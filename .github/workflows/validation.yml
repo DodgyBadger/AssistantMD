@@ -58,12 +58,13 @@ jobs:
             exit 1
           fi
           python - <<'PY'
-from pathlib import Path
-import yaml
-path = Path("system/secrets.yaml")
-data = yaml.safe_load(path.read_text()) if path.exists() else {}
-print("System secrets keys:", sorted(list(data.keys())))
-PY
+          from pathlib import Path
+          import yaml
+
+          path = Path("system/secrets.yaml")
+          data = yaml.safe_load(path.read_text()) if path.exists() else {}
+          print("System secrets keys:", sorted(list(data.keys())))
+          PY
 
       - name: Install uv
         uses: astral-sh/setup-uv@v2
