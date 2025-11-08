@@ -32,31 +32,34 @@ Add the following repository secrets before enabling workflows:
 - `LIBRECHAT_API_KEY`
 - `GHCR_PAT` (token with `write:packages` to push the release image)
 
+The CI workflows call `python scripts/seed_ci_secrets.py` to write
+`validation/secrets_override/secrets.yaml` from the environment, so any secret
+you configure becomes available to the runtime without committing it to the
+repo.
+
 Optional:
 - `ENV_FILE` for base64-encoded `.env` exports if a one-shot import is useful.
 - Environment-specific secrets for staging/production deployments.
 
 ## CI Workflows
 - `.github/workflows/validation.yml` (`ci-validation`) runs on push/PR to
-  `main` and `dev`. It installs dependencies with `uv`, reads
-  `validation/required_scenarios.txt`, and runs the validation harness. All
-  artifacts in `validation/runs/` are uploaded when the job finishes.
+  `main` and `dev`. It installs dependencies with `uv`, runs the entire
+  `integration/` scenario folder, and uploads artifacts from `validation/runs/`.
 - `.github/workflows/release.yml` triggers on `v*` tags. It reuses the same
   validation runner, exports release notes via `scripts/export_changelog.py`,
   builds a multi-arch Docker image from `docker/Dockerfile`, pushes it to GHCR,
   and publishes a GitHub Release that includes `changelog.md`.
 
 ## Validation Suite
-The minimum required scenarios live in `validation/required_scenarios.txt`. They
-currently cover:
-- `integration/basic_haiku`
-- `integration/system_startup_validation`
-- `multi_tool_assistant`
-- `file_operations_test`
-- `security/prompt_injection_security`
+CI executes every scenario in `validation/scenarios/integration/`, which
+currently includes:
+- `basic_haiku`
+- `system_startup_validation`
+- `api_endpoints`
+- `tool_suite`
 
-Update the file when the required coverage changes—CI and the release workflow
-consume it automatically.
+Drop any scenario you do not need from that folder (or add new ones) and the
+workflows automatically follow suit.
 
 ## Release Flow
 1. Update version metadata and changelog entries.

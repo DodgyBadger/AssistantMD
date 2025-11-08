@@ -29,7 +29,7 @@ description: Validation helper assistant
 
 ## STEP1
 @output-file logs/{today}
-@model test
+@model gpt-5-mini
 
 Summarize the validation run context.
 """,
@@ -198,7 +198,7 @@ Summarize the validation run context.
             "vault_name": vault.name,
             "prompt": "Say hello from integration test.",
             "tools": [],
-            "model": "test",
+            "model": "gpt-5-mini",
             "use_conversation_history": True,
         }
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
@@ -224,7 +224,7 @@ Summarize the validation run context.
             data={
                 "session_id": session_id,
                 "vault_name": vault.name,
-                "model": "test",
+                "model": "gpt-5-mini",
                 "user_instructions": "Keep it brief.",
             },
         )
@@ -239,7 +239,7 @@ Summarize the validation run context.
             data={
                 "session_id": new_session_id,
                 "vault_name": vault.name,
-                "model": "test",
+                "model": "gpt-5-mini",
                 "user_instructions": "Outline a simple assistant.",
             },
         )
