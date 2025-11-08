@@ -45,7 +45,7 @@ Open `docker-compose.yml` and update the fields that matter:
   cron-style schedules align with your locale.
 - Leave `image: ghcr.io/dodgybadger/assistantmd:latest` as the default. To pin a
   specific release, edit that line and replace `latest` with a tag such as
-  `v0.0.0-ci-check`.
+  `v1.0.0`.
 - (Optional) Change the host side (the left side) of `127.0.0.1:8000:8000` if
   you need to expose the UI on a different IP/port pair (e.g.
   `192.168.0.1:1234:8000`).
