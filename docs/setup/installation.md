@@ -36,10 +36,25 @@ Skip this step when you manually pasted the compose file in step 1.
 Open `docker-compose.yml` and update the fields that matter:
 
 - Replace `/absolute/path/to/your/vaults` with the directory that holds your
-  vault folders. The container path must stay `/app/data`.
+  vault folders. The container path must stay `/app/data`. **Important:** create
+  the host directory yourself and make sure it is owned by your normal user
+  before running Docker; otherwise Docker will create it as `root` when the bind
+  mount is first used. Example:
+  ```bash
+  mkdir -p /absolute/path/to/your/vaults
+  sudo chown -R $(id -u):$(id -g) /absolute/path/to/your/vaults
+  ```
 - Keep `./system:/app/system` mounted so settings, logs, and generated secrets
-  survive restarts. Create the `system` directory locally if it does not exist:
-  `mkdir -p system`.
+  survive restarts. Create the `system` directory *before* running Docker and
+  ensure your user owns it:
+  ```bash
+  mkdir -p system
+  sudo chown -R $(id -u):$(id -g) system
+  ```
+- These ownership steps are crucial on WSL/Linux because the Docker daemon runs
+  as `root` and will otherwise create bind-mount targets with root ownership,
+  leading to `Permission denied` errors (for example when writing
+  `/app/system/secrets.yaml`).
 - Set `TZ` to your local
   [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so
   cron-style schedules align with your locale.

@@ -14,8 +14,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"    # FastAPI - localhost only
     volumes:
-      - /absolute/path/to/your/vaults:/app/data
-      - ./system:/app/system     # Persist settings, secrets, activity logs
+      - /absolute/path/to/your/vaults:/app/data   # Pre-create & chown to your user
+      - ./system:/app/system                      # Pre-create & keep owned by your user
     environment:
       - TZ=UTC
       - API_PORT=8000
