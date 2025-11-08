@@ -1,0 +1,6 @@
+# Scenarios that must pass in CI workflows before merging or releasing.
+integration/basic_haiku
+integration/system_startup_validation
+multi_tool_assistant
+file_operations_test
+security/prompt_injection_security

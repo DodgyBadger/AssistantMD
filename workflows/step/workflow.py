@@ -1,0 +1,448 @@
+
+from datetime import datetime
+import os
+from typing import Dict
+
+from core.logger import UnifiedLogger
+from core.core_services import CoreServices
+
+# Create workflow logger
+logger = UnifiedLogger(tag="step-workflow")
+
+
+########################################################################
+## Workflow entry. All workflow modules must implement run_workflow.
+########################################################################
+
+@logger.trace("run_workflow")
+async def run_workflow(job_args: dict, **kwargs):
+    """
+    Sequential content generation workflow with predictable, deterministic structure.
+
+    Args:
+        job_args: Lightweight job arguments containing:
+            - global_id: Assistant identifier (vault/name)
+            - config: Configuration dictionary with data_root, etc.
+        **kwargs: Additional workflow parameters (e.g., step_name)
+    """
+
+    # Create CoreServices fresh from lightweight job arguments
+    services = CoreServices(
+        job_args['global_id'],
+        _data_root=job_args['config']['data_root']
+    )
+
+    """
+    WORKFLOW PHILOSOPHY:
+    - AI as Content Generator: The LLM generates text content for each step
+    - Workflow as Controller: Determines where content goes, when steps run, file organization
+    - Predictable Structure: Sequential steps (STEP1 → STEP2 → STEP3) with predetermined outputs
+    - Linear Processing: Each step builds on previous steps in a defined sequence
+
+    This workflow treats the AI as a content generator that produces text according to prompts,
+    while the workflow maintains full control over file operations, step ordering, and output
+    destinations. It's designed for structured content creation like planning, journaling,
+    reporting, and documentation where predictable organization is important.
+    
+    CAPABILITIES:
+    - Dynamic step discovery (e.g. STEP1, STEP2, STEP3, ...) from assistant file
+    - Flexible output files using @output-file directives with time patterns
+    - File content embedding using @input-file directives  
+    - Automatic directory creation for nested paths
+    - Configurable week start day for time pattern resolution
+    - External tool integration (@tools directive) for enhanced AI capabilities
+    
+    USE CASES:
+    - Daily/weekly planning workflows
+    - Structured journaling and reflection
+    - Report generation with consistent formatting
+    - Documentation creation with predictable organization
+    - Content creation where workflow controls structure and AI provides substance
+    
+    Args:
+        services: CoreServices instance providing access to all core functionality
+        **kwargs: Optional parameters:
+            step_name: If provided, execute only the specified step (ignores @run-on directive)
+    """
+    
+    # Extract parameters from kwargs
+    step_name = kwargs.get('step_name')
+    
+    workflow_steps = []
+
+    try:
+        #######################################################################
+        ## 1: LOAD AND VALIDATE ASSISTANT CONFIGURATION
+        #######################################################################
+        
+        config = await load_and_validate_config(services, step_name)
+        workflow_sections = config['workflow_sections']
+        assistant_instructions = config['assistant_instructions']
+        workflow_steps = config['workflow_steps']
+        
+        #######################################################################
+        ## 2: INITIALIZE WORKFLOW CONTEXT
+        #######################################################################
+        
+        context = initialize_workflow_context(services)
+        
+        #######################################################################
+        ## 3: PROCESS EACH WORKFLOW STEP
+        #######################################################################
+        
+        for i, current_step in enumerate(workflow_steps):
+            raw_step_content = workflow_sections[current_step]
+            await process_workflow_step(
+                current_step,
+                raw_step_content,
+                assistant_instructions,
+                services,
+                i,
+                step_name,
+                context,
+            )
+        
+        #######################################################################
+        ## 4: WORKFLOW COMPLETION
+        #######################################################################
+        
+        # Log successful workflow completion
+        logger.activity(
+            "Workflow completed successfully",
+            vault=services.assistant_id,
+            metadata={
+                "steps_completed": len(workflow_steps),
+                "output_files_created": len(context['created_files']),
+            },
+        )
+        
+    except Exception as e:
+        # Log workflow failure with context
+        logger.activity(
+            "Workflow execution failed",
+            vault=services.assistant_id,
+            level="error",
+            metadata={
+                "error_message": str(e),
+                "steps_attempted": len(workflow_steps),
+            },
+        )
+        raise
+
+
+
+########################################################################
+## Helper Functions
+########################################################################
+
+def generate_numbered_file_path(full_file_path: str, vault_path: str) -> str:
+    """Generate a numbered file path for new write mode.
+    
+    Args:
+        full_file_path: Full path to the file (e.g., '/vault/journal/2025-08-19.md')
+        vault_path: Root path of the vault
+        
+    Returns:
+        Numbered file path (e.g., '/vault/journal/2025-08-19_0.md')
+    """
+    # Extract the relative path within the vault
+    if full_file_path.startswith(vault_path + '/'):
+        relative_path = full_file_path[len(vault_path) + 1:]
+    else:
+        relative_path = full_file_path
+    
+    # Remove .md extension to get base path
+    if relative_path.endswith('.md'):
+        base_path = relative_path[:-3]
+    else:
+        base_path = relative_path
+    
+    # Find next available number
+    directory = os.path.dirname(base_path) if os.path.dirname(base_path) else '.'
+    basename = os.path.basename(base_path)
+    
+    # Full directory path in vault
+    full_directory = os.path.join(vault_path, directory)
+    
+    existing_numbers = set()
+    if os.path.exists(full_directory):
+        for filename in os.listdir(full_directory):
+            if filename.startswith(f"{basename}_") and filename.endswith('.md'):
+                # Extract number from filename (supports both old format _N and new format _NNN)
+                number_part = filename[len(basename) + 1:-3]  # Remove prefix_ and .md
+                try:
+                    number = int(number_part)
+                    existing_numbers.add(number)
+                except ValueError:
+                    # Skip files with non-numeric suffixes
+                    continue
+    
+    # Find the lowest available number starting from 0
+    next_number = 0
+    while next_number in existing_numbers:
+        next_number += 1
+    
+    # Return full path with zero-padded 3-digit number for proper sorting
+    numbered_relative_path = f"{base_path}_{next_number:03d}.md"
+    return f"{vault_path}/{numbered_relative_path}"
+
+
+def should_step_run_today(processed_step, step_name: str, context: Dict, single_step_name: str, global_id: str) -> bool:
+    """Check if step should run today based on @run-on directive."""
+    if single_step_name:
+        return True
+
+    run_on_days = processed_step.get_directive_value('run_on')
+    if not run_on_days:
+        # If @run-on is not specified, step runs every day (default behavior)
+        return True
+
+    # Check for 'never' option to disable step execution
+    if 'never' in run_on_days:
+        return False
+
+    # Check for 'daily' option to run every day
+    if 'daily' in run_on_days:
+        return True
+
+    today = context['today']
+    today_name = today.strftime('%A').lower()
+    today_abbrev = today.strftime('%a').lower()
+    return today_name in run_on_days or today_abbrev in run_on_days
+
+
+def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
+    """Check if any directive issued a skip signal.
+
+    Directives can signal that a step should be skipped by returning a dict
+    with '_workflow_signal': 'skip_step'. This is used by directives like
+    @input-file with required=true when no files are found.
+
+    Returns:
+        Tuple of (should_skip, reason)
+    """
+    input_file_data = processed_step.get_directive_value('input_file', [])
+
+    # Normalize to list-of-lists format for consistent handling
+    if not input_file_data:
+        return False, ""
+    elif isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
+        # Single @input-file directive
+        input_file_lists = [input_file_data]
+    else:
+        # Multiple @input-file directives
+        input_file_lists = input_file_data
+
+    # Check each input-file result for skip signals
+    for file_list in input_file_lists:
+        for file_data in file_list:
+            if isinstance(file_data, dict) and file_data.get('_workflow_signal') == 'skip_step':
+                reason = file_data.get('reason', 'Directive signaled skip')
+                return True, reason
+
+    return False, ""
+
+
+def build_final_prompt(processed_step) -> str:
+    """Build final prompt with input file content."""
+    final_prompt = processed_step.content
+    
+    input_file_data = processed_step.get_directive_value('input_file', [])
+    if input_file_data:
+        # Normalize to list-of-lists format for consistent handling
+        if not input_file_data:
+            input_file_lists = []
+        elif input_file_data and isinstance(input_file_data[0], dict):
+            input_file_lists = [input_file_data]
+        else:
+            input_file_lists = input_file_data
+        
+        # Flatten list-of-lists into single list of file metadata
+        flattened_files = []
+        for file_list in input_file_lists:
+            flattened_files.extend(file_list)
+        
+        # Format each file's content for inclusion in prompt
+        formatted_content = []
+        for file_data in flattened_files:
+            if file_data['found'] and file_data['content']:
+                formatted_content.append(f"# File: {file_data['filepath']}\n\n{file_data['content']}")
+            elif not file_data['found']:
+                formatted_content.append(f"# File: {file_data['filepath']}\n\n[File not found: {file_data['error']}]")
+        
+        if formatted_content:
+            final_prompt += "\n\n---\n\n"
+            final_prompt += "\n\n---\n\n".join(formatted_content)
+    
+    return final_prompt
+
+
+
+
+########################################################################
+## Helper Functions - Configuration
+########################################################################
+
+async def write_step_output(step_content: str, output_file: str, processed_step, 
+                            context: Dict, step_index: int, step_name: str, global_id: str):
+    """Write step content to output file."""
+    try:
+        created_files = context['created_files']
+        write_mode = processed_step.get_directive_value('write_mode')
+        file_mode = 'w' if write_mode == 'new' else 'a'
+        
+        with open(output_file, file_mode, encoding='utf-8') as file:
+            # Check for custom header from @header directive
+            custom_header = processed_step.get_directive_value('header')
+            if custom_header:
+                file.write(f"# {custom_header}\n\n")
+            file.write(step_content)
+            file.write("\n\n")
+        
+        created_files.add(output_file)
+        context['state_manager'].update_from_processed_step(processed_step)
+            
+    except (IOError, OSError, PermissionError) as file_error:
+        logger.activity(
+            "Failed to create output file",
+            vault=global_id,
+            level="error",
+            metadata={
+                "target_file": output_file,
+                "step_name": step_name,
+                "reason": str(file_error),
+            },
+        )
+        raise
+
+
+async def create_step_agent(processed_step, assistant_instructions: str, services: CoreServices):
+    """Create AI agent for step execution with optional tool integration."""
+    # Get model instance from model directive (None if not specified)
+    model_instance = processed_step.get_directive_value('model', None)
+
+    # Get tools and enhanced instructions from tools directive
+    tools_result = processed_step.get_directive_value('tools', ([], ""))
+    if isinstance(tools_result, tuple) and len(tools_result) == 2:
+        tool_functions, tool_instructions = tools_result
+    else:
+        # Fallback for empty tools
+        tool_functions, tool_instructions = [], ""
+
+    # Compose instructions using Pydantic AI's list support for clean composition
+    if tool_instructions:
+        final_instructions = [assistant_instructions, tool_instructions]
+    else:
+        final_instructions = assistant_instructions
+
+    return await services.create_agent(final_instructions, model_instance, tool_functions)
+
+
+def initialize_workflow_context(services: CoreServices):
+    """Initialize workflow execution context."""
+    today = datetime.today()
+    day_name = today.strftime('%A')
+    today_formatted = today.strftime('%Y-%m-%d')
+    
+    return {
+        'today': today,
+        'day_name': day_name,
+        'today_formatted': today_formatted,
+        'week_start_day': services.week_start_day,
+        'state_manager': services.get_state_manager(),
+        'created_files': set()
+    }
+
+async def process_workflow_step(
+    step_name: str,
+    raw_step_content: str,
+    assistant_instructions: str,
+    services: CoreServices,
+    step_index: int,
+    single_step_name: str,
+    context: Dict,
+):
+    """Process a single workflow step with all directives and AI generation."""
+    today = context['today']
+    
+    # Process all directives with current context (single parse operation)
+    processed_step = services.process_step(raw_step_content, reference_date=today)
+    
+    # Get output file path from processed step (optional)
+    output_file_path = processed_step.get_directive_value('output_file')
+    output_file = None
+
+    if output_file_path:
+        # Apply write-mode from processed step (no re-parsing)
+        write_mode = processed_step.get_directive_value('write_mode')
+        output_file = f'{services.vault_path}/{output_file_path}'
+        if write_mode == 'new':
+            output_file = generate_numbered_file_path(output_file, services.vault_path)
+
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
+    # Check @run-on directive for scheduled execution
+    if not should_step_run_today(processed_step, step_name, context, single_step_name, services.assistant_id):
+        return  # Skip this step
+
+    # Check for workflow skip signals from directives (e.g., required input files missing)
+    should_skip, skip_reason = has_workflow_skip_signal(processed_step)
+    if should_skip:
+        logger.activity(
+            f"Step skipped: {skip_reason}",
+            vault=services.assistant_id,
+            metadata={"step_name": step_name}
+        )
+        return  # Skip this step
+
+    # Build final prompt with input file content
+    final_prompt = build_final_prompt(processed_step)
+    
+    # Generate AI content
+    chat_agent = await create_step_agent(processed_step, assistant_instructions, services)
+    step_content = await services.generate_response(chat_agent, final_prompt)
+
+    # Write AI-generated content to output file (if @output-file specified)
+    if output_file:
+        await write_step_output(step_content, output_file, processed_step,
+                                context, step_index, step_name, services.assistant_id)
+    else:
+        # No output file - step executed for side effects only (e.g., tool calls)
+        # Still update state manager for any pending patterns used
+        context['state_manager'].update_from_processed_step(processed_step)
+
+
+async def load_and_validate_config(services: CoreServices, step_name: str = None):
+    """Load assistant file and validate workflow configuration."""
+    workflow_sections = services.get_assistant_sections()
+    
+    # Extract INSTRUCTIONS from workflow_sections if present, then filter it out from steps
+    assistant_instructions = workflow_sections.get('INSTRUCTIONS', "")
+    if not assistant_instructions or not assistant_instructions.strip():
+        assistant_instructions = "You are a helpful assistant."
+    
+    # Filter INSTRUCTIONS from workflow steps (it's not an executable step)
+    workflow_steps = [k for k in workflow_sections.keys() if k != 'INSTRUCTIONS']
+    
+    if not workflow_steps:
+        error_msg = "No workflow sections found after ASSISTANT_CONFIG. Please add at least one section."
+        raise ValueError(error_msg)
+    
+    if step_name:
+        if step_name not in workflow_steps:
+            error_msg = f"Step '{step_name}' not found. Available steps: {', '.join(workflow_steps)}"
+            raise ValueError(error_msg)
+        workflow_steps = [step_name]
+    
+    return {
+        'workflow_sections': workflow_sections,
+        'assistant_instructions': assistant_instructions,
+        'workflow_steps': workflow_steps
+    }
+
+
+
+
+
+

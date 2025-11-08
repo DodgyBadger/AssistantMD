@@ -1,0 +1,170 @@
+# AssistantMD Settings Template
+#
+# This template seeds `system/settings.yaml` when no user configuration
+# exists. Edit a copy under `system/settings.yaml` rather than this file.
+
+settings:
+  default_model:
+    value: sonnet
+    description: "Fallback model alias when @model is omitted."
+    restart_required: false
+  default_api_timeout:
+    value: 120
+    description: "Default timeout (seconds) for external API calls."
+    restart_required: false
+  web_tool_max_tokens:
+    value: 50000
+    description: "Maximum token limit for web extraction tools (tavily_extract, tavily_crawl) to prevent context overflow."
+    restart_required: false
+  debug:
+    value: false
+    description: "Enable verbose API error responses. Restart required."
+    restart_required: true
+  logfire:
+    value: false
+    description: "Enable Logfire telemetry when LOGFIRE_TOKEN is set."
+    restart_required: false
+
+models:
+  gemini:
+    provider: google
+    model_string: gemini-2.5-pro
+    description: null
+    user_editable: true
+  gemini-flash:
+    provider: google
+    model_string: gemini-2.5-flash
+    description: null
+    user_editable: true
+  gemini-flash-lite:
+    provider: google
+    model_string: gemini-2.5-flash-lite
+    description: null
+    user_editable: true
+  sonnet:
+    provider: anthropic
+    model_string: claude-sonnet-4-5
+    description: null
+    user_editable: true
+  opus:
+    provider: anthropic
+    model_string: claude-opus-4-1
+    description: null
+    user_editable: true
+  haiku:
+    provider: anthropic
+    model_string: claude-haiku-4-5
+    description: null
+    user_editable: true
+  gpt-5:
+    provider: openai
+    model_string: gpt-5
+    description: null
+    user_editable: true
+  gpt-5-mini:
+    provider: openai
+    model_string: gpt-5-mini
+    description: null
+    user_editable: true
+  gpt-5-nano:
+    provider: openai
+    model_string: gpt-5-nano
+    description: null
+    user_editable: true
+  mistral-large:
+    provider: mistral
+    model_string: mistral-large-latest
+    description: null
+    user_editable: true
+  mistral-small:
+    provider: mistral
+    model_string: mistral-small-latest
+    description: null
+    user_editable: true
+  mistral-medium:
+    provider: mistral
+    model_string: mistral-medium-latest
+    description: null
+    user_editable: true
+  magistral-medium:
+    provider: mistral
+    model_string: magistral-medium-latest
+    description: null
+    user_editable: true
+  magistral-small:
+    provider: mistral
+    model_string: magistral-small-latest
+    description: null
+    user_editable: true
+
+providers:
+  google:
+    api_key: GEMINI_API_KEY
+    base_url: null
+    user_editable: false
+  anthropic:
+    api_key: ANTHROPIC_API_KEY
+    base_url: null
+    user_editable: false
+  openai:
+    api_key: OPENAI_API_KEY
+    base_url: null
+    user_editable: false
+  mistral:
+    api_key: MISTRAL_API_KEY
+    base_url: null
+    user_editable: false
+  lm_studio:
+    api_key: LM_STUDIO_API_KEY
+    base_url: LM_STUDIO_BASE_URL
+    user_editable: true
+  ollama:
+    api_key: OLLAMA_API_KEY
+    base_url: OLLAMA_BASE_URL
+    user_editable: true
+
+tools:
+  web_search_tavily:
+    module: core.tools.web_search_tavily
+    description: "Web search using Tavily (premium)"
+    requires_secrets:
+      - TAVILY_API_KEY
+    user_editable: false
+  web_search_duckduckgo:
+    module: core.tools.web_search_duckduckgo
+    description: "Web search using DuckDuckGo (free)"
+    requires_secrets: []
+    user_editable: false
+  file_ops_safe:
+    module: core.tools.file_ops_safe
+    description: "Read, write, append, list, search"
+    requires_secrets: []
+    user_editable: false
+  file_ops_unsafe:
+    module: core.tools.file_ops_unsafe
+    description: "Edit, delete, move/overwrite (use with caution)"
+    requires_secrets: []
+    user_editable: false
+  tavily_extract:
+    module: core.tools.tavily_extract
+    description: "Extract content from specific URLs"
+    requires_secrets:
+      - TAVILY_API_KEY
+    user_editable: false
+  tavily_crawl:
+    module: core.tools.tavily_crawl
+    description: "Crawl websites for content"
+    requires_secrets:
+      - TAVILY_API_KEY
+    user_editable: false
+  documentation_access:
+    module: core.tools.documentation_access
+    description: "Create assistant workflows via chat"
+    requires_secrets: []
+    user_editable: false
+  code_execution:
+    module: core.tools.code_execution_librechat
+    description: "Multi-language code execution via LibreChat API (premium)"
+    requires_secrets:
+      - LIBRECHAT_API_KEY
+    user_editable: false

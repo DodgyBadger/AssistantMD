@@ -1,0 +1,63 @@
+name: ci-validation
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    env:
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+      UV_LINK_MODE: copy
+      UV_COMPILE_BYTECODE: "1"
+      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Sync dependencies
+        working-directory: docker
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
+        run: uv sync --frozen --all-extras --no-install-project
+
+      - name: Run validation scenarios
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          LIBRECHAT_API_KEY: ${{ secrets.LIBRECHAT_API_KEY }}
+        run: |
+          SCENARIOS=$(grep -vE '^[[:space:]]*(#|$)' validation/required_scenarios.txt | tr '\n' ' ')
+          if [ -z "$SCENARIOS" ]; then
+            echo "No scenarios listed in validation/required_scenarios.txt"
+            exit 1
+          fi
+          ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python validation/run_validation.py run $SCENARIOS
+
+      - name: Upload validation artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-runs
+          path: validation/runs

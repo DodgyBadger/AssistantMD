@@ -1,0 +1,47 @@
+# Default Docker Compose configuration using the secure UV-based Dockerfile
+# Copy this file to docker-compose.yml and run:
+#   docker compose up -d --build
+#
+# Once the GHCR image is published, switch to `image: ghcr.io/<org>/assistantmd:latest`
+
+services:
+  assistant:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        USER_ID: 1000
+        GROUP_ID: 1000
+    image: ghcr.io/your-org/assistantmd:latest
+    container_name: assistant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"    # FastAPI - localhost only
+    volumes:
+      - /absolute/path/to/your/vaults:/app/data
+      - ./system:/app/system     # Persist settings, secrets, activity logs
+    environment:
+      - TZ=UTC
+      - API_PORT=8000
+    
+    # Resource limits for better container security
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Health check (compose-only so it can be disabled/overridden easily)
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/api/health"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 40s

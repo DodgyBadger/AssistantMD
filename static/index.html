@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AssistantMD</title>
+    <base href="./">
+    <link rel="stylesheet" href="static/output.css">
+    <script src="static/vendor/marked.min.js"></script>
+    <style>
+        details summary {
+            cursor: pointer;
+            user-select: none;
+        }
+        details summary::-webkit-details-marker {
+            display: none;
+        }
+        .message-bubble {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .message-body {
+            position: relative;
+        }
+        .message-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid rgba(107, 114, 128, 0.2);
+        }
+        .message-footer-right {
+            justify-content: flex-end;
+        }
+        .message-footer-content {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            line-height: 1.4;
+        }
+        .message-footer-content span {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .message-footer-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .copy-button {
+            border: none;
+            border-radius: 9999px;
+            background: #e5e7eb;
+            color: #4b5563;
+            padding: 2px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: background-color 0.15s ease, opacity 0.15s ease;
+        }
+        .copy-button:hover {
+            background: #d1d5db;
+        }
+        .copy-button:disabled {
+            cursor: default;
+            opacity: 0.6;
+        }
+        .copy-button svg {
+            width: 14px;
+            height: 14px;
+            display: block;
+        }
+        .message-bubble pre {
+            position: relative;
+            padding: 1rem 1rem 2.5rem;
+        }
+        .message-bubble pre code {
+            display: block;
+            overflow-x: auto;
+        }
+        .message-bubble pre .copy-button {
+            position: absolute;
+            right: 0.75rem;
+            bottom: 0.75rem;
+            background: rgba(17, 24, 39, 0.85);
+            color: #f9fafb;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 12px;
+        }
+        .message-bubble pre .copy-button:hover {
+            background: rgba(17, 24, 39, 0.95);
+        }
+        .message-bubble.bg-blue-100 .message-footer {
+            border-top: 1px solid rgba(59, 130, 246, 0.2);
+            color: #6b7280;
+        }
+        .message-bubble.bg-blue-100 .copy-button {
+            background: rgba(59, 130, 246, 0.15);
+            color: #4b5563;
+        }
+        .message-bubble.bg-blue-100 .copy-button:hover {
+            background: rgba(59, 130, 246, 0.25);
+        }
+        .message-bubble.bg-blue-100 .copy-button:disabled {
+            opacity: 0.6;
+        }
+        .stream-progress {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 0.75rem;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+        .stream-status-indicator {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 9999px;
+            background: rgba(79, 70, 229, 0.15);
+            color: #4f46e5;
+            font-weight: 600;
+        }
+        .stream-status-indicator.typing {
+            background: transparent;
+            width: auto;
+            height: auto;
+        }
+        .stream-status-indicator.success {
+            background: rgba(22, 163, 74, 0.15);
+            color: #15803d;
+        }
+        .stream-status-indicator.error {
+            background: rgba(234, 179, 8, 0.2);
+            color: #b45309;
+        }
+        .stream-status-indicator.tool {
+            background: rgba(59, 130, 246, 0.18);
+            color: #1d4ed8;
+        }
+        .stream-status-text {
+            font-weight: 500;
+        }
+        .typing-indicator {
+            display: inline-flex;
+            gap: 0.35rem;
+        }
+        .typing-dot {
+            width: 0.4rem;
+            height: 0.4rem;
+            background: #4f46e5;
+            border-radius: 9999px;
+            opacity: 0.2;
+            animation: typing 1.2s infinite;
+        }
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes typing {
+            0%, 80%, 100% {
+                opacity: 0.2;
+                transform: translateY(0);
+            }
+            40% {
+                opacity: 1;
+                transform: translateY(-3px);
+            }
+        }
+        .tool-status-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .tool-status {
+            margin: 0;
+            padding: 0;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 0.6rem;
+            background: rgba(239, 246, 255, 0.55);
+            font-size: 0.85rem;
+            overflow: hidden;
+        }
+        .tool-status.tool-status-complete {
+            border-color: rgba(34, 197, 94, 0.35);
+        }
+        .tool-status-summary {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.55rem 0.75rem;
+            cursor: pointer;
+            list-style: none;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        .tool-status-summary::-webkit-details-marker,
+        .tool-status-summary::marker {
+            display: none;
+            content: '';
+        }
+        .tool-status-chevron {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.25rem;
+            height: 1.25rem;
+            font-size: 0.9rem;
+            color: #2563eb;
+            transition: color 0.15s ease;
+        }
+        .tool-status[open] .tool-status-chevron {
+            color: #16a34a;
+        }
+        .tool-status.tool-status-complete .tool-status-chevron {
+            color: #16a34a;
+        }
+        .tool-status-body {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            padding: 0.65rem 0.75rem 0.75rem;
+            background: rgba(255, 255, 255, 0.7);
+            border-top: 1px solid rgba(59, 130, 246, 0.15);
+        }
+        .tool-status-detail-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+        }
+        .tool-status-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+        .tool-status-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #2563eb;
+        }
+        .tool-status-block {
+            margin: 0;
+            padding: 0.55rem 0.65rem;
+            background: rgba(30, 64, 175, 0.08);
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 16rem;
+            overflow: auto;
+            color: #1f2937;
+        }
+        .tool-status-placeholder {
+            font-size: 0.8rem;
+            color: #4b5563;
+            font-style: italic;
+        }
+        summary.collapsible-summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            font-weight: 600;
+            color: #1f2937;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.15s ease;
+        }
+        summary.collapsible-summary:hover {
+            background-color: #f9fafb;
+        }
+        summary.collapsible-summary .summary-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+        summary.collapsible-summary .summary-title {
+            font-weight: 600;
+        }
+        summary.collapsible-summary .summary-subtext {
+            font-size: 0.85rem;
+            color: #6b7280;
+            font-weight: 400;
+        }
+        summary.collapsible-summary .chevron {
+            width: 1rem;
+            height: 1rem;
+            color: #9ca3af;
+            transition: transform 0.2s ease;
+        }
+        details[open] summary.collapsible-summary .chevron {
+            transform: rotate(180deg);
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto max-w-6xl p-4">
+        <!-- Header -->
+        <div class="mb-4">
+            <h1 class="text-3xl font-bold text-gray-800">AssistantMD</h1>
+        </div>
+
+        <!-- Tabs -->
+        <div class="mb-4">
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-8">
+                    <button id="chat-tab" class="tab-button border-b-2 border-blue-500 py-2 px-1 text-sm font-medium text-blue-600">
+                        Chat
+                    </button>
+                    <button id="dashboard-tab" class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700">
+                        Dashboard
+                    </button>
+                    <button id="configuration-tab" class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700">
+                        Configuration
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Chat Tab Content -->
+        <div id="chat-content" class="tab-content">
+            <!-- Status Bar -->
+            <div class="mb-4 p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <span id="status-text" class="text-sm text-gray-600">Loading...</span>
+            </div>
+
+            <!-- Configuration Section -->
+            <details open class="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <summary class="collapsible-summary">
+                    <div class="summary-text">
+                        <span class="summary-title">Vault & Model</span>
+                    </div>
+                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </summary>
+                <div class="p-4 pt-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Vault</label>
+                        <select id="vault-selector" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Select vault...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                        <select id="model-selector" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Select model...</option>
+                        </select>
+                    </div>
+                </div>
+            </details>
+
+            <!-- Advanced Section -->
+            <details class="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <summary class="collapsible-summary">
+                    <div class="summary-text">
+                        <span class="summary-title">Advanced</span>
+                    </div>
+                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </summary>
+                <div class="p-4 pt-0 space-y-4">
+                    <!-- Mode & History -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Mode</label>
+                            <select id="mode-selector" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="regular">Regular Chat</option>
+                                <option value="assistant_creation">Assistant Creation</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">History</label>
+                            <select id="history-selector" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="true">On</option>
+                                <option value="false">Off</option>
+                            </select>
+                        </div>
+                    </div>
+                    <!-- Tools -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Tools</label>
+                        <div id="tools-checkboxes" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <!-- Tool checkboxes will be added here -->
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <!-- Action Buttons -->
+            <div class="mb-4 flex gap-2">
+                <button id="clear-btn" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500">
+                    🗑️ New Session
+                </button>
+                <button
+                    id="compact-btn"
+                    class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    disabled
+                    title="Temporarily disabled while we fix compacted session seeding"
+                >
+                    📦 Compact History
+                </button>
+            </div>
+
+            <!-- Chat Container -->
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm">
+                <div id="chat-messages" class="h-[500px] overflow-y-auto p-4 space-y-4">
+                    <div class="text-center text-gray-500 text-sm">
+                        Start a conversation...
+                    </div>
+                </div>
+                <div class="border-t border-gray-200 p-4">
+                    <div class="flex gap-2">
+                        <textarea
+                            id="chat-input"
+                            rows="3"
+                            placeholder="Type your message (Ctrl+Enter or Cmd+Enter to send)..."
+                            class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                        ></textarea>
+                        <button
+                            id="send-btn"
+                            class="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Tab Content -->
+        <div id="dashboard-content" class="tab-content hidden">
+            <!-- Rescan Vaults - Compact Control -->
+            <div class="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm p-3">
+                <div class="flex items-center gap-3">
+                    <button id="rescan-btn" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 whitespace-nowrap">
+                        🔄 Rescan Vaults
+                    </button>
+                    <span class="text-sm text-gray-600">Discover new vaults and reload assistant configurations</span>
+                </div>
+                <div id="rescan-result" class="mt-2 text-sm"></div>
+            </div>
+
+            <!-- System Status -->
+            <div class="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+                <div id="system-status" class="space-y-2 text-sm">
+                    <p>Loading...</p>
+                </div>
+            </div>
+
+            <!-- Execute Assistant -->
+            <div class="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+                <h2 class="text-xl font-bold text-gray-800 mb-3">Execute Assistant</h2>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Assistant ID</label>
+                        <select id="assistant-selector" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Select assistant...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Step (optional - blank for all steps)</label>
+                        <input
+                            id="step-name-input"
+                            type="text"
+                            placeholder="Leave blank to run all steps"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                    </div>
+                    <button id="execute-assistant-btn" class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                        Execute Assistant
+                    </button>
+                    <div id="execute-assistant-result" class="text-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Tab Content -->
+        <div id="configuration-content" class="tab-content hidden">
+            <div class="space-y-4">
+                <details id="config-models-section" class="bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Models</span>
+                            <span class="summary-subtext">Aliases linked to providers</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-gray-600">
+                            Model mappings connect assistant-friendly names to provider models. Availability reflects current API key configuration.
+                        </p>
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div id="model-feedback" class="flex-1 text-sm text-gray-600"></div>
+                                <button id="model-add-row" type="button" class="shrink-0 px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    Add Model
+                                </button>
+                            </div>
+                            <div id="model-list" class="flex flex-col gap-3">
+                                <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                                    No models configured.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
+                <details id="config-providers-section" class="bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Model Providers</span>
+                            <span class="summary-subtext">Configure API keys and endpoints</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-gray-600">
+                            Providers define API keys or base URLs for custom endpoints. Built-in providers are read-only. Enter secret names in the fields below and manage their values from the Secrets section.
+                        </p>
+                        <div id="provider-feedback" class="text-sm"></div>
+                        <div id="provider-list" class="flex flex-col gap-3">
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                                No custom providers configured.
+                            </div>
+                        </div>
+                        <form id="provider-form" class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 border border-gray-200 rounded-md p-4">
+                            <div>
+                                <label for="provider-name" class="block text-sm font-medium text-gray-700 mb-1">Provider Name</label>
+                                <input id="provider-name" name="provider-name" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. local-ollama" required>
+                            </div>
+                            <div>
+                                <label for="provider-api-key-value" class="block text-sm font-medium text-gray-700 mb-1">API Key Secret (optional)</label>
+                                <input id="provider-api-key" name="provider-api-key" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="SECRET_NAME (optional)">
+                                <p class="text-xs text-gray-500 mt-1">Enter the secret name; use the Secrets form below to set its value.</p>
+                            </div>
+                            <div>
+                                <label for="provider-base-url" class="block text-sm font-medium text-gray-700 mb-1">Base URL Secret (optional)</label>
+                                <input id="provider-base-url" name="provider-base-url" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="SECRET_NAME (optional)">
+                                <p class="text-xs text-gray-500 mt-1">Base URLs are stored as secrets; enter the secret name and manage the URL value via the Secrets form.</p>
+                            </div>
+                            <div class="md:col-span-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                <span id="provider-form-status" class="text-sm text-gray-600"></span>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" id="provider-reset" class="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                                        Reset
+                                    </button>
+                                    <button type="submit" id="provider-submit" class="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        Save Provider
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </details>
+
+                <details id="config-settings-section" class="bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Application Settings</span>
+                            <span class="summary-subtext">General configuration from system/settings.yaml</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-gray-600">
+                            Update non-secret runtime settings. Changes apply immediately unless otherwise specified. Values are stored as plain text; use JSON for lists or objects.
+                        </p>
+                        <div id="settings-feedback" class="text-sm text-gray-600"></div>
+                        <div id="settings-list" class="flex flex-col gap-3">
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                                Loading settings…
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
+                <details id="config-secrets-section" class="bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Secrets</span>
+                            <span class="summary-subtext">Hot-reloadable credentials managed by the secrets store</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-3">
+                        <p class="text-sm text-gray-600">
+                            API keys and other credentials can be updated here. Use the form below to add new secrets or overwrite existing ones. Changes take effect immediately—no container restart required.
+                        </p>
+                        <div class="bg-gray-50 border border-gray-200 rounded-md p-4">
+                            <form id="secret-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="secret-name" class="block text-sm font-medium text-gray-700 mb-1">Secret Name</label>
+                                    <input id="secret-name" name="secret-name" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. LOCAL_MODEL_TOKEN" required>
+                                    <p class="text-xs text-gray-500 mt-1">Use uppercase letters, numbers, or underscores. The name becomes available to providers immediately.</p>
+                                </div>
+                                <div>
+                                    <label for="secret-value" class="block text-sm font-medium text-gray-700 mb-1">Secret Value</label>
+                                    <input id="secret-value" name="secret-value" type="password" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter the credential" required>
+                                    <p class="text-xs text-gray-500 mt-1">Values are stored as plain text inside <code>system/secrets.yaml</code>.</p>
+                                </div>
+                                <div class="md:col-span-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                    <span id="secret-form-status" class="text-sm text-gray-600"></span>
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" id="secret-reset" class="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                                            Reset
+                                        </button>
+                                        <button type="submit" id="secret-submit" class="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            Save Secret
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                        <div id="secrets-list" class="flex flex-col gap-3">
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                                Loading secrets…
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
+                <details id="config-activity-section" class="bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">System Activity Log</span>
+                            <span class="summary-subtext">View recent runtime events</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-3">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <p class="text-sm text-gray-600">
+                                Runtime events are written to <code>system/activity.log</code>. Refresh to load the latest entries.
+                            </p>
+                            <button id="refresh-activity-log" type="button" class="self-start md:self-auto px-3 py-1.5 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-70 disabled:cursor-not-allowed">
+                                Refresh
+                            </button>
+                        </div>
+                        <div class="border border-gray-200 rounded-md bg-gray-50">
+                            <pre id="activity-log-viewer" class="overflow-y-auto whitespace-pre-wrap p-3 text-sm font-mono text-gray-700 max-h-96">Loading system log...</pre>
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <script src="static/js/configuration.js"></script>
+    <script src="static/app.js"></script>
+</body>
+</html>

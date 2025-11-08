@@ -1,0 +1,106 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+      UV_LINK_MODE: copy
+      UV_COMPILE_BYTECODE: "1"
+      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Sync dependencies
+        working-directory: docker
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
+        run: uv sync --frozen --all-extras --no-install-project
+
+      - name: Run validation scenarios
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          LIBRECHAT_API_KEY: ${{ secrets.LIBRECHAT_API_KEY }}
+        run: |
+          SCENARIOS=$(grep -vE '^[[:space:]]*(#|$)' validation/required_scenarios.txt | tr '\n' ' ')
+          if [ -z "$SCENARIOS" ]; then
+            echo "No scenarios listed in validation/required_scenarios.txt"
+            exit 1
+          fi
+          ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python validation/run_validation.py run $SCENARIOS
+
+      - name: Export changelog and release notes
+        run: |
+          ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/export_changelog.py \
+            --output changelog.md \
+            --latest-output release-notes.md
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Derive image name
+        id: image
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repo_name="$(basename "$GITHUB_REPOSITORY")"
+          repo_name="${repo_name,,}"
+          echo "name=ghcr.io/${owner}/${repo_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          docker buildx build \
+            --push \
+            --platform linux/amd64,linux/arm64 \
+            -f docker/Dockerfile \
+            -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+            -t "${IMAGE_NAME}:latest" \
+            .
+
+      - name: Upload validation artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-runs
+          path: validation/runs
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            changelog.md

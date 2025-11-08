@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Docker
+docker/
+!docker/Dockerfile
+!docker/Dockerfile.old
+!docker/requirements.txt
+!docker/pyproject.toml
+!docker/uv.lock
+Dockerfile
+docker-compose.yml
+
+# Runtime data and generated artifacts
+data/
+system/
+validation/runs/
+node_modules/
+static/output.css
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment files
+.env
+
+# Alembic configuration - usually not needed in the image if migrations run separately
+alembic.ini
+alembic/
+
+# Backup directory
+bak/
+
+# IDE/Editor specific
+.vscode/
+.idea/
+*.swp
