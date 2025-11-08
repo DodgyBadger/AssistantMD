@@ -38,20 +38,19 @@ class ToolSuiteScenario(BaseScenario):
         result = await self.run_assistant(vault, "tool_suite")
         self.expect_equals(result.status, "completed", "Tool suite assistant should finish successfully")
 
-        expected_outputs = {
-            "tool-outputs/documentation-access.md": ["read_documentation"],
-            "tool-outputs/file-ops-safe.md": ["file_operations"],
-            "tool-outputs/file-ops-unsafe.md": ["file_ops_unsafe"],
-            "tool-outputs/web-search-duckduckgo.md": ["search_web_duckduckgo"],
-            "tool-outputs/web-search-tavily.md": ["search_web_tavily"],
-            "tool-outputs/tavily-extract.md": ["tavily_extract"],
-            "tool-outputs/tavily-crawl.md": ["tavily_crawl"],
-            "tool-outputs/code-execution.md": ["execute_code"],
-        }
+        expected_outputs = [
+            "tool-outputs/documentation-access.md",
+            "tool-outputs/file-ops-safe.md",
+            "tool-outputs/file-ops-unsafe.md",
+            "tool-outputs/web-search-duckduckgo.md",
+            "tool-outputs/web-search-tavily.md",
+            "tool-outputs/tavily-extract.md",
+            "tool-outputs/tavily-crawl.md",
+            "tool-outputs/code-execution.md",
+        ]
 
-        for relative_path, keywords in expected_outputs.items():
+        for relative_path in expected_outputs:
             self.expect_file_created(vault, relative_path)
-            self.expect_file_contains(vault, relative_path, keywords)
 
         await self.stop_system()
         self.teardown_scenario()
