@@ -43,9 +43,9 @@ Open `docker-compose.yml` and update the fields that matter:
 - Set `TZ` to your local
   [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so
   cron-style schedules align with your locale.
-- Leave `image: ghcr.io/your-org/assistantmd:latest` in place after the public
-  release so Docker pulls published images. Until then, use `docker compose
-  build` or keep the `build:` section to create the image locally.
+- Leave `image: ghcr.io/dodgybadger/assistantmd:${ASSISTANTMD_TAG:-latest}` as
+  the default. You can create a `.env` file next to the compose file and set
+  `ASSISTANTMD_TAG=v0.0.0-ci-check` (or any release) to pin a specific image.
 - (Optional) Change the host side (the left side) of `127.0.0.1:8000:8000` if
   you need to expose the UI on a different IP/port pair (e.g.
   `192.168.0.1:1234:8000`).
@@ -58,29 +58,35 @@ Example vault layout:
 └── Research/
 ```
 
-#### Optional: Customize the runtime user or mount the repo for development
-The default docker image runs as UID 1000 to match the typical non-root user on
-Linux/macOS. If your UID/GID is different, or you need a dev-only bind mount of
-the repository (`.:/app`), copy `docker-compose.override.yml.example` to
-`docker-compose.override.yml` and edit:
+#### Optional: Customize the runtime user, build locally, or mount the repo
+The published GHCR image runs as UID/GID 1000. If your UID/GID is different, you
+need to tweak build arguments, or you want to bind mount the repository
+(`.:/app`) for local development, copy the override file and edit:
 
 ```bash
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-Adjust the `USER_ID`, `GROUP_ID`, and `volumes` entries as needed. Keep the repo
-mount **out of** production configuration so containerized builds stay
-reproducible.
+Adjust the `build.args`, `user`, and `volumes` entries as needed. When using the
+override file, run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --build
+```
+
+Keep the repository bind mount **out of** production configuration so container
+deployments remain reproducible.
 
 
 ### 4. Start the System
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-The `--build` flag ensures the local image stays in sync with the latest source.
-Once the public GHCR image is available you can omit it to simply pull the
-pre-built tag.
+This pulls the pinned GHCR image (default: `latest`) and starts the stack. If
+you are using the override file to build locally, run the combined command shown
+above instead.
 
 This command will:
 - Build the Docker image (when needed)

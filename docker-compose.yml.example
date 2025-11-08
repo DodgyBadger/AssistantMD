@@ -1,18 +1,13 @@
-# Default Docker Compose configuration using the secure UV-based Dockerfile
+# Default Docker Compose configuration that pulls the published GHCR image.
 # Copy this file to docker-compose.yml and run:
-#   docker compose up -d --build
+#   docker compose pull
+#   docker compose up -d
 #
-# Once the GHCR image is published, switch to `image: ghcr.io/<org>/assistantmd:latest`
+# Optional: create a .env next to this file and set ASSISTANTMD_TAG=v0.0.0 to pin a release.
 
 services:
   assistant:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      args:
-        USER_ID: 1000
-        GROUP_ID: 1000
-    image: ghcr.io/your-org/assistantmd:latest
+    image: ghcr.io/dodgybadger/assistantmd:${ASSISTANTMD_TAG:-latest}
     container_name: assistant
     restart: unless-stopped
     ports:

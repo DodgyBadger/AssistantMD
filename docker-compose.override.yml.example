@@ -1,8 +1,11 @@
-# Optional docker-compose override for local customization.
-# Copy to docker-compose.override.yml and adjust as needed.
+# Optional docker-compose override for local customization/builds.
+# Copy to docker-compose.override.yml and adjust as needed, then run:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --build
 services:
   assistant:
     build:
+      context: .
+      dockerfile: docker/Dockerfile
       args:
         USER_ID: 1000   # Edit to desired UID (e.g., 0 for root)
         GROUP_ID: 1000  # Edit to desired GID
