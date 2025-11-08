@@ -29,6 +29,7 @@ jobs:
           fi
           sudo ln -s "$GITHUB_WORKSPACE" /app
           sudo mkdir -p /app/system /app/data
+          sudo chown -R "$USER":"$USER" /app/system /app/data
 
       - name: Set up Python
         uses: actions/setup-python@v5
