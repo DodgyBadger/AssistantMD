@@ -43,9 +43,9 @@ Open `docker-compose.yml` and update the fields that matter:
 - Set `TZ` to your local
   [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so
   cron-style schedules align with your locale.
-- Leave `image: ghcr.io/dodgybadger/assistantmd:${ASSISTANTMD_TAG:-latest}` as
-  the default. You can create a `.env` file next to the compose file and set
-  `ASSISTANTMD_TAG=v0.0.0-ci-check` (or any release) to pin a specific image.
+- Leave `image: ghcr.io/dodgybadger/assistantmd:latest` as the default. To pin a
+  specific release, edit that line and replace `latest` with a tag such as
+  `v0.0.0-ci-check`.
 - (Optional) Change the host side (the left side) of `127.0.0.1:8000:8000` if
   you need to expose the UI on a different IP/port pair (e.g.
   `192.168.0.1:1234:8000`).

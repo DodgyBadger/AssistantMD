@@ -3,11 +3,12 @@
 #   docker compose pull
 #   docker compose up -d
 #
-# Optional: create a .env next to this file and set ASSISTANTMD_TAG=v0.0.0 to pin a release.
+# To pin a specific release, edit the `image` line below and replace `latest`
+# with the desired tag (for example `ghcr.io/dodgybadger/assistantmd:v1.2.3`).
 
 services:
   assistant:
-    image: ghcr.io/dodgybadger/assistantmd:${ASSISTANTMD_TAG:-latest}
+    image: ghcr.io/dodgybadger/assistantmd:latest
     container_name: assistant
     restart: unless-stopped
     ports:
