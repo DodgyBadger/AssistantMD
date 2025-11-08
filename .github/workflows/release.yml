@@ -55,11 +55,16 @@ jobs:
           fi
           python - <<'PY'
           from pathlib import Path
-          import yaml
 
           path = Path("system/secrets.yaml")
-          data = yaml.safe_load(path.read_text()) if path.exists() else {}
-          print("System secrets keys:", sorted(list(data.keys())))
+          keys = []
+          if path.exists():
+              for line in path.read_text().splitlines():
+                  if ":" in line:
+                      key = line.split(":", 1)[0].strip()
+                      if key:
+                          keys.append(key)
+          print("System secrets keys:", sorted(keys))
           PY
 
       - name: Install uv
