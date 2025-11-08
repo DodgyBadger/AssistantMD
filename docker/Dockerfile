@@ -37,10 +37,9 @@ FROM node:22-slim as css-builder
 
 WORKDIR /app
 
-# Copy Tailwind configuration and source files
+# Copy Tailwind configuration and all source files (HTML/JS/CSS)
 COPY package.json package-lock.json tailwind.config.js ./
-COPY static/input.css ./static/input.css
-COPY static/*.html static/*.js ./static/
+COPY static ./static
 
 # Install dependencies and build CSS
 RUN npm ci && \
@@ -103,7 +102,7 @@ EXPOSE ${API_PORT}
 
 # Use system Python with uvicorn module
 USER appuser
-CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${API_PORT:-8000}"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 127.0.0.1 --port ${API_PORT:-8000}"]
 
 #######################################################################
 ## Metadata for better container management
