@@ -51,10 +51,10 @@ Open `docker-compose.yml` and update the fields that matter:
   mkdir -p system
   sudo chown -R $(id -u):$(id -g) system
   ```
-- These ownership steps are crucial on WSL/Linux because the Docker daemon runs
-  as `root` and will otherwise create bind-mount targets with root ownership,
-  leading to `Permission denied` errors (for example when writing
-  `/app/system/secrets.yaml`).
+- These ownership steps matter on every Docker host (native Linux, WSL, Docker
+  Desktop) because the daemon runs as `root` and will otherwise create
+  bind-mount targets with root ownership, leading to `Permission denied` errors
+  (for example when writing `/app/system/secrets.yaml`).
 - Set `TZ` to your local
   [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so
   cron-style schedules align with your locale.
