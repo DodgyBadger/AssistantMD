@@ -32,10 +32,9 @@ Add the following repository secrets before enabling workflows:
 - `LIBRECHAT_API_KEY`
 - `GHCR_PAT` (token with `write:packages` to push the release image)
 
-The CI workflows call `python scripts/seed_ci_secrets.py` to write
-`validation/secrets_override/secrets.yaml` from the environment, so any secret
-you configure becomes available to the runtime without committing it to the
-repo.
+The CI workflows call `python scripts/seed_ci_secrets.py` to overwrite
+`system/secrets.yaml` from the environment, so any secret you configure becomes
+available to the runtime without committing it to the repo.
 
 Optional:
 - `ENV_FILE` for base64-encoded `.env` exports if a one-shot import is useful.

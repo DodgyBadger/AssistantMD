@@ -50,24 +50,17 @@ class SystemController:
         Path(self.test_data_root).mkdir(parents=True, exist_ok=True)
         os.environ.setdefault("VAULTS_ROOT_PATH", self.test_data_root)
 
-        # Isolate secrets per run; prefer validation override when present, otherwise use system secrets
-        validation_root = Path(__file__).resolve().parents[1]
-        validation_override = validation_root / "secrets_override" / "secrets.yaml"
         self._system_root = self.run_path / "system"
         self._system_root.mkdir(parents=True, exist_ok=True)
         self._secrets_file = self._system_root / "secrets.yaml"
-        self._secrets_file.touch(exist_ok=True)
+        base_secrets = Path(SYSTEM_DATA_ROOT) / "secrets.yaml"
+        if base_secrets.exists():
+            self._secrets_file.write_text(base_secrets.read_text(), encoding="utf-8")
+        else:
+            self._secrets_file.touch(exist_ok=True)
 
         self._original_secrets_path: Optional[str] = os.environ.get("SECRETS_PATH")
         os.environ["SECRETS_PATH"] = str(self._secrets_file)
-
-        self._original_base_secrets_path: Optional[str] = os.environ.get("SECRETS_BASE_PATH")
-        if validation_override.exists():
-            os.environ["SECRETS_BASE_PATH"] = str(validation_override)
-        else:
-            system_secrets = Path(SYSTEM_DATA_ROOT) / "secrets.yaml"
-            if self._original_base_secrets_path is None and system_secrets.exists():
-                os.environ["SECRETS_BASE_PATH"] = str(system_secrets)
 
         # Store current date for restoration
         self._current_test_date = None
@@ -191,18 +184,13 @@ class SystemController:
             os.environ["SECRETS_PATH"] = self._original_secrets_path
         self._original_secrets_path = None
 
-        if getattr(self, "_original_base_secrets_path", None) is None:
-            os.environ.pop("SECRETS_BASE_PATH", None)
-        else:
-            os.environ["SECRETS_BASE_PATH"] = self._original_base_secrets_path
-        self._original_base_secrets_path = None
-
         # Remove the per-run secrets overlay to avoid lingering copies
         try:
             if self._secrets_file.exists():
                 self._secrets_file.unlink()
         except OSError:
             pass
+
     
     async def restart_system(self):
         """Full system restart cycle."""

@@ -72,9 +72,9 @@ surfaces via `call_api` and `launcher_command`.
 
 ## Working With Secrets During Validation
 
-- Place developer API keys in `validation/secrets_override/secrets.yaml`. The validation harness points
-  `SECRETS_BASE_PATH` at that file so scenarios can read real credentials without modifying your
-  production `system/secrets.yaml`.
+- Place developer API keys in `system/secrets.yaml` (gitignored). The validation harness copies this
+  file into each run’s local sandbox before starting so scenarios can read real credentials without
+  touching your working copy.
 - Each scenario run creates a temporary overlay secrets file under
   `validation/runs/<timestamp>_<scenario>/system/secrets.yaml`. Endpoint calls that update secrets
   write to this overlay and the file is removed when the run completes.

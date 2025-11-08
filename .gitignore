@@ -102,7 +102,6 @@ celerybeat.pid
 # Environments
 .env
 system/secrets.yaml
-validation/secrets_override/secrets.yaml
 .venv
 env/
 venv/

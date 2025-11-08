@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Utility script that writes a secrets.yaml overlay from environment variables.
+Utility script that writes system/secrets.yaml from environment variables.
 
 Used in CI to bridge GitHub repository secrets into the custom secrets store
 expected by the runtime and validation framework.
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict
 
 
-DEFAULT_OUTPUT = "validation/secrets_override/secrets.yaml"
+DEFAULT_OUTPUT = "system/secrets.yaml"
 CI_SECRET_KEYS = [
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -23,6 +23,7 @@ CI_SECRET_KEYS = [
     "MISTRAL_API_KEY",
     "TAVILY_API_KEY",
     "LIBRECHAT_API_KEY",
+    "LOGFIRE_TOKEN",
 ]
 
 

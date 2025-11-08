@@ -18,7 +18,6 @@ jobs:
       UV_LINK_MODE: copy
       UV_COMPILE_BYTECODE: "1"
       UV_CACHE_DIR: ./.uv-cache
-      SECRETS_BASE_PATH: ${{ github.workspace }}/validation/secrets_override/secrets.yaml
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +38,7 @@ jobs:
 
       - name: Seed validation secrets
         run: |
-          python scripts/seed_ci_secrets.py --output validation/secrets_override/secrets.yaml
+          python scripts/seed_ci_secrets.py --output system/secrets.yaml
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -50,16 +49,16 @@ jobs:
 
       - name: Verify seeded secrets file
         run: |
-          if [ ! -f validation/secrets_override/secrets.yaml ]; then
-            echo "Secrets override file missing"
+          if [ ! -f system/secrets.yaml ]; then
+            echo "system/secrets.yaml missing"
             exit 1
           fi
           python - <<'PY'
 from pathlib import Path
 import yaml
-path = Path("validation/secrets_override/secrets.yaml")
+path = Path("system/secrets.yaml")
 data = yaml.safe_load(path.read_text()) if path.exists() else {}
-print("Secrets override keys:", sorted(list(data.keys())))
+print("System secrets keys:", sorted(list(data.keys())))
 PY
 
       - name: Install uv
