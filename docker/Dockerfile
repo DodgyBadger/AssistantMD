@@ -102,13 +102,10 @@ EXPOSE ${API_PORT}
 
 # Use system Python with uvicorn module
 USER appuser
-CMD ["sh", "-c", "python -m uvicorn main:app --host 127.0.0.1 --port ${API_PORT:-8000}"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${API_PORT:-8000}"]
 
 #######################################################################
 ## Metadata for better container management
 #######################################################################
-LABEL org.opencontainers.image.title="AssistantMD"
-LABEL org.opencontainers.image.description="Automated personal productivity system with AI-powered workflows"
-LABEL org.opencontainers.image.version="0.1.0"
 LABEL security.non-root-user="appuser"
 LABEL security.configurable-uid-gid="true"
