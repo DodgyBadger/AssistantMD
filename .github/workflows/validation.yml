@@ -22,10 +22,17 @@ jobs:
       UV_LINK_MODE: copy
       UV_COMPILE_BYTECODE: "1"
       UV_CACHE_DIR: ./.uv-cache
-      SYSTEM_DATA_ROOT: ${{ github.workspace }}/system
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare container-style paths
+        run: |
+          if [ -e /app ]; then
+            sudo rm -rf /app
+          fi
+          sudo ln -s "$GITHUB_WORKSPACE" /app
+          sudo mkdir -p /app/system /app/data
 
       - name: Set up Python
         uses: actions/setup-python@v5
