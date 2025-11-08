@@ -45,9 +45,8 @@ Optional:
   `main` and `dev`. It installs dependencies with `uv`, runs the entire
   `integration/` scenario folder, and uploads artifacts from `validation/runs/`.
 - `.github/workflows/release.yml` triggers on `v*` tags. It reuses the same
-  validation runner, exports release notes via `scripts/export_changelog.py`,
-  builds a multi-arch Docker image from `docker/Dockerfile`, pushes it to GHCR,
-  and publishes a GitHub Release that includes `changelog.md`.
+  validation runner, builds a multi-arch Docker image from `docker/Dockerfile`,
+  pushes it to GHCR, and publishes a GitHub Release that includes `changelog.md`.
 
 ## Validation Suite
 CI executes every scenario in `validation/scenarios/integration/`, which
@@ -61,22 +60,16 @@ Drop any scenario you do not need from that folder (or add new ones) and the
 workflows automatically follow suit.
 
 ## Release Flow
-1. Update version metadata and changelog entries.
-2. Export the changelog and the latest entry:
-   ```bash
-   python scripts/export_changelog.py \
-     --output changelog.md \
-     --latest-output release-notes.md
-   ```
-3. Open a release PR from `dev` → `main`. Merge after `ci-validation` passes.
-4. Tag the merge commit with `vMAJOR.MINOR.PATCH` and push the tag:
+1. Update version metadata and edit `changelog.md` with the latest entries.
+2. Open a release PR from `dev` → `main`. Merge after `ci-validation` passes.
+3. Tag the merge commit with `vMAJOR.MINOR.PATCH` and push the tag:
    ```bash
    git tag v1.2.3
    git push origin v1.2.3
    ```
-5. Monitor the `release` workflow. It will publish the GHCR image at
+4. Monitor the `release` workflow. It will publish the GHCR image at
    `ghcr.io/<org>/<repo>:vX.Y.Z` and `:latest`, upload validation artifacts, and
-   create the GitHub Release using `release-notes.md`.
+   create the GitHub Release using the committed `changelog.md`.
 
 ## Post-Setup Verification
 - Trigger the workflows manually via `gh workflow run` to ensure secrets are

@@ -94,12 +94,6 @@ jobs:
         run: |
           ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python validation/run_validation.py run integration
 
-      - name: Export changelog and release notes
-        run: |
-          ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/export_changelog.py \
-            --output changelog.md \
-            --latest-output release-notes.md
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -144,6 +138,6 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: release-notes.md
+          body_path: changelog.md
           files: |
             changelog.md
