@@ -18,6 +18,7 @@ jobs:
       UV_LINK_MODE: copy
       UV_COMPILE_BYTECODE: "1"
       UV_CACHE_DIR: ./.uv-cache
+      SYSTEM_DATA_ROOT: ${{ github.workspace }}/system
     steps:
       - name: Checkout
         uses: actions/checkout@v4

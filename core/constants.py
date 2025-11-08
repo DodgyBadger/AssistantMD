@@ -4,15 +4,18 @@ Core system constants.
 Basic system constants that are used across multiple modules.
 """
 
+from __future__ import annotations
+
+import os
 
 # Container data root path - where vaults are mounted inside the container
-CONTAINER_DATA_ROOT = '/app/data'
+CONTAINER_DATA_ROOT = os.getenv('CONTAINER_DATA_ROOT', '/app/data')
 
 # System data root path - where system databases and state are stored
-SYSTEM_DATA_ROOT = '/app/system'
+SYSTEM_DATA_ROOT = os.getenv('SYSTEM_DATA_ROOT', '/app/system')
 
 # Documentation root path - where system documentation is stored
-DOCS_ROOT = '/app/docs'
+DOCS_ROOT = os.getenv('DOCS_ROOT', '/app/docs')
 
 # File to mark directories as excluded from vault discovery
 VAULT_IGNORE_FILE = '.vaultignore'
