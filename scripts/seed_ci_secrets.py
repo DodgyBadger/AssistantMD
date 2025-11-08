@@ -66,7 +66,8 @@ def main() -> None:
 
     output_path = Path(args.output)
     write_yaml(output_path, secrets)
-    print(f"Seeded {len(secrets)} secrets to {output_path}")
+    keys = ", ".join(sorted(secrets.keys()))
+    print(f"Seeded {len(secrets)} secrets to {output_path} ({keys})")
 
 
 if __name__ == "__main__":

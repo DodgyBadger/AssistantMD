@@ -52,6 +52,20 @@ jobs:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           LIBRECHAT_API_KEY: ${{ secrets.LIBRECHAT_API_KEY }}
 
+      - name: Verify seeded secrets file
+        run: |
+          if [ ! -f validation/secrets_override/secrets.yaml ]; then
+            echo "Secrets override file missing"
+            exit 1
+          fi
+          python - <<'PY'
+from pathlib import Path
+import yaml
+path = Path("validation/secrets_override/secrets.yaml")
+data = yaml.safe_load(path.read_text()) if path.exists() else {}
+print("Secrets override keys:", sorted(list(data.keys())))
+PY
+
       - name: Install uv
         uses: astral-sh/setup-uv@v2
 
