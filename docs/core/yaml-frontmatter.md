@@ -8,14 +8,13 @@ All assistant configuration is specified in YAML frontmatter at the top of the f
 
 **workflow** (string, required)
 - The workflow engine to use for this assistant
-- Currently supported: `step`, `interactive`
+- Currently supported: `step`
 
 ## Optional Parameters
 
 **schedule** (string, optional)
 - Defines when the assistant runs using crontab format or explicit datetime
-- If omitted, assistant is manual-only (executed via API or interactive interface)
-- **Note**: Quotes are optional. Both `schedule: cron: 0 8 * * *` and `schedule: "cron: 0 8 * * *"` work identically. Obsidian automatically adds quotes when editing properties, but they're not required when editing raw markdown.
+- If omitted, assistant is manual-only (executed via the web UI)
 
 ### Recurring Schedules
 

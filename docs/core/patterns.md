@@ -1,6 +1,6 @@
 # Pattern Variables Reference
 
-The AssistantMD supports various pattern variables for dynamic file paths and headers. Patterns are used in `@output-file`, `@input-file`, and `@header` directives.
+AssistantMD supports pattern variables for dynamic file paths and headers. Patterns are used in `@output-file`, `@input-file`, and `@header` directives.
 
 ## Time-Based Patterns
 

@@ -1,228 +1,112 @@
-# System Installation
-
-Follow these steps to get the AssistantMD running with Docker.
-
 ## Prerequisites
-*   **Docker Engine or Docker Desktop**
-*   **LLM API Key**
+*   [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+*   At least one LLM API Key
 
-## Step-by-Step Setup
+### Create a folder for your deployment, structured as follows:
+```
+assistantmd
+├── system/
+└── docker-compose.yml
+```
+_Pre-creating the `system` folder is important to avoid a "permission denied" error. See note about file permissions below._
 
-### 1. Create a deployment folder and grab the compose file
-If you're using the published GHCR image you do **not** need the full source
-tree. Create a folder for your deployment and copy the contents of
-`docker-compose.yml.example` into `docker-compose.yml`. You can copy/paste from
-the docs or download it directly once the public repo is live.
+Copy the contents of
+`docker-compose.yml.example` into `docker-compose.yml`.
 
 ```bash
 mkdir assistantmd
 cd assistantmd
-# paste the compose contents into docker-compose.yml
+mkdir system
+nano docker-compose.yml
 ```
-
-> Clone the repo only when you plan to build a custom image (for example, to
-> bake in a different UID/GID or modify the application code). For all other
-> cases running the published container is sufficient.
-
-### 2. (Optional) Copy the template if you cloned the repo
-If you cloned the repository for local development, duplicate the provided
-template:
-```bash
-cp docker-compose.yml.example docker-compose.yml
-```
-Skip this step when you manually pasted the compose file in step 1.
-
-### 3. Configure Docker Compose
-Open `docker-compose.yml` and update the fields that matter:
+### Open `docker-compose.yml` and update the following:
 
 - Replace `/absolute/path/to/your/vaults` with the directory that holds your
-  vault folders. The container path must stay `/app/data`. **Important:** create
-  the host directory yourself and make sure it is owned by your normal user
-  before running Docker; otherwise Docker will create it as `root` when the bind
-  mount is first used. Example:
-  ```bash
-  mkdir -p /absolute/path/to/your/vaults
-  sudo chown -R $(id -u):$(id -g) /absolute/path/to/your/vaults
-  ```
-- Keep `./system:/app/system` mounted so settings, logs, and generated secrets
-  survive restarts. Create the `system` directory *before* running Docker and
-  ensure your user owns it:
-  ```bash
-  mkdir -p system
-  sudo chown -R $(id -u):$(id -g) system
-  ```
-- These ownership steps matter on every Docker host (native Linux, WSL, Docker
-  Desktop) because the daemon runs as `root` and will otherwise create
-  bind-mount targets with root ownership, leading to `Permission denied` errors
-  (for example when writing `/app/system/secrets.yaml`).
-- Set `TZ` to your local
-  [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so
-  cron-style schedules align with your locale.
-- Leave `image: ghcr.io/dodgybadger/assistantmd:latest` as the default. To pin a
-  specific release, edit that line and replace `latest` with a tag such as
-  `v1.0.0`.
-- (Optional) Change the host side (the left side) of `127.0.0.1:8000:8000` if
-  you need to expose the UI on a different IP/port pair (e.g.
-  `192.168.0.1:1234:8000`).
+  vault folders. See examples below.
+- If you have directories in that path that should not be treated as vaults, create a `.vaultignore` file in the directory and it will be ignored.
+- **Do not** change the right hand side: `/app/data` or the `./system:/app/system` mount.
+- Set `TZ` to your local [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so
+  that scheduled workflows run when you expect them to.
 
-Example vault layout:
-```
-/Users/yourname/MyVaults/
-├── Personal/
-├── Work/
-└── Research/
-```
-
-#### Optional: Customize the runtime user, build locally, or mount the repo
-The published GHCR image runs as UID/GID 1000. If your UID/GID is different, you
-need to tweak build arguments, or you want to bind mount the repository
-(`.:/app`) for local development, copy the override file and edit:
-
-```bash
-cp docker-compose.override.yml.example docker-compose.override.yml
-```
-
-Adjust the `build.args`, `user`, and `volumes` entries as needed. When using the
-override file, run:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --build
-```
-
-Keep the repository bind mount **out of** production configuration so container
-deployments remain reproducible.
+**Optional**
+- Change the host side (the left side) of `127.0.0.1:8000:8000` if
+  you need to expose the UI on a different IP/port (e.g. `192.168.0.1:1234:8000`).
+- Change the `latest` tag in `image: ghcr.io/dodgybadger/assistantmd:latest` to lock a
+  specific release. See the [repository](https://github.com/DodgyBadger/AssistantMD/tags) for all tags.
 
 
-### 4. Start the System
-```bash
-docker compose pull
-docker compose up -d
-```
+### Start the System
+`docker compose up -d`
 
-This pulls the pinned GHCR image (default: `latest`) and starts the stack. If
-you are using the override file to build locally, run the combined command shown
-above instead.
+**Verify Installation**
+`docker ps` should show assistantMD running. If you see "restarting", something is wrong. Run `docker logs assistantMD` to check for startup errors.
 
-This command will:
-- Build the Docker image (when needed)
-- Start the AssistantMD service
-- Begin monitoring your vault directories
-- Start the API server on `http://localhost:8000`
-- Enable rich console instrumentation for debugging (always available)
-
-Once the container is running, open the **Configuration → Secrets** tab and add the API keys or other credentials you want the system to use. Changes apply immediately—no container restart required.
-
-### 6. Verify Installation
-Use the REST API directly to confirm the service is healthy:
-```bash
-curl http://localhost:8000/api/status
-```
-
-You should receive JSON containing overall system status, vault counts, and scheduler information. For additional troubleshooting, tail the container logs:
-```bash
-docker compose logs -f
-```
-
-### 7. Access the Web Interface
-The AssistantMD includes a web-based interface for interactive chat and system monitoring.
-
-By default, the interface is available at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file).
+Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file).
 
 **Chat Tab**: Interactive chat with your vaults
 **Dashboard Tab**: View system status and execute assistants manually
 **Configuration Tab**: Manage models, settings and secrets.
 
-## Vault Organization Patterns
+Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required.
 
-Understanding how to organize your files depends on your specific use case. Here are the two recommended patterns:
+### Customize the runtime user
+The published GHCR image runs as UID/GID 1000. This will work in most cases. If you have followed the steps above and are still getting "permission denied" errors, run `id` from the command line to check your UID. If it is not 1000, then you need to build a custom image. There are also scenarios where you might want to run as root inside the container, such as hosting assistantMD and syncing your markdown files to a remote server.
 
-### Pattern 1: Single Vault Setup (Simplest)
-**When to use**: You have one collection of markdown files you want to work with.
+Clone the repo:
+`git clone https://github.com/DodgyBadger/AssistantMD.git`
 
-**File structure on your computer**:
-```
-/home/user/MyNotes/
-├── projects/
-├── daily-notes/
-└── goals.md
-```
-
-**Docker volume mapping**: edit the compose volume line to `/home/user/MyNotes:/app/data`.
-
-**Assistant configuration**:
-Create assistant files in the root directory:
-```
-/home/user/MyNotes/
-├── assistants/
-│   ├── my_assistant.md     # Direct assistant file
-│   ├── planning/           # Optional: organize in subfolders
-│   │   └── weekly.md
-│   └── _chat-sessions/     # System folders (underscore prefix = ignored)
-├── projects/
-├── daily-notes/
-└── goals.md
-```
-
-### Pattern 2: Multiple Vaults in Organized Folder (Recommended)
-**When to use**: You have separate collections (personal, work, projects) that you want different assistants to handle.
-
-**File structure on your computer**:
-```
-/home/user/AllMyVaults/
-├── Personal/
-│   ├── journal/
-│   └── goals.md
-├── Work/
-│   ├── projects/
-│   └── meetings/
-└── Research/
-    ├── papers/
-    └── notes/
-```
-
-**Docker volume mapping**: edit the compose volume line to `/home/user/AllMyVaults:/app/data`.
-
-**Assistant configuration**:
-Create assistant files in each vault's directory:
-```
-/home/user/AllMyVaults/
-├── Personal/
-│   ├── assistants/
-│   │   ├── personal_planner.md  # Personal assistant config
-│   │   └── planning/            # Optional subfolders for organization
-│   │       └── weekly.md
-│   ├── journal/
-│   └── goals.md
-├── Work/
-│   ├── assistants/
-│   │   ├── work_planner.md      # Work assistant config
-│   │   └── reports/
-│   │       └── monthly.md
-│   ├── projects/
-│   └── meetings/
-└── Research/
-    ├── assistants/
-    │   ├── research_assistant.md # Research assistant config
-    │   └── _chat-sessions/       # System folders (ignored)
-    ├── papers/
-    └── notes/
-```
-
-## Key Principles
-
-1. **The system always starts looking from `/app/data` inside the container**
-2. **Each directory under `/app/data` is automatically discovered as a vault**
-3. **Each assistant works within exactly one vault and cannot access files from other vaults**
-4. **Assistants are defined by markdown files in each vault's `assistants/` directory**
-5. **Assistants can be organized in subfolders (one level deep) within `assistants/` for better organization**
-6. **Folders prefixed with underscore (e.g., `_chat-sessions`) are automatically ignored**
-7. **Each vault will automatically get an `assistants/` subdirectory created for assistant configurations**
-
-## Vault Ignore
-
-If you have directories that should not be treated as vaults, create a `.vaultignore` file in the directory and it will be ignored.
+Rename both docker compose files
 
 ```bash
-# Example: Exclude a temporary directory
-echo "# Temporary files - not a vault" > /path/to/data/temp/.vaultignore
+cd assistantmd
+cp docker-compose.yml.example docker-compose.yml
+cp docker-compose.override.yml.example docker-compose.override.yml
 ```
+
+Edit docker-compose.yml as above.
+In docker-compose.override.yml, edit `build.args` and `user` as needed. E.g.
+
+```
+    args:
+      USER_ID: 1001
+      GROUP_ID: 1001
+  user: "1001:1001"
+```
+
+Build and run the image: `docker compose up -d --build`
+
+
+## Vault Path Examples
+
+**Single Vault**
+
+File structure on your computer:
+```
+/home/user/MyNotes/
+├── projects/
+├── daily-notes/
+└── goals.md
+```
+Docker compose volume mount reads: `/home/user/MyNotes:/app/data`.
+
+**Multiple Vaults**
+
+File structure on your computer:
+```
+/home/user/AllMyVaults/
+├── Personal/
+│   ├── journal/
+│   └── goals.md
+├── Work/
+│   ├── projects/
+│   └── meetings/
+└── Research/
+    ├── papers/
+    └── notes/
+```
+
+Docker compose volume mount reads: `/home/user/AllMyVaults:/app/data`.
+
+
+> [!NOTE]
+> **File permissions**: The default docker image runs as UID 1000 inside the container. This ensures that markdown files edited or written by the app remain accessible to you on the host. If it ran as root inside the container, you would lose access to any markdown files it touched. This works in reverse also. If either of the volumes being mounted inside the container (`/absolute/path/to/your/vaults` and `./system`) are created by root on the host (i.e. you let docker create them or use `sudo`), then UID 1000 inside the container will not have permission. If you get "permission denied" when loading the app, make sure these two folder are not owned by root. Instructions are provided below for creating a custom image with a different internal UID.

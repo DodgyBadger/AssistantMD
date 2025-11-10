@@ -1,6 +1,6 @@
-# Optional docker-compose override for local customization/builds.
-# Copy to docker-compose.override.yml and adjust as needed, then run:
-#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --build
+# Optional docker-compose override for custom builds
+# Copy to docker-compose.override.yml and adjust as needed
+
 services:
   assistant:
     build:
@@ -11,6 +11,7 @@ services:
         GROUP_ID: 1000  # Edit to desired GID
     # Run the container as your chosen user to align file ownership.
     user: "1000:1000"   # Keep in sync with USER_ID/GROUP_ID above
-    # Optional development-only bind mounts (not for production)
-    volumes:
-      - .:/app
+    
+    # Optional development-only bind mounts (not for regular use)
+    # volumes:
+    #  - .:/app
