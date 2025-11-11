@@ -1,21 +1,16 @@
 # Default Docker Compose configuration that pulls the published GHCR image.
-# Copy this file to docker-compose.yml and run:
-#   docker compose pull
-#   docker compose up -d
-#
-# To pin a specific release, edit the `image` line below and replace `latest`
-# with the desired tag (for example `ghcr.io/dodgybadger/assistantmd:v1.2.3`).
+# Copy this file to docker-compose.yml and run: docker compose up -d
 
 services:
   assistant:
     image: ghcr.io/dodgybadger/assistantmd:latest
-    container_name: assistant
+    container_name: assistantMD
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"    # FastAPI - localhost only
     volumes:
-      - /absolute/path/to/your/vaults:/app/data   # Pre-create & chown to your user
-      - ./system:/app/system                      # Pre-create & keep owned by your user
+      - /absolute/path/to/your/vaults:/app/data   # Pre-create path on the left of the colon & ensure owned by your user
+      - ./system:/app/system                      # Pre-create path on the left of the colon & ensure owned by your user
     environment:
       - TZ=UTC
       - API_PORT=8000

@@ -20,7 +20,7 @@ const STATUS_ICONS = {
 };
 
 // State management
-const RESTART_NOTICE_TEXT = '⚠️ Restart recommended: restart the container to apply pending configuration changes.';
+const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
 const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
 
 const state = {
@@ -28,24 +28,22 @@ const state = {
     metadata: null,
     isLoading: false,
     systemStatus: null,
-    lastStatusMessage: '',
     restartRequired: false,
     shouldAutoScroll: true
 };
 
 // DOM elements - Chat
 const chatElements = {
+    statusIcon: document.getElementById('status-icon'),
     statusText: document.getElementById('status-text'),
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
     modeSelector: document.getElementById('mode-selector'),
-    historySelector: document.getElementById('history-selector'),
     toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
     sendBtn: document.getElementById('send-btn'),
-    clearBtn: document.getElementById('clear-btn'),
-    compactBtn: document.getElementById('compact-btn')
+    clearBtn: document.getElementById('clear-btn')
 };
 
 // DOM elements - Dashboard
@@ -173,10 +171,11 @@ async function fetchMetadata() {
 
         state.metadata = await response.json();
         populateSelectors();
-        updateStatus(`✅ Connected: ${state.metadata.vaults.length} vaults, ${state.metadata.models.length} models, ${state.metadata.tools.length} tools`);
+        updateStatus();
     } catch (error) {
         console.error('Error fetching metadata:', error);
-        updateStatus('⚠️ Could not connect to server. Make sure the API is running.');
+        // Connection failure - could add a warning here if needed
+        updateStatus();
     }
 }
 
@@ -253,7 +252,7 @@ async function fetchSystemStatus() {
         syncRestartFlagWithStorage();
         displaySystemStatus();
         populateAssistantSelector();
-        updateStatus(state.lastStatusMessage || '');
+        updateStatus();
     } catch (error) {
         console.error('Error fetching status:', error);
         dashElements.systemStatus.innerHTML = '<p class="text-red-600">Failed to fetch system status</p>';
@@ -426,10 +425,6 @@ function setupEventListeners() {
         chatElements.clearBtn.addEventListener('click', clearSession);
     }
 
-    if (chatElements.compactBtn) {
-        chatElements.compactBtn.addEventListener('click', compactHistory);
-    }
-
     if (dashElements.rescanBtn) {
         dashElements.rescanBtn.addEventListener('click', rescanVaults);
     }
@@ -475,7 +470,7 @@ async function sendMessage() {
         prompt: message,
         tools: selectedTools,
         model: model,
-        use_conversation_history: chatElements.historySelector.value === 'true',
+        use_conversation_history: true,
         session_type: chatElements.modeSelector.value,
         instructions: null,
         stream: true
@@ -1099,58 +1094,7 @@ function flashCopyFeedback(button, didCopy) {
 async function clearSession() {
     state.sessionId = null;
     chatElements.chatMessages.innerHTML = '<div class="text-center text-gray-500 text-sm">Start a conversation...</div>';
-    updateStatus('✅ New chat session started!');
-
-    setTimeout(() => {
-        updateStatus(`✅ Connected: ${state.metadata.vaults.length} vaults, ${state.metadata.models.length} models, ${state.metadata.tools.length} tools`);
-    }, 3000);
-}
-
-// Compact history
-async function compactHistory() {
-    if (!state.sessionId) {
-        alert('No active session to compact');
-        return;
-    }
-
-    const vault = chatElements.vaultSelector.value;
-    const model = chatElements.modelSelector.value;
-
-    if (!vault || !model) {
-        alert('Please select vault and model');
-        return;
-    }
-
-    try {
-        const response = await fetch('api/chat/compact', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                session_id: state.sessionId,
-                vault_name: vault,
-                model: model,
-                user_instructions: null
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        state.sessionId = data.new_session_id;
-
-        updateStatus('✅ History compacted!');
-
-        setTimeout(() => {
-            updateStatus(`✅ Connected: ${state.metadata.vaults.length} vaults, ${state.metadata.models.length} models, ${state.metadata.tools.length} tools`);
-        }, 3000);
-
-    } catch (error) {
-        console.error('Error compacting history:', error);
-        alert(`Error: ${error.message}`);
-    }
+    updateStatus();
 }
 
 // Rescan vaults
@@ -1247,27 +1191,34 @@ async function executeAssistant() {
 }
 
 function updateStatus(message) {
-    if (!chatElements.statusText) return;
+    if (!chatElements.statusIcon || !chatElements.statusText) return;
 
-    const baseMessage = message || state.lastStatusMessage || 'Ready.';
-    state.lastStatusMessage = baseMessage;
     const warnings = getConfigurationWarnings();
     const noticeLines = [];
 
     if (state.restartRequired) {
-        noticeLines.push(`<span class="text-amber-600">${RESTART_NOTICE_TEXT}</span>`);
+        noticeLines.push(RESTART_NOTICE_TEXT);
     }
 
     warnings.forEach((issue) => {
-        noticeLines.push(`<span class="text-amber-600">⚠️ ${issue.message}</span>`);
+        noticeLines.push(issue.message);
     });
 
-    if (!noticeLines.length) {
-        chatElements.statusText.textContent = baseMessage;
-        return;
+    // Check for no vaults
+    if (state.metadata && state.metadata.vaults && state.metadata.vaults.length === 0) {
+        noticeLines.push('No vaults found. Review installation instructions.');
     }
 
-    chatElements.statusText.innerHTML = `${baseMessage}<br>${noticeLines.join('<br>')}`;
+    // Show only icon when everything is good, or icon + text when there are issues
+    if (!noticeLines.length) {
+        chatElements.statusIcon.textContent = '✅';
+        chatElements.statusText.classList.add('hidden');
+        chatElements.statusText.innerHTML = '';
+    } else {
+        chatElements.statusIcon.textContent = '⚠️';
+        chatElements.statusText.classList.remove('hidden');
+        chatElements.statusText.innerHTML = `<span class="text-amber-600">${noticeLines.join(' • ')}</span>`;
+    }
 }
 
 function setRestartRequired(required = true) {
@@ -1279,7 +1230,7 @@ function setRestartRequired(required = true) {
         if (window.ConfigurationPanel && typeof window.ConfigurationPanel.setRestartRequired === 'function') {
             window.ConfigurationPanel.setRestartRequired(false);
         }
-        updateStatus(state.lastStatusMessage || '');
+        updateStatus();
         return;
     }
 
@@ -1294,7 +1245,7 @@ function setRestartRequired(required = true) {
     if (window.ConfigurationPanel && typeof window.ConfigurationPanel.setRestartRequired === 'function') {
         window.ConfigurationPanel.setRestartRequired(true);
     }
-    updateStatus(state.lastStatusMessage || '');
+    updateStatus();
 }
 
 function syncRestartFlagWithStorage() {
@@ -1324,7 +1275,7 @@ function syncRestartFlagWithStorage() {
             if (window.ConfigurationPanel && typeof window.ConfigurationPanel.setRestartRequired === 'function') {
                 window.ConfigurationPanel.setRestartRequired(true);
             }
-            updateStatus(state.lastStatusMessage || '');
+            updateStatus();
         }
         return;
     }
@@ -1334,7 +1285,7 @@ function syncRestartFlagWithStorage() {
         if (window.ConfigurationPanel && typeof window.ConfigurationPanel.setRestartRequired === 'function') {
             window.ConfigurationPanel.setRestartRequired(false);
         }
-        updateStatus(state.lastStatusMessage || '');
+        updateStatus();
     }
 
     localStorage.removeItem(RESTART_STORAGE_KEY);

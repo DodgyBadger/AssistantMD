@@ -44,9 +44,7 @@ class DocumentationAccessTool(BaseTool):
     def get_instructions(cls) -> str:
         """Return instructions for using the documentation access tool."""
         instructions = """
-Use this tool to access AssistantMD documentation. Start by reading the README which contains an overview and table of contents. Then request specific sections as needed by following the references you see in the content.
-
-Call read_documentation() with no arguments to get the main README, or specify a path like "core/patterns" or "workflows/step" to read specific documentation sections.
+Use this tool to access AssistantMD documentation. Start by reading index.md. Then request specific pages as needed by specifying a path.
         """
         return instructions.strip()
     
@@ -68,7 +66,7 @@ Call read_documentation() with no arguments to get the main README, or specify a
         """Normalize documentation path to full file path within docs root."""
         docs_root = Path(core.constants.DOCS_ROOT).resolve()
 
-        normalized_path = (path or "README").strip()
+        normalized_path = (path or "index").strip()
         normalized_path = normalized_path.strip('/')
         if normalized_path.endswith('.md'):
             normalized_path = normalized_path[:-3]

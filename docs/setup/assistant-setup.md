@@ -1,37 +1,53 @@
 # Assistant Setup Guide
 
-An assistant is a markdown file in a vault's `assistants/` folder (or subfolder) that defines an automated AI workflow.
+An assistant is a markdown file in a vault's `assistants/` folder that defines a scheduled AI workflow. Assistants can be in subfolders (one level deep) for better organization. Folders prefixed with underscore (e.g., `_chat-sessions`) are ignored.
 
-**Organization**: Assistants can be organized into subfolders (one level deep) for better organization. Folders prefixed with underscore (e.g., `_chat-sessions`) are ignored.
+Following is a complete and valid assistant file which you can use as a starting point. Copy and paste the text into a markdown file in your assistants folder and then Rescan from the Dashboard tab in the web UI to load it.
 
-## Step Workflow
+**NOTE**: Assistant files must include only the text below, not embedded inside a code block.
 
-Step workflows execute predefined steps in sequence, typically on an automatic schedule. Use when you want automated, repeatable tasks that run consistently.
-
-**Common uses:**
-- Daily planning and task generation
-- Weekly reviews and summaries
-- Automated content processing
-- Scheduled file organization
-
+```
+---
+schedule: cron: 0 9 * * *
+workflow: step
+enabled: true
+description: Daily learning assistant
 ---
 
-## Complete Template
+## Instructions
+You are a helpful learning assistant.
 
-See **[workflows/step-template](workflows/step-template.md)** for a complete, valid assistant file you can use as a starting point.
+## Weekly plan
+@run-on monday
+@output-file lesson_plans/plan-{this-week}
+@input-file goals.md
+@model gpt-5
 
-**Key structure:**
-1. YAML frontmatter between `---` delimiters (required)
-2. Optional `## INSTRUCTIONS` section for AI system instructions
-3. One or more `## STEP1`, `## STEP2`, etc. sections with directives and prompts
+Review my goals and suggest a weekly learning plan. Keep it high level, focused on key topics and learning objectives.
+
+## Daily reading
+@output-file lesson_plans/daily-{today}
+@input-file lesson_plans/plan-{this-week}
+@model gpt-5
+@tools web_search
+
+Review my weekly learning plan and the morning notes I have added and then search the web to build a daily reading list. Keep it short, 2 or 3 links per day with a focus on quality and authoritative content.
+```
+
+**Structure**
+YAML frontmatter between `---` delimiters (required). These appear as properties if using Obsidian.
+Sets the run schedule using a cron expression and the workflow engine to run. Currently there is only one workflow engine: step.
+
+`## INSTRUCTIONS` section with a prompt that is included as a system instruction before every step prompt. This section is optinal.
+
+One or more `## Header` sections which define the steps to run. Steps run in the order they appear in the assistant file. The header name can be anything.
 
 ---
-
-## Learn More
 
 Explore detailed documentation for each component:
 
-- **[YAML Frontmatter](core/yaml-frontmatter.md)** - Schedules, workflows, and settings
-- **[Core Directives](core/core-directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
-- **[Pattern Variables](core/patterns.md)** - Dynamic file names using {today}, {this-week}, etc.
-- **[Step Workflow Details](workflows/step.md)** - Advanced features and examples
+- **[YAML frontmatter](../core/yaml-frontmatter.md)** - Schedules, workflows, and settings
+- **[Core directives](../core/core-directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
+- **[Pattern variables](../core/patterns.md)** - Dynamic file names using {today}, {this-week}, etc.
+
+
