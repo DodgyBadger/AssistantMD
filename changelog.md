@@ -1,8 +1,13 @@
 # Changelog
 
-Fresh log for the public repository reset on 2025-11-08.
-Append new entries to the bottom of this file so it stays in chronological order.
-Rotate periodically and keep this file focused on the current release train.
+## 2025-11-11 - Tighten Main Branch Workflow Guardrails
+
+Documented the workflow updates that keep `main` protected while avoiding redundant checks:
+
+- Limited `ci-validation` to pull requests targeting `main` so every change merges only after validation
+- Removed the `dev` branch trigger to prevent duplicate runs and simplify branch protection expectations
+
+---
 
 ## 2025-11-10 - Streamline Chat UI
 

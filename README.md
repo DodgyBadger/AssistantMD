@@ -1,38 +1,62 @@
 # AssistantMD
 
-Self-hosted clean chat interface that can read and write to markdown files.  
-Scheduled workflows that are defined by markdown files for quick setup and testing.  
-Built with Obsidian in mind, but not tied to Obsidian.  
-Run locally or on a cloud server (you must provide security - single user only).  
+Markdown-native, self-hosted AI chat UI and scheduled workflows.
 
-**Supports**
-- OpenAI
-- Anthropic
-- Gemini
-- Mistral
-- any OpenAI compatible API (e.g. Ollama)
+Runs in Docker alongside Obsidian, VSCode, or any markdown editor - mount your vault and you're done. No copying files, no plugin dependencies.
 
-**Requires**
-- Docker Engine / Docker Desktop
+Run it locally or deploy to a VPS (you provide the security layer). Sync your files with tools like Obsidian's Remotely Save plugin for everywhere-access.
+
+## Requirements
+
+- Docker Engine or Docker Desktop
 - At least one LLM API key
 
-Read the [docs](docs/index.md) for full details.
+## ✨ Features
 
+**🤖 AI Providers**
+- OpenAI, Anthropic (Claude), Google (Gemini), Mistral
+- Any OpenAI-compatible API (Ollama, etc.)
 
-## Use cases
+**💬 Chat Interface**
+- Clean, focused chat UI
+- Read and write markdown files during conversations
+- Sessions auto-saved as markdown files
+- Full vault context available to the AI
 
-**Your go-to chat interface.**  
-Standard AI chat, but you can ask the AI save a summary / plan / recipe / whatever to markdown. Or ask the AI to read files as context for the chat. If you use Obsidian and have mounted your vault into AssistantMD, then files are instantly shared. No more copying and pasting. Chat sessions are automatically saved as markdown files, making them searchable in Obsidian.
+**⚡ Scheduled Workflows**
+- Workflows defined as markdown files in `assistants/` folder
+- Recurring schedules (cron) or one-time execution
+- Multi-step workflows with per-step model and tool selection
+- Dynamic file patterns: `{today}`, `{this-week}`, `{latest}`, etc.
 
-How is this different from the many Obsidian AI plugins, or giving Claude Code or Codex access to your markdown files? The main difference is that AssistantMD runs in docker, making it highly portable. You can run it locally or you can set it up on a VPS (you must provide the security layer), sync your markdown files (e.g. using the excellent Remotely Save plugin in Obsidian) and then have everywhere-access to your files and chat.
+**🔐 Privacy & Control**
+- Self-hosted - your files stay on your infrastructure
+- Docker-based deployment
+- Single-user design (bring your own auth layer if needed)
 
-There's also scheduled workflows (which you can use the chat to help you create) - read on.
+## 🚀 Quick Start
 
-**Workflows**  
-After installing AssistantMD, a special "assistants" folder is created in each of your mounted vaults. To set up a workflow, you add a markdown file to this folder that specifies the run schedule and workflow steps. To edit a workflow, simply edit the markdown file and the changes will be picked up on the next run. Schedules can be recurring or once at a specific date-time. The full set of parameters allows for a lot of flexibility, from explicitly defined workflows to more agentic workflows.
+```bash
+mkdir -p assistantmd/system && cd assistantmd
+wget https://raw.githubusercontent.com/DodgyBadger/AssistantMD/main/docker-compose.yml.example -O docker-compose.yml
+# Edit docker-compose.yml: update vault path & timezone
+docker compose up -d
+```
 
-I'm interested to hear what others can do with this app, and ideas for how to improve it. Currently on the roadmap:
-- Import utility so you can get content from different file types into your vault
-- Better context management (workflows using web search can get big if you're not careful)
+Access at `http://localhost:8000` → Configure API keys → Start chatting
+
+**[Full installation guide →](docs/setup/installation.md)**
+
+## 📚 Documentation
+
+- **[Installation Guide](docs/setup/installation.md)** - Complete setup instructions
+- **[Creating Assistants](docs/setup/assistant-setup.md)** - Build your first workflow
+- **[Directives Reference](docs/core/core-directives.md)** - Control workflow behavior
+- **[Security Considerations](docs/security.md)** - Important security information
+
+## 🗺️ Roadmap
+
+- Import utility for non-markdown file types
+- Better context management for web search workflows
 - Image support
 - UI improvements
