@@ -417,13 +417,23 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
     """Load assistant file and validate workflow configuration."""
     workflow_sections = services.get_assistant_sections()
     
-    # Extract INSTRUCTIONS from workflow_sections if present, then filter it out from steps
-    assistant_instructions = workflow_sections.get('INSTRUCTIONS', "")
+    # Extract INSTRUCTIONS (case-insensitive) from workflow_sections, then filter it out from steps
+    instructions_key = next(
+        (section_name for section_name in workflow_sections.keys()
+         if section_name.strip().lower() == 'instructions'),
+        None,
+    )
+    assistant_instructions = ""
+    if instructions_key:
+        assistant_instructions = workflow_sections.get(instructions_key, "")
     if not assistant_instructions or not assistant_instructions.strip():
         assistant_instructions = "You are a helpful assistant."
     
     # Filter INSTRUCTIONS from workflow steps (it's not an executable step)
-    workflow_steps = [k for k in workflow_sections.keys() if k != 'INSTRUCTIONS']
+    if instructions_key:
+        workflow_steps = [k for k in workflow_sections.keys() if k != instructions_key]
+    else:
+        workflow_steps = list(workflow_sections.keys())
     
     if not workflow_steps:
         error_msg = "No workflow sections found after ASSISTANT_CONFIG. Please add at least one section."
@@ -440,7 +450,6 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
         'assistant_instructions': assistant_instructions,
         'workflow_steps': workflow_steps
     }
-
 
 
 

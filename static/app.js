@@ -296,6 +296,8 @@ function populateSelectors() {
 
     chatElements.toolsCheckboxes.appendChild(leftColumn);
     chatElements.toolsCheckboxes.appendChild(rightColumn);
+
+    applyModeToolPreferences();
 }
 
 // Fetch system status
@@ -493,6 +495,22 @@ function setupEventListeners() {
         chatElements.chatMessages.addEventListener('scroll', handleChatScroll, { passive: true });
     }
 
+    if (chatElements.modeSelector) {
+        chatElements.modeSelector.addEventListener('change', handleModeChange);
+    }
+}
+
+function handleModeChange() {
+    applyModeToolPreferences();
+}
+
+function applyModeToolPreferences() {
+    const mode = chatElements.modeSelector ? chatElements.modeSelector.value : 'regular';
+    const docCheckbox = document.getElementById('tool-documentation_access');
+    if (!docCheckbox || docCheckbox.disabled) {
+        return;
+    }
+    docCheckbox.checked = mode === 'assistant_creation';
 }
 
 // Send message handler with streaming response support
