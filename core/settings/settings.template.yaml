@@ -126,13 +126,13 @@ providers:
 tools:
   web_search_tavily:
     module: core.tools.web_search_tavily
-    description: "Web search using Tavily (premium)"
+    description: "Web search using Tavily"
     requires_secrets:
       - TAVILY_API_KEY
     user_editable: false
   web_search_duckduckgo:
     module: core.tools.web_search_duckduckgo
-    description: "Web search using DuckDuckGo (free)"
+    description: "Web search using DuckDuckGo"
     requires_secrets: []
     user_editable: false
   file_ops_safe:
@@ -164,7 +164,7 @@ tools:
     user_editable: false
   code_execution:
     module: core.tools.code_execution_librechat
-    description: "Multi-language code execution via LibreChat API (premium)"
+    description: "Multi-language code execution via LibreChat API"
     requires_secrets:
       - LIBRECHAT_API_KEY
     user_editable: false

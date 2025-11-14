@@ -216,9 +216,16 @@ function populateSelectors() {
         chatElements.modelSelector.value = firstAvailableModel;
     }
 
-    state.metadata.tools.forEach(tool => {
-        const div = document.createElement('div');
-        div.className = 'flex items-center';
+    const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
+        .map(name => state.metadata.tools.find(tool => tool.name === name && tool.available !== false))
+        .find(Boolean)?.name) || null;
+
+    const toolMap = new Map(state.metadata.tools.map(tool => [tool.name, tool]));
+    const handledTools = new Set();
+
+    const createToolElement = (tool) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'flex items-center';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -227,19 +234,68 @@ function populateSelectors() {
         checkbox.className = 'mr-2';
         checkbox.disabled = tool.available === false;
 
-        if (!checkbox.disabled && ['file_ops_safe', 'web_search_tavily'].includes(tool.name)) {
+        if (
+            !checkbox.disabled &&
+            (
+                tool.name === 'file_ops_safe' ||
+                (preferredWebTool && tool.name === preferredWebTool)
+            )
+        ) {
             checkbox.checked = true;
         }
 
         const label = document.createElement('label');
         label.htmlFor = `tool-${tool.name}`;
         label.className = `text-sm ${checkbox.disabled ? 'text-gray-400' : 'text-gray-700'}`;
-        label.textContent = `${tool.name}: ${tool.description}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        label.innerHTML = `<strong>${tool.name}</strong>: ${tool.description}${checkbox.disabled ? ' (unavailable)' : ''}`;
 
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        chatElements.toolsCheckboxes.appendChild(div);
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(label);
+        return wrapper;
+    };
+
+    const leftColumnOrder = [
+        'web_search_duckduckgo',
+        'web_search_tavily',
+        'file_ops_safe',
+        'file_ops_unsafe'
+    ];
+    const rightColumnOrder = [
+        'documentation_access',
+        'tavily_extract',
+        'tavily_crawl',
+        'code_execution'
+    ];
+
+    const leftColumn = document.createElement('div');
+    leftColumn.className = 'flex flex-col gap-2';
+    const rightColumn = document.createElement('div');
+    rightColumn.className = 'flex flex-col gap-2';
+
+    const appendTools = (order, column) => {
+        order.forEach(name => {
+            const tool = toolMap.get(name);
+            if (!tool) return;
+            column.appendChild(createToolElement(tool));
+            handledTools.add(name);
+        });
+    };
+
+    appendTools(leftColumnOrder, leftColumn);
+    appendTools(rightColumnOrder, rightColumn);
+
+    state.metadata.tools.forEach(tool => {
+        if (handledTools.has(tool.name)) {
+            return;
+        }
+        const targetColumn = leftColumn.childElementCount <= rightColumn.childElementCount
+            ? leftColumn
+            : rightColumn;
+        targetColumn.appendChild(createToolElement(tool));
     });
+
+    chatElements.toolsCheckboxes.appendChild(leftColumn);
+    chatElements.toolsCheckboxes.appendChild(rightColumn);
 }
 
 // Fetch system status
