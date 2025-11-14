@@ -12,8 +12,6 @@ Directives are special commands that control how workflow steps execute. All dir
 - Format: `@output-file path/to/file` or `@output-file [[path/to/file]]`
 - Path resolution: All paths are relative to the vault root
 - Automatic .md extension: The system automatically adds `.md` extension if not present
-- Obsidian hotlinks: Square brackets (`[[filename]]`) are automatically stripped for drag-and-drop compatibility
-- **Obsidian users**: Enable "Use [[Wikilinks]]" and set "New link format" to "Absolute path in vault" in Settings > Files & Links for drag-and-drop to work properly
 - **Best Practice**: Choose one approach per step:
   - **Explicit outputs**: Use @output-file for predictable, workflow-controlled file creation (recommended for most workflows)
   - **Tool-managed outputs**: Omit @output-file and enable file_ops_safe to let the LLM manage all file creation

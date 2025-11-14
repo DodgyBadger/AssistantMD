@@ -2,45 +2,47 @@
 
 An assistant is a markdown file in a vault's `assistants/` folder that defines a scheduled AI workflow. Assistants can be in subfolders (one level deep) for better organization. Folders prefixed with underscore (e.g., `_chat-sessions`) are ignored.
 
-Following is a complete and valid assistant file which you can use as a starting point. Copy and paste the text into a markdown file in your assistants folder and then Rescan from the Dashboard tab in the web UI to load it.
+**Basic Structure**  
+- YAML frontmatter between `---` delimiters (required). These appear as properties if using Obsidian.
+Sets the run schedule and the workflow engine to run. Currently there is only one workflow engine called step.
+- Optional `## Instructions` section with a prompt that is included as a system instruction before every step prompt.
+- One or more `## Headers` which define the steps to run. The header name can be anything - every `## Header` found after Instructions is interpretted as a step, running in the order they appear.
 
-**NOTE**: Assistant files must include only the text below, not embedded inside a code block.
+Following is a complete and valid assistant file example. Copy and paste the text into a markdown file in your assistants folder, change the model as needed, rescan your vaults and then run it manually to see the results. Both operations are found on the Dashboard tab of the web interface.
+
+**NOTE**: Assistant files must include only the text below, not embedded inside a markdown code block. If you are pasting into a new note in Obsidian, use `ctrl-shift-v` (or right-click `Paste as plain text`) to make sure it doesn't include the code block. You should see the top section immediately turn into Obsidian Properties.
 
 ```
 ---
-schedule: cron: 0 9 * * *
+schedule: "cron: 0 9 * * *"
 workflow: step
-enabled: true
-description: Daily learning assistant
+enabled: false
+description: Daily poet
 ---
 
 ## Instructions
-You are a helpful learning assistant.
+You are a helpful assistant.
 
-## Weekly plan
-@run-on monday
-@output-file lesson_plans/plan-{this-week}
-@input-file goals.md
-@model gpt-5
+## Daily haiku
+@output-file test/{today}
+@header Weekly Haiku
+@model gpt-5-mini
 
-Review my goals and suggest a weekly learning plan. Keep it high level, focused on key topics and learning objectives.
+Write a haiku to go with the current season or nearest holiday.
 
-## Daily reading
-@output-file lesson_plans/daily-{today}
-@input-file lesson_plans/plan-{this-week}
-@model gpt-5
-@tools web_search
+## Haiku critic
+@output-file test/{today}
+@input-file test/{today}
+@write-mode append
+@header Haiku feedback
+@model gpt-5-mini
 
-Review my weekly learning plan and the morning notes I have added and then search the web to build a daily reading list. Keep it short, 2 or 3 links per day with a focus on quality and authoritative content.
+Read the haiku above and provide your feedback.
+- Does it meet the criteria of being appropriate to the current season or nearest holiday?
+- Does it follow proper haiku structure?
+- Is the imagery compelling?
+- How could it be improved?
 ```
-
-**Structure**
-YAML frontmatter between `---` delimiters (required). These appear as properties if using Obsidian.
-Sets the run schedule using a cron expression and the workflow engine to run. Currently there is only one workflow engine: step.
-
-`## INSTRUCTIONS` section with a prompt that is included as a system instruction before every step prompt. This section is optinal.
-
-One or more `## Header` sections which define the steps to run. Steps run in the order they appear in the assistant file. The header name can be anything.
 
 ---
 

@@ -18,10 +18,10 @@ Run it locally or deploy to a VPS (you provide the security layer). Sync your fi
 - Any OpenAI-compatible API (Ollama, etc.)
 
 **💬 Chat Interface**
-- Clean, focused chat UI
+- Clean, mobile-friendly focused chat UI
 - Read and write markdown files during conversations
-- Sessions auto-saved as markdown files
 - Full vault context available to the AI
+- Easy to update models and providers
 
 **⚡ Scheduled Workflows**
 - Workflows defined as markdown files in `assistants/` folder
@@ -45,7 +45,6 @@ docker compose up -d
 
 Access at `http://localhost:8000` → Configure API keys → Start chatting
 
-**[Full installation guide →](docs/setup/installation.md)**
 
 ## 📚 Documentation
 
