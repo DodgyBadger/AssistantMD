@@ -5,7 +5,7 @@
 AssistantMD is designed as a **single-user application** running on your local machine or private server. There is no cross-user contamination or shared data.
 
 **Primary security concerns:**
-- User error when configuring assistants
+- User error when configuring workflows
 - Exposure risks if you make the API or chat UI publicly accessible on the internet
 
 

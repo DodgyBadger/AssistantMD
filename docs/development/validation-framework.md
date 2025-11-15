@@ -8,7 +8,7 @@ LLM execution, and artifact capture—using the high-level API in
 ## Philosophy
 
 - Validate complete user journeys, not isolated functions.
-- Operate on real vault layouts and assistant markdown.
+- Operate on real vault layouts and workflow markdown.
 - Keep scenario code readable so product stakeholders can follow the story.
 - Collect evidence automatically so failures are easy to diagnose.
 

@@ -44,7 +44,7 @@ nano docker-compose.yml
 Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file).
 
 **Chat Tab**: Interactive chat with your vaults
-**Dashboard Tab**: View system status and execute assistants manually
+**Workflow Tab**: View all workflows and execute workflows manually
 **Configuration Tab**: Manage models, settings and secrets.
 
 Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required.

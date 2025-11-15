@@ -2,7 +2,7 @@
 
 🔶 Use the Chat UI in `Workflow Creation` mode to help you build workflow files and refine the prompts.
 
-🔶 Start with worflows disabled and test by running manually from the Dashboard tab in the web interface. Enable and rescan when you are happy with the outputs.
+🔶 Start with worflows disabled and test by running manually from the Workflow tab in the web interface. Enable and rescan when you are happy with the outputs.
 
 🔶 Start simple, test and refine. One step with a compound prompt might do the trick. If not, split the prompt into two or more steps. Remember that each step can define a different `@model`, allowing for fine grained cost control.
 

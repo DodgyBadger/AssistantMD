@@ -8,7 +8,7 @@ Sets the run schedule and the workflow engine to run. Currently there is only on
 - Optional `## Instructions` section with a prompt that is included as a system instruction before every step prompt.
 - One or more `## Headers` which define the steps to run. The header name can be anything - every `## Header` found after Instructions is interpretted as a step, running in the order they appear.
 
-Following is a complete, valid workflow definition. Copy the text into `AssistantMD/Workflows/` inside any vault, change the model as needed, rescan your vaults, and then run it manually to see the results. Both operations are available on the Dashboard tab of the web interface.
+Following is a complete, valid workflow definition. Copy the text into `AssistantMD/Workflows/` inside any vault, change the model as needed, rescan your vaults, and then run it manually to see the results. Both operations are available on the Workflow tab of the web interface.
 
 **NOTE**: Workflow files must include only the text below, not embedded inside a markdown code block. If you are pasting into a new note in Obsidian, use `ctrl-shift-v` (or right-click `Paste as plain text`) to avoid pasting the code block. The top section should immediately render as Obsidian Properties.
 
