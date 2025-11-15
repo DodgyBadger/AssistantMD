@@ -1,6 +1,6 @@
 # AssistantMD Architecture (Quick Reference)
 
-AssistantMD is designed as a **single-user application** that runs locally or on a private server where a user’s markdown “vaults” are synced. Assistants, schedules, and prompts live inside those vaults.
+AssistantMD is designed as a **single-user application** that runs locally or on a private server where a user’s markdown “vaults” are synced.
 
 ## System Snapshot
 
@@ -20,9 +20,9 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 
 ## Core Runtime Loop
 
-1. **FastAPI lifespan** constructs a `RuntimeConfig` and calls `bootstrap_runtime`, wiring together the scheduler, assistant loader, and logging under a shared runtime context.
-2. **Assistant discovery** (via `core/assistant/`) scans vaults for assistant markdown files (including subfolders one level deep, ignoring underscore-prefixed folders), parses configuration, and prepares schedule triggers for enabled workflows.
-3. **Scheduler synchronization** (in `core/scheduling/`) compares configured assistants with persisted jobs to add, update, or remove APScheduler entries without resetting timing unnecessarily.
+1. **FastAPI lifespan** constructs a `RuntimeConfig` and calls `bootstrap_runtime`, wiring together the scheduler, workflow loader, and logging under a shared runtime context.
+2. **Workflow discovery** (via `core/workflow/`) scans vaults for workflow markdown files (including subfolders one level deep, ignoring underscore-prefixed folders), parses configuration, and prepares schedule triggers for enabled workflows.
+3. **Scheduler synchronization** (in `core/scheduling/`) compares configured workflows with persisted jobs to add, update, or remove APScheduler entries without resetting timing unnecessarily.
 4. **Workflow execution** kicks off when a trigger fires: the workflow receives lightweight `job_args`, instantiates `CoreServices`, processes directives, gathers context, and calls the LLM interface.
 5. **Outputs & state** are written back to the vault, state trackers update `{pending}` metadata, and activity logging records the run.
 
@@ -33,10 +33,10 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | API | REST endpoints, exception wiring, web UI hosting | `api/`, `main.py` |
 | Chat UI | Static single-page app that drives chat sessions through API endpoints | `static/`, `api/endpoints.py`, `core/llm/chat_executor.py` |
 | Runtime | Configuration, bootstrap, global context, scheduler lifecycle, configuration reload service | `core/runtime/`, `core/runtime/reload_service.py`, `core/constants.py` |
-| Assistant Loader | Vault discovery, assistant parsing, trigger preparation | `core/assistant/` |
+| Workflow Loader | Vault discovery, workflow parsing, trigger preparation | `core/workflow/` |
 | Scheduler | Job syncing, picklable job args, trigger comparison | `core/scheduling/` |
 | Workflow Layer | Step orchestration, directive processing, file writes | `workflows/`, `core/core_services.py` |
-| Directive System | Parse/process `@directives`, pattern resolution, file state | `core/directives/`, `core/assistant/parser.py` |
+| Directive System | Parse/process `@directives`, pattern resolution, file state | `core/directives/`, `core/workflow/parser.py` |
 | LLM Interface | Model resolution, agent creation, response generation | `core/llm/`, `core/settings/store.py` |
 | Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
 | Logging & Activity | Unified logging, Logfire instrumentation | `core/logger.py/`, `system/activity.log` |
@@ -44,9 +44,9 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 
 ## Workflows & Directives
 
-- The system currently ships with the **step** workflow (`workflows/step/`), which discovers all `##` headings (e.g. `STEP1`, `STEP2`, etc.), processes directives with `CoreServices.process_step`, and executes them sequentially.
-- Additional workflow types can be added under `workflows/<name>/` as long as they expose an `async def run_workflow(job_args: dict, **kwargs)` entry point.
-- Directives are resolved centrally by `core/directives/` and the helper functions in `core/assistant/parser.py`. Each directive processor is a parser: it validates input, resolves patterns, and returns structured data. Workflows decide how (or whether) to use that data, keeping directive logic decoupled from workflow behavior. Features like `{pending}` tracking are implemented via `AssistantFileStateManager`, but the workflow determines when state updates occur.
+- The system currently ships with the **step** workflow engine (`workflow_engines/step/`), which discovers all `##` headings (e.g. `## STEP 1`, `## STEP 2`, etc.), processes directives with `CoreServices.process_step`, and executes them sequentially.
+- Additional workflow engines can be added under `workflow_engines/<name>/` as long as they expose an `async def run_workflow(job_args: dict, **kwargs)` entry point.
+- Directives are resolved centrally by `core/directives/` and the helper functions in `core/workflow/parser.py`. Each directive processor is a parser: it validates input, resolves patterns, and returns structured data. Workflows decide how (or whether) to use that data, keeping directive logic decoupled from workflow behavior. Features like `{pending}` tracking are implemented via `WorkflowFileStateManager`, but the workflow determines when state updates occur.
 
 ## LLM, Models, and Tools
 
@@ -56,7 +56,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 ## Observability & Validation
 
 - `UnifiedLogger` instruments FastAPI, APScheduler, and Pydantic AI while writing structured activity entries to `system/activity.log`.
-- The validation framework (`validation/`) spins up isolated runtimes, runs assistants against fixture vaults, and captures artifacts for review.
+- The validation framework (`validation/`) spins up isolated runtimes, runs workflows against sandbox vaults, and captures artifacts for review.
 
 ## Configuration Services
 
@@ -67,4 +67,4 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 ## When the Code Changes
 
 - Minor file moves rarely affect these boundaries; if a module is renamed, it will still sit inside the same directory listed above.
-- For detailed behavior or implementation questions, ask an assistant to inspect the relevant module (for example, “explain how CoreServices processes directives”). This keeps the documentation short while ensuring timely, code-level answers.
+- For detailed behavior or implementation questions, ask a coding agent to inspect the relevant module (for example, “explain how CoreServices processes directives”). This keeps the documentation short while ensuring timely, code-level answers.

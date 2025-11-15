@@ -1,8 +1,8 @@
 """
-Assistant configuration parser and step processor.
+Workflow configuration parser and step processor.
 
 This module provides utilities for:
-1. Parsing assistant files according to the application's structural contract
+1. Parsing workflow definition files (markdown) with YAML frontmatter
 2. Step processing orchestration for directive-based workflow execution
 """
 
@@ -20,25 +20,25 @@ from core.directives.registry import get_global_registry, InvalidDirectiveError
 
 # Create module logger
 from core.logger import UnifiedLogger
-logger = UnifiedLogger(tag="assistant-parser")
+logger = UnifiedLogger(tag="workflow-parser")
 
 
 #######################################################################
 ## Pydantic Configuration Schema
 #######################################################################
 
-class AssistantConfigSchema(BaseModel):
-    """Pydantic schema for assistant configuration validation.
+class WorkflowConfigSchema(BaseModel):
+    """Pydantic schema for workflow definition configuration validation.
     
     Provides automatic validation, type conversion, and default values
-    for assistant configuration loaded from ASSISTANT_CONFIG sections.
+    for workflow metadata loaded from YAML frontmatter.
     """
     # Required fields
-    workflow: str = Field(..., description="Workflow module to execute")
+    workflow_engine: str = Field(..., description="Workflow engine module to execute")
     
     # Optional fields with defaults
-    schedule: Optional[str] = Field(None, description="Schedule string for when assistant runs, None for manual-only")
-    enabled: bool = Field(True, description="Whether assistant is enabled (only relevant if scheduled)")
+    schedule: Optional[str] = Field(None, description="Schedule string for when the workflow runs, None for manual-only")
+    enabled: bool = Field(True, description="Whether the workflow is enabled (only relevant if scheduled)")
     week_start_day: str = Field("monday", description="Week start day for weekly patterns")
     description: str = Field("", description="Human-readable description")
     
@@ -47,7 +47,7 @@ class AssistantConfigSchema(BaseModel):
     def validate_schedule(cls, v: Optional[str]) -> Optional[str]:
         """Validate schedule syntax using the schedule parser."""
         if v is None:
-            return None  # Allow None for manual-only assistants
+            return None  # Allow None for manual-only workflows
         try:
             # Parse to validate syntax - we don't use the result, just check it's valid
             parse_schedule_syntax(v)
@@ -91,7 +91,7 @@ def parse_frontmatter(content: str) -> Tuple[dict, str]:
     content = content.strip()
 
     if not content.startswith('---'):
-        raise ValueError("Assistant file must start with YAML frontmatter (---)")
+        raise ValueError("Workflow file must start with YAML frontmatter (---)")
 
     lines = content.split('\n')
     if len(lines) < 3:
@@ -181,25 +181,25 @@ def parse_markdown_sections(content: str, delimiter: str = "##") -> Dict[str, st
     return sections
 
 
-def parse_assistant_file(file_path: str, context_id: str = None) -> Dict[str, str]:
-    """Parse assistant file with YAML frontmatter format.
+def parse_workflow_file(file_path: str, context_id: str = None) -> Dict[str, str]:
+    """Parse workflow definition file with YAML frontmatter format.
     
-    Reads assistant file with frontmatter configuration and markdown sections.
+    Reads workflow file with frontmatter configuration and markdown sections.
     Returns sections dictionary with frontmatter config stored in special key.
     
     Args:
-        file_path: Path to assistant markdown file
+        file_path: Path to the workflow markdown file
         context_id: Optional context ID for logging (e.g., global_id)
         
     Returns:
         Dictionary mapping section names to content, plus '__FRONTMATTER_CONFIG__' key
         
     Raises:
-        FileNotFoundError: If assistant file doesn't exist
+        FileNotFoundError: If the workflow file doesn't exist
         ValueError: If file cannot be parsed or frontmatter is invalid
     """
     try:
-        # Read assistant file content
+        # Read workflow file content
         with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
         
@@ -209,16 +209,16 @@ def parse_assistant_file(file_path: str, context_id: str = None) -> Dict[str, st
         # Parse remaining content into sections
         sections = parse_markdown_sections(remaining_content, "##")
         
-        # Store frontmatter config in special key for assistant loader
+        # Store frontmatter config in special key for workflow loader
         sections['__FRONTMATTER_CONFIG__'] = frontmatter_config
         
         return sections
         
     except FileNotFoundError:
-        error_msg = f"Assistant file not found: {file_path}"
+        error_msg = f"Workflow file not found: {file_path}"
         raise FileNotFoundError(error_msg)
     except Exception as e:
-        error_msg = f"Failed to parse assistant file {file_path}: {str(e)}"
+        error_msg = f"Failed to parse workflow file {file_path}: {str(e)}"
         raise ValueError(error_msg) from e
 
 
@@ -228,7 +228,7 @@ def get_workflow_sections(sections: Dict[str, str]) -> Dict[str, str]:
     All remaining sections are treated as workflow steps in file order.
     
     Args:
-        sections: Parsed sections dictionary from parse_assistant_file()
+        sections: Parsed sections dictionary from parse_workflow_file()
         
     Returns:
         Dictionary with all sections except reserved sections
@@ -238,15 +238,15 @@ def get_workflow_sections(sections: Dict[str, str]) -> Dict[str, str]:
 
 
 def validate_config(config: dict, vault: str, name: str) -> dict:
-    """Validate assistant configuration from template or user file using Pydantic.
+    """Validate workflow configuration from template or user file using Pydantic.
     
-    Uses the AssistantConfigSchema for validation with automatic type conversion,
+    Uses the WorkflowConfigSchema for validation with automatic type conversion,
     defaults, and comprehensive validation rules.
     
     Args:
-        config: Configuration dictionary from ASSISTANT_CONFIG section
+        config: Configuration dictionary from YAML frontmatter
         vault: Vault name for error context
-        name: Assistant name for error context
+        name: Workflow name for error context
         
     Returns:
         Validated configuration dictionary with normalized values and defaults
@@ -256,7 +256,7 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
     """
     try:
         # Use Pydantic schema for validation
-        validated_config = AssistantConfigSchema(**config)
+        validated_config = WorkflowConfigSchema(**config)
         
         # Convert back to dictionary format expected by callers
         return validated_config.model_dump()
@@ -267,7 +267,7 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
         
         # Add user-facing vault log for configuration errors
         logger.activity(
-            "Invalid assistant configuration detected",
+            "Invalid workflow configuration detected",
             vault=f"{vault}/{name}",
             level="error",
             metadata={

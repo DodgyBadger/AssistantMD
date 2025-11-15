@@ -1,1 +1,1 @@
-# Core module for shared functionality across all assistants
+# Core module for shared functionality across all workflows

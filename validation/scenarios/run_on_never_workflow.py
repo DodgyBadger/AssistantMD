@@ -24,10 +24,10 @@ class TestRunOnNeverWorkflow(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("NeverTestVault")
         
-        # Create assistant with multiple steps - some never, some daily
-        assistant_content = """---
+        # Create workflow with multiple steps - some never, some daily
+        workflow_content = """---
 schedule: once at 10:00
-workflow: step
+workflow_engine: step
 enabled: true
 ---
 
@@ -53,11 +53,11 @@ Step 2 content - should run.
 Step 3 content - should also run.
 """
         
-        self.create_file(vault, "assistants/never_test.md", assistant_content)
+        self.create_file(vault, "AssistantMD/Workflows/never_test.md", workflow_content)
         
         # === SYSTEM STARTUP ===
         await self.start_system()
-        self.expect_assistant_loaded("NeverTestVault", "never_test")
+        self.expect_workflow_loaded("NeverTestVault", "never_test")
         
         # === EXECUTE WORKFLOW ===
         self.set_date("2025-01-15")

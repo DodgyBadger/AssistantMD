@@ -257,7 +257,7 @@ class UnifiedLogger:
 
         Args:
             message: Human-readable description of the activity.
-            vault: Explicit vault identifier (e.g., ``vault/assistant``). If omitted
+            vault: Explicit vault identifier (e.g., ``vault/workflow``). If omitted
                 an identifier is derived from the supplied context.
             level: Activity level; used for Logfire mirroring and stored payload.
             metadata: Optional structured payload persisted alongside the message.
@@ -334,7 +334,7 @@ class UnifiedLogger:
 def _detect_vault_context(**kwargs: Any) -> Optional[str]:
     """Derive vault identifier from common context keys."""
 
-    direct_keys: Iterable[str] = ("vault", "vault_id", "global_id")
+    direct_keys: Iterable[str] = ("vault", "vault_id", "global_id", "workflow_id")
     for key in direct_keys:
         value = kwargs.get(key)
         if isinstance(value, str) and value:
@@ -346,23 +346,31 @@ def _detect_vault_context(**kwargs: Any) -> Optional[str]:
         if detected:
             return detected
 
-    file_path = kwargs.get("file_path") or kwargs.get("assistant_file_path")
+    file_path = (
+        kwargs.get("file_path")
+        or kwargs.get("workflow_file_path")
+        or kwargs.get("assistant_file_path")
+    )
     if isinstance(file_path, str):
-        detected = _detect_from_path(file_path, prefer_assistant=True)
+        detected = _detect_from_path(file_path, prefer_workflow=True)
         if detected:
             return detected
 
     vault_name = kwargs.get("vault")
-    assistant_name = kwargs.get("assistant_name") or kwargs.get("name")
+    workflow_name = (
+        kwargs.get("workflow_name")
+        or kwargs.get("assistant_name")
+        or kwargs.get("name")
+    )
     if isinstance(vault_name, str) and vault_name:
-        if isinstance(assistant_name, str) and assistant_name:
-            return f"{vault_name}/{assistant_name}"
+        if isinstance(workflow_name, str) and workflow_name:
+            return f"{vault_name}/{workflow_name}"
         return f"{vault_name}/system"
 
     return None
 
 
-def _detect_from_path(path_value: str, *, prefer_assistant: bool = False) -> Optional[str]:
+def _detect_from_path(path_value: str, *, prefer_workflow: bool = False) -> Optional[str]:
     """Map filesystem paths under the data root to vault identifiers."""
 
     try:
@@ -388,8 +396,17 @@ def _detect_from_path(path_value: str, *, prefer_assistant: bool = False) -> Opt
 
     vault_name = path_relative.parts[0]
 
-    if prefer_assistant and len(path_relative.parts) >= 3 and path_relative.parts[1] == "assistants":
-        assistant = Path(path_relative.parts[-1]).stem
-        return f"{vault_name}/{assistant}"
+    if (
+        prefer_workflow
+        and len(path_relative.parts) >= 4
+        and path_relative.parts[1] == core_constants.ASSISTANTMD_ROOT_DIR
+        and path_relative.parts[2] == core_constants.WORKFLOW_DEFINITIONS_DIR
+    ):
+        workflow_parts = list(path_relative.parts[3:])
+        if not workflow_parts:
+            return f"{vault_name}/system"
+        workflow_parts[-1] = Path(workflow_parts[-1]).stem
+        workflow_name = "/".join(workflow_parts)
+        return f"{vault_name}/{workflow_name}"
 
     return f"{vault_name}/system"

@@ -1,12 +1,12 @@
 ---
 schedule: once: 2030-01-01 09:00
-workflow: step
+workflow_engine: step
 enabled: true
-description: Web content extraction and summarization assistant
+description: Web content extraction and summarization workflow
 ---
 
 ## INSTRUCTIONS
-You are a helpful research assistant that extracts and summarizes information from web pages.
+You are a helpful research workflow that extracts and summarizes information from web pages.
 
 ## STEP1_SR_ONLY
 @model mistral-small

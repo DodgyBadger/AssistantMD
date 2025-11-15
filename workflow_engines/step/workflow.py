@@ -21,7 +21,7 @@ async def run_workflow(job_args: dict, **kwargs):
 
     Args:
         job_args: Lightweight job arguments containing:
-            - global_id: Assistant identifier (vault/name)
+            - global_id: Workflow identifier (vault/name)
             - config: Configuration dictionary with data_root, etc.
         **kwargs: Additional workflow parameters (e.g., step_name)
     """
@@ -45,7 +45,7 @@ async def run_workflow(job_args: dict, **kwargs):
     reporting, and documentation where predictable organization is important.
     
     CAPABILITIES:
-    - Dynamic step discovery (e.g. STEP1, STEP2, STEP3, ...) from assistant file
+    - Dynamic step discovery (e.g. STEP1, STEP2, STEP3, ...) from workflow file
     - Flexible output files using @output-file directives with time patterns
     - File content embedding using @input-file directives  
     - Automatic directory creation for nested paths
@@ -77,7 +77,7 @@ async def run_workflow(job_args: dict, **kwargs):
         
         config = await load_and_validate_config(services, step_name)
         workflow_sections = config['workflow_sections']
-        assistant_instructions = config['assistant_instructions']
+        workflow_instructions = config['workflow_instructions']
         workflow_steps = config['workflow_steps']
         
         #######################################################################
@@ -95,7 +95,7 @@ async def run_workflow(job_args: dict, **kwargs):
             await process_workflow_step(
                 current_step,
                 raw_step_content,
-                assistant_instructions,
+                workflow_instructions,
                 services,
                 i,
                 step_name,
@@ -109,7 +109,7 @@ async def run_workflow(job_args: dict, **kwargs):
         # Log successful workflow completion
         logger.activity(
             "Workflow completed successfully",
-            vault=services.assistant_id,
+            vault=services.workflow_id,
             metadata={
                 "steps_completed": len(workflow_steps),
                 "output_files_created": len(context['created_files']),
@@ -120,7 +120,7 @@ async def run_workflow(job_args: dict, **kwargs):
         # Log workflow failure with context
         logger.activity(
             "Workflow execution failed",
-            vault=services.assistant_id,
+            vault=services.workflow_id,
             level="error",
             metadata={
                 "error_message": str(e),
@@ -316,7 +316,7 @@ async def write_step_output(step_content: str, output_file: str, processed_step,
         raise
 
 
-async def create_step_agent(processed_step, assistant_instructions: str, services: CoreServices):
+async def create_step_agent(processed_step, workflow_instructions: str, services: CoreServices):
     """Create AI agent for step execution with optional tool integration."""
     # Get model instance from model directive (None if not specified)
     model_instance = processed_step.get_directive_value('model', None)
@@ -331,9 +331,9 @@ async def create_step_agent(processed_step, assistant_instructions: str, service
 
     # Compose instructions using Pydantic AI's list support for clean composition
     if tool_instructions:
-        final_instructions = [assistant_instructions, tool_instructions]
+        final_instructions = [workflow_instructions, tool_instructions]
     else:
-        final_instructions = assistant_instructions
+        final_instructions = workflow_instructions
 
     return await services.create_agent(final_instructions, model_instance, tool_functions)
 
@@ -356,7 +356,7 @@ def initialize_workflow_context(services: CoreServices):
 async def process_workflow_step(
     step_name: str,
     raw_step_content: str,
-    assistant_instructions: str,
+    workflow_instructions: str,
     services: CoreServices,
     step_index: int,
     single_step_name: str,
@@ -383,7 +383,7 @@ async def process_workflow_step(
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
     
     # Check @run-on directive for scheduled execution
-    if not should_step_run_today(processed_step, step_name, context, single_step_name, services.assistant_id):
+    if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
         return  # Skip this step
 
     # Check for workflow skip signals from directives (e.g., required input files missing)
@@ -391,7 +391,7 @@ async def process_workflow_step(
     if should_skip:
         logger.activity(
             f"Step skipped: {skip_reason}",
-            vault=services.assistant_id,
+            vault=services.workflow_id,
             metadata={"step_name": step_name}
         )
         return  # Skip this step
@@ -400,13 +400,13 @@ async def process_workflow_step(
     final_prompt = build_final_prompt(processed_step)
     
     # Generate AI content
-    chat_agent = await create_step_agent(processed_step, assistant_instructions, services)
+    chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
     step_content = await services.generate_response(chat_agent, final_prompt)
 
     # Write AI-generated content to output file (if @output-file specified)
     if output_file:
         await write_step_output(step_content, output_file, processed_step,
-                                context, step_index, step_name, services.assistant_id)
+                                context, step_index, step_name, services.workflow_id)
     else:
         # No output file - step executed for side effects only (e.g., tool calls)
         # Still update state manager for any pending patterns used
@@ -414,8 +414,8 @@ async def process_workflow_step(
 
 
 async def load_and_validate_config(services: CoreServices, step_name: str = None):
-    """Load assistant file and validate workflow configuration."""
-    workflow_sections = services.get_assistant_sections()
+    """Load workflow file and validate configuration."""
+    workflow_sections = services.get_workflow_sections()
     
     # Extract INSTRUCTIONS (case-insensitive) from workflow_sections, then filter it out from steps
     instructions_key = next(
@@ -423,11 +423,11 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
          if section_name.strip().lower() == 'instructions'),
         None,
     )
-    assistant_instructions = ""
+    workflow_instructions = ""
     if instructions_key:
-        assistant_instructions = workflow_sections.get(instructions_key, "")
-    if not assistant_instructions or not assistant_instructions.strip():
-        assistant_instructions = "You are a helpful assistant."
+        workflow_instructions = workflow_sections.get(instructions_key, "")
+    if not workflow_instructions or not workflow_instructions.strip():
+        workflow_instructions = "You are a helpful assistant."
     
     # Filter INSTRUCTIONS from workflow steps (it's not an executable step)
     if instructions_key:
@@ -436,7 +436,7 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
         workflow_steps = list(workflow_sections.keys())
     
     if not workflow_steps:
-        error_msg = "No workflow sections found after ASSISTANT_CONFIG. Please add at least one section."
+        error_msg = "No workflow sections found after the instructions block. Please add at least one section."
         raise ValueError(error_msg)
     
     if step_name:
@@ -447,11 +447,7 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
     
     return {
         'workflow_sections': workflow_sections,
-        'assistant_instructions': assistant_instructions,
+        'workflow_instructions': workflow_instructions,
         'workflow_steps': workflow_steps
     }
-
-
-
-
 

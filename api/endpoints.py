@@ -15,8 +15,8 @@ from core.llm.chat_executor import execute_chat_prompt, execute_chat_prompt_stre
 from .models import (
     VaultRescanRequest,
     VaultRescanResponse,
-    ExecuteAssistantRequest,
-    ExecuteAssistantResponse,
+    ExecuteWorkflowRequest,
+    ExecuteWorkflowResponse,
     StatusResponse,
     ChatExecuteRequest,
     ChatExecuteResponse,
@@ -41,10 +41,10 @@ from .utils import create_error_response, generate_session_id
 from .services import (
     rescan_vaults_and_update_scheduler,
     get_system_status,
-    execute_assistant_manually,
+    execute_workflow_manually,
     get_chat_metadata,
     compact_conversation_history,
-    start_assistant_creation,
+    start_workflow_creation,
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
@@ -118,7 +118,7 @@ async def get_status():
     Get current system status including vault discovery, scheduler status, and system health.
     
     Returns comprehensive information about:
-    - Discovered vaults and their assistant counts
+    - Discovered vaults and their workflow counts
     - Scheduler status and job information  
     - System health indicators
     """
@@ -274,13 +274,13 @@ async def delete_secret_endpoint(secret_name: str):
 @router.post("/vaults/rescan", response_model=VaultRescanResponse)
 async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
     """
-    Force immediate rediscovery of all vault directories and reload assistant configurations.
+    Force immediate rediscovery of all vault directories and reload workflow configurations.
     
     This endpoint:
     - Rediscovers all vault directories
-    - Reloads all assistant configurations from discovered vaults
-    - Updates the scheduler with new/modified/removed assistant jobs
-    - Returns summary of discovered vaults and assistants
+    - Reloads all workflow configurations from discovered vaults
+    - Updates the scheduler with new/modified/removed workflow jobs
+    - Returns summary of discovered vaults and workflows
     """
     try:
         # Try to get scheduler from runtime context
@@ -298,10 +298,10 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
         response = VaultRescanResponse(
             success=True,
             vaults_discovered=results['vaults_discovered'],
-            assistants_loaded=results['assistants_loaded'],
-            enabled_assistants=results['enabled_assistants'],
+            workflows_loaded=results['workflows_loaded'],
+            enabled_workflows=results['enabled_workflows'],
             scheduler_jobs_synced=results['scheduler_jobs_synced'],
-            message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_assistants']} enabled assistants, {results['scheduler_jobs_synced']} jobs synced"
+            message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_workflows']} enabled workflows, {results['scheduler_jobs_synced']} jobs synced"
         )
         
         return response
@@ -312,34 +312,18 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
 
 
 
-@router.post("/assistants/execute", response_model=ExecuteAssistantResponse)
-async def execute_assistant(request: ExecuteAssistantRequest):
+@router.post("/workflows/execute", response_model=ExecuteWorkflowResponse)
+async def execute_workflow(request: ExecuteWorkflowRequest):
     """
-    Execute a specific assistant workflow manually.
-    
-    This endpoint enables on-demand execution of any assistant workflow,
-    bypassing the normal scheduled execution. Useful for testing, debugging,
-    or when immediate results are needed.
+    Execute a specific workflow manually.
     
     Args:
-        request: ExecuteAssistantRequest with global_id and optional force flag
-        
-    Returns:
-        ExecuteAssistantResponse with execution results and timing
-        
-    Raises:
-        404: If assistant global_id not found
-        500: If workflow execution fails
+        request: ExecuteWorkflowRequest with global_id and optional step selection
     """
-    try:        
-        # Execute the assistant workflow
-        result = await execute_assistant_manually(request.global_id, request.step_name)
-        
-        # Format the response
-        response = ExecuteAssistantResponse(**result)
-        
+    try:
+        result = await execute_workflow_manually(request.global_id, request.step_name)
+        response = ExecuteWorkflowResponse(**result)
         return response
-        
     except Exception as e:
         return create_error_response(e)
 
@@ -464,25 +448,25 @@ async def compact_chat_history(request: ChatSessionTransformRequest):
         return create_error_response(e)
 
 
-@router.post("/chat/create-assistant", response_model=ChatSessionTransformResponse)
-async def create_assistant(request: ChatSessionTransformRequest):
+@router.post("/chat/create-workflow", response_model=ChatSessionTransformResponse)
+async def create_workflow(request: ChatSessionTransformRequest):
     """
-    Start interactive assistant creation conversation.
+    Start interactive workflow creation conversation.
 
-    Creates a new session focused on designing and creating a step workflow assistant.
+    Creates a new session focused on designing and creating a step workflow.
     Handles both scenarios:
     - Existing conversation: Summarizes with creation focus, starts new session
-    - No/minimal conversation: Starts fresh with assistant creation guidance
+    - No/minimal conversation: Starts fresh with workflow creation guidance
 
     The LLM will ask questions to gather requirements and ultimately use tools
-    to read documentation and write the assistant file.
+    to read documentation and write the workflow file.
     """
     try:
         # Get vault path from runtime context
         runtime = get_runtime_context()
         vault_path = str(runtime.config.data_root / request.vault_name)
 
-        result = await start_assistant_creation(
+        result = await start_workflow_creation(
             session_id=request.session_id,
             vault_name=request.vault_name,
             model=request.model,
@@ -497,7 +481,7 @@ async def create_assistant(request: ChatSessionTransformRequest):
             original_message_count=result["original_count"],
             compacted_to=result["compacted_count"],
             new_session_id=result["new_session_id"],
-            message="Assistant creation started - continue conversation in new session"
+            message="Workflow creation started - continue conversation in new session"
         )
     except Exception as e:
         return create_error_response(e)

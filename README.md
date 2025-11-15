@@ -24,7 +24,7 @@ Run it locally or deploy to a VPS (you provide the security layer). Sync your fi
 - Easy to update models and providers
 
 **⚡ Scheduled Workflows**
-- Workflows defined as markdown files in `assistants/` folder
+- Workflows defined as markdown files in `AssistantMD/Workflows/`
 - Recurring schedules (cron) or one-time execution
 - Multi-step workflows with per-step model and tool selection
 - Dynamic file patterns: `{today}`, `{this-week}`, `{latest}`, etc.
@@ -52,10 +52,3 @@ Access at `http://localhost:8000` → Configure API keys → Start chatting
 - **[Creating Assistants](docs/setup/assistant-setup.md)** - Build your first workflow
 - **[Directives Reference](docs/core/core-directives.md)** - Control workflow behavior
 - **[Security Considerations](docs/security.md)** - Important security information
-
-## 🗺️ Roadmap
-
-- Import utility for non-markdown file types
-- Better context management for web search workflows
-- Image support
-- UI improvements

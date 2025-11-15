@@ -45,18 +45,32 @@ from core.llm.chat_executor import execute_chat_prompt
 from core.constants import (
     COMPACT_SUMMARY_PROMPT,
     COMPACT_INSTRUCTIONS,
-    ASSISTANT_CREATION_SUMMARY_PROMPT,
+    WORKFLOW_CREATION_SUMMARY_PROMPT,
     SYSTEM_DATA_ROOT,
 )
 from .utils import generate_session_id
 from .models import (
-    VaultInfo, SchedulerInfo, SystemInfo, StatusResponse, AssistantSummary,
-    ConfigurationError as APIConfigurationError, ModelInfo, ToolInfo, ChatMetadataResponse,
-    ConfigurationStatusInfo, ConfigurationIssueInfo, ProviderInfo,
-    ModelConfigRequest, ProviderConfigRequest, OperationResult,
-    SecretInfo, SecretUpdateRequest,
-    SettingInfo, SettingUpdateRequest,
-    SystemLogResponse, SystemSettingsResponse
+    VaultInfo,
+    SchedulerInfo,
+    SystemInfo,
+    StatusResponse,
+    WorkflowSummary,
+    ConfigurationError as APIConfigurationError,
+    ModelInfo,
+    ToolInfo,
+    ChatMetadataResponse,
+    ConfigurationStatusInfo,
+    ConfigurationIssueInfo,
+    ProviderInfo,
+    ModelConfigRequest,
+    ProviderConfigRequest,
+    OperationResult,
+    SecretInfo,
+    SecretUpdateRequest,
+    SettingInfo,
+    SettingUpdateRequest,
+    SystemLogResponse,
+    SystemSettingsResponse,
 )
 from .exceptions import SystemConfigurationError
 
@@ -67,10 +81,10 @@ logger = UnifiedLogger(tag="api-services")
 _system_startup_time: Optional[datetime] = None
 
 
-def _get_assistant_loader():
-    """Get assistant loader from runtime context."""
+def _get_workflow_loader():
+    """Get workflow loader from runtime context."""
     runtime = get_runtime_context()
-    return runtime.assistant_loader
+    return runtime.workflow_loader
 
 
 def set_system_startup_time(startup_time: datetime):
@@ -90,8 +104,8 @@ async def collect_vault_status() -> List[VaultInfo]:
         SystemConfigurationError: If vault discovery fails
     """
     try:
-        # Use cached vault info from assistant loader
-        vault_data = _get_assistant_loader().get_vault_info()
+        # Use cached vault info from workflow loader
+        vault_data = _get_workflow_loader().get_vault_info()
 
         # Create VaultInfo objects from cached data
         vault_infos = []
@@ -99,8 +113,8 @@ async def collect_vault_status() -> List[VaultInfo]:
             vault_info = VaultInfo(
                 name=vault_name,
                 path=data['path'],
-                assistant_count=len(data['assistants']),
-                assistants=data['assistants']
+                workflow_count=len(data['workflows']),
+                workflows=data['workflows']
             )
             vault_infos.append(vault_info)
 
@@ -135,8 +149,8 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
             return SchedulerInfo(
                 running=False,
                 total_jobs=0,
-                enabled_assistants=0,
-                disabled_assistants=0
+                enabled_workflows=0,
+                disabled_workflows=0
             )
 
         # Get scheduler status
@@ -163,12 +177,12 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         # Sort by next run time for better display
         job_summaries.sort(key=lambda x: x['next_run_time'] or datetime.max)
 
-        # Remove redundant assistant counting - this will be done at the higher level using cached data
+        # Remove redundant workflow counting - this will be done at the higher level using cached data
         scheduler_info = SchedulerInfo(
             running=is_running,
             total_jobs=total_jobs,
-            enabled_assistants=0,  # Will be calculated elsewhere
-            disabled_assistants=0,  # Will be calculated elsewhere
+            enabled_workflows=0,  # Will be calculated elsewhere
+            disabled_workflows=0,  # Will be calculated elsewhere
             job_details=job_summaries  # Add rich job data
         )
 
@@ -179,8 +193,8 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         return SchedulerInfo(
             running=False,
             total_jobs=0,
-            enabled_assistants=0,
-            disabled_assistants=0,
+            enabled_workflows=0,
+            disabled_workflows=0,
             job_details=[]
         )
 
@@ -197,15 +211,15 @@ def collect_system_health() -> SystemInfo:
         startup_time = _system_startup_time or datetime.now()
         
         runtime = get_runtime_context()
-        assistant_loader = runtime.assistant_loader
+        workflow_loader = runtime.workflow_loader
 
         # Prefer explicit runtime timestamp, fall back to loader metadata.
         last_reload = runtime.last_config_reload
-        if last_reload is None and hasattr(assistant_loader, "_last_loaded"):
-            last_reload = assistant_loader._last_loaded
+        if last_reload is None and hasattr(workflow_loader, "_last_loaded"):
+            last_reload = workflow_loader._last_loaded
 
         # Get data root
-        data_root = assistant_loader._data_root
+        data_root = workflow_loader._data_root
         
         system_info = SystemInfo(
             startup_time=startup_time,
@@ -248,18 +262,15 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         # Collect system health
         system_info = collect_system_health()
 
-        # Calculate totals
         total_vaults = len(vaults)
-        total_assistants = sum(vault.assistant_count for vault in vaults)
+        total_workflows = sum(vault.workflow_count for vault in vaults)
 
-        # Get assistant summaries and group by enabled/disabled status
-        assistant_summaries = get_assistant_summaries()
-        enabled_assistants = [summary for summary in assistant_summaries if summary.enabled]
-        disabled_assistants = [summary for summary in assistant_summaries if not summary.enabled]
+        workflow_summaries = get_workflow_summaries()
+        enabled_workflows = [summary for summary in workflow_summaries if summary.enabled]
+        disabled_workflows = [summary for summary in workflow_summaries if not summary.enabled]
 
-        # Update scheduler info with correct assistant counts
-        scheduler_info.enabled_assistants = len(enabled_assistants)
-        scheduler_info.disabled_assistants = len(disabled_assistants)
+        scheduler_info.enabled_workflows = len(enabled_workflows)
+        scheduler_info.disabled_workflows = len(disabled_workflows)
 
         # Get configuration errors and overall configuration health
         configuration_errors = get_configuration_errors()
@@ -282,13 +293,12 @@ async def get_system_status(scheduler=None) -> StatusResponse:
             scheduler=scheduler_info,
             system=system_info,
             total_vaults=total_vaults,
-            total_assistants=total_assistants,
-            enabled_assistants=enabled_assistants,
-            disabled_assistants=disabled_assistants,
+            total_workflows=total_workflows,
+            enabled_workflows=enabled_workflows,
+            disabled_workflows=disabled_workflows,
             configuration_errors=configuration_errors,
             configuration_status=configuration_status,
         )
-
 
         return status_response
 
@@ -297,29 +307,27 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         raise SystemConfigurationError(error_msg) from e
 
 
-def get_assistant_summaries() -> List[AssistantSummary]:
+def get_workflow_summaries() -> List[WorkflowSummary]:
     """
-    Get summary information about all loaded assistants.
+    Get summary information about all loaded workflows.
 
     Returns:
-        List of AssistantSummary objects
+        List of WorkflowSummary objects
     """
     summaries = []
 
-    # Get all assistants from the in-memory cache
-    assistant_loader = _get_assistant_loader()
-    all_assistants = getattr(assistant_loader, '_assistants', [])
+    workflow_loader = _get_workflow_loader()
+    all_workflows = getattr(workflow_loader, '_workflows', [])
 
-    for assistant in all_assistants:
-        # Use original schedule string from config (no reconstruction)
-        summary = AssistantSummary(
-            global_id=assistant.global_id,
-            name=assistant.name,
-            vault=assistant.vault,
-            enabled=assistant.enabled,
-            workflow=assistant.workflow_name,
-            schedule_cron=assistant.schedule_string,
-            description=assistant.description
+    for workflow in all_workflows:
+        summary = WorkflowSummary(
+            global_id=workflow.global_id,
+            name=workflow.name,
+            vault=workflow.vault,
+            enabled=workflow.enabled,
+            workflow_engine=workflow.workflow_name,
+            schedule_cron=workflow.schedule_string,
+            description=workflow.description
         )
         summaries.append(summary)
 
@@ -327,16 +335,16 @@ def get_assistant_summaries() -> List[AssistantSummary]:
 
 
 def get_configuration_errors() -> List[APIConfigurationError]:
-    """Get configuration errors from the assistant loader."""
-    # Get errors from assistant loader
-    core_errors = _get_assistant_loader().get_configuration_errors()
+    """Get configuration errors from the workflow loader."""
+    # Get errors from workflow loader
+    core_errors = _get_workflow_loader().get_configuration_errors()
     
     # Convert to API models
     api_errors = []
     for error in core_errors:
         api_error = APIConfigurationError(
             vault=error.vault,
-            assistant_name=error.assistant_name,
+            workflow_name=error.workflow_name,
             file_path=error.file_path,
             error_message=error.error_message,
             error_type=error.error_type,
@@ -349,7 +357,7 @@ def get_configuration_errors() -> List[APIConfigurationError]:
 
 async def rescan_vaults_and_update_scheduler(scheduler=None) -> Dict[str, Any]:
     """
-    Force rediscovery of vault directories and reload assistant configurations.
+    Force rediscovery of vault directories and reload workflow configurations.
     Updates scheduler jobs based on new configurations.
     
     Args:
@@ -834,19 +842,19 @@ def delete_secret_entry(name: str) -> OperationResult:
     )
 
 
-async def execute_assistant_manually(global_id: str, step_name: str = None) -> Dict[str, Any]:
+async def execute_workflow_manually(global_id: str, step_name: str = None) -> Dict[str, Any]:
     """
-    Execute a specific assistant workflow manually.
+    Execute a specific workflow manually.
     
     Args:
-        global_id: Assistant global ID in format "vault/name"
+        global_id: Workflow global ID in format "vault/name"
         step_name: If provided, execute only the specified step (e.g. 'STEP1')
         
     Returns:
         Dictionary with execution results and timing information
         
     Raises:
-        SystemConfigurationError: If assistant not found or execution fails
+        SystemConfigurationError: If workflow not found or execution fails
         ValueError: If global_id format is invalid or step_name not found
     """
     try:
@@ -854,28 +862,24 @@ async def execute_assistant_manually(global_id: str, step_name: str = None) -> D
         if '/' not in global_id:
             raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
         
-        # Load current assistant (just the target)
-        loaded_assistants = await _get_assistant_loader().load_assistants(force_reload=True, target_global_id=global_id)
+        loaded_workflows = await _get_workflow_loader().load_workflows(
+            force_reload=True, target_global_id=global_id
+        )
 
-        # Should have exactly one assistant (the target)
-        if not loaded_assistants:
-            raise ValueError(f"Assistant not found: {global_id}")
+        if not loaded_workflows:
+            raise ValueError(f"Workflow not found: {global_id}")
 
-        target_assistant = loaded_assistants[0]
+        target_workflow = loaded_workflows[0]
 
-        # Manual execution ignores enabled flag - if user is manually running, they intend to run it
+        await _get_workflow_loader().ensure_workflow_directories(target_workflow)
 
-        # Ensure assistant directories exist
-        await _get_assistant_loader().ensure_assistant_directories(target_assistant)
-
-        # Use cached workflow function (no duplicate loading!)
-        workflow_function = target_assistant.workflow_function
+        workflow_function = target_workflow.workflow_function
         
         # Execute workflow with timing using job arguments
         start_time = datetime.now()
         try:
             # Create job arguments
-            job_args = create_job_args(target_assistant.global_id)
+            job_args = create_job_args(target_workflow.global_id)
 
             # Execute workflow with job arguments and optional step_name
             kwargs = {}
@@ -887,7 +891,7 @@ async def execute_assistant_manually(global_id: str, step_name: str = None) -> D
         except Exception as workflow_error:
             execution_time = (datetime.now() - start_time).total_seconds()
             # Re-raise as SystemConfigurationError for API layer
-            raise SystemConfigurationError(f"Workflow execution failed for assistant '{global_id}': {str(workflow_error)}")
+            raise SystemConfigurationError(f"Workflow execution failed for '{global_id}': {str(workflow_error)}")
         
         # Prepare results
         results = {
@@ -895,7 +899,7 @@ async def execute_assistant_manually(global_id: str, step_name: str = None) -> D
             'global_id': global_id,
             'execution_time_seconds': execution_time,
             'output_files': [],  # TODO: Enhanced in Phase 4
-            'message': f"Assistant '{global_id}' executed successfully in {execution_time:.2f} seconds"
+            'message': f"Workflow '{global_id}' executed successfully in {execution_time:.2f} seconds"
         }
         
         return results
@@ -903,7 +907,7 @@ async def execute_assistant_manually(global_id: str, step_name: str = None) -> D
     except (ValueError, SystemConfigurationError):
         raise  # Re-raise known errors
     except Exception as e:
-        error_msg = f"Failed to execute assistant '{global_id}': {str(e)}"
+        error_msg = f"Failed to execute workflow '{global_id}': {str(e)}"
         raise SystemConfigurationError(error_msg) from e
 
 
@@ -918,7 +922,7 @@ async def get_chat_metadata() -> ChatMetadataResponse:
         ChatMetadataResponse with vaults, models, and tools
     """
     # Get vaults from runtime context
-    vault_data = _get_assistant_loader().get_vault_info()
+    vault_data = _get_workflow_loader().get_vault_info()
     vaults = list(vault_data.keys())
 
     # Evaluate configuration status for availability metadata
@@ -1078,7 +1082,7 @@ async def compact_conversation_history(
     }
 
 
-async def start_assistant_creation(
+async def start_workflow_creation(
     session_id: str,
     vault_name: str,
     model: str,
@@ -1087,20 +1091,20 @@ async def start_assistant_creation(
     vault_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Start assistant creation conversation from current chat session or fresh.
+    Start workflow creation conversation from current chat session or fresh.
 
     Handles two scenarios:
     1. Existing conversation: Summarizes with creation focus, starts new session
     2. No/minimal conversation: Skips summary, starts fresh creation session
 
-    The new session uses assistant creation instructions so the LLM gathers
-    requirements and writes the assistant file using available tools.
+    The new session uses workflow creation instructions so the LLM gathers
+    requirements and writes the workflow file using available tools.
 
     Args:
         session_id: Current session to summarize (may be empty/minimal)
-        vault_name: Vault context for assistant creation
+        vault_name: Vault context for workflow creation
         model: Model name to use for creation conversation
-        user_instructions: Optional user guidance for assistant requirements
+        user_instructions: Optional user guidance for workflow requirements
         session_manager: SessionManager instance
         vault_path: Path to vault directory (optional, resolved from runtime if not provided)
 
@@ -1121,7 +1125,7 @@ async def start_assistant_creation(
         # Scenario 1: Existing conversation - summarize with creation focus
         original_count = len(history)
 
-        summarize_prompt = ASSISTANT_CREATION_SUMMARY_PROMPT
+        summarize_prompt = WORKFLOW_CREATION_SUMMARY_PROMPT
         if user_instructions:
             summarize_prompt += f"\n\nUser's requirements: {user_instructions}"
 
@@ -1152,7 +1156,7 @@ async def start_assistant_creation(
     else:
         # Scenario 2: No/minimal conversation - start fresh
         original_count = len(history) if history else 0
-        summary = "Starting fresh assistant creation conversation."
+        summary = "Starting fresh workflow creation conversation."
 
         # Generate new session_id for creation conversation
         new_session_id = generate_session_id(vault_name)

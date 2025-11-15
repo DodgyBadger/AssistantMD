@@ -35,7 +35,7 @@ AssistantMD supports pattern variables for dynamic file paths and headers. Patte
 Files are tracked by content hash, so:
 - Renaming or moving a file doesn't mark it as unprocessed
 - Editing a file's content marks it as unprocessed (will be re-processed)
-- State is tracked per assistant and per pattern
+- State is tracked per workflow and per pattern
 
 **Glob Patterns**
 - `*.md` - All .md files in vault root

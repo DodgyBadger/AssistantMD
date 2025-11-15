@@ -21,9 +21,9 @@ class VaultRescanRequest(BaseModel):
     pass
 
 
-class ExecuteAssistantRequest(BaseModel):
-    """Request model for manually executing an assistant."""
-    global_id: str = Field(..., description="Assistant global ID (vault/name format)")
+class ExecuteWorkflowRequest(BaseModel):
+    """Request model for manually executing a workflow."""
+    global_id: str = Field(..., description="Workflow global ID (vault/name format)")
     step_name: Optional[str] = Field(None, description="Execute only specified step (e.g. 'STEP1')")
 
 
@@ -36,7 +36,7 @@ class ChatExecuteRequest(BaseModel):
     model: str = Field(..., description="Model name to use")
     use_conversation_history: bool = Field(True, description="Whether to maintain conversation state")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
-    session_type: str = Field("regular", description="Chat mode: 'regular' or 'assistant_creation'")
+    session_type: str = Field("regular", description="Chat mode: 'regular' or 'workflow_creation'")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 
@@ -56,16 +56,16 @@ class VaultInfo(BaseModel):
     """Information about a single vault."""
     name: str = Field(..., description="Vault name")
     path: str = Field(..., description="Full path to vault directory")
-    assistant_count: int = Field(..., description="Number of assistants in this vault")
-    assistants: List[str] = Field(default_factory=list, description="List of assistant names")
+    workflow_count: int = Field(..., description="Number of workflows in this vault")
+    workflows: List[str] = Field(default_factory=list, description="List of workflow names")
 
 
 class SchedulerInfo(BaseModel):
     """Information about the scheduler status."""
     running: bool = Field(..., description="Whether the scheduler is running")
     total_jobs: int = Field(..., description="Total number of scheduled jobs")
-    enabled_assistants: int = Field(..., description="Number of enabled assistants")
-    disabled_assistants: int = Field(..., description="Number of disabled assistants")
+    enabled_workflows: int = Field(..., description="Number of enabled workflows")
+    disabled_workflows: int = Field(..., description="Number of disabled workflows")
     job_details: List[Dict] = Field(default_factory=list, description="Detailed job information from APScheduler")
 
 
@@ -99,9 +99,9 @@ class StatusResponse(BaseModel):
     scheduler: SchedulerInfo = Field(..., description="Scheduler status information")
     system: SystemInfo = Field(..., description="System health information")
     total_vaults: int = Field(..., description="Total number of discovered vaults")
-    total_assistants: int = Field(..., description="Total number of assistants across all vaults")
-    enabled_assistants: List["AssistantSummary"] = Field(default_factory=list, description="List of enabled assistants with details")
-    disabled_assistants: List["AssistantSummary"] = Field(default_factory=list, description="List of disabled assistants with details")
+    total_workflows: int = Field(..., description="Total number of workflows across all vaults")
+    enabled_workflows: List["WorkflowSummary"] = Field(default_factory=list, description="List of enabled workflows with details")
+    disabled_workflows: List["WorkflowSummary"] = Field(default_factory=list, description="List of disabled workflows with details")
     configuration_errors: List["ConfigurationError"] = Field(default_factory=list, description="Configuration errors encountered during loading")
     configuration_status: ConfigurationStatusInfo = Field(default_factory=ConfigurationStatusInfo, description="Aggregated configuration health information")
 
@@ -111,7 +111,7 @@ class VaultCreateResponse(BaseModel):
     success: bool = Field(..., description="Whether the vault was created successfully")
     vault_name: str = Field(..., description="Name of the created vault")
     vault_path: str = Field(..., description="Full path to the created vault")
-    assistant_file: str = Field(..., description="Path to the created assistant file")
+    workflow_file: str = Field(..., description="Path to the created workflow file")
     message: str = Field(..., description="Human-readable success message")
 
 
@@ -119,16 +119,16 @@ class VaultRescanResponse(BaseModel):
     """Response model for vault rescan endpoint."""
     success: bool = Field(..., description="Whether the rescan was successful")
     vaults_discovered: int = Field(..., description="Number of vaults discovered")
-    assistants_loaded: int = Field(..., description="Number of assistants loaded")
-    enabled_assistants: int = Field(..., description="Number of enabled assistants")
+    workflows_loaded: int = Field(..., description="Number of workflows loaded")
+    enabled_workflows: int = Field(..., description="Number of enabled workflows")
     scheduler_jobs_synced: int = Field(..., description="Number of scheduler jobs synchronized")
     message: str = Field(..., description="Human-readable success message")
 
 
-class ExecuteAssistantResponse(BaseModel):
-    """Response model for manual assistant execution."""
+class ExecuteWorkflowResponse(BaseModel):
+    """Response model for manual workflow execution."""
     success: bool = Field(..., description="Whether execution succeeded")
-    global_id: str = Field(..., description="Assistant global ID that was executed")
+    global_id: str = Field(..., description="Workflow global ID that was executed")
     execution_time_seconds: float = Field(..., description="Workflow execution time")
     output_files: List[str] = Field(default_factory=list, description="Created output file paths")
     message: str = Field(..., description="Human-readable execution summary")
@@ -285,13 +285,13 @@ class ErrorResponse(BaseModel):
 ## Internal Data Models
 #######################################################################
 
-class AssistantSummary(BaseModel):
-    """Summary information about an assistant for internal use."""
+class WorkflowSummary(BaseModel):
+    """Summary information about a workflow for internal use."""
     global_id: str
     name: str
     vault: str
     enabled: bool
-    workflow: str
+    workflow_engine: str
     schedule_cron: Optional[str]
     description: str
 
@@ -299,7 +299,7 @@ class AssistantSummary(BaseModel):
 class ConfigurationError(BaseModel):
     """Configuration error information for API responses."""
     vault: str
-    assistant_name: Optional[str] = Field(None, description="Assistant name if determinable")
+    workflow_name: Optional[str] = Field(None, description="Workflow name if determinable")
     file_path: str
     error_message: str
     error_type: str

@@ -1,13 +1,13 @@
 ---
 schedule: cron: 0 10 * * *
-workflow: step
+workflow_engine: step
 enabled: true
-description: File operations testing assistant
+description: File operations testing workflow
 ---
 
 ## INSTRUCTIONS
 
-You are a helpful assistant that tests file operations tools. Use lots of emojis! 📁✨
+You are a helpful workflow that tests file operations tools. Use lots of emojis! 📁✨
 
 ## STEP1
 @model sonnet

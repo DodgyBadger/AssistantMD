@@ -1,6 +1,6 @@
-# Assistant Setup Guide
+# Workflow Setup Guide
 
-An assistant is a markdown file in a vault's `assistants/` folder that defines a scheduled AI workflow. Assistants can be in subfolders (one level deep) for better organization. Folders prefixed with underscore (e.g., `_chat-sessions`) are ignored.
+A workflow is a markdown file stored under each vault's `AssistantMD/Workflows/` folder. Workflows can be organized in subfolders (one level deep). Subfolders beginning with an underscore are ignored.
 
 **Basic Structure**  
 - YAML frontmatter between `---` delimiters (required). These appear as properties if using Obsidian.
@@ -8,14 +8,14 @@ Sets the run schedule and the workflow engine to run. Currently there is only on
 - Optional `## Instructions` section with a prompt that is included as a system instruction before every step prompt.
 - One or more `## Headers` which define the steps to run. The header name can be anything - every `## Header` found after Instructions is interpretted as a step, running in the order they appear.
 
-Following is a complete and valid assistant file example. Copy and paste the text into a markdown file in your assistants folder, change the model as needed, rescan your vaults and then run it manually to see the results. Both operations are found on the Dashboard tab of the web interface.
+Following is a complete, valid workflow definition. Copy the text into `AssistantMD/Workflows/` inside any vault, change the model as needed, rescan your vaults, and then run it manually to see the results. Both operations are available on the Dashboard tab of the web interface.
 
-**NOTE**: Assistant files must include only the text below, not embedded inside a markdown code block. If you are pasting into a new note in Obsidian, use `ctrl-shift-v` (or right-click `Paste as plain text`) to make sure it doesn't include the code block. You should see the top section immediately turn into Obsidian Properties.
+**NOTE**: Workflow files must include only the text below, not embedded inside a markdown code block. If you are pasting into a new note in Obsidian, use `ctrl-shift-v` (or right-click `Paste as plain text`) to avoid pasting the code block. The top section should immediately render as Obsidian Properties.
 
 ```
 ---
 schedule: "cron: 0 9 * * *"
-workflow: step
+workflow_engine: step
 enabled: false
 description: Daily poet
 ---
@@ -48,8 +48,7 @@ Read the haiku above and provide your feedback.
 
 Explore detailed documentation for each component:
 
-- **[YAML frontmatter](../core/yaml-frontmatter.md)** - Schedules, workflows, and settings
+- **[YAML frontmatter](../core/yaml-frontmatter.md)** - Schedules, workflow engines, and settings
 - **[Core directives](../core/core-directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
 - **[Pattern variables](../core/patterns.md)** - Dynamic file names using {today}, {this-week}, etc.
-
 

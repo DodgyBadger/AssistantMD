@@ -19,13 +19,13 @@ class TestBasicHaikuScenario(BaseScenario):
     """Test basic single-step workflow execution."""
 
     async def test_scenario(self):
-        """Execute complete end-to-end workflow: system startup → assistant execution."""
+        """Execute complete end-to-end workflow: system startup → workflow execution."""
 
         # === SETUP ===
         vault = self.create_vault("HaikuVault")
 
-        # Create simple single-step assistant
-        self.create_file(vault, "assistants/haiku_writer.md", HAIKU_WRITER_ASSISTANT)
+        # Create simple single-step workflow
+        self.create_file(vault, "AssistantMD/Workflows/haiku_writer.md", HAIKU_WRITER_WORKFLOW)
 
         # === SYSTEM STARTUP VALIDATION ===
         # Test real system startup with vault discovery and job scheduling
@@ -33,7 +33,7 @@ class TestBasicHaikuScenario(BaseScenario):
 
         # Validate system startup completed correctly
         self.expect_vault_discovered("HaikuVault")
-        self.expect_assistant_loaded("HaikuVault", "haiku_writer")
+        self.expect_workflow_loaded("HaikuVault", "haiku_writer")
         self.expect_scheduler_job_created("HaikuVault/haiku_writer")
         self.expect_schedule_parsed_correctly("HaikuVault/haiku_writer", "cron")
 
@@ -56,13 +56,13 @@ class TestBasicHaikuScenario(BaseScenario):
         self.teardown_scenario()
 
 
-# === ASSISTANT TEMPLATES ===
+# === WORKFLOW TEMPLATES ===
 
-HAIKU_WRITER_ASSISTANT = """---
+HAIKU_WRITER_WORKFLOW = """---
 schedule: cron: 0 9 * * *
-workflow: step
+workflow_engine: step
 enabled: true
-description: Simple haiku writing assistant
+description: Simple haiku writing workflow
 ---
 
 ## STEP1

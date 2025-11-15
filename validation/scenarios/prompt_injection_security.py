@@ -30,14 +30,14 @@ class TestPromptInjectionSecurityScenario(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("SecurityTest")
 
-        # Copy the prompt injection test assistant
-        self.copy_files("validation/templates/assistants/prompt_injection_tester.md", vault, "assistants")
+        # Copy the prompt injection test workflow
+        self.copy_files("validation/templates/AssistantMD/Workflows/prompt_injection_tester.md", vault, "AssistantMD/Workflows")
 
         # === SYSTEM STARTUP ===
         await self.start_system()
 
         self.expect_vault_discovered("SecurityTest")
-        self.expect_assistant_loaded("SecurityTest", "prompt_injection_tester")
+        self.expect_workflow_loaded("SecurityTest", "prompt_injection_tester")
 
         # === EXECUTE ALL INJECTION TESTS ===
         self.set_date("2025-01-20")

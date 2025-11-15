@@ -26,24 +26,24 @@ class TestAgenticWorkflowScenario(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("Research")
 
-        # Create the agentic assistant
-        self.create_file(vault, "assistants/agentic_assistant.md", AGENTIC_ASSISTANT)
+        # Create the agentic workflow
+        self.create_file(vault, "AssistantMD/Workflows/agentic_workflow.md", AGENTIC_WORKFLOW)
 
         # === SYSTEM STARTUP ===
         await self.start_system()
 
         self.expect_vault_discovered("Research")
-        self.expect_assistant_loaded("Research", "agentic_assistant")
+        self.expect_workflow_loaded("Research", "agentic_workflow")
 
         # === WORKFLOW EXECUTION ===
         self.set_date("2025-01-15")
 
-        await self.trigger_job(vault, "agentic_assistant")
+        await self.trigger_job(vault, "agentic_workflow")
 
         # === ASSERTIONS ===
-        self.expect_scheduled_execution_success(vault, "agentic_assistant")
+        self.expect_scheduled_execution_success(vault, "agentic_workflow")
 
-        # The assistant should create files autonomously
+        # The workflow should create files autonomously
         # We intentionally don't specify WHAT files to see what it does
 
         # Clean up
@@ -51,18 +51,18 @@ class TestAgenticWorkflowScenario(BaseScenario):
         self.teardown_scenario()
 
 
-# === ASSISTANT TEMPLATES ===
+# === WORKFLOW TEMPLATES ===
 
-AGENTIC_ASSISTANT = """---
+AGENTIC_WORKFLOW = """---
 schedule: cron: 0 9 * * *
-workflow: step
+workflow_engine: step
 enabled: true
-description: Agentic assistant that autonomously manages task execution
+description: Agentic workflow that autonomously manages task execution
 ---
 
 ## INSTRUCTIONS
 
-You are an autonomous task execution assistant with full control over file creation and management. Break down objectives into actionable steps, track your progress, and execute tasks systematically.
+You are an autonomous task execution workflow with full control over file creation and management. Break down objectives into actionable steps, track your progress, and execute tasks systematically.
 
 When given a goal:
 1. First, create a task list file that breaks down the goal into specific steps

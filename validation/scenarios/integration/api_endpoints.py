@@ -17,14 +17,14 @@ class ApiEndpointsScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("IntegrationApiVault")
 
-        # Seed a minimal step assistant for execution and status checks
+        # Seed a minimal step workflow for execution and status checks
         self.create_file(
             vault,
-            "assistants/status_probe.md",
+            "AssistantMD/Workflows/status_probe.md",
             """---
-workflow: step
+workflow_engine: step
 enabled: false
-description: Validation helper assistant
+description: Validation helper workflow
 ---
 
 ## STEP1
@@ -53,7 +53,7 @@ Summarize the validation run context.
         self.expect_equals(status_response.status_code, 200, "Status endpoint succeeds")
         status_payload = status_response.json()
         self.expect_equals(status_payload.get("total_vaults"), 1, "One vault discovered")
-        self.expect_equals(status_payload.get("total_assistants"), 1, "Seeded assistant counted")
+        self.expect_equals(status_payload.get("total_workflows"), 1, "Seeded workflow counted")
 
         activity = self.call_api("/api/system/activity-log")
         self.expect_equals(activity.status_code, 200, "Activity log fetch succeeds")
@@ -173,18 +173,18 @@ Summarize the validation run context.
             "Secret list no longer reports a stored value",
         )
 
-        # Vault rescan should keep assistant counts stable
+        # Vault rescan should keep workflow counts stable
         rescan_response = self.call_api("/api/vaults/rescan", method="POST")
         self.expect_equals(rescan_response.status_code, 200, "Vault rescan succeeds")
 
-        # Manual assistant execution
+        # Manual workflow execution
         execute_response = self.call_api(
-            "/api/assistants/execute",
+            "/api/workflows/execute",
             method="POST",
             data={"global_id": f"{vault.name}/status_probe"},
         )
         self.expect_equals(
-            execute_response.status_code, 200, "Manual assistant execution succeeds"
+            execute_response.status_code, 200, "Manual workflow execution succeeds"
         )
         self.expect_equals(
             execute_response.json().get("success"), True, "Workflow reports success"
@@ -233,20 +233,20 @@ Summarize the validation run context.
         )
         new_session_id = compact_response.json()["new_session_id"]
 
-        create_assistant_response = self.call_api(
-            "/api/chat/create-assistant",
+        create_workflow_response = self.call_api(
+            "/api/chat/create-workflow",
             method="POST",
             data={
                 "session_id": new_session_id,
                 "vault_name": vault.name,
                 "model": "gpt-5-mini",
-                "user_instructions": "Outline a simple assistant.",
+                "user_instructions": "Outline a simple workflow.",
             },
         )
         self.expect_equals(
-            create_assistant_response.status_code,
+            create_workflow_response.status_code,
             200,
-            "Assistant creation flow initializes",
+            "Workflow creation flow initializes",
         )
 
         await self.stop_system()

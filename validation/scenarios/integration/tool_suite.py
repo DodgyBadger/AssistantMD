@@ -1,7 +1,7 @@
 """
 Integration scenario that exercises every configured tool using TestModel.
 
-Runs a multi-step assistant where each step enables a single tool so we can
+Runs a multi-step workflow where each step enables a single tool so we can
 confirm tool wiring without external API calls.
 """
 
@@ -19,24 +19,24 @@ class ToolSuiteScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("ToolSuiteVault")
 
-        # Seed assistant that contains one step per tool
+        # Seed workflow that contains one step per tool
         self.copy_files(
-            "validation/templates/assistants/tool-suite-validation.md",
+            "validation/templates/AssistantMD/Workflows/tool-suite-validation.md",
             vault,
-            "assistants",
+            "AssistantMD/Workflows",
             dest_filename="tool_suite.md",
         )
 
         await self.start_system()
 
         self.expect_vault_discovered("ToolSuiteVault")
-        self.expect_assistant_loaded("ToolSuiteVault", "tool_suite")
+        self.expect_workflow_loaded("ToolSuiteVault", "tool_suite")
 
         # Run with deterministic date for pattern placeholders if used later
         self.set_date("2025-01-06")  # Monday
 
-        result = await self.run_assistant(vault, "tool_suite")
-        self.expect_equals(result.status, "completed", "Tool suite assistant should finish successfully")
+        result = await self.run_workflow(vault, "tool_suite")
+        self.expect_equals(result.status, "completed", "Tool suite workflow should finish successfully")
 
         expected_outputs = [
             "tool-outputs/documentation-access.md",

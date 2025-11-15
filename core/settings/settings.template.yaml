@@ -159,7 +159,7 @@ tools:
     user_editable: false
   documentation_access:
     module: core.tools.documentation_access
-    description: "Create assistant workflows via chat"
+    description: "Create workflows via chat"
     requires_secrets: []
     user_editable: false
   code_execution:

@@ -6,7 +6,7 @@ Tests core system functionality including:
 - Job configuration change detection
 - Real-time scheduled execution
 - System discovery and loading processes
-- Resilience to malformed assistant configurations
+- Resilience to malformed workflow configurations
 """
 
 import sys
@@ -25,20 +25,20 @@ class TestSystemStartupValidationScenario(BaseScenario):
     async def test_scenario(self):
         # Setup
         vault = self.create_vault("SystemTest")
-        self.create_file(vault, "assistants/quick_job.md", QUICK_JOB_ASSISTANT)
+        self.create_file(vault, "AssistantMD/Workflows/quick_job.md", QUICK_JOB_WORKFLOW)
 
-        # Test subfolder support - create assistant in assistants/planning/ subfolder
-        self.create_file(vault, "assistants/planning/quick_job_2.md", QUICK_JOB_2_ASSISTANT)
+        # Test subfolder support - create workflow in AssistantMD/Workflows/planning/ subfolder
+        self.create_file(vault, "AssistantMD/Workflows/planning/quick_job_2.md", QUICK_JOB_2_WORKFLOW)
 
         # Test 1: System Discovery and Job Creation
         await self.start_system()
 
         self.expect_vault_discovered("SystemTest")
-        self.expect_assistant_loaded("SystemTest", "quick_job")
+        self.expect_workflow_loaded("SystemTest", "quick_job")
         self.expect_scheduler_job_created("SystemTest/quick_job")
 
-        # Validate subfolder assistant was discovered and loaded
-        self.expect_assistant_loaded("SystemTest", "planning/quick_job_2")
+        # Validate subfolder workflow was discovered and loaded
+        self.expect_workflow_loaded("SystemTest", "planning/quick_job_2")
         self.expect_scheduler_job_created("SystemTest/planning/quick_job_2")
 
         # Capture original job properties
@@ -70,7 +70,7 @@ class TestSystemStartupValidationScenario(BaseScenario):
 
         # Test 3: Schedule Change Detection
         # Overwrite the original file with updated schedule (every 1m → every 2m)
-        self.create_file(vault, "assistants/quick_job.md", QUICK_JOB_UPDATED_ASSISTANT)
+        self.create_file(vault, "AssistantMD/Workflows/quick_job.md", QUICK_JOB_UPDATED_WORKFLOW)
         await self.restart_system()
 
         updated_next_run = self.get_next_run_time(vault, "quick_job")
@@ -94,21 +94,21 @@ class TestSystemStartupValidationScenario(BaseScenario):
         final_next_run = self.get_next_run_time(vault, "quick_job")
         assert final_next_run is not None, "Job should survive multiple restarts"
 
-        # Test 6: Malformed Assistant Resilience
-        # Add a malformed assistant file with invalid schedule syntax
-        self.create_file(vault, "assistants/malformed_schedule.md", MALFORMED_SCHEDULE_ASSISTANT)
+        # Test 6: Malformed Workflow Resilience
+        # Add a malformed workflow file with invalid schedule syntax
+        self.create_file(vault, "AssistantMD/Workflows/malformed_schedule.md", MALFORMED_SCHEDULE_WORKFLOW)
         await self.restart_system()
 
         # Verify the system still started successfully
         self.expect_vault_discovered("SystemTest")
 
-        # Verify good assistants are still loaded and working
-        self.expect_assistant_loaded("SystemTest", "quick_job")
-        self.expect_assistant_loaded("SystemTest", "planning/quick_job_2")
+        # Verify good workflows are still loaded and working
+        self.expect_workflow_loaded("SystemTest", "quick_job")
+        self.expect_workflow_loaded("SystemTest", "planning/quick_job_2")
         self.expect_scheduler_job_created("SystemTest/quick_job")
         self.expect_scheduler_job_created("SystemTest/planning/quick_job_2")
 
-        # Verify the malformed assistant error was captured
+        # Verify the malformed workflow error was captured
         self.expect_configuration_error("SystemTest", "malformed_schedule", "ValueError")
 
         # Clean up
@@ -116,11 +116,11 @@ class TestSystemStartupValidationScenario(BaseScenario):
         self.teardown_scenario()
 
 
-# === ASSISTANT TEMPLATES ===
+# === WORKFLOW TEMPLATES ===
 
-QUICK_JOB_ASSISTANT = """---
+QUICK_JOB_WORKFLOW = """---
 schedule: cron: */1 * * * *
-workflow: step
+workflow_engine: step
 enabled: true
 description: Quick job for persistence testing
 ---
@@ -132,9 +132,9 @@ description: Quick job for persistence testing
 Quick persistence test - creating file at scheduled intervals.
 """
 
-QUICK_JOB_2_ASSISTANT = """---
+QUICK_JOB_2_WORKFLOW = """---
 schedule: cron: */2 * * * *
-workflow: step
+workflow_engine: step
 enabled: true
 description: Second quick job for subfolder testing
 ---
@@ -143,12 +143,12 @@ description: Second quick job for subfolder testing
 @output-file results/{today}
 @model gpt-5-mini
 
-Quick subfolder test - creating file from subfolder assistant.
+Quick subfolder test - creating file from subfolder workflow.
 """
 
-QUICK_JOB_UPDATED_ASSISTANT = """---
+QUICK_JOB_UPDATED_WORKFLOW = """---
 schedule: cron: */2 * * * *
-workflow: step
+workflow_engine: step
 enabled: true
 description: Updated schedule for persistence testing
 ---
@@ -160,15 +160,15 @@ description: Updated schedule for persistence testing
 Updated persistence test - now running every 2 minutes.
 """
 
-MALFORMED_SCHEDULE_ASSISTANT = """---
+MALFORMED_SCHEDULE_WORKFLOW = """---
 schedule: every 1d at 9am
-workflow: step
+workflow_engine: step
 enabled: true
-description: Malformed assistant with invalid old schedule syntax
+description: Malformed workflow with invalid old schedule syntax
 ---
 
 ## STEP1
 @output-file test.md
 
-This assistant has invalid schedule syntax (old format) and should fail to load without crashing the system.
+This workflow has invalid schedule syntax (old format) and should fail to load without crashing the system.
 """

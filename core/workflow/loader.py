@@ -1,8 +1,8 @@
 """
-Assistant configuration management with fully parsed objects.
+Workflow definition management with fully parsed objects.
 
-Handles auto-discovery and loading of assistant files from vault directories,
-storing parsed schedules and workflow functions instead of raw strings.
+Handles auto-discovery and loading of workflow files from vault directories,
+storing parsed schedules and workflow engine references instead of raw strings.
 """
 
 import os
@@ -11,15 +11,20 @@ import types
 from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime
 
-from .parser import parse_assistant_file, validate_config
-from .assistant import Assistant
-from core.constants import CONTAINER_DATA_ROOT, VAULT_IGNORE_FILE
+from .parser import parse_workflow_file, validate_config
+from .definition import WorkflowDefinition
+from core.constants import (
+    CONTAINER_DATA_ROOT,
+    VAULT_IGNORE_FILE,
+    ASSISTANTMD_ROOT_DIR,
+    WORKFLOW_DEFINITIONS_DIR,
+)
 from core.scheduling.parser import parse_schedule_syntax
 from core.scheduling.triggers import create_schedule_trigger
 from core.logger import UnifiedLogger
 
-# Create system logger for assistant configuration management
-logger = UnifiedLogger(tag="assistant-loader")
+# Create system logger for workflow configuration management
+logger = UnifiedLogger(tag="workflow-loader")
 
 
 #######################################################################
@@ -28,10 +33,10 @@ logger = UnifiedLogger(tag="assistant-loader")
 
 class ConfigurationError:
     """Represents a configuration error encountered during loading."""
-    def __init__(self, vault: str, assistant_name: Optional[str], file_path: str,
+    def __init__(self, vault: str, workflow_name: Optional[str], file_path: str,
                  error_message: str, error_type: str, timestamp: datetime):
         self.vault = vault
-        self.assistant_name = assistant_name
+        self.workflow_name = workflow_name
         self.file_path = file_path
         self.error_message = error_message
         self.error_type = error_type
@@ -59,81 +64,67 @@ def discover_vaults(data_root: str = CONTAINER_DATA_ROOT) -> List[str]:
     return sorted(vaults)
 
 
-@logger.trace("assistant_file_discovery")
-def discover_assistant_files(vault_path: str) -> List[str]:
-    """Return list of assistant file paths in vault/assistants/ and subfolders (one level deep).
+@logger.trace("workflow_file_discovery")
+def discover_workflow_files(vault_path: str) -> List[str]:
+    """Return list of workflow file paths in AssistantMD/Workflows (one level deep)."""
+    workflows_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR)
 
-    Ignores folders prefixed with underscore (e.g., _chat-sessions).
-    """
-    assistants_dir = os.path.join(vault_path, "assistants")
-
-    if not os.path.exists(assistants_dir) or not os.path.isdir(assistants_dir):
+    if not os.path.exists(workflows_dir) or not os.path.isdir(workflows_dir):
         return []
 
-    assistant_files = []
+    workflow_files = []
 
-    # Scan for .md files directly in assistants/
-    for item in os.listdir(assistants_dir):
-        item_path = os.path.join(assistants_dir, item)
+    # Scan for .md files directly in Workflows/
+    for item in os.listdir(workflows_dir):
+        item_path = os.path.join(workflows_dir, item)
 
         if item.endswith('.md') and os.path.isfile(item_path):
-            # Direct file in assistants/
-            assistant_files.append(item_path)
+            workflow_files.append(item_path)
         elif os.path.isdir(item_path) and not item.startswith('_'):
             # Subfolder (not prefixed with underscore) - scan one level deep
             for subitem in os.listdir(item_path):
                 if subitem.endswith('.md'):
                     subitem_path = os.path.join(item_path, subitem)
                     if os.path.isfile(subitem_path):
-                        assistant_files.append(subitem_path)
+                        workflow_files.append(subitem_path)
 
-    return sorted(assistant_files)
+    return sorted(workflow_files)
 
 
 #######################################################################
 ## Assistant Loading Functions
 #######################################################################
 
-@logger.trace("workflow_loading")
-def validate_and_load_workflow(workflow_name: str) -> tuple[types.ModuleType, Callable]:
-    """Load and validate a workflow module and its run_workflow function.
+@logger.trace("workflow_engine_loading")
+def validate_and_load_engine(engine_name: str) -> tuple[types.ModuleType, Callable]:
+    """Load and validate a workflow engine module and its run_workflow function.
 
     Args:
-        workflow_name: Name of the workflow module
+        engine_name: Name of the workflow engine module
 
     Returns:
-        Tuple of (workflow_module, workflow_function)
+        Tuple of (workflow_engine_module, workflow_function)
 
     Raises:
-        ImportError: If workflow module cannot be imported
+        ImportError: If workflow engine module cannot be imported
         AttributeError: If run_workflow function is not found in module
     """
-    # Import the workflow module
-    workflow_module = importlib.import_module(f"workflows.{workflow_name}.workflow")
-
-    # Get the run_workflow function
+    workflow_module = importlib.import_module(f"workflow_engines.{engine_name}.workflow")
     workflow_function = getattr(workflow_module, 'run_workflow')
 
-    # Validate it's callable
     if not callable(workflow_function):
-        raise AttributeError(f"'run_workflow' in workflow '{workflow_name}' is not callable")
+        raise AttributeError(f"'run_workflow' in workflow engine '{engine_name}' is not callable")
 
     return workflow_module, workflow_function
 
-@logger.trace("assistant_loading")
-def load_assistant_from_file(file_path: str, vault: str, name: str,
-                           validated_config: Dict[str, Any]) -> Assistant:
-    """Load an Assistant from a parsed configuration.
-
-    Args:
-        file_path: Path to the assistant markdown file
-        vault: Vault name
-        name: Assistant name
-        validated_config: Already validated configuration dictionary
-
-    Returns:
-        Assistant object with all parsed components
-    """
+@logger.trace("workflow_loading")
+def load_workflow_from_file(
+    file_path: str,
+    vault: str,
+    name: str,
+    validated_config: Dict[str, Any],
+) -> WorkflowDefinition:
+    """Load a WorkflowDefinition from a parsed configuration."""
     # Parse schedule if provided and create actual trigger
     trigger = None
     schedule_string = validated_config['schedule']  # Store original for display
@@ -141,12 +132,10 @@ def load_assistant_from_file(file_path: str, vault: str, name: str,
         parsed_schedule = parse_schedule_syntax(schedule_string)
         trigger = create_schedule_trigger(parsed_schedule)
 
-    # Load and validate workflow module
-    workflow_name = validated_config['workflow']
-    workflow_module, workflow_function = validate_and_load_workflow(workflow_name)
+    engine_name = validated_config['workflow_engine']
+    workflow_module, workflow_function = validate_and_load_engine(engine_name)
 
-    # Create Assistant object
-    assistant = Assistant(
+    workflow = WorkflowDefinition(
         vault=vault,
         name=name,
         file_path=file_path,
@@ -154,30 +143,30 @@ def load_assistant_from_file(file_path: str, vault: str, name: str,
         schedule_string=schedule_string,
         workflow_function=workflow_function,
         workflow_module=workflow_module,
-        workflow_name=workflow_name,
+        workflow_name=engine_name,
         week_start_day=validated_config['week_start_day'],
         description=validated_config['description'],
         enabled=validated_config['enabled']
     )
 
-    return assistant
+    return workflow
 
 
 #######################################################################
 ## Assistant Loader Manager
 #######################################################################
 
-class AssistantLoader:
+class WorkflowLoader:
     """
-    Manages loading and validation of vault-based assistant configurations with parsed objects.
+    Manages loading and validation of vault-based workflow configurations with parsed objects.
 
-    WARNING: Direct instantiation is discouraged. Use RuntimeContext.assistant_loader instead
+    WARNING: Direct instantiation is discouraged. Use RuntimeContext.workflow_loader instead
     to ensure proper dependency injection and avoid multiple instances.
     """
 
     def __init__(self, _data_root: str = CONTAINER_DATA_ROOT, *, _allow_direct_instantiation: bool = False):
         """
-        Initialize the assistant loader.
+        Initialize the workflow loader.
 
         Args:
             _data_root: Root directory for vault data
@@ -188,18 +177,18 @@ class AssistantLoader:
         """
         if not _allow_direct_instantiation:
             raise RuntimeError(
-                "Direct AssistantLoader instantiation is discouraged. "
-                "Use get_runtime_context().assistant_loader or bootstrap_runtime() instead."
+                "Direct WorkflowLoader instantiation is discouraged. "
+                "Use get_runtime_context().workflow_loader or bootstrap_runtime() instead."
             )
         self._data_root = _data_root
-        self._assistants: List[Assistant] = []
+        self._workflows: List[WorkflowDefinition] = []
         self._config_errors: List[ConfigurationError] = []
         self._last_loaded: Optional[datetime] = None
         self._vault_info: Dict[str, Dict[str, Any]] = {}  # Cache vault discovery data
 
-    @logger.trace("assistant_loading")
-    async def load_assistants(self, force_reload: bool = False, target_global_id: str = None) -> List[Assistant]:
-        """Load assistants from all vaults or a specific assistant."""
+    @logger.trace("workflow_loading")
+    async def load_workflows(self, force_reload: bool = False, target_global_id: str = None) -> List[WorkflowDefinition]:
+        """Load workflows from all vaults or a specific workflow."""
         # Parse target if specified
         target_vault = None
         target_name = None
@@ -217,7 +206,7 @@ class AssistantLoader:
 
         if not vaults:
             if not target_global_id:
-                self._assistants = []
+                self._workflows = []
                 self._last_loaded = datetime.now()
             return []
 
@@ -225,53 +214,49 @@ class AssistantLoader:
         if not target_global_id:
             self._config_errors = []
 
-        # Load assistant configurations from all vaults
-        assistants = []
+        workflows: List[WorkflowDefinition] = []
         global_ids = set()
         vault_info = {}
 
         for vault in vaults:
             vault_path = os.path.join(self._data_root, vault)
-            assistant_files = discover_assistant_files(vault_path)
+            workflow_files = discover_workflow_files(vault_path)
 
             # Cache vault info during processing
             vault_info[vault] = {
                 'path': vault_path,
-                'assistant_files': assistant_files,
-                'assistants': []
+                'workflow_files': workflow_files,
+                'workflows': []
             }
 
-            for file_path in assistant_files:
+            for file_path in workflow_files:
                 try:
                     # Extract vault and name from file path
-                    # Expected formats:
-                    #   - Direct: vault/assistants/daily.md -> name = 'daily'
-                    #   - Subfolder: vault/assistants/planning/daily.md -> name = 'planning/daily'
                     path_parts = file_path.replace(self._data_root, '').strip('/').split('/')
-                    if len(path_parts) < 3 or path_parts[1] != 'assistants':
+                    if len(path_parts) < 4:
+                        continue
+
+                    if path_parts[1] != ASSISTANTMD_ROOT_DIR or path_parts[2] != WORKFLOW_DEFINITIONS_DIR:
                         continue
 
                     vault = path_parts[0]
 
-                    # Handle both direct files and files in subfolders (one level deep)
-                    if len(path_parts) == 3:
-                        # Direct file: vault/assistants/filename.md
-                        name = os.path.splitext(path_parts[2])[0]
-                    elif len(path_parts) == 4:
-                        # Subfolder file: vault/assistants/subfolder/filename.md
-                        subfolder = path_parts[2]
-                        filename = os.path.splitext(path_parts[3])[0]
+                    if len(path_parts) == 4:
+                        name = os.path.splitext(path_parts[3])[0]
+                    elif len(path_parts) == 5:
+                        subfolder = path_parts[3]
+                        filename = os.path.splitext(path_parts[4])[0]
                         name = f"{subfolder}/{filename}"
                     else:
                         # Unexpected path structure (too deep) - skip
                         continue
 
-                    # Skip if targeting specific assistant and this isn't it
+                    # Skip if targeting specific workflow and this isn't it
                     if target_name and name != target_name:
                         continue
 
-                    # Parse assistant file using frontmatter format
-                    sections = parse_assistant_file(file_path, f"{vault}/{name}")
+                    # Parse workflow file using frontmatter format
+                    sections = parse_workflow_file(file_path, f"{vault}/{name}")
 
                     # Extract configuration from frontmatter
                     raw_config = sections.get('__FRONTMATTER_CONFIG__', {})
@@ -281,24 +266,23 @@ class AssistantLoader:
                     # Validate configuration from template/user file
                     validated_config = validate_config(raw_config, vault, name)
 
-                    # Create Assistant object with parsed objects (not strings)
-                    assistant = load_assistant_from_file(file_path, vault, name, validated_config)
+                    workflow = load_workflow_from_file(file_path, vault, name, validated_config)
 
                     # Check for global ID conflicts
-                    if assistant.global_id in global_ids:
-                        raise ValueError(f"Duplicate assistant global ID: {assistant.global_id}")
-                    global_ids.add(assistant.global_id)
+                    if workflow.global_id in global_ids:
+                        raise ValueError(f"Duplicate workflow global ID: {workflow.global_id}")
+                    global_ids.add(workflow.global_id)
 
-                    assistants.append(assistant)
+                    workflows.append(workflow)
 
                     # Add to vault cache
-                    vault_info[vault]['assistants'].append(assistant.name)
+                    vault_info[vault]['workflows'].append(workflow.name)
 
                 except Exception as e:
                     # Create configuration error record
                     config_error = ConfigurationError(
                         vault=vault,
-                        assistant_name=name if 'name' in locals() else None,
+                        workflow_name=name if 'name' in locals() else None,
                         file_path=file_path,
                         error_message=str(e),
                         error_type=type(e).__name__,
@@ -308,7 +292,7 @@ class AssistantLoader:
 
                     vault_identifier = f"{vault}/{name}" if 'name' in locals() else vault
                     logger.activity(
-                        f"Failed to load assistant file {file_path}: {str(e)}",
+                        f"Failed to load workflow file {file_path}: {str(e)}",
                         vault=vault_identifier,
                         level="error",
                         metadata={
@@ -321,28 +305,25 @@ class AssistantLoader:
 
         # Handle different modes of operation
         if target_global_id:
-            # Single assistant mode - validate we found the target
-            if not assistants:
-                raise ValueError(f"Target assistant '{target_global_id}' not found")
+            if not workflows:
+                raise ValueError(f"Target workflow '{target_global_id}' not found")
 
-            # Update the specific assistant in the cache
-            target_assistant = assistants[0]
+            target_workflow = workflows[0]
 
-            # Remove old version from cache if it exists
-            self._assistants = [assistant for assistant in self._assistants if assistant.global_id != target_global_id]
-            self._assistants.append(target_assistant)
+            self._workflows = [workflow for workflow in self._workflows if workflow.global_id != target_global_id]
+            self._workflows.append(target_workflow)
 
-            return assistants
+            return workflows
         else:
             # Full reload mode - replace entire cache
-            self._assistants = assistants
+            self._workflows = workflows
             self._vault_info = vault_info
             self._last_loaded = datetime.now()
-            return assistants
+            return workflows
 
-    def get_enabled_assistants(self) -> List[Assistant]:
-        """Get only enabled assistant configurations."""
-        return [assistant for assistant in self._assistants if assistant.enabled]
+    def get_enabled_workflows(self) -> List[WorkflowDefinition]:
+        """Get only enabled workflow configurations."""
+        return [workflow for workflow in self._workflows if workflow.enabled]
 
     def get_configuration_errors(self) -> List[ConfigurationError]:
         """Get list of configuration errors encountered during loading."""
@@ -352,18 +333,18 @@ class AssistantLoader:
         """Get cached vault discovery data."""
         return self._vault_info.copy()
 
-    def get_assistant_by_global_id(self, global_id: str) -> Optional[Assistant]:
-        """Get assistant configuration by global ID (vault/name format)."""
-        for assistant in self._assistants:
-            if assistant.global_id == global_id:
-                return assistant
+    def get_workflow_by_global_id(self, global_id: str) -> Optional[WorkflowDefinition]:
+        """Get workflow configuration by global ID (vault/name format)."""
+        for workflow in self._workflows:
+            if workflow.global_id == global_id:
+                return workflow
         return None
 
-    async def ensure_assistant_directories(self, assistant: Assistant):
-        """Ensure that the assistant's directories exist."""
-        assistants_dir = os.path.dirname(assistant.file_path)
-        os.makedirs(assistants_dir, exist_ok=True)
+    async def ensure_workflow_directories(self, workflow: WorkflowDefinition):
+        """Ensure that the workflow's directories exist."""
+        workflows_dir = os.path.dirname(workflow.file_path)
+        os.makedirs(workflows_dir, exist_ok=True)
 
 
-# Note: AssistantLoader instances should be created through RuntimeContext.
+# Note: WorkflowLoader instances should be created through RuntimeContext.
 # Direct instantiation is discouraged to maintain proper dependency injection.

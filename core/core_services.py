@@ -11,17 +11,21 @@ from datetime import datetime
 from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
 
-from core.constants import CONTAINER_DATA_ROOT
+from core.constants import (
+    CONTAINER_DATA_ROOT,
+    ASSISTANTMD_ROOT_DIR,
+    WORKFLOW_DEFINITIONS_DIR,
+)
 from core.runtime.state import get_runtime_context
-from core.assistant.parser import (
-    parse_assistant_file,
+from core.workflow.parser import (
+    parse_workflow_file,
     get_workflow_sections,
     process_step_content,
 )
 from core.llm.agents import generate_response, create_agent
 from core.directives.registry import register_directive
 from core.directives.base import DirectiveProcessor
-from core.directives.file_state import AssistantFileStateManager
+from core.directives.file_state import WorkflowFileStateManager
 
 
 @dataclass
@@ -34,14 +38,14 @@ class CoreServices:
     the global_id, eliminating the need for complex parameter construction.
     
     Attributes:
-        global_id: Assistant identifier (format: 'vault/name') 
+        global_id: Workflow identifier (format: 'vault/name') 
         _data_root: Root path for all vault data (defaults to CONTAINER_DATA_ROOT)
         
     Computed Properties (resolved automatically):
         vault_name: Name of the vault (e.g., 'HaikuVault')
-        assistant_file_path: Path to the assistant markdown file
+        workflow_file_path: Path to the workflow markdown file
         week_start_day: Week start day number (0=Monday, 6=Sunday)
-        assistant_id: Assistant identifier (same as global_id)
+        workflow_id: Workflow identifier (same as global_id)
         vault_path: Full path to the vault directory
     """
     
@@ -50,9 +54,9 @@ class CoreServices:
     
     # Computed properties (resolved in __post_init__)
     vault_name: str = field(init=False)
-    assistant_file_path: str = field(init=False)
+    workflow_file_path: str = field(init=False)
     week_start_day: int = field(init=False)
-    assistant_id: str = field(init=False)
+    workflow_id: str = field(init=False)
     vault_path: str = field(init=False)
     
     def __post_init__(self):
@@ -62,48 +66,53 @@ class CoreServices:
             raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {self.global_id}")
         
         # Parse global_id
-        vault_name, assistant_name = self.global_id.split('/', 1)
+        vault_name, workflow_name = self.global_id.split('/', 1)
         self.vault_name = vault_name
-        self.assistant_id = self.global_id
+        self.workflow_id = self.global_id
         
         # Construct paths
         self.vault_path = os.path.join(self._data_root, vault_name)
-        self.assistant_file_path = os.path.join(self.vault_path, "assistants", f"{assistant_name}.md")
+        self.workflow_file_path = os.path.join(
+            self.vault_path,
+            ASSISTANTMD_ROOT_DIR,
+            WORKFLOW_DEFINITIONS_DIR,
+            f"{workflow_name}.md"
+        )
         
-        # Resolve week_start_day from assistant config
+        # Resolve week_start_day from workflow config
         self.week_start_day = self._resolve_week_start_day()
         
         # Initialize state manager
-        self._state_manager = AssistantFileStateManager(self.vault_name, self.assistant_id)
+        self._state_manager = WorkflowFileStateManager(self.vault_name, self.workflow_id)
     
     def _resolve_week_start_day(self) -> int:
-        """Resolve week_start_day from runtime context assistant_loader."""
+        """Resolve week_start_day from runtime context workflow_loader."""
         runtime = get_runtime_context()
-        assistant = runtime.assistant_loader.get_assistant_by_global_id(self.global_id)
-        if assistant:
-            return assistant.week_start_day_number
+        workflow = runtime.workflow_loader.get_workflow_by_global_id(self.global_id)
+        if workflow:
+            return workflow.week_start_day_number
 
-        # If assistant not found, default to Monday
+        # If workflow not found, default to Monday
         return 1
     
-    def get_assistant_sections(self) -> Dict[str, str]:
+    def get_workflow_sections(self) -> Dict[str, str]:
         """
-        Load and parse assistant file sections.
+        Load and parse workflow file sections.
         
-        Parses the assistant markdown file and returns all workflow sections
+        Parses the workflow markdown file and returns all workflow sections
         (excluding reserved sections like INSTRUCTIONS and __FRONTMATTER_CONFIG__).
         
         Returns:
             Dictionary mapping section names to content
             
         Raises:
-            ValueError: If assistant file cannot be parsed
-            FileNotFoundError: If assistant file does not exist
+            ValueError: If workflow file cannot be parsed
+            FileNotFoundError: If workflow file does not exist
         """
-        if not os.path.exists(self.assistant_file_path):
-            raise FileNotFoundError(f"Assistant file not found: {self.assistant_file_path}")
+        if not os.path.exists(self.workflow_file_path):
+            raise FileNotFoundError(f"Workflow file not found: {self.workflow_file_path}")
         
-        sections = parse_assistant_file(self.assistant_file_path)
+        sections = parse_workflow_file(self.workflow_file_path)
         return get_workflow_sections(sections)
     
     def process_step(self, content: str, reference_date: Optional[datetime] = None, **context) -> Any:
@@ -203,13 +212,13 @@ class CoreServices:
         """
         return os.path.join(self.vault_path, path)
     
-    def get_state_manager(self) -> AssistantFileStateManager:
+    def get_state_manager(self) -> WorkflowFileStateManager:
         """
         Get the file state manager for this workflow execution.
         
         Provides access to state tracking for stateful directives like {pending}.
         
         Returns:
-            AssistantFileStateManager instance for this vault and assistant
+            WorkflowFileStateManager instance for this vault and workflow
         """
         return self._state_manager

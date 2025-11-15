@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict
 
 from core.logger import UnifiedLogger
+from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR, CHAT_SESSIONS_DIR, WORKFLOW_LOGS_DIR
 
 
 class VaultManager:
@@ -30,7 +31,12 @@ class VaultManager:
         vault_path.mkdir(parents=True, exist_ok=True)
         
         # Create basic directory structure
-        (vault_path / "assistants").mkdir(exist_ok=True)
+        workflows_dir = vault_path / ASSISTANTMD_ROOT_DIR / WORKFLOW_DEFINITIONS_DIR
+        chat_sessions_dir = vault_path / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
+        logs_dir = vault_path / ASSISTANTMD_ROOT_DIR / WORKFLOW_LOGS_DIR
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        chat_sessions_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
         
         self.created_vaults[name] = vault_path
         return vault_path
@@ -39,9 +45,9 @@ class VaultManager:
         """Copy files/directories from source to vault.
 
         Args:
-            source_path: Path relative to /app root (e.g., 'workflows/step/templates/vault')
+            source_path: Path relative to /app root (e.g., 'workflow_engines/step/templates/vault')
             vault: Target vault (must be a vault created by this manager)
-            dest_dir: Optional subdirectory within vault (e.g., 'assistants')
+            dest_dir: Optional subdirectory within vault (e.g., 'AssistantMD/Workflows')
             dest_filename: Optional filename to rename single file (allows overwriting)
         """
         # Security: Ensure vault is one we created
@@ -78,7 +84,7 @@ class VaultManager:
         
         Args:
             vault: Target vault (must be a vault created by this manager)
-            file_path: Path within vault (e.g., 'assistants/my_assistant.md')
+            file_path: Path within vault (e.g., 'AssistantMD/Workflows/my_workflow.md')
             content: File content (can be large block of text)
         """
         # Security: Ensure vault is one we created

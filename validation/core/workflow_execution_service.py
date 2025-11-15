@@ -25,7 +25,7 @@ VaultPath = Path
 
 
 class WorkflowResult:
-    """Result from assistant workflow execution."""
+    """Result from workflow execution."""
     def __init__(self, status: str, created_files: List[str] = None, 
                  error_message: str = None, logs: List[str] = None):
         self.status = status
@@ -50,7 +50,7 @@ class WorkflowExecutionService:
         self.test_vaults_path = test_vaults_path
         self.logger = UnifiedLogger(tag="workflow-execution-service")
     
-    async def run_workflow(self, vault: VaultPath, assistant_name: str, 
+    async def run_workflow(self, vault: VaultPath, workflow_name: str, 
                           step_name: str = None, week_start_day: int = 1, 
                           test_date: Optional[Any] = None) -> WorkflowResult:
         """
@@ -58,7 +58,7 @@ class WorkflowExecutionService:
         
         Args:
             vault: Test vault path (within test_vaults)
-            assistant_name: Name of assistant to execute
+            workflow_name: Name of workflow to execute
             step_name: Optional specific step to run
             week_start_day: Week start day (0=Monday, 6=Sunday), default Monday
             test_date: Optional datetime to override system date for testing
@@ -67,27 +67,26 @@ class WorkflowExecutionService:
             WorkflowResult with execution status and created files
         """
         vault_name = vault.name
-        global_id = f"{vault_name}/{assistant_name}"
-        assistant_file_path = vault / "assistants" / f"{assistant_name}.md"
-        
-        # Validate assistant file exists
-        if not assistant_file_path.exists():
+        global_id = f"{vault_name}/{workflow_name}"
+        workflow_file_path = vault / "AssistantMD" / "Workflows" / f"{workflow_name}.md"
+
+        if not workflow_file_path.exists():
             return WorkflowResult(
                 status="error",
-                error_message=f"Assistant file not found: {assistant_file_path}"
+                error_message=f"Workflow file not found: {workflow_file_path}"
             )
         
         try:
             # Execute workflow in isolated environment
             with self._create_isolated_environment(test_date):
 
-                # Get workflow function from runtime context assistant_loader
+                # Get workflow function from runtime context workflow_loader
                 runtime = get_runtime_context()
-                assistant = runtime.assistant_loader.get_assistant_by_global_id(global_id)
-                if not assistant:
-                    raise ValueError(f"Assistant {global_id} not found in assistant_loader")
+                workflow_def = runtime.workflow_loader.get_workflow_by_global_id(global_id)
+                if not workflow_def:
+                    raise ValueError(f"Workflow {global_id} not found in workflow_loader")
 
-                workflow_function = assistant.workflow_function
+                workflow_function = workflow_def.workflow_function
 
                 # Record files before execution
                 files_before = self._get_vault_files(vault)
@@ -113,7 +112,7 @@ class WorkflowExecutionService:
         except Exception as e:
             self.logger.error(f"Workflow execution failed: {str(e)}", 
                             vault=vault_name, 
-                            assistant=assistant_name,
+                            workflow=workflow_name,
                             error_type=type(e).__name__)
             
             return WorkflowResult(
@@ -147,7 +146,7 @@ class WorkflowExecutionService:
 
                 # Apply datetime mocking if test_date provided
                 if test_date:
-                    with patch('workflows.step.workflow.datetime') as mock_datetime:
+                    with patch('workflow_engines.step.workflow.datetime') as mock_datetime:
                         mock_datetime.today.return_value = test_date
                         mock_datetime.strftime = test_date.strftime
 
@@ -187,7 +186,7 @@ class WorkflowExecutionService:
     def validate_workflow_available(self, workflow_name: str = "step") -> bool:
         """Validate that the specified workflow module is available."""
         try:
-            workflow_module = importlib.import_module(f"workflows.{workflow_name}.workflow")
+            workflow_module = importlib.import_module(f"workflow_engines.{workflow_name}.workflow")
             workflow_function = getattr(workflow_module, 'run_workflow')
             return callable(workflow_function)
         except (ImportError, AttributeError):
@@ -195,7 +194,7 @@ class WorkflowExecutionService:
     
     def get_available_workflows(self) -> List[str]:
         """Get list of available workflow modules."""
-        workflows_path = Path(__file__).parent.parent.parent / "workflows"
+        workflows_path = Path(__file__).parent.parent.parent / "workflow_engines"
         available = []
         
         if workflows_path.exists():

@@ -33,30 +33,9 @@ Artifacts saved under validation/runs/<timestamp>_<scenario>
 3. Import `BaseScenario` from `validation.core.base_scenario`.
 4. Implement `async def test_scenario(self)` using high-level helpers.
 
-Minimal example:
+See `validation/scenarios/integration/basic_haiku.py` for a minimal example.
 
-```python
-from validation.core.base_scenario import BaseScenario
-
-class TestWeeklyPlanning(BaseScenario):
-    async def test_scenario(self):
-        vault = self.create_vault("Planning")
-        self.copy_files("validation/templates/assistants/daily_planner.md", vault, "assistants")
-
-        await self.start_system()
-        self.expect_vault_discovered("Planning")
-
-        self.set_date("2025-01-06")
-        await self.trigger_job(vault, "daily_planner")
-
-        self.expect_file_created(vault, "2025-01-06.md")
-        await self.stop_system()
-        self.teardown_scenario()
-```
-
-Scenarios can call `await self.start_system()` multiple times, interact with the
-chat UI (`start_chat_session`, `send_chat_message`), or exercise REST/CLI
-surfaces via `call_api` and `launcher_command`.
+Scenarios can call `await self.start_system()` multiple times, interact with the chat UI (`start_chat_session`, `send_chat_message`), or exercise REST/CLI surfaces via `call_api` and `launcher_command`.
 
 ## BaseScenario Surface
 
@@ -65,8 +44,8 @@ surfaces via `call_api` and `launcher_command`.
 | Vault setup | `create_vault`, `copy_files`, `create_file` |
 | Time & pattern control | `set_date`, `advance_time`, `trigger_job`, `wait_for_real_execution` |
 | System lifecycle | `start_system`, `stop_system`, `restart_system`, `trigger_vault_rescan` |
-| Workflow execution | `run_assistant`, `expect_scheduled_execution_success`, `get_job_executions` |
-| Assertions | `expect_file_created`, `expect_file_contains`, `expect_vault_discovered`, `expect_assistant_loaded`, `expect_scheduler_job_created`, etc. |
+| Workflow execution | `run_workflow`, `expect_scheduled_execution_success`, `get_job_executions` |
+| Assertions | `expect_file_created`, `expect_file_contains`, `expect_vault_discovered`, `expect_workflow_loaded`, `expect_scheduler_job_created`, etc. |
 | Chat and API | `run_chat_prompt`, `clear_chat_session`, `call_api`, `launcher_command` |
 | Evidence & teardown | `timeline_file`, `system_interactions_file`, `critical_errors_file`, `teardown_scenario()` |
 
@@ -104,8 +83,8 @@ control flow decisions stay inside production code.
   to confirm workflow wiring.
 - `set_date()` (and `advance_time()`) only change how patterns such as `{today}`
   resolve; they do **not** advance APScheduler’s clock. To execute a scheduled
-  run immediately, call `trigger_job` or `wait_for_real_execution`.
-- `validation/templates/assistants/` and `validation/templates/files/` provide
+  workflow immediately, call `trigger_job` or `wait_for_real_execution`.
+- `validation/templates/AssistantMD/Workflows/` and `validation/templates/files/` provide
   reusable fixtures so scenarios stay concise.
 - `call_api("/api/...")` uses FastAPI's `TestClient` under the hood, letting you
   exercise REST endpoints without running uvicorn; requests reuse the same
@@ -114,14 +93,18 @@ control flow decisions stay inside production code.
 ## Running Scenarios
 
 ```bash
-# Run specific scenarios
-python validation/run_validation.py run weekly_planning,basic_haiku
+# List available scenarios with descriptions
+python validation/run_validation.py list
+
+# Run specific scenario(s)
+python validation/run_validation.py run integration/basic_haiku
+python validation/run_validation.py run integration/basic_haiku, integration/tool_suite
+
+# Run all scenarios in a folder
+python validation/run_validation.py run integration
 
 # Filter by name pattern
 python validation/run_validation.py run --pattern planner
-
-# List available scenarios with descriptions
-python validation/run_validation.py list
 ```
 
 The CLI prints pass/fail summaries, points you to the evidence directory, and

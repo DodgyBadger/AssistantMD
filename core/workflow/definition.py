@@ -1,8 +1,7 @@
 """
-New Assistant class with fully parsed objects instead of raw strings.
+WorkflowDefinition captures parsed workflow metadata for scheduling and execution.
 
-This replaces AssistantConfig to eliminate duplicate parsing and enable
-efficient job comparison for persistent job store functionality.
+This replaces the older AssistantConfig naming to better align with documentation.
 """
 
 import os
@@ -15,8 +14,8 @@ from core.constants import CONTAINER_DATA_ROOT
 
 
 @dataclass
-class Assistant:
-    """Assistant configuration with fully parsed and validated objects."""
+class WorkflowDefinition:
+    """Workflow configuration with fully parsed and validated objects."""
     vault: str
     name: str
     file_path: str
@@ -52,6 +51,5 @@ class Assistant:
             'friday': 4, 'saturday': 5, 'sunday': 6
         }
         return day_mapping[self.week_start_day]
-
 
 

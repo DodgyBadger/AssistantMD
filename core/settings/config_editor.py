@@ -100,7 +100,7 @@ def upsert_model_mapping(
     Create or update a model mapping entry.
 
     Args:
-        name: Model alias (lowercase string used by assistants)
+        name: Model alias (lowercase string used by workflows)
         provider: Provider name the model depends on
         model_string: Provider-specific model identifier
         description: Optional human-readable description

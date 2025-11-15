@@ -1,5 +1,5 @@
 """
-File operations tool for chat-driven assistants.
+File operations tool for chat-driven workflows.
 
 Provides secure file management capabilities within vault boundaries.
 """

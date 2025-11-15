@@ -1,5 +1,5 @@
 """
-Daily Task Assistant scenario - tests multi-step workflow with input files.
+Daily Task Workflow scenario - tests multi-step execution with input files.
 
 Tests complex workflow with multiple steps, input file dependencies, and time-based execution.
 """
@@ -15,17 +15,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class DailyTaskAssistantScenario(BaseScenario):
-    """Test daily task assistant with multi-step workflow and input files."""
+class DailyTaskWorkflowScenario(BaseScenario):
+    """Test daily task workflow with multi-step execution and input files."""
     
     async def test_scenario(self):
-        """Execute complete daily task assistant workflow across a full week."""
+        """Execute complete daily task workflow across a full week."""
         
         # === SETUP ===
         vault = self.create_vault("TaskVault")
         
-        # Copy the daily-task-assistant and task-list from validation templates
-        self.copy_files("validation/templates/assistants/daily-task-assistant.md", vault, "assistants")
+        # Copy the daily-task workflow and task-list from validation templates
+        self.copy_files("validation/templates/AssistantMD/Workflows/daily-task-workflow.md", vault, "AssistantMD/Workflows")
         self.copy_files("validation/templates/files/task-list.md", vault)
         
         # === SYSTEM STARTUP VALIDATION ===
@@ -33,8 +33,8 @@ class DailyTaskAssistantScenario(BaseScenario):
         
         # Validate system startup
         self.expect_vault_discovered("TaskVault")
-        self.expect_assistant_loaded("TaskVault", "daily-task-assistant")
-        self.expect_scheduler_job_created("TaskVault/daily-task-assistant")
+        self.expect_workflow_loaded("TaskVault", "daily-task-workflow")
+        self.expect_scheduler_job_created("TaskVault/daily-task-workflow")
         
         # === DAILY TASK EXECUTION (Monday through Thursday) ===
         weekdays = [
@@ -48,10 +48,10 @@ class DailyTaskAssistantScenario(BaseScenario):
             self.set_date(date)
 
             # Trigger the daily task step
-            await self.trigger_job(vault, "daily-task-assistant")
+            await self.trigger_job(vault, "daily-task-workflow")
 
             # Verify daily execution succeeded
-            self.expect_scheduled_execution_success(vault, "daily-task-assistant")
+            self.expect_scheduled_execution_success(vault, "daily-task-workflow")
 
         # === VERIFY WRITE-MODE NEW CREATED NUMBERED FILES ===
         # The DAILY_TASKS step uses @write-mode new, so each run should create a numbered file
@@ -66,10 +66,10 @@ class DailyTaskAssistantScenario(BaseScenario):
         self.set_date("2025-01-17")  # Friday
 
         # Trigger the weekly summary step
-        await self.trigger_job(vault, "daily-task-assistant")
+        await self.trigger_job(vault, "daily-task-workflow")
 
         # === ASSERTIONS FOR WEEKLY SUMMARY ===
-        self.expect_scheduled_execution_success(vault, "daily-task-assistant")
+        self.expect_scheduled_execution_success(vault, "daily-task-workflow")
 
         self.expect_file_created(vault, "summary-2025-01-13.md")
         
