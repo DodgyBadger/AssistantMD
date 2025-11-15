@@ -161,12 +161,12 @@ class BaseScenario(ABC):
         self._log_timeline("Restarting AssistantMD system")
         await self._get_system_controller().restart_system()
     
-    # === ASSISTANT & WORKFLOW EXECUTION ===
+    # === WORKFLOW EXECUTION ===
     
-    async def run_assistant(self, vault: VaultPath, assistant_name: str, 
+    async def run_workflow(self, vault: VaultPath, workflow_name: str, 
                            step_name: str = None) -> WorkflowResult:
-        """Manually trigger assistant execution with real workflow processing."""
-        self._log_timeline(f"Running assistant: {assistant_name} in vault {vault.name}")
+        """Manually trigger workflow execution with real step processing."""
+        self._log_timeline(f"Running workflow: {workflow_name} in vault {vault.name}")
         
         workflow_service = self._get_workflow_service()
         
@@ -175,15 +175,15 @@ class BaseScenario(ABC):
         if self._time_controller and self._time_controller.current_test_date:
             test_date = self._time_controller.current_test_date
         
-        result = await workflow_service.run_workflow(vault, assistant_name, step_name, test_date=test_date)
+        result = await workflow_service.run_workflow(vault, workflow_name, step_name, test_date=test_date)
         
         # Log result details to timeline
         if result.status == "completed":
-            self._log_timeline(f"✅ Assistant completed successfully. Created {len(result.created_files)} files")
+            self._log_timeline(f"✅ Workflow completed successfully. Created {len(result.created_files)} files")
             for file_path in result.created_files:
                 self._log_timeline(f"   📄 Created: {file_path}")
         else:
-            self._log_timeline(f"❌ Assistant failed: {result.error_message}")
+            self._log_timeline(f"❌ Workflow failed: {result.error_message}")
         
         return result
 
@@ -253,7 +253,7 @@ class BaseScenario(ABC):
         return self._get_system_controller().get_job_executions(global_id)
     
     async def trigger_vault_rescan(self):
-        """Force system to rescan for new vaults/assistants."""
+        """Force system to rescan for new vaults/workflows."""
         self._log_timeline("Triggering vault rescan")
         await self._get_system_controller().trigger_vault_rescan()
     
@@ -263,9 +263,9 @@ class BaseScenario(ABC):
         """Get vaults discovered during system startup."""
         return self._get_system_controller().get_discovered_vaults()
     
-    def get_loaded_assistants(self):
-        """Get assistant configurations loaded during startup."""
-        return self._get_system_controller().get_loaded_assistants()
+    def get_loaded_workflows(self):
+        """Get workflow configurations loaded during startup."""
+        return self._get_system_controller().get_loaded_workflows()
     
     def get_scheduler_jobs(self):
         """Get APScheduler job objects created during startup."""
@@ -356,7 +356,7 @@ class BaseScenario(ABC):
 
     def expect_chat_history_exists(self, vault: VaultPath, session_id: str):
         """Assert chat transcript exists for the session."""
-        history_path = vault / "assistants" / "_chat-sessions" / f"{session_id}.md"
+        history_path = vault / "AssistantMD" / "Chat_Sessions" / f"{session_id}.md"
         self._log_timeline(f"Checking chat history exists: session={session_id}")
 
         if not history_path.exists():
@@ -374,7 +374,7 @@ class BaseScenario(ABC):
         keywords: Sequence[str],
     ):
         """Assert chat transcript contains each keyword snippet."""
-        history_path = vault / "assistants" / "_chat-sessions" / f"{session_id}.md"
+        history_path = vault / "AssistantMD" / "Chat_Sessions" / f"{session_id}.md"
         self._log_timeline(
             f"Checking chat history contents: session={session_id}, keywords={list(keywords)}"
         )
@@ -399,7 +399,7 @@ class BaseScenario(ABC):
 
     def expect_log_contains(self, vault: VaultPath, assistant_name: str, message: str):
         """Assert assistant log contains message."""
-        log_file = vault / f"assistants/logs/{assistant_name}.md"
+        log_file = vault / "AssistantMD" / "Logs" / f"{assistant_name}.md"
         self._log_timeline(f"Checking log contains: {message}")
         
         try:
@@ -483,23 +483,23 @@ class BaseScenario(ABC):
             self._capture_critical_error(e, f"vault_discovery_check: {vault_name}")
             raise
     
-    def expect_assistant_loaded(self, vault_name: str, assistant_name: str):
-        """Assert assistant file was parsed successfully."""
-        self._log_timeline(f"Checking assistant loaded: {vault_name}/{assistant_name}")
+    def expect_workflow_loaded(self, vault_name: str, workflow_name: str):
+        """Assert workflow file was parsed successfully."""
+        self._log_timeline(f"Checking workflow loaded: {vault_name}/{workflow_name}")
         
         try:
-            loaded_assistants = self.get_loaded_assistants()
-            global_id = f"{vault_name}/{assistant_name}"
+            loaded_workflows = self.get_loaded_workflows()
+            global_id = f"{vault_name}/{workflow_name}"
             
-            assistant_found = any(config.global_id == global_id for config in loaded_assistants)
-            assert assistant_found, f"Assistant {global_id} not loaded. Found: {[c.global_id for c in loaded_assistants]}"
+            workflow_found = any(config.global_id == global_id for config in loaded_workflows)
+            assert workflow_found, f"Workflow {global_id} not loaded. Found: {[c.global_id for c in loaded_workflows]}"
             
-            self._log_timeline(f"✅ Assistant loaded: {global_id}")
+            self._log_timeline(f"✅ Workflow loaded: {global_id}")
         except AssertionError as e:
-            self._log_timeline(f"❌ Assistant loading failed: {vault_name}/{assistant_name} - {str(e)}")
+            self._log_timeline(f"❌ Workflow loading failed: {vault_name}/{workflow_name} - {str(e)}")
             raise
         except Exception as e:
-            self._capture_critical_error(e, f"assistant_loading_check: {vault_name}/{assistant_name}")
+            self._capture_critical_error(e, f"workflow_loading_check: {vault_name}/{workflow_name}")
             raise
     
     def expect_scheduler_job_created(self, global_id: str):
@@ -545,9 +545,9 @@ class BaseScenario(ABC):
             self._capture_critical_error(e, f"schedule_parsing_check: {global_id}")
             raise
     
-    def expect_configuration_error(self, vault_name: str, assistant_name: str, error_type: str):
+    def expect_configuration_error(self, vault_name: str, workflow_name: str, error_type: str):
         """Assert configuration error was properly detected and logged."""
-        self._log_timeline(f"Checking configuration error detected: {vault_name}/{assistant_name} ({error_type})")
+        self._log_timeline(f"Checking configuration error detected: {vault_name}/{workflow_name} ({error_type})")
         
         try:
             startup_errors = self.get_startup_errors()
@@ -555,19 +555,19 @@ class BaseScenario(ABC):
             matching_error = None
             for error in startup_errors:
                 if (error.vault == vault_name and 
-                    error.assistant_name == assistant_name and 
+                    error.workflow_name == workflow_name and 
                     error_type.lower() in error.error_type.lower()):
                     matching_error = error
                     break
             
-            assert matching_error is not None, f"Expected {error_type} error for {vault_name}/{assistant_name} not found. Found errors: {[(e.vault, e.assistant_name, e.error_type) for e in startup_errors]}"
+            assert matching_error is not None, f"Expected {error_type} error for {vault_name}/{workflow_name} not found. Found errors: {[(e.vault, e.workflow_name, e.error_type) for e in startup_errors]}"
             
             self._log_timeline(f"✅ Configuration error detected: {matching_error.error_message}")
         except AssertionError as e:
-            self._log_timeline(f"❌ Configuration error detection failed: {vault_name}/{assistant_name} - {str(e)}")
+            self._log_timeline(f"❌ Configuration error detection failed: {vault_name}/{workflow_name} - {str(e)}")
             raise
         except Exception as e:
-            self._capture_critical_error(e, f"configuration_error_check: {vault_name}/{assistant_name}")
+            self._capture_critical_error(e, f"configuration_error_check: {vault_name}/{workflow_name}")
             raise
     
     def expect_scheduled_execution_success(self, vault: VaultPath, assistant_name: str, timeout: int = 30):

@@ -19,7 +19,12 @@ from pydantic_ai import (
 
 from core.llm.agents import create_agent
 from core.llm.session_manager import SessionManager
-from core.constants import ASSISTANT_CREATION_INSTRUCTIONS, REGULAR_CHAT_INSTRUCTIONS
+from core.constants import (
+    WORKFLOW_CREATION_INSTRUCTIONS,
+    REGULAR_CHAT_INSTRUCTIONS,
+    ASSISTANTMD_ROOT_DIR,
+    CHAT_SESSIONS_DIR,
+)
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
 from core.logger import UnifiedLogger
@@ -84,9 +89,9 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
     """
     Append chat exchange to history file.
 
-    Saves to {vault_path}/assistants/_chat-sessions/{session_id}.md
+    Saves to {vault_path}/AssistantMD/Chat_Sessions/{session_id}.md
     """
-    sessions_dir = Path(vault_path) / "assistants" / "_chat-sessions"
+    sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
     history_file = sessions_dir / f"{session_id}.md"
@@ -121,8 +126,8 @@ def _prepare_agent_config(
         Tuple of (final_instructions, model_instance, tool_functions)
     """
     # Select base instructions by session type
-    if session_type == "assistant_creation":
-        base_instructions = ASSISTANT_CREATION_INSTRUCTIONS
+    if session_type == "workflow_creation":
+        base_instructions = WORKFLOW_CREATION_INSTRUCTIONS
     elif instructions:
         base_instructions = instructions  # Custom instructions override
     else:
@@ -178,7 +183,7 @@ async def execute_chat_prompt(
         use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular" or "assistant_creation")
+        session_type: Chat mode ("regular" or "workflow_creation")
 
     Returns:
         ChatExecutionResult with response and session metadata
@@ -245,7 +250,7 @@ async def execute_chat_prompt_stream(
         use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular" or "assistant_creation")
+        session_type: Chat mode ("regular" or "workflow_creation")
 
     Yields:
         SSE-formatted chunks in OpenAI-compatible format

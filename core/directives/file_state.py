@@ -1,7 +1,7 @@
 """
 File processing state management for {pending} patterns.
 
-Tracks which files have been processed by assistants to support incremental processing.
+Tracks which files have been processed by workflows to support incremental processing.
 """
 
 import hashlib
@@ -41,29 +41,29 @@ class ProcessedFile(Base):
     __tablename__ = "processed_files"
 
     vault_name = Column(String, primary_key=True, nullable=False)
-    assistant_id = Column(String, primary_key=True, nullable=False)
+    workflow_id = Column("assistant_id", String, primary_key=True, nullable=False)
     pattern = Column(String, primary_key=True, nullable=False)
     content_hash = Column(String, primary_key=True, nullable=False)  # SHA256 hash for comparison
     filepath = Column(String, nullable=False)  # Human-readable path for debugging
     processed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
-class AssistantFileStateManager:
-    """Manages persistent state for assistant file processing.
+class WorkflowFileStateManager:
+    """Manages persistent state for workflow file processing.
 
     Uses a single system database to track which files have been
-    processed by each assistant for each @input-file pattern across all vaults.
+    processed by each workflow for each @input-file pattern across all vaults.
     """
 
-    def __init__(self, vault_name: str, assistant_id: str):
-        """Initialize state manager for a specific vault and assistant.
+    def __init__(self, vault_name: str, workflow_id: str):
+        """Initialize state manager for a specific vault and workflow.
 
         Args:
             vault_name: Name of the vault (not full path)
-            assistant_id: Assistant identifier (typically vault/name format)
+            workflow_id: Workflow identifier (typically vault/name format)
         """
         self.vault_name = vault_name
-        self.assistant_id = assistant_id
+        self.workflow_id = workflow_id
 
         # Create SQLAlchemy engine and session factory for file_state database
         self.engine = create_engine_from_system_db("file_state")
@@ -87,7 +87,7 @@ class AssistantFileStateManager:
         with self.SessionFactory() as session:
             results = session.query(ProcessedFile.content_hash).filter(
                 ProcessedFile.vault_name == self.vault_name,
-                ProcessedFile.assistant_id == self.assistant_id,
+                ProcessedFile.workflow_id == self.workflow_id,
                 ProcessedFile.pattern == pattern
             ).all()
 
@@ -108,7 +108,7 @@ class AssistantFileStateManager:
                 # Use merge for INSERT OR REPLACE behavior
                 processed_file = ProcessedFile(
                     vault_name=self.vault_name,
-                    assistant_id=self.assistant_id,
+                    workflow_id=self.workflow_id,
                     pattern=pattern,
                     content_hash=record['content_hash'],
                     filepath=record['filepath'],

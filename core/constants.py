@@ -20,6 +20,12 @@ DOCS_ROOT = os.getenv('DOCS_ROOT', '/app/docs')
 # File to mark directories as excluded from vault discovery
 VAULT_IGNORE_FILE = '.vaultignore'
 
+# Vault subdirectory structure
+ASSISTANTMD_ROOT_DIR = "AssistantMD"
+WORKFLOW_DEFINITIONS_DIR = "Workflows"
+CHAT_SESSIONS_DIR = "Chat_Sessions"
+WORKFLOW_LOGS_DIR = "Logs"
+
 # Assistant timeout validation bounds
 TIMEOUT_MIN = 30        # Minimum timeout in seconds
 TIMEOUT_MAX = 3600      # Maximum timeout in seconds (1 hour)
@@ -79,7 +85,7 @@ You are a conversation summarizer. Provide ONLY the summary, no preamble or expl
 """
 
 # Assistant Creation Prompts
-ASSISTANT_CREATION_SUMMARY_PROMPT = """
+WORKFLOW_CREATION_SUMMARY_PROMPT = """
 Review our conversation and summarize it focusing on:
 - The user's goals and desired outcomes
 - Any workflows, patterns, or automations discussed
@@ -89,7 +95,7 @@ Review our conversation and summarize it focusing on:
 Keep it under 300 words, focusing on what would help design an automated assistant.
 """
 
-ASSISTANT_CREATION_INSTRUCTIONS = """
+WORKFLOW_CREATION_INSTRUCTIONS = """
 You are an expert assistant creator helping the user design a workflow assistant.
 
 IMPORTANT: You need TWO tools to complete this task:

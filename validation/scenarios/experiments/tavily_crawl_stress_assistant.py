@@ -1,5 +1,5 @@
 """
-Tavily Crawl Stress Test Assistant scenario - tests ambitious crawl parameters and error handling.
+Tavily Crawl Stress Test Workflow scenario - tests ambitious crawl parameters and error handling.
 
 This scenario intentionally uses ambitious parameters to stress test the system
 and observe timeout/error behavior without artificial validation timeouts.
@@ -16,36 +16,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class TavilyCrawlStressAssistantScenario(BaseScenario):
+class TavilyCrawlStressWorkflowScenario(BaseScenario):
     """Test Tavily crawl tool with ambitious parameters to observe timeout/error behavior."""
     
     async def test_scenario(self):
-        """Execute stress test crawl assistant workflow."""
+        """Execute stress test crawl workflow."""
 
         # === SETUP ===
         vault = self.create_vault("StressTestVault")
 
-        # Create the stress test crawl assistant
-        self.create_file(vault, "assistants/tavily-crawl-stress-assistant.md", TAVILY_CRAWL_STRESS_ASSISTANT)
+        # Create the stress test crawl workflow
+        self.create_file(vault, "AssistantMD/Workflows/tavily-crawl-stress-workflow.md", TAVILY_CRAWL_STRESS_WORKFLOW)
 
         # === SYSTEM STARTUP VALIDATION ===
         await self.start_system()
 
         # Validate system startup
         self.expect_vault_discovered("StressTestVault")
-        self.expect_assistant_loaded("StressTestVault", "tavily-crawl-stress-assistant")
-        self.expect_scheduler_job_created("StressTestVault/tavily-crawl-stress-assistant")
+        self.expect_workflow_loaded("StressTestVault", "tavily-crawl-stress-workflow")
+        self.expect_scheduler_job_created("StressTestVault/tavily-crawl-stress-workflow")
 
         # === STRESS TEST CRAWL EXECUTION ===
         self.set_date("2025-01-20")  # Monday
 
         # Trigger the ambitious crawl step (no timeout - observe natural behavior)
         self._log_timeline("🚀 Starting stress test crawl with ambitious parameters...")
-        await self.trigger_job(vault, "tavily-crawl-stress-assistant")
+        await self.trigger_job(vault, "tavily-crawl-stress-workflow")
 
         # === ASSERTIONS ===
         # Note: This may legitimately fail due to API timeouts - that's part of what we're testing
-        self.expect_scheduled_execution_success(vault, "tavily-crawl-stress-assistant")
+        self.expect_scheduled_execution_success(vault, "tavily-crawl-stress-workflow")
 
         # Check that research file was created (if job succeeded)
         self.expect_file_created(vault, "research/2025-01-20.md")
@@ -57,17 +57,17 @@ class TavilyCrawlStressAssistantScenario(BaseScenario):
         self.teardown_scenario()
 
 
-# === ASSISTANT TEMPLATES ===
+# === WORKFLOW TEMPLATES ===
 
-TAVILY_CRAWL_STRESS_ASSISTANT = """---
+TAVILY_CRAWL_STRESS_WORKFLOW = """---
 schedule: once: 2030-01-01 09:00
-workflow: step
+workflow_engine: step
 enabled: true
 description: Tavily crawl stress test with ambitious parameters - tests timeout behavior
 ---
 
 ## INSTRUCTIONS
-You are a comprehensive research assistant that uses Tavily's crawl tool to deeply analyze websites. This is a stress test scenario to evaluate timeout and error handling behavior.
+You are a comprehensive research workflow that uses Tavily's crawl tool to deeply analyze websites. This is a stress test scenario to evaluate timeout and error handling behavior.
 
 ## DEEP_ANALYSIS_STEP
 @model gemini-flash

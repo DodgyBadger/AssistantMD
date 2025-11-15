@@ -1,9 +1,9 @@
 """
 Documentation builder scenario.
 
-Exercises the documentation builder assistant to verify an LLM can
-research the docs, generate a fresh assistant, repair a malformed
-assistant, and produce user guidance.
+Exercises the documentation builder workflow to verify an LLM can
+research the docs, generate a fresh workflow, repair a malformed
+workflow, and produce user guidance.
 """
 
 import sys
@@ -16,26 +16,26 @@ from validation.core.base_scenario import BaseScenario
 
 
 class DocumentationBuilderScenario(BaseScenario):
-    """Run the documentation builder assistant end-to-end."""
+    """Run the documentation builder workflow end-to-end."""
 
     async def test_scenario(self):
         """Execute setup → run → verification."""
 
         vault = self.create_vault("DocumentationBuilderVault")
         self.copy_files(
-            "validation/templates/assistants/documentation_builder.md",
+            "validation/templates/AssistantMD/Workflows/documentation_builder.md",
             vault,
-            "assistants",
+            "AssistantMD/Workflows",
         )
         self.copy_files(
-            "validation/templates/files/broken_assistant.md",
+            "validation/templates/files/broken_workflow.md",
             vault,
             "inputs",
         )
 
         await self.start_system()
         self.expect_vault_discovered("DocumentationBuilderVault")
-        self.expect_assistant_loaded(
+        self.expect_workflow_loaded(
             "DocumentationBuilderVault", "documentation_builder"
         )
         self.expect_scheduler_job_created(
@@ -51,8 +51,8 @@ class DocumentationBuilderScenario(BaseScenario):
 
         # Verify expected artifacts
         self.expect_file_created(vault, "analysis/research.md")
-        self.expect_file_created(vault, "outputs/generated_assistant.md")
-        self.expect_file_created(vault, "outputs/fixed_assistant.md")
+        self.expect_file_created(vault, "outputs/generated_workflow.md")
+        self.expect_file_created(vault, "outputs/fixed_workflow.md")
         self.expect_file_created(vault, "reports/user_summary.md")
 
         await self.stop_system()

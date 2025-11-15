@@ -115,11 +115,7 @@ TRUNCATE (clear all file contents):
 5. NO UNDO - changes are permanent
 6. Double-check paths before destructive operations
 
-REQUIRED: When you modify or delete files, always end your response with:
-
-FILES_MODIFIED_OR_DELETED:
-- path/to/file1.md (edited)
-- path/to/file2.md (deleted)"""
+"""
 
     @classmethod
     def _edit_line(cls, path: str, line_number: int, old_content: str, new_content: str, vault_path: str) -> str:

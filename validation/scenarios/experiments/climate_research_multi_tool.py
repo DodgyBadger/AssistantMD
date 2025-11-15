@@ -25,15 +25,15 @@ class ClimateResearchMultiToolScenario(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("KnowledgeVault")
 
-        # Create the multi-tool climate research assistant
-        self.create_file(vault, "assistants/climate-research-multi-tool.md", CLIMATE_RESEARCH_MULTI_TOOL_ASSISTANT)
+        # Create the multi-tool climate research workflow
+        self.create_file(vault, "AssistantMD/Workflows/climate-research-multi-tool.md", CLIMATE_RESEARCH_MULTI_TOOL_WORKFLOW)
 
         # === SYSTEM STARTUP VALIDATION ===
         await self.start_system()
 
         # Validate system startup
         self.expect_vault_discovered("KnowledgeVault")
-        self.expect_assistant_loaded("KnowledgeVault", "climate-research-multi-tool")
+        self.expect_workflow_loaded("KnowledgeVault", "climate-research-multi-tool")
         self.expect_scheduler_job_created("KnowledgeVault/climate-research-multi-tool")
 
         # === COMPREHENSIVE RESEARCH EXECUTION ===
@@ -59,17 +59,17 @@ class ClimateResearchMultiToolScenario(BaseScenario):
         self.teardown_scenario()
 
 
-# === ASSISTANT TEMPLATES ===
+# === WORKFLOW TEMPLATES ===
 
-CLIMATE_RESEARCH_MULTI_TOOL_ASSISTANT = """---
+CLIMATE_RESEARCH_MULTI_TOOL_WORKFLOW = """---
 schedule: once: 2030-01-01 09:00
-workflow: step
+workflow_engine: step
 enabled: true
-description: Climate research assistant with all tools available - let LLM choose best approach
+description: Climate research workflow with all tools available - let LLM choose best approach
 ---
 
 ## INSTRUCTIONS
-You are a comprehensive climate research assistant helping build a detailed knowledge base about climate change. Use the tools provided to gather, analyze, and structure information about climate science, impacts, and solutions. You have access to web search, content extraction, and web crawling tools - choose the most appropriate tool for each task. Provide links to back up your analysis and for further research.
+You are a comprehensive climate research workflow helping build a detailed knowledge base about climate change. Use the tools provided to gather, analyze, and structure information about climate science, impacts, and solutions. You have access to web search, content extraction, and web crawling tools - choose the most appropriate tool for each task. Provide links to back up your analysis and for further research.
 
 ## OVERVIEW_RESEARCH
 @model gemini

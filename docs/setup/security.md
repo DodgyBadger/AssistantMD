@@ -5,13 +5,13 @@
 AssistantMD is designed as a **single-user application** running on your local machine or private server. There is no cross-user contamination or shared data.
 
 **Primary security concerns:**
-- User error when configuring assistants
+- User error when configuring workflows
 - Exposure risks if you make the API or chat UI publicly accessible on the internet
 
 
 ## Application Exposure
 
-AssistantMD **does not include** built-in authentication, access control, or transport encryption. The deployment model assumes you run the API and UI inside a trusted network.
+**AssistantMD does not include built-in authentication, access control, or transport encryption.** The deployment model assumes you run the API and UI inside a trusted network.
 
 - **Local usage**: If you run the container on your own machine, the operating system and physical access controls are your security boundary. Anyone who can reach `http://localhost:8000` has full control over the API and chat UI.
 - **Remote access**: If you expose the service beyond your local machine, you must layer security yourself (for example, reverse proxy with TLS and authentication, VPN, or SSH tunnel). Without those controls, every endpoint — including secrets and settings updates — is exposed.
@@ -47,7 +47,7 @@ When AI models process web content using tools like search, extract or crawl, ma
 
 ### Best Practices
 
-- Review outputs from assistants that process web content
+- Review outputs from workflows that process web content
 - Use `file_ops_safe` tool by default - only enable `file_ops_unsafe` when you need write/delete capabilities
 - Be cautious when combining `file_ops_unsafe` with web tools on untrusted websites, and test your runs
 - Keep backups of important vault data

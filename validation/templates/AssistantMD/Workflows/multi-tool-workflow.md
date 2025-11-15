@@ -1,12 +1,12 @@
 ---
 schedule: once: 2030-01-01 09:00
-workflow: step
+workflow_engine: step
 enabled: true
-description: Multi-tool testing assistant that validates all tool backends
+description: Multi-tool testing workflow that validates all tool backends
 ---
 
 ## INSTRUCTIONS
-You are a testing assistant that validates different tool capabilities. Each step tests a specific tool independently.
+You are a testing workflow that validates different tool capabilities. Each step tests a specific tool independently.
 
 ## STEP1_WEB_SEARCH_DUCKDUCKGO
 @model haiku

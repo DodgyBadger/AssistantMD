@@ -26,8 +26,8 @@ class TestInvoiceGenerationScenario(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("Consulting")
 
-        # Create the invoice generator assistant and template
-        self.create_file(vault, "assistants/invoice_generator.md", INVOICE_GENERATOR_ASSISTANT)
+        # Create the invoice generator workflow and template
+        self.create_file(vault, "AssistantMD/Workflows/invoice_generator.md", INVOICE_GENERATOR_WORKFLOW)
         self.create_file(vault, "invoice-template.md", INVOICE_TEMPLATE)
 
         # Create Week 1, 2, and 3 billable hours logs in timesheets subfolder
@@ -39,7 +39,7 @@ class TestInvoiceGenerationScenario(BaseScenario):
         await self.start_system()
 
         self.expect_vault_discovered("Consulting")
-        self.expect_assistant_loaded("Consulting", "invoice_generator")
+        self.expect_workflow_loaded("Consulting", "invoice_generator")
 
         # === FIRST RUN - Should process all three pending weeks ===
         self.set_date("2025-02-02")  # Sunday - invoice generation day
@@ -109,9 +109,9 @@ class TestInvoiceGenerationScenario(BaseScenario):
 
 # === ASSISTANT TEMPLATES ===
 
-INVOICE_GENERATOR_ASSISTANT = """---
+INVOICE_GENERATOR_WORKFLOW = """---
 schedule: cron: 0 9 * * *
-workflow: step
+workflow_engine: step
 enabled: true
 description: Weekly invoice generator that extracts billable hours by client
 week_start_day: monday

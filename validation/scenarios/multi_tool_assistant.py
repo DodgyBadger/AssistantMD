@@ -1,5 +1,5 @@
 """
-Multi-Tool Assistant scenario - tests all tool backends.
+Multi-Tool Workflow scenario - tests all tool backends.
 
 Tests each tool implementation separately including named backends and generic aliases.
 """
@@ -13,34 +13,34 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class MultiToolAssistantScenario(BaseScenario):
+class MultiToolWorkflowScenario(BaseScenario):
     """Test all tool backends and generic aliases independently."""
 
     async def test_scenario(self):
-        """Execute multi-tool assistant workflow testing all backends."""
+        """Execute multi-tool workflow testing all backends."""
 
         # === SETUP ===
         vault = self.create_vault("MultiToolVault")
 
-        # Copy the multi-tool assistant template
-        self.copy_files("validation/templates/assistants/multi-tool-assistant.md", vault, "assistants")
+        # Copy the multi-tool workflow template
+        self.copy_files("validation/templates/AssistantMD/Workflows/multi-tool-workflow.md", vault, "AssistantMD/Workflows")
 
         # === SYSTEM STARTUP VALIDATION ===
         await self.start_system()
 
         # Validate system startup
         self.expect_vault_discovered("MultiToolVault")
-        self.expect_assistant_loaded("MultiToolVault", "multi-tool-assistant")
-        self.expect_scheduler_job_created("MultiToolVault/multi-tool-assistant")
+        self.expect_workflow_loaded("MultiToolVault", "multi-tool-workflow")
+        self.expect_scheduler_job_created("MultiToolVault/multi-tool-workflow")
 
         # === TOOL EXECUTION TESTS ===
         self.set_date("2025-01-21")  # Tuesday
 
-        # Trigger all tool tests - the assistant has 6 steps, each will run
-        await self.trigger_job(vault, "multi-tool-assistant")
+        # Trigger all tool tests - the workflow has 6 steps, each will run
+        await self.trigger_job(vault, "multi-tool-workflow")
 
         # === ASSERTIONS ===
-        self.expect_scheduled_execution_success(vault, "multi-tool-assistant")
+        self.expect_scheduled_execution_success(vault, "multi-tool-workflow")
 
         # Check that all output files were created
         self.expect_file_created(vault, "tools/duckduckgo-test.md")

@@ -51,10 +51,10 @@ const dashElements = {
     systemStatus: document.getElementById('system-status'),
     rescanBtn: document.getElementById('rescan-btn'),
     rescanResult: document.getElementById('rescan-result'),
-    assistantSelector: document.getElementById('assistant-selector'),
+    workflowSelector: document.getElementById('workflow-selector'),
     stepNameInput: document.getElementById('step-name-input'),
-    executeAssistantBtn: document.getElementById('execute-assistant-btn'),
-    executeAssistantResult: document.getElementById('execute-assistant-result')
+    executeWorkflowBtn: document.getElementById('execute-workflow-btn'),
+    executeWorkflowResult: document.getElementById('execute-workflow-result')
 };
 
 function isChatNearBottom(element, threshold = 64) {
@@ -216,9 +216,16 @@ function populateSelectors() {
         chatElements.modelSelector.value = firstAvailableModel;
     }
 
-    state.metadata.tools.forEach(tool => {
-        const div = document.createElement('div');
-        div.className = 'flex items-center';
+    const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
+        .map(name => state.metadata.tools.find(tool => tool.name === name && tool.available !== false))
+        .find(Boolean)?.name) || null;
+
+    const toolMap = new Map(state.metadata.tools.map(tool => [tool.name, tool]));
+    const handledTools = new Set();
+
+    const createToolElement = (tool) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'flex items-center';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -227,19 +234,70 @@ function populateSelectors() {
         checkbox.className = 'mr-2';
         checkbox.disabled = tool.available === false;
 
-        if (!checkbox.disabled && ['file_ops_safe', 'web_search_tavily'].includes(tool.name)) {
+        if (
+            !checkbox.disabled &&
+            (
+                tool.name === 'file_ops_safe' ||
+                (preferredWebTool && tool.name === preferredWebTool)
+            )
+        ) {
             checkbox.checked = true;
         }
 
         const label = document.createElement('label');
         label.htmlFor = `tool-${tool.name}`;
         label.className = `text-sm ${checkbox.disabled ? 'text-gray-400' : 'text-gray-700'}`;
-        label.textContent = `${tool.name}: ${tool.description}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        label.innerHTML = `<strong>${tool.name}</strong>: ${tool.description}${checkbox.disabled ? ' (unavailable)' : ''}`;
 
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        chatElements.toolsCheckboxes.appendChild(div);
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(label);
+        return wrapper;
+    };
+
+    const leftColumnOrder = [
+        'web_search_duckduckgo',
+        'web_search_tavily',
+        'file_ops_safe',
+        'file_ops_unsafe'
+    ];
+    const rightColumnOrder = [
+        'documentation_access',
+        'tavily_extract',
+        'tavily_crawl',
+        'code_execution'
+    ];
+
+    const leftColumn = document.createElement('div');
+    leftColumn.className = 'flex flex-col gap-2';
+    const rightColumn = document.createElement('div');
+    rightColumn.className = 'flex flex-col gap-2';
+
+    const appendTools = (order, column) => {
+        order.forEach(name => {
+            const tool = toolMap.get(name);
+            if (!tool) return;
+            column.appendChild(createToolElement(tool));
+            handledTools.add(name);
+        });
+    };
+
+    appendTools(leftColumnOrder, leftColumn);
+    appendTools(rightColumnOrder, rightColumn);
+
+    state.metadata.tools.forEach(tool => {
+        if (handledTools.has(tool.name)) {
+            return;
+        }
+        const targetColumn = leftColumn.childElementCount <= rightColumn.childElementCount
+            ? leftColumn
+            : rightColumn;
+        targetColumn.appendChild(createToolElement(tool));
     });
+
+    chatElements.toolsCheckboxes.appendChild(leftColumn);
+    chatElements.toolsCheckboxes.appendChild(rightColumn);
+
+    applyModeToolPreferences();
 }
 
 // Fetch system status
@@ -251,7 +309,7 @@ async function fetchSystemStatus() {
         state.systemStatus = await response.json();
         syncRestartFlagWithStorage();
         displaySystemStatus();
-        populateAssistantSelector();
+        populateWorkflowSelector();
         updateStatus();
     } catch (error) {
         console.error('Error fetching status:', error);
@@ -262,10 +320,10 @@ async function fetchSystemStatus() {
 // Display system status information
 function displaySystemStatus() {
     const status = state.systemStatus;
-    const enabledAssistants = status.enabled_assistants || [];
-    const disabledAssistants = status.disabled_assistants || [];
-    const combinedAssistants = [...enabledAssistants, ...disabledAssistants];
-    const workflowTypes = [...new Set(combinedAssistants.map(a => a.workflow))];
+    const enabledWorkflows = status.enabled_workflows || [];
+    const disabledWorkflows = status.disabled_workflows || [];
+    const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows];
+    const workflowTypes = [...new Set(combinedWorkflows.map(a => a.workflow_engine))];
 
     const badgeColors = [
         { bg: '#e8f5e9', color: '#388e3c' },
@@ -304,7 +362,7 @@ function displaySystemStatus() {
                 <tr>
                     <th>Name</th>
                     <th>Path</th>
-                    <th style="text-align: center;">Assistants</th>
+                    <th style="text-align: center;">Workflows</th>
                 </tr>
             </thead>
             <tbody>
@@ -312,7 +370,7 @@ function displaySystemStatus() {
                     <tr>
                         <td><strong>${v.name}</strong></td>
                         <td style="font-family: monospace; font-size: 11px; color: #666;">${v.path}</td>
-                        <td style="text-align: center;">${v.assistant_count}</td>
+                        <td style="text-align: center;">${v.workflow_count}</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -329,20 +387,20 @@ function displaySystemStatus() {
             <table class="dashboard-table">
                 <thead>
                     <tr>
-                        <th>Assistant</th>
+                        <th>Workflow</th>
                         <th>Next Run</th>
                         <th>Interval</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${status.scheduler.job_details.map(job => {
-                        const assistantName = job.id.replace('__', '/');
+                        const workflowName = job.id.replace('__', '/');
                         const nextRun = job.next_run_time ? new Date(job.next_run_time).toLocaleString('en-US', {
                             month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
                         }) : '—';
                         return `
                             <tr>
-                                <td><strong>${assistantName}</strong></td>
+                                <td><strong>${workflowName}</strong></td>
                                 <td>${nextRun}</td>
                                 <td style="font-size: 11px;">${job.trigger_description}</td>
                             </tr>
@@ -353,9 +411,9 @@ function displaySystemStatus() {
         `;
     }
 
-    if (combinedAssistants.length > 0) {
+    if (combinedWorkflows.length > 0) {
         html += `
-            <h3 class="text-lg font-semibold mb-2 mt-6">🤖 Assistants</h3>
+            <h3 class="text-lg font-semibold mb-2 mt-6">🤖 Workflows</h3>
             <table class="dashboard-table">
                 <thead>
                     <tr>
@@ -366,14 +424,14 @@ function displaySystemStatus() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${combinedAssistants.map(a => {
-                        const badgeClass = `badge-${a.workflow}`;
-                        const schedule = a.schedule_cron || '—';
-                        const description = a.description || '—';
+                    ${combinedWorkflows.map(workflow => {
+                        const badgeClass = `badge-${workflow.workflow_engine}`;
+                        const schedule = workflow.schedule_cron || '—';
+                        const description = workflow.description || '—';
                         return `
                             <tr>
-                                <td><strong>${a.global_id}</strong></td>
-                                <td style="text-align: center;"><span class="badge ${badgeClass}">${a.workflow}</span></td>
+                                <td><strong>${workflow.global_id}</strong></td>
+                                <td style="text-align: center;"><span class="badge ${badgeClass}">${workflow.workflow_engine}</span></td>
                                 <td style="font-size: 11px;">${schedule}</td>
                                 <td style="font-size: 11px; color: #666;">${description}</td>
                             </tr>
@@ -387,22 +445,22 @@ function displaySystemStatus() {
     dashElements.systemStatus.innerHTML = html;
 }
 
-// Populate assistant selector
-function populateAssistantSelector() {
-    if (!dashElements.assistantSelector) return;
+// Populate workflow selector
+function populateWorkflowSelector() {
+    if (!dashElements.workflowSelector) return;
 
-    dashElements.assistantSelector.innerHTML = '<option value="">Select assistant...</option>';
+    dashElements.workflowSelector.innerHTML = '<option value="">Select workflow...</option>';
 
-    const allAssistants = [
-        ...(state.systemStatus?.enabled_assistants || []),
-        ...(state.systemStatus?.disabled_assistants || [])
+    const allWorkflows = [
+        ...(state.systemStatus?.enabled_workflows || []),
+        ...(state.systemStatus?.disabled_workflows || [])
     ];
 
-    allAssistants.forEach(assistant => {
+    allWorkflows.forEach(workflow => {
         const option = document.createElement('option');
-        option.value = assistant.global_id;
-        option.textContent = `${assistant.global_id} (${assistant.workflow})`;
-        dashElements.assistantSelector.appendChild(option);
+        option.value = workflow.global_id;
+        option.textContent = `${workflow.global_id} (${workflow.workflow_engine})`;
+        dashElements.workflowSelector.appendChild(option);
     });
 }
 
@@ -429,14 +487,30 @@ function setupEventListeners() {
         dashElements.rescanBtn.addEventListener('click', rescanVaults);
     }
 
-    if (dashElements.executeAssistantBtn) {
-        dashElements.executeAssistantBtn.addEventListener('click', executeAssistant);
+    if (dashElements.executeWorkflowBtn) {
+        dashElements.executeWorkflowBtn.addEventListener('click', executeWorkflow);
     }
 
     if (chatElements.chatMessages) {
         chatElements.chatMessages.addEventListener('scroll', handleChatScroll, { passive: true });
     }
 
+    if (chatElements.modeSelector) {
+        chatElements.modeSelector.addEventListener('change', handleModeChange);
+    }
+}
+
+function handleModeChange() {
+    applyModeToolPreferences();
+}
+
+function applyModeToolPreferences() {
+    const mode = chatElements.modeSelector ? chatElements.modeSelector.value : 'regular';
+    const docCheckbox = document.getElementById('tool-documentation_access');
+    if (!docCheckbox || docCheckbox.disabled) {
+        return;
+    }
+    docCheckbox.checked = mode === 'workflow_creation';
 }
 
 // Send message handler with streaming response support
@@ -1118,8 +1192,8 @@ async function rescanVaults() {
             <div class="text-green-700 bg-green-50 p-3 rounded border border-green-200">
                 <p class="font-medium">✅ Rescan Completed</p>
                 <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
-                <p>Assistants loaded: ${data.assistants_loaded || 0}</p>
-                <p>Enabled assistants: ${data.enabled_assistants || 0}</p>
+                <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
+                <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
                 <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
                 <p class="mt-2 text-sm">${data.message || ''}</p>
             </div>
@@ -1136,24 +1210,24 @@ async function rescanVaults() {
     }
 }
 
-// Execute assistant manually
-async function executeAssistant() {
-    const globalId = dashElements.assistantSelector.value;
+// Execute workflow manually
+async function executeWorkflow() {
+    const globalId = dashElements.workflowSelector.value;
     const stepName = dashElements.stepNameInput.value.trim() || null;
 
     if (!globalId) {
-        alert('Please select an assistant');
+        alert('Please select a workflow');
         return;
     }
 
-    dashElements.executeAssistantResult.innerHTML = '<p class="text-gray-600">Executing...</p>';
-    dashElements.executeAssistantBtn.disabled = true;
+    dashElements.executeWorkflowResult.innerHTML = '<p class="text-gray-600">Executing...</p>';
+    dashElements.executeWorkflowBtn.disabled = true;
 
     try {
         const payload = { global_id: globalId };
         if (stepName) payload.step_name = stepName;
 
-        const response = await fetch('api/assistants/execute', {
+        const response = await fetch('api/workflows/execute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1167,10 +1241,10 @@ async function executeAssistant() {
         const data = await response.json();
         const outputFiles = data.output_files || [];
 
-        dashElements.executeAssistantResult.innerHTML = `
+        dashElements.executeWorkflowResult.innerHTML = `
             <div class="text-green-700 bg-green-50 p-3 rounded border border-green-200">
                 <p class="font-medium">✅ Execution Completed</p>
-                <p>Assistant: ${data.global_id || ''}</p>
+                <p>Workflow: ${data.global_id || ''}</p>
                 <p>Execution time: ${data.execution_time_seconds?.toFixed(2) || 0}s</p>
                 ${outputFiles.length ? `
                     <p class="mt-2">Output files created:</p>
@@ -1183,10 +1257,10 @@ async function executeAssistant() {
         `;
 
     } catch (error) {
-        console.error('Error executing assistant:', error);
-        dashElements.executeAssistantResult.innerHTML = `<p class="text-red-600">❌ Error: ${error.message}</p>`;
+        console.error('Error executing workflow:', error);
+        dashElements.executeWorkflowResult.innerHTML = `<p class="text-red-600">❌ Error: ${error.message}</p>`;
     } finally {
-        dashElements.executeAssistantBtn.disabled = false;
+        dashElements.executeWorkflowBtn.disabled = false;
     }
 }
 

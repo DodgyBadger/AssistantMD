@@ -12,8 +12,6 @@ Directives are special commands that control how workflow steps execute. All dir
 - Format: `@output-file path/to/file` or `@output-file [[path/to/file]]`
 - Path resolution: All paths are relative to the vault root
 - Automatic .md extension: The system automatically adds `.md` extension if not present
-- Obsidian hotlinks: Square brackets (`[[filename]]`) are automatically stripped for drag-and-drop compatibility
-- **Obsidian users**: Enable "Use [[Wikilinks]]" and set "New link format" to "Absolute path in vault" in Settings > Files & Links for drag-and-drop to work properly
 - **Best Practice**: Choose one approach per step:
   - **Explicit outputs**: Use @output-file for predictable, workflow-controlled file creation (recommended for most workflows)
   - **Tool-managed outputs**: Omit @output-file and enable file_ops_safe to let the LLM manage all file creation
@@ -83,17 +81,17 @@ Examples:
 **@run-on** (string, optional)
 - Controls which days of the week a step should execute
 - Format: `@run-on monday, friday` or `@run-on daily` or `@run-on never`
-- Default behavior: If omitted, step runs every day the assistant is scheduled
-- **Use case**: Allows different steps to run on different days within a single assistant, avoiding the need to create multiple assistant files with different schedules
+- Default behavior: If omitted, step runs every day the workflow is scheduled
+- **Use case**: Allows different steps to run on different days within a single workflow, avoiding the need to create multiple workflow files with different schedules
 - Supports comma or space separation between days
 - Valid day names: Full names (`monday`, `tuesday`, `wednesday`, `thursday`, `friday`, `saturday`, `sunday`) or abbreviations (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`)
 - Special keywords:
-  - `daily` - Run every day the assistant is scheduled (same as omitting the directive)
+  - `daily` - Run every day the workflow is scheduled (same as omitting the directive)
   - `never` - Never run this step automatically (useful for disabling steps temporarily)
 - Case insensitive: `Monday`, `MONDAY`, and `monday` are all valid
 
 **How it works with schedule:**
-The `schedule` in YAML frontmatter determines when the assistant runs. The `@run-on` directive determines which steps execute during that run. For example, an assistant scheduled daily at 8am can have steps that only run on specific days - weekly planning on Mondays, daily tasks on weekdays, and weekly reviews on Fridays - all in one assistant file.
+The `schedule` in YAML frontmatter determines when the workflow runs. The `@run-on` directive determines which steps execute during that run. For example, an workflow scheduled daily at 8am can have steps that only run on specific days - weekly planning on Mondays, daily tasks on weekdays, and weekly reviews on Fridays - all in one workflow file.
 
 ---
 

@@ -7,11 +7,11 @@ with proper configuration, error handling, and lifecycle management.
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.assistant.loader import AssistantLoader
+from core.workflow.loader import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.settings import validate_settings
-# Note: Job setup now handled via runtime_context.reload_assistants()
+# Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .state import set_runtime_context, clear_runtime_context
@@ -56,8 +56,8 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 metadata={"issue": warning.name, "severity": warning.severity},
             )
 
-        # Initialize assistant loader with configured data root
-        assistant_loader = AssistantLoader(
+        # Initialize workflow loader with configured data root
+        workflow_loader = WorkflowLoader(
             _data_root=str(config.data_root),
             _allow_direct_instantiation=True
         )
@@ -80,7 +80,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,
-            assistant_loader=assistant_loader,
+            workflow_loader=workflow_loader,
             logger=logger
         )
 
@@ -88,9 +88,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         set_runtime_context(runtime_context)
 
         try:
-            # Load assistant configurations and synchronize jobs using runtime context
-            await runtime_context.reload_assistants(manual=False)
-            logger.info("Assistant configurations loaded and jobs synchronized")
+            # Load workflow configurations and synchronize jobs using runtime context
+            await runtime_context.reload_workflows(manual=False)
+            logger.info("Workflow configurations loaded and jobs synchronized")
 
             # Resume scheduler after successful synchronization
             scheduler.resume()

@@ -1,7 +1,7 @@
 ---
-workflow: step
+workflow_engine: step
 enabled: false
-description: Validation assistant that exercises every available tool with the TestModel.
+description: Validation workflow that exercises every available tool with the TestModel.
 ---
 
 ## STEP1_DOCUMENTATION

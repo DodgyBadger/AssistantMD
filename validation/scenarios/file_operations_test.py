@@ -24,8 +24,8 @@ class TestFileOperationsScenario(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("FileOpsTestVault")
         
-        # Create file operations testing assistant
-        self.copy_files("validation/templates/assistants/file_ops_test.md", vault, "assistants")
+        # Create file operations testing workflow
+        self.copy_files("validation/templates/AssistantMD/Workflows/file_ops_test.md", vault, "AssistantMD/Workflows")
         
         # === SYSTEM STARTUP VALIDATION ===
         # Test real system startup with vault discovery and job scheduling
@@ -33,7 +33,7 @@ class TestFileOperationsScenario(BaseScenario):
         
         # Validate system startup completed correctly
         self.expect_vault_discovered("FileOpsTestVault")
-        self.expect_assistant_loaded("FileOpsTestVault", "file_ops_test")
+        self.expect_workflow_loaded("FileOpsTestVault", "file_ops_test")
         self.expect_scheduler_job_created("FileOpsTestVault/file_ops_test")
         self.expect_schedule_parsed_correctly("FileOpsTestVault/file_ops_test", "cron")
         
@@ -56,8 +56,8 @@ class TestFileOperationsScenario(BaseScenario):
         # Verify unsafe operations created and modified files
         self.expect_file_created(vault, "template.md")
         
-        # Verify the assistant had file_operations tool available by checking tool was loaded
-        # The presence of the tool in the assistant and successful execution indicates it worked
+        # Verify the workflow had file_operations tool available by checking tool was loaded
+        # The presence of the tool in the workflow and successful execution indicates it worked
         
         # Clean up
         await self.stop_system()

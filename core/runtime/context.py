@@ -2,7 +2,7 @@
 Runtime context for AssistantMD system.
 
 Provides centralized access to core services and manages lifecycle
-for scheduler, assistant loader, and related components.
+for scheduler, workflow loader, and related components.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.assistant.loader import AssistantLoader
+from core.workflow.loader import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from .config import RuntimeConfig
@@ -24,20 +24,20 @@ class RuntimeContext:
     Central runtime context for AssistantMD services.
 
     Manages lifecycle and provides access to core services including
-    scheduler, assistant loader, and configuration. Supports both
+    scheduler, workflow loader, and configuration. Supports both
     async and sync teardown for different use cases.
 
     Attributes:
         config: Runtime configuration
         scheduler: APScheduler instance for job management
-        assistant_loader: Assistant configuration loader
+        workflow_loader: Workflow configuration loader
         logger: Unified logger for runtime operations
         last_config_reload: Timestamp of most recent configuration reload (if any)
     """
 
     config: RuntimeConfig
     scheduler: AsyncIOScheduler
-    assistant_loader: AssistantLoader
+    workflow_loader: WorkflowLoader
     logger: UnifiedLogger
     last_config_reload: Optional[datetime] = None
 
@@ -81,9 +81,9 @@ class RuntimeContext:
             # No event loop running, safe to use asyncio.run
             asyncio.run(self.shutdown())
 
-    async def reload_assistants(self, manual: bool = True):
+    async def reload_workflows(self, manual: bool = True):
         """
-        Convenience method to reload assistant configurations.
+        Convenience method to reload workflow configurations.
 
         Delegates to existing setup_scheduler_jobs function while
         maintaining clean separation of concerns.
@@ -91,7 +91,7 @@ class RuntimeContext:
         Args:
             manual: Whether this is a manual reload (affects logging)
         """
-        self.logger.info(f"Reloading assistants (manual={manual})")
+        self.logger.info(f"Reloading workflows (manual={manual})")
         return await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
 
     def get_runtime_summary(self) -> dict:

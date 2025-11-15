@@ -22,12 +22,15 @@ class DocumentationAccessTool(BaseTool):
         """Return the Pydantic AI tool function for documentation access."""
         async def read_documentation(
             ctx: RunContext,
-            path: str = Field(default="README", description="Documentation path (e.g., 'core/patterns', 'workflows/step'). Defaults to README for overview.")
+            path: str | None = Field(
+                default=None,
+                description="Documentation path (e.g., 'setup/assistant-setup', 'core/patterns'). Leave empty to get a summary of the docs layout."
+            )
         ) -> str:
             """
             Read AssistantMD documentation. 
             
-            Start with README for overview and table of contents, then request specific sections as needed.
+            Start with index for overview and table of contents, then request specific sections as needed.
             
             Args:
                 path: Documentation path relative to /app/docs/ (without .md extension)
@@ -44,23 +47,71 @@ class DocumentationAccessTool(BaseTool):
     def get_instructions(cls) -> str:
         """Return instructions for using the documentation access tool."""
         instructions = """
-Use this tool to access AssistantMD documentation. Start by reading index.md. Then request specific pages as needed by specifying a path.
-        """
+Use this tool to read AssistantMD documentation. Call it with no arguments to receive a quick guide describing what lives under /docs.
+
+When creating assistants:
+- `documentation_access(path="setup/assistant-setup")` → full assistant template and walkthrough
+- `documentation_access(path="core/yaml-frontmatter")` → frontmatter options
+- `documentation_access(path="core/core-directives")` → @directive reference
+- `documentation_access(path="core/patterns")` → pattern variables
+
+Ask for other paths (security, architecture, validation) only if specifically needed.
+        """.strip()
         return instructions.strip()
     
     def _read_document(self, path: str) -> str:
         """Read a documentation file."""
+        if not path or not path.strip():
+            return self._describe_docs()
+
         try:
-            # Normalize path and read document
             file_path = self._normalize_path(path)
-            if not file_path.exists():
-                return f"Documentation not found: {path}"
-            
-            content = file_path.read_text(encoding='utf-8')
-            return content
-            
         except Exception as e:
             return f"Error reading documentation '{path}': {str(e)}"
+
+        if not file_path.exists():
+            return f"Documentation not found: {path}"
+
+        return file_path.read_text(encoding='utf-8')
+
+    def _describe_docs(self) -> str:
+        """Return a short overview of the docs folder to steer the agent."""
+        docs_root = Path(core.constants.DOCS_ROOT)
+
+        focus_sections = [
+            ("setup/assistant-setup", "Complete assistant template and walkthrough"),
+            ("setup/installation", "Deployment prerequisites and docker-compose setup"),
+            ("core/yaml-frontmatter", "Frontmatter keys: workflow, schedule, enabled"),
+            ("core/core-directives", "Directive reference for @output-file, @tools, etc."),
+            ("core/patterns", "Pattern variables like {today}, {this-week}"),
+        ]
+
+        other_sections = []
+        for entry in sorted(docs_root.iterdir()):
+            if entry.name.startswith('.'):
+                continue
+            if entry.is_dir() and entry.name not in {'setup', 'core'}:
+                other_sections.append(f"{entry.name}/")
+            elif entry.is_file() and entry.suffix == ".md" and entry.name not in {'index.md'}:
+                other_sections.append(entry.name)
+
+        lines = [
+            "AssistantMD documentation guide:",
+            "",
+            "Start with these paths:",
+        ]
+        for path, description in focus_sections:
+            lines.append(f"- {path} → {description}")
+
+        if other_sections:
+            lines.append("")
+            lines.append("Other references (call by path if needed):")
+            for entry in other_sections:
+                lines.append(f"- {entry}")
+
+        lines.append("")
+        lines.append("Call this tool again with a specific path when you need the full file.")
+        return "\n".join(lines)
     
     def _normalize_path(self, path: str) -> Path:
         """Normalize documentation path to full file path within docs root."""
@@ -68,6 +119,8 @@ Use this tool to access AssistantMD documentation. Start by reading index.md. Th
 
         normalized_path = (path or "index").strip()
         normalized_path = normalized_path.strip('/')
+        if normalized_path.startswith('[[') and normalized_path.endswith(']]'):
+            normalized_path = normalized_path[2:-2].strip()
         if normalized_path.endswith('.md'):
             normalized_path = normalized_path[:-3]
 

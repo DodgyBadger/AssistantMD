@@ -20,9 +20,9 @@ from core.logger import UnifiedLogger
 from core.runtime.config import RuntimeConfig
 from core.runtime.bootstrap import bootstrap_runtime
 from core.runtime.state import clear_runtime_context
-from core.assistant.loader import discover_vaults
+from core.workflow.loader import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
-import workflows.step.workflow as workflow_module
+import workflow_engines.step.workflow as workflow_module
 from core.constants import SYSTEM_DATA_ROOT
 
 
@@ -69,7 +69,7 @@ class SystemController:
         # Runtime context instead of direct component access
         self._runtime = None
         self._discovered_vaults: List[str] = []
-        self._loaded_assistants: List[Any] = []  # AssistantConfig imported later
+        self._loaded_workflows: List[Any] = []  # Workflow definitions imported later
         self._startup_errors: List[Any] = []  # ConfigurationError imported later
         self._startup_results: Dict[str, Any] = {}
 
@@ -119,20 +119,20 @@ class SystemController:
 
             # Cache validation data for interface compatibility
             self._discovered_vaults = discover_vaults(self.test_data_root)
-            self._loaded_assistants = self._runtime.assistant_loader._assistants.copy()
-            self._startup_errors = self._runtime.assistant_loader.get_configuration_errors()
+            self._loaded_workflows = self._runtime.workflow_loader._workflows.copy()
+            self._startup_errors = self._runtime.workflow_loader.get_configuration_errors()
             # Get startup results from runtime context summary
             self._startup_results = {
                 'vaults_discovered': len(self._discovered_vaults),
-                'assistants_loaded': len(self._loaded_assistants),
-                'enabled_assistants': len([a for a in self._loaded_assistants if a.enabled]),
+                'workflows_loaded': len(self._loaded_workflows),
+                'enabled_workflows': len([w for w in self._loaded_workflows if w.enabled]),
                 'scheduler_jobs_synced': len(self._runtime.scheduler.get_jobs())
             }
 
             self.is_running = True
             self._api_app.state.runtime = self._runtime
             self.logger.info(f"System startup completed - discovered {len(self._discovered_vaults)} vaults, "
-                           f"loaded {len(self._loaded_assistants)} assistants, "
+                           f"loaded {len(self._loaded_workflows)} workflows, "
                            f"created {self._startup_results.get('scheduler_jobs_synced', 0)} jobs")
 
         except Exception as e:
@@ -199,28 +199,28 @@ class SystemController:
         await self.start_system()
     
     async def trigger_vault_rescan(self):
-        """Force system to rescan for new vaults/assistants using runtime context."""
+        """Force system to rescan for new vaults/workflows using runtime context."""
         if not self.is_running:
             raise RuntimeError("System must be running to trigger rescan")
 
         self.logger.info("Triggering vault rescan")
 
         # Use runtime context reload functionality
-        results = await self._runtime.reload_assistants(manual=True)
+        results = await self._runtime.reload_workflows(manual=True)
 
         # Update cached data for interface compatibility
         self._discovered_vaults = discover_vaults(self.test_data_root)
-        self._loaded_assistants = self._runtime.assistant_loader._assistants.copy()
-        self._startup_errors = self._runtime.assistant_loader.get_configuration_errors()
+        self._loaded_workflows = self._runtime.workflow_loader._workflows.copy()
+        self._startup_errors = self._runtime.workflow_loader.get_configuration_errors()
         self._startup_results = results
     
     def get_discovered_vaults(self) -> List[str]:
         """Get vaults discovered during startup using real discovery logic."""
         return self._discovered_vaults.copy()
     
-    def get_loaded_assistants(self) -> List[Any]:
-        """Get parsed assistant configurations using real assistant_loader."""
-        return self._loaded_assistants.copy()
+    def get_loaded_workflows(self) -> List[Any]:
+        """Get parsed workflow configurations using real workflow_loader."""
+        return self._loaded_workflows.copy()
     
     def get_scheduler_jobs(self) -> List[SchedulerJobInfo]:
         """Get actual APScheduler job objects for validation."""

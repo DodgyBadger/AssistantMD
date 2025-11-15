@@ -1,6 +1,6 @@
 ---
 schedule: cron: 0 8 * * *
-workflow: step
+workflow_engine: step
 enabled: true
 ---
 
