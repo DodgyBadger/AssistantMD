@@ -69,8 +69,8 @@ def discover_workflow_files(vault_path: str) -> List[str]:
     """Return list of workflow file paths in AssistantMD/Workflows (one level deep)."""
     workflows_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR)
 
-    if not os.path.exists(workflows_dir) or not os.path.isdir(workflows_dir):
-        return []
+    # Ensure the AssistantMD/Workflows directory exists so new vaults are ready for workflow files
+    os.makedirs(workflows_dir, exist_ok=True)
 
     workflow_files = []
 
