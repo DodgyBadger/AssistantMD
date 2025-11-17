@@ -51,4 +51,3 @@ Explore detailed documentation for each component:
 - **[YAML frontmatter](../core/yaml-frontmatter.md)** - Schedules, workflow engines, and settings
 - **[Core directives](../core/core-directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
 - **[Pattern variables](../core/patterns.md)** - Dynamic file names using {today}, {this-week}, etc.
-
