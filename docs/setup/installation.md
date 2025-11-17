@@ -14,8 +14,8 @@ Copy the contents of
 `docker-compose.yml.example` into `docker-compose.yml`.
 
 ```bash
-mkdir assistantmd
-cd assistantmd
+mkdir AssistantMD
+cd AssistantMD
 mkdir system
 nano docker-compose.yml
 ```
@@ -74,7 +74,7 @@ Clone the repo:
 Rename both docker compose files
 
 ```bash
-cd assistantmd
+cd AssistantMD
 cp docker-compose.yml.example docker-compose.yml
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```

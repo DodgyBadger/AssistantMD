@@ -152,11 +152,7 @@ def validate_settings(
     if not active_settings.has_any_llm_key():
         status.add_issue(
             name="LLM_API_KEYS",
-            message=(
-                "No LLM API keys configured yet. Configure at least one secret "
-                "for OPENAI, ANTHROPIC, GEMINI, MISTRAL, or DEEPSEEK to enable "
-                "production model usage."
-            ),
+            message="Add at least one LLM API key under Secrets in the Configuration tab.",
             severity="warning",
         )
 

@@ -37,7 +37,7 @@ Run it locally or deploy to a VPS (you provide the security layer). Sync your fi
 ## 🚀 Quick Start
 
 ```bash
-mkdir -p assistantmd/system && cd assistantmd
+mkdir -p AssistantMD/system && cd AssistantMD
 wget https://raw.githubusercontent.com/DodgyBadger/AssistantMD/main/docker-compose.yml.example -O docker-compose.yml
 # Edit docker-compose.yml: update vault path & timezone
 docker compose up -d
@@ -49,6 +49,7 @@ Access at `http://localhost:8000` → Configure API keys → Start chatting
 ## 📚 Documentation
 
 - **[Installation Guide](docs/setup/installation.md)** - Complete setup instructions
-- **[Creating Assistants](docs/setup/assistant-setup.md)** - Build your first workflow
+- **[Creating Workflows](docs/setup/workflow-setup.md)** - Build your first workflow
 - **[Directives Reference](docs/core/core-directives.md)** - Control workflow behavior
-- **[Security Considerations](docs/security.md)** - Important security information
+- **[Workflow Tips](docs/setup/tips.md)** - Additional tips for creating and managing workflows
+- **[Security Considerations](docs/setup/security.md)** - Important security information
