@@ -14,7 +14,7 @@ Run it locally or deploy to a VPS (you provide the security layer). Sync your fi
 ## ✨ Features
 
 **🤖 AI Providers**
-- OpenAI, Anthropic (Claude), Google (Gemini), Mistral
+- GPT, Claude, Gemini, Mistral, Grok
 - Any OpenAI-compatible API (Ollama, etc.)
 
 **💬 Chat Interface**

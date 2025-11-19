@@ -140,7 +140,7 @@ You are a precise invoice generator. Your job is to process ALL unprocessed bill
 
 ## STEP1
 @run-on sunday
-@model gpt-5
+@model gpt
 @tools file_ops_safe, code_execution
 @input-file timesheets/{pending} (required)
 @input-file invoice-template.md

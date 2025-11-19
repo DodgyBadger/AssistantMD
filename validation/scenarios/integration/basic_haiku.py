@@ -66,7 +66,7 @@ description: Simple haiku writing workflow
 ---
 
 ## STEP1
-@model gpt-5-mini
+@model gpt-mini
 @output-file {today}
 @header My new haiku - {today}
 
