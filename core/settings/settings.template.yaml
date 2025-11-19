@@ -56,19 +56,29 @@ models:
     model_string: claude-haiku-4-5
     description: null
     user_editable: true
-  gpt-5:
+  gpt:
     provider: openai
     model_string: gpt-5
     description: null
     user_editable: true
-  gpt-5-mini:
+  gpt-mini:
     provider: openai
     model_string: gpt-5-mini
     description: null
     user_editable: true
-  gpt-5-nano:
+  gpt-nano:
     provider: openai
     model_string: gpt-5-nano
+    description: null
+    user_editable: true
+  grok:
+    provider: grok
+    model_string: grok-4
+    description: null
+    user_editable: true
+  grok-mini:
+    provider: grok
+    model_string: grok-3-mini
     description: null
     user_editable: true
   mistral-large:
@@ -99,7 +109,11 @@ models:
 
 providers:
   google:
-    api_key: GEMINI_API_KEY
+    api_key: GOOGLE_API_KEY
+    base_url: null
+    user_editable: false
+  grok:
+    api_key: GROK_API_KEY
     base_url: null
     user_editable: false
   anthropic:

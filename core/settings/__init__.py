@@ -78,7 +78,8 @@ class AppSettings(BaseSettings):
     _LLM_SECRET_KEYS = [
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
-        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GROK_API_KEY",
         "MISTRAL_API_KEY",
         "DEEPSEEK_API_KEY",
     ]

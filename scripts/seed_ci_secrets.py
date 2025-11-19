@@ -19,7 +19,8 @@ DEFAULT_OUTPUT = "system/secrets.yaml"
 CI_SECRET_KEYS = [
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
-    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GROK_API_KEY",
     "MISTRAL_API_KEY",
     "TAVILY_API_KEY",
     "LIBRECHAT_API_KEY",
