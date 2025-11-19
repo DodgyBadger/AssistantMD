@@ -4,17 +4,17 @@ Model directive processor.
 Handles @model directive for per-step model selection using user-friendly model names.
 """
 
-from pydantic_ai.models.gemini import GeminiModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import OpenAIModel, OpenAIResponsesModelSettings
 from pydantic_ai.models.mistral import MistralModel
-from pydantic_ai.models.google import GoogleModelSettings
-from pydantic_ai.providers.google_gla import GoogleGLAProvider
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.mistral import MistralProvider
 from pydantic_ai.providers.ollama import OllamaProvider
+from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.grok import GrokProvider
 from pydantic_ai.settings import ModelSettings
 
 from .base import DirectiveProcessor
@@ -98,20 +98,11 @@ class ModelDirective(DirectiveProcessor):
         # Create models with provider-specific settings
         if provider == 'google':
             settings_kwargs = {"timeout": get_default_api_timeout()}
-            # if not enable_thinking:
-            #     settings_kwargs["google_thinking_config"] = {
-            #         "thinking_budget": 0,
-            #         "include_thoughts": False
-            #     }
-            # elif enable_thinking:
-            #     settings_kwargs["google_thinking_config"] = {
-            #         "thinking_budget": -1,
-            #         "include_thoughts": True
-            #     }
-            api_key = get_secret_value('GEMINI_API_KEY')
-            return GeminiModel(
+            # Keep thinking toggles disabled by default; callers can opt-in once configs stabilize.
+            api_key = get_secret_value('GOOGLE_API_KEY')
+            return GoogleModel(
                 model_string,
-                provider=GoogleGLAProvider(api_key=api_key),
+                provider=GoogleProvider(api_key=api_key),
                 settings=GoogleModelSettings(**settings_kwargs)
             )
 
@@ -143,6 +134,15 @@ class ModelDirective(DirectiveProcessor):
             return OpenAIModel(
                 model_string,
                 provider=OpenAIProvider(api_key=api_key),
+                settings=OpenAIResponsesModelSettings(**settings_kwargs)
+            )
+
+        elif provider == 'grok':
+            settings_kwargs = {"timeout": get_default_api_timeout()}
+            api_key = get_secret_value('GROK_API_KEY')
+            return OpenAIModel(
+                model_string,
+                provider=GrokProvider(api_key=api_key),
                 settings=OpenAIResponsesModelSettings(**settings_kwargs)
             )
 

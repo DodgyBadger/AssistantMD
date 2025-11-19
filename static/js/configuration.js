@@ -32,7 +32,8 @@
     const SECRET_METADATA = {
         OPENAI_API_KEY: { label: 'OpenAI API Key', description: 'Required for OpenAI model aliases' },
         ANTHROPIC_API_KEY: { label: 'Anthropic API Key', description: 'Required for Claude model aliases' },
-        GEMINI_API_KEY: { label: 'Gemini API Key', description: 'Required for Google Gemini model aliases' },
+        GOOGLE_API_KEY: { label: 'Google API Key', description: 'Required for Google Gemini model aliases' },
+        GROK_API_KEY: { label: 'Grok API Key', description: 'Required for Grok model aliases' },
         MISTRAL_API_KEY: { label: 'Mistral API Key', description: 'Required for Mistral model aliases' },
         TAVILY_API_KEY: { label: 'Tavily API Key', description: 'Required for Tavily search/crawl tools' },
         LIBRECHAT_API_KEY: { label: 'LibreChat API Key', description: 'Required for code execution tool' },

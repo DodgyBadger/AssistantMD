@@ -127,7 +127,7 @@ description: Quick job for persistence testing
 
 ## STEP1
 @output-file results/{today}
-@model gpt-5-mini
+@model gpt-mini
 
 Quick persistence test - creating file at scheduled intervals.
 """
@@ -141,7 +141,7 @@ description: Second quick job for subfolder testing
 
 ## STEP1
 @output-file results/{today}
-@model gpt-5-mini
+@model gpt-mini
 
 Quick subfolder test - creating file from subfolder workflow.
 """
@@ -155,7 +155,7 @@ description: Updated schedule for persistence testing
 
 ## STEP1
 @output-file results/{today}
-@model gpt-5-mini
+@model gpt-mini
 
 Updated persistence test - now running every 2 minutes.
 """
