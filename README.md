@@ -2,14 +2,15 @@
 
 Markdown-native, self-hosted AI chat UI and scheduled workflows.
 
-Runs in Docker alongside Obsidian, VSCode, or any markdown editor - mount your vault and you're done. No copying files, no plugin dependencies.
+Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locally or deploy to a VPS (you provide the security layer).
 
-Run it locally or deploy to a VPS (you provide the security layer). Sync your files with tools like Obsidian's Remotely Save plugin for everywhere-access.
+⚠️ **Beta software**
 
 ## Requirements
 
 - Docker Engine or Docker Desktop
 - At least one LLM API key
+- Comfort with the terminal 
 
 ## ✨ Features
 
