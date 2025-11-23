@@ -34,17 +34,6 @@ Run it locally or deploy to a VPS (you provide the security layer). Sync your fi
 - Docker-based deployment
 - Single-user design (bring your own auth layer if needed)
 
-## 🚀 Quick Start
-
-```bash
-mkdir -p AssistantMD/system && cd AssistantMD
-wget https://raw.githubusercontent.com/DodgyBadger/AssistantMD/main/docker-compose.yml.example -O docker-compose.yml
-# Edit docker-compose.yml: update vault path & timezone
-docker compose up -d
-```
-
-Access at `http://localhost:8000` → Configure API keys → Start chatting
-
 
 ## 📚 Documentation
 
