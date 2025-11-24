@@ -4,7 +4,7 @@
 
 ⚠️ It is strongly recommended that you back up your vaults before deploying for the first time, or create a test vault and then migrate the mount path when you have verified that everything works as expected.
 
-⚠️ These instructions are optimized for installing on Linux. See the end of this document for considerations for Windows and Mac. I have only tested tested installation on Linux and Windows.
+⚠️ These instructions are optimized for installing on Linux. See the end of this document for notes for Windows and Mac. I have only tested installation on Linux and Windows.
 
 ### Create a folder for your deployment, structured as follows:
 ```

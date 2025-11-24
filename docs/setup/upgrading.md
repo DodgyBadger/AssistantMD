@@ -1,6 +1,6 @@
 ## Upgrading
 
-⚠️ Beta software. Always check the [release notes](https://github.com/DodgyBadger/AssistantMD/releases/latest) for breaking changes.
+⚠️ Beta software. Always check the [release notes](https://github.com/DodgyBadger/AssistantMD/releases/latest) for breaking changes.  
 ⚠️ Back up your notes and the `AssistantMD/system` folder.
 
 ***If you are using the default docker image:***
