@@ -68,7 +68,7 @@ Open the **Configuration** tab and add at least one LLM API key under **Secrets*
 
 **Linux:** The default docker image runs as UID 1000 inside the container. This is the most common non-root user ID on Linux systems. It ensures that markdown files edited or written by the app remain accessible to you on the host. If it ran as root inside the container, you would lose access to any markdown files it touched. This works in reverse also. If the volumes being mounted into the container (`/absolute/path/to/your/vaults` and `./system`) are created by root on the host (i.e. you let docker create them or use `sudo`), then UID 1000 inside the container will not have access.
 
-If you see "permission denied" in the docker logs when loading the app, first make sure that your user on the host is UID 1000 by running `id` at a command line. Then make sure that the two mounted folders are not owned by root. 
+If you see "permission denied" in the docker logs when loading the app, first make sure that your user on the host is UID 1000 by running `id` in the terminal. Then make sure that the two mounted folders are not owned by root. 
 
 If your UID is not 1000, then you need to build a custom image. There are also scenarios where you might want to run as root inside the container, such as hosting AssistantMD and syncing your markdown files to a remote server.
 
@@ -104,7 +104,7 @@ Build and run the image: `docker compose up -d --build`
 /home/user/MyVaults/
 ├── Personal/
 ```
-Docker compose volume mount reads: `/home/user/MyVaults:/app/data`.
+Docker compose volume mount reads: `/home/user/MyVaults:/app/data`.  
 AssistantMD will see one vault called `Personal`.
 
 ```
@@ -114,7 +114,7 @@ AssistantMD will see one vault called `Personal`.
 └── Family/
 
 ```
-Docker compose volume mount reads: `/home/user/MyVaults:/app/data`.
+Docker compose volume mount reads: `/home/user/MyVaults:/app/data`.  
 AssistantMD will see three vaults called `Personal`, `Work` and `Family`
 
 ## Additional Notes

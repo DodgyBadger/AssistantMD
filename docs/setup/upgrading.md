@@ -14,5 +14,5 @@ docker compose up -d
 ```
 docker compose down
 git pull
-docker compuse up -d --build
+docker compose up -d --build
 ```
