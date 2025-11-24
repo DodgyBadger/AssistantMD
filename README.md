@@ -1,10 +1,13 @@
 # AssistantMD
 
-Markdown-native, self-hosted AI chat UI and scheduled workflows.
+Markdown-native, self-hosted AI chat UI and scheduled, multi-step prompts.
 
 Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locally or deploy to a VPS (you provide the security layer).
 
-⚠️ **Beta software**
+**Examples use-cases:**
+- 
+
+⚠️ **Beta software. Back up your markdown files.**
 
 ## Requirements
 
@@ -19,15 +22,15 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 - Any OpenAI-compatible API (Ollama, etc.)
 
 **💬 Chat Interface**
-- Clean, mobile-friendly focused chat UI
+- Clean, mobile-friendly chat UI
 - Read and write markdown files during conversations
 - Full vault context available to the AI
 - Easy to update models and providers
 
 **⚡ Scheduled Workflows**
+- Multi-step prompts (called workflows) with per-step model and tool selection
 - Workflows defined as markdown files in `AssistantMD/Workflows/`
-- Recurring schedules (cron) or one-time execution
-- Multi-step workflows with per-step model and tool selection
+- Recurring schedules using cron expressions or one-time execution
 - Dynamic file patterns: `{today}`, `{this-week}`, `{latest}`, etc.
 
 **🔐 Privacy & Control**
