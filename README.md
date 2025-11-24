@@ -1,10 +1,16 @@
 # AssistantMD
 
-Markdown-native, self-hosted AI chat UI and scheduled workflows.
+Markdown-native, self-hosted AI chat UI and scheduled, multi-step prompts.
 
 Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locally or deploy to a VPS (you provide the security layer).
 
-⚠️ **Beta software**
+**Examples use-cases:**
+- Instant read/write to your markdown files in the chat UI. No copying and pasting content.
+- Run a prompt at 6am every day to review the latest meeting notes and summarize actions.
+- Run a prompt monthly to find local events you might like and write them to a note.
+- Run a multi-step workflow (sequence of prompts) to conduct online research for latest trends in your industry, create a weekly briefing note and recommended actions.
+
+⚠️ **Beta software. Back up your markdown files before installing.**
 
 ## Requirements
 
@@ -19,15 +25,15 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 - Any OpenAI-compatible API (Ollama, etc.)
 
 **💬 Chat Interface**
-- Clean, mobile-friendly focused chat UI
+- Clean, mobile-friendly chat UI
 - Read and write markdown files during conversations
 - Full vault context available to the AI
 - Easy to update models and providers
 
 **⚡ Scheduled Workflows**
+- Multi-step prompts (called workflows) with per-step model and tool selection
 - Workflows defined as markdown files in `AssistantMD/Workflows/`
-- Recurring schedules (cron) or one-time execution
-- Multi-step workflows with per-step model and tool selection
+- Recurring schedules using cron expressions or one-time execution
 - Dynamic file patterns: `{today}`, `{this-week}`, `{latest}`, etc.
 
 **🔐 Privacy & Control**
@@ -43,3 +49,4 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 - **[Directives Reference](docs/core/core-directives.md)** - Control workflow behavior
 - **[Workflow Tips](docs/setup/tips.md)** - Additional tips for creating and managing workflows
 - **[Security Considerations](docs/setup/security.md)** - Important security information
+- **[Upgrading](docs/setup/upgrading.md)** - Upgrading to the latest version

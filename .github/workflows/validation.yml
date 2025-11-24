@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # paths-filter requires the base ref to detect docs-only changes correctly
+          fetch-depth: 0
 
       - name: Detect docs-only changes
         id: docs-filter
