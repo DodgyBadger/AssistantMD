@@ -49,3 +49,4 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 - **[Directives Reference](docs/core/core-directives.md)** - Control workflow behavior
 - **[Workflow Tips](docs/setup/tips.md)** - Additional tips for creating and managing workflows
 - **[Security Considerations](docs/setup/security.md)** - Important security information
+- **[Upgrading](docs/setup/upgrading.md)** - Upgrading to the latest version
