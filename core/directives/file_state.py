@@ -5,11 +5,13 @@ Tracks which files have been processed by workflows to support incremental proce
 """
 
 import hashlib
+import os
 from datetime import datetime
-from typing import List, Set, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import Column, String, DateTime
 
 from core.database import Base, create_engine_from_system_db, create_session_factory
+from core.constants import CONTAINER_DATA_ROOT
 from core.logger import UnifiedLogger
 
 logger = UnifiedLogger(tag="file-state")
@@ -43,7 +45,8 @@ class ProcessedFile(Base):
     vault_name = Column(String, primary_key=True, nullable=False)
     workflow_id = Column("assistant_id", String, primary_key=True, nullable=False)
     pattern = Column(String, primary_key=True, nullable=False)
-    content_hash = Column(String, primary_key=True, nullable=False)  # SHA256 hash for comparison
+    # SHA256 hash for comparison
+    content_hash = Column(String, primary_key=True, nullable=False)
     filepath = Column(String, nullable=False)  # Human-readable path for debugging
     processed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -64,6 +67,7 @@ class WorkflowFileStateManager:
         """
         self.vault_name = vault_name
         self.workflow_id = workflow_id
+        self.vault_path = os.path.join(CONTAINER_DATA_ROOT, vault_name)
 
         # Create SQLAlchemy engine and session factory for file_state database
         self.engine = create_engine_from_system_db("file_state")
@@ -75,23 +79,50 @@ class WorkflowFileStateManager:
         """Initialize database schema if it doesn't exist."""
         Base.metadata.create_all(self.engine)
     
-    def get_processed_files(self, pattern: str) -> Set[str]:
-        """Get set of content hashes for files that have been processed for a pattern.
-
-        Args:
-            pattern: The @input-file pattern (e.g., "journal/{pending:5}")
-
-        Returns:
-            Set of content hashes that have been marked as processed
+    def _normalize_path_for_state(self, filepath: str) -> str:
         """
+        Normalize file path to vault-relative, extension-stripped form used for
+        state tracking.
+        """
+        if not os.path.isabs(filepath):
+            abs_path = os.path.join(self.vault_path, filepath)
+        else:
+            abs_path = filepath
+
+        relative_path = os.path.relpath(abs_path, self.vault_path)
+        if relative_path.endswith('.md'):
+            relative_path = relative_path[:-3]
+        return relative_path.replace('\\', '/')
+
+    def get_processed_state(self, pattern: str) -> Tuple[Set[str], Dict[str, datetime]]:
+        """Get processed hashes and per-path processed timestamps for a pattern."""
         with self.SessionFactory() as session:
-            results = session.query(ProcessedFile.content_hash).filter(
+            results = session.query(
+                ProcessedFile.content_hash,
+                ProcessedFile.filepath,
+                ProcessedFile.processed_at
+            ).filter(
                 ProcessedFile.vault_name == self.vault_name,
                 ProcessedFile.workflow_id == self.workflow_id,
                 ProcessedFile.pattern == pattern
             ).all()
 
-            return {row.content_hash for row in results}
+            hashes = set()
+            path_processed_at: Dict[str, datetime] = {}
+
+            for content_hash, filepath, processed_at in results:
+                hashes.add(content_hash)
+                normalized_path = self._normalize_path_for_state(filepath)
+                existing = path_processed_at.get(normalized_path)
+                if not existing or processed_at > existing:
+                    path_processed_at[normalized_path] = processed_at
+
+            return hashes, path_processed_at
+
+    def get_processed_files(self, pattern: str) -> Set[str]:
+        """Backward-compatible helper returning only processed hashes."""
+        hashes, _ = self.get_processed_state(pattern)
+        return hashes
     
     def mark_files_processed(self, file_records: List[dict], pattern: str):
         """Mark files as processed for a specific pattern.
@@ -111,45 +142,64 @@ class WorkflowFileStateManager:
                     workflow_id=self.workflow_id,
                     pattern=pattern,
                     content_hash=record['content_hash'],
-                    filepath=record['filepath'],
+                    filepath=self._normalize_path_for_state(record['filepath']),
                     processed_at=datetime.utcnow()
                 )
                 session.merge(processed_file)
 
             session.commit()
     
-    def get_pending_files(self, all_files: List[str], pattern: str, count_limit: Optional[int] = None) -> List[str]:
+    def get_pending_files(
+        self,
+        all_files: List[str],
+        pattern: str,
+        count_limit: Optional[int] = None
+    ) -> List[str]:
         """Filter list of files to return only pending (unprocessed) files.
 
         Returns files in chronological order (oldest first) up to the count limit.
         Core function that implements {pending} variable behavior.
 
-        Uses content hashing for file identification - files are matched by content hash
-        rather than path, making this robust to file renames/moves and avoiding path format issues.
+        Uses content hashing for file identification - files are matched by content
+        hash rather than path, making this robust to file renames/moves and
+        avoiding path format issues.
 
         Args:
-            all_files: List of all available file paths (absolute paths, should be pre-sorted chronologically)
+            all_files: List of all available file paths (absolute paths, should be
+                pre-sorted chronologically)
             pattern: The @input-file pattern that requested these files
             count_limit: Maximum number of files to return
 
         Returns:
             List of file paths for unprocessed files, preserving chronological order
         """
-        processed_hashes = self.get_processed_files(pattern)
+        processed_hashes, path_processed_at = self.get_processed_state(pattern)
 
         # Filter out processed files - compare by content hash
         pending_files = []
         for filepath in all_files:
+            normalized_path = self._normalize_path_for_state(filepath)
             try:
                 # Read file content and hash it
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
                 file_hash = hash_file_content(content)
 
-                if file_hash not in processed_hashes:
-                    pending_files.append(filepath)
+                if file_hash in processed_hashes:
+                    continue
+
+                # Hybrid check: if path was processed and file hasn't been
+                # modified since, treat as processed
+                processed_at = path_processed_at.get(normalized_path)
+                if processed_at:
+                    file_mtime = datetime.utcfromtimestamp(os.path.getmtime(filepath))
+                    if file_mtime <= processed_at:
+                        continue
+
+                pending_files.append(filepath)
             except (IOError, OSError) as e:
-                # If we can't read the file, include it as pending (it will fail later with a clear error)
+                # If we can't read the file, include it as pending (it will fail
+                # later with a clear error)
                 logger.activity(
                     f"Warning: Could not read file for hash comparison: {filepath}",
                     level="warning",
@@ -188,7 +238,8 @@ class WorkflowFileStateManager:
         # Check each file list for state metadata
         for file_list in file_lists:
             for file_data in file_list:
-                if '_state_metadata' in file_data and file_data['_state_metadata'].get('requires_tracking'):
+                if ('_state_metadata' in file_data
+                        and file_data['_state_metadata'].get('requires_tracking')):
                     pattern = file_data['_state_metadata']['pattern']
                     file_records = file_data['_state_metadata']['file_records']
                     self.mark_files_processed(file_records, pattern)
