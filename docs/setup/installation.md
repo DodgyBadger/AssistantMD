@@ -59,7 +59,7 @@ Open the **Configuration** tab and add at least one LLM API key under **Secrets*
 
 **Web search**: The default web search tool uses the free duckduckgo library. This is enabled by default. To enable more advanced searches, web extraction and web crawling, you can add a [Tavily API key](https://www.tavily.com). The free tier will be sufficient for many users and is worth grabbing.
 
-<!-- **Code execution**: The default code execution tool uses the public Piston API (free, no setup). The base URL lives in the Configuration tab as `piston_base_url` (defaults to the public endpoint). Piston supports many languages with fast, single-shot execution. -->
+**Code execution**: The default code execution tool uses the public Piston API (free, no setup). The base URL lives in the Configuration tab as `piston_base_url` (defaults to the public endpoint). Piston supports many languages with fast, single-shot execution.
 
 To self-host Piston:
 - Uncomment the `piston` service block in `docker-compose.yml`.
