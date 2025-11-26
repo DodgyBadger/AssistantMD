@@ -24,13 +24,13 @@ Use the DuckDuckGo search tool to find information about "Python programming bas
 
 Use the Tavily search tool to find information about "machine learning fundamentals" and provide a brief summary.
 
-## STEP3_CODE_EXECUTION_LIBRECHAT
+## STEP3_CODE_EXECUTION_PISTON
 @model haiku
-@tools code_execution_librechat
+@tools code_execution_piston
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output-file tools/librechat-test
+@output-file tools/piston-test
 
-Use the LibreChat code execution tool to create a simple Python list [1, 2, 3, 4, 5] and find its length.
+Use the Piston code execution tool to create a simple Python list [1, 2, 3, 4, 5] and find its length.
 
 ## STEP4_WEB_SEARCH_GENERIC
 @model haiku

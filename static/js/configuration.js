@@ -36,7 +36,7 @@
         GROK_API_KEY: { label: 'Grok API Key', description: 'Required for Grok model aliases' },
         MISTRAL_API_KEY: { label: 'Mistral API Key', description: 'Required for Mistral model aliases' },
         TAVILY_API_KEY: { label: 'Tavily API Key', description: 'Required for Tavily search/crawl tools' },
-        LIBRECHAT_API_KEY: { label: 'LibreChat API Key', description: 'Required for code execution tool' },
+        PISTON_API_KEY: { label: 'Piston API Key', description: 'Optional; only needed if your Piston endpoint requires auth' },
         LOGFIRE_TOKEN: { label: 'Logfire Token', description: 'Enables cloud telemetry when set' },
         LM_STUDIO_API_KEY: { label: 'LM Studio API Key', description: 'Optional key for LM Studio endpoints' },
         LM_STUDIO_BASE_URL: { label: 'LM Studio Base URL', description: 'Custom endpoint for LM Studio (http://host:port)' },

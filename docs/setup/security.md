@@ -41,8 +41,8 @@ When AI models process web content using tools like search, extract or crawl, ma
 - Treat this as an additional layer, not a guarantee—future tool changes or alternate fetch paths may surface the payloads
 
 **3. No data exfiltration possible**
-- The `code_execution` tool uses LibreChat code interpreter which runs a network-isolated sandbox
-- No workflow tool can send data to external servers or download additional content
+- The `code_execution` tool uses Piston (public endpoint by default). The public instance is sandboxed for untrusted code, and you can self-host Piston for stricter network isolation if needed.
+- No workflow tool can send data to external servers or download additional content beyond their providers.
 - Even if a model is compromised, your data stays local
 
 ### Best Practices

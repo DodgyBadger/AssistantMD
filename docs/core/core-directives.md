@@ -100,4 +100,4 @@ The `schedule` in YAML frontmatter determines when the workflow runs. The `@run-
 - Tools are disabled by default and must be explicitly enabled per step
 - Format: `@tools tool1, tool2` or `@tools tool1 tool2`
 - Available tools can be viewed in the web UI Chat tab under Advanced. Copy the name shown into the directive (e.g. `file_ops_safe`)
-- the Tavily tools and code_execution require API keys to be set in the web UI Configuration tab. Tavily offers a generous free tier. code_execution uses LibreChat code interpreter which is paid.
+- the Tavily tools require API keys to be set in the web UI Configuration tab. The `code_execution` tool defaults to the public Piston API (no key needed); edit `piston_base_url` in Configuration (or `PISTON_BASE_URL` env) and optionally `PISTON_API_KEY` if your endpoint requires it.

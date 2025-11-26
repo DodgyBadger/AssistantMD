@@ -29,10 +29,31 @@ services:
     security_opt:
       - no-new-privileges:true
     
-    # Health check (compose-only so it can be disabled/overridden easily)
+#   # Health check
 #    healthcheck:
 #      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/api/health"]
-#      interval: 30s
+#      interval: 120s
 #      timeout: 10s
 #      retries: 3
 #      start_period: 40s
+
+# Optional self-hosted Piston code execution sandbox
+# Uncomment to run Piston locally instead of the public endpoint.
+# piston:
+#   image: ghcr.io/engineer-man/piston:latest
+#   container_name: piston
+#   restart: unless-stopped
+#   # Disable outbound network from Piston containers (recommended)
+#   network_mode: "none"
+#   # Piston listens on 2000 by default; the app talks to it via the internal service name.
+#   # Keep it internal-only; expose a host port only if you explicitly need it.
+#   environment: []
+#   # Optional: tighten runtime further
+#   read_only: true
+#   tmpfs:
+#     - /tmp
+#   deploy:
+#     resources:
+#       limits:
+#         memory: 1G
+#         cpus: "1.0"
