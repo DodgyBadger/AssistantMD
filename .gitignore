@@ -143,6 +143,9 @@ node_modules/
 # Generated CSS (built during Docker build)
 static/output.css
 
+# Local Python package installs
+.pip-packages/
+
 # Application databases and logs (runtime state)
 *.db
 *.sqlite

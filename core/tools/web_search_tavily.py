@@ -40,7 +40,7 @@ class WebSearchTavily(BaseTool):
                         json={
                             "api_key": tavily_api_key,
                             "query": query,
-                            "max_results": 10,
+                            "max_results": 3,
                             "search_depth": "basic",
                             "include_answer": False,
                             "include_raw_content": False
