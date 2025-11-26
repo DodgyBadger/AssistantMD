@@ -247,7 +247,9 @@ class DirectiveValueParser:
             return []
         
         # Split on both commas and whitespace, filter empty items
-        items = [item.strip() for item in re.split(r'[,\s]+', value.strip()) if item.strip()]
+        items = [
+            item.strip() for item in re.split(r'[,\s]+', value.strip()) if item.strip()
+        ]
         
         if to_lower:
             items = [item.lower() for item in items]
@@ -297,7 +299,9 @@ class DirectiveValueParser:
         return normalized in comparison_set
     
     @staticmethod
-    def validate_list_from_set(value: str, valid_values: set, to_lower: bool = True) -> bool:
+    def validate_list_from_set(
+        value: str, valid_values: set, to_lower: bool = True
+    ) -> bool:
         """
         Validate that all items in a list exist in a set of valid values.
         
@@ -317,7 +321,9 @@ class DirectiveValueParser:
         return all(item in comparison_set for item in items)
     
     @staticmethod
-    def parse_value_with_parameters(value: str) -> tuple[str, Dict[str, str]]:
+    def parse_value_with_parameters(
+        value: str, allowed_parameters: set[str] | None = None
+    ) -> tuple[str, Dict[str, str]]:
         """
         Parse a value that may contain parameters in parentheses.
         
@@ -325,7 +331,10 @@ class DirectiveValueParser:
         - "sonnet" -> ("sonnet", {})
         - "sonnet (thinking)" -> ("sonnet", {"thinking": "true"})
         - "sonnet (thinking=true)" -> ("sonnet", {"thinking": "true"})
-        - "sonnet (thinking=false, temperature=0.5)" -> ("sonnet", {"thinking": "false", "temperature": "0.5"})
+        - "sonnet (thinking=false, temperature=0.5)" -> (
+            "sonnet",
+            {"thinking": "false", "temperature": "0.5"},
+        )
         
         Args:
             value: The directive value to parse
@@ -335,31 +344,116 @@ class DirectiveValueParser:
         """
         if DirectiveValueParser.is_empty(value):
             return "", {}
-        
+
         value = value.strip()
-        
-        # Check if there are parameters in parentheses
-        param_match = re.search(r'^([^(]+)\s*\(([^)]+)\)$', value)
-        if not param_match:
-            # No parameters found
-            return value, {}
-        
-        base_value = param_match.group(1).strip()
-        params_str = param_match.group(2).strip()
-        
-        # Parse parameters
-        parameters = {}
-        if params_str:
-            # Split by commas and parse key=value or just key
-            param_items = [item.strip() for item in params_str.split(',') if item.strip()]
-            
+        allowed_normalized = (
+            {param.lower() for param in allowed_parameters}
+            if allowed_parameters
+            else None
+        )
+
+        def parse_parameters(params_str: str) -> Dict[str, str] | None:
+            if not params_str:
+                return None
+
+            param_items = [
+                item.strip() for item in params_str.split(",") if item.strip()
+            ]
+            if not param_items:
+                return None
+
+            parameters: Dict[str, str] = {}
             for param_item in param_items:
-                if '=' in param_item:
-                    # key=value format
-                    key, val = param_item.split('=', 1)
-                    parameters[key.strip()] = val.strip()
+                if "=" in param_item:
+                    key, val = param_item.split("=", 1)
+                    key = key.strip()
+                    val = val.strip()
                 else:
-                    # Just key format (defaults to "true")
-                    parameters[param_item.strip()] = "true"
-        
-        return base_value, parameters
+                    key = param_item.strip()
+                    val = "true"
+
+                if not key:
+                    return None
+
+                if allowed_normalized and key.lower() not in allowed_normalized:
+                    return None
+
+                parameters[key] = val
+
+            return parameters
+
+        def split_base_and_params(value_str: str) -> tuple[str, str | None]:
+            stripped = value_str.rstrip()
+            if not stripped.endswith(")"):
+                return value_str.strip(), None
+
+            depth = 0
+            open_idx: int | None = None
+            for idx in range(len(stripped) - 1, -1, -1):
+                char = stripped[idx]
+                if char == ")":
+                    depth += 1
+                elif char == "(":
+                    depth -= 1
+                    if depth == 0:
+                        open_idx = idx
+                        break
+
+            if open_idx is None or depth != 0:
+                return value_str.strip(), None
+
+            candidate_base = stripped[:open_idx].rstrip()
+            params_section = stripped[open_idx + 1 : -1].strip()
+
+            if not candidate_base:
+                return value_str.strip(), None
+
+            return candidate_base, params_section
+
+        # Handle quoted or Obsidian-style paths up front and leave any trailing
+        # parentheses to be treated as parameters on the remainder.
+        base_value: str | None = None
+        remainder = value
+        if remainder.startswith("[["):
+            close_idx = remainder.find("]]")
+            if close_idx != -1:
+                base_value = remainder[2:close_idx]
+                remainder = remainder[close_idx + 2 :].strip()
+        elif remainder.startswith('"') or remainder.startswith("'"):
+            quote_char = remainder[0]
+            close_idx = remainder.find(quote_char, 1)
+            if close_idx != -1:
+                base_value = remainder[1:close_idx]
+                remainder = remainder[close_idx + 1 :].strip()
+
+        parameters: Dict[str, str] = {}
+
+        # If we already extracted a base path (quoted or [[link]]), only parse
+        # parameters from the remaining text.
+        if base_value is not None:
+            if remainder:
+                stripped_remainder = remainder.strip()
+
+                if (
+                    stripped_remainder.startswith("(")
+                    and stripped_remainder.endswith(")")
+                ):
+                    params_section = stripped_remainder[1:-1].strip()
+                else:
+                    _, params_section = split_base_and_params(remainder)
+
+                parsed = parse_parameters(params_section) if params_section else None
+                if parsed:
+                    parameters = parsed
+            return base_value, parameters
+
+        # Otherwise, attempt to split trailing parameters from the value. If the
+        # trailing parentheses don't parse as recognized parameters, treat the
+        # whole string as the base value to avoid misclassifying filenames.
+        candidate_base, params_section = split_base_and_params(remainder)
+        parsed_params = parse_parameters(params_section) if params_section else None
+
+        if parsed_params is None:
+            return value, {}
+
+        return candidate_base, parsed_params

@@ -28,11 +28,12 @@ You may use time patterns in the output-file directive to generate files dynamic
 - Path resolution: All paths are relative to the vault root
 - Automatic .md extension: The system automatically adds `.md` extension if not present
 - When the optional parameter `(required)` or `(required=true)` is specified, the step will be skipped if no files are found for this @input-file directive. Useful for workflows that should only run when input data is available (e.g., only generate invoices when there are billable hours to process).
+- When the optional parameter `(paths-only)` / `(paths_only)` is specified, the directive passes only file paths into the prompt (listed as bullet points) and does not inline file contents. Use this when you want the model or tools to open the files one-by-one instead of loading large contexts directly.
 
 Examples:
 - `goals.md` or `projects/notes.md` - Specific file
 - `reports/*.md` - All files in the reports folder
-- `timesheets/{pending} (required)` - Only run if unprocessed timesheets exist
+- `timesheets/{pending} (required, paths_only)` - Only run if unprocessed timesheets exist and pass only the file paths
 
 You may use time patterns and glob patterns in the input-file directive to retrieve files dynamically. See [Pattern Reference](patterns.md) for all available patterns.
 

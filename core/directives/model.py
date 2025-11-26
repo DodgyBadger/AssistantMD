@@ -37,7 +37,9 @@ class ModelDirective(DirectiveProcessor):
         
         try:
             # Parse model name and parameters
-            model_name, parameters = DirectiveValueParser.parse_value_with_parameters(value)
+            model_name, parameters = DirectiveValueParser.parse_value_with_parameters(
+                value, allowed_parameters={"thinking"}
+            )
             normalized_model = DirectiveValueParser.normalize_string(model_name, to_lower=True)
 
             if normalized_model == 'test':
@@ -76,7 +78,9 @@ class ModelDirective(DirectiveProcessor):
             raise ValueError("Model name cannot be empty")
 
         # Parse model name and parameters
-        model_name, parameters = DirectiveValueParser.parse_value_with_parameters(value)
+        model_name, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value, allowed_parameters={"thinking"}
+        )
         normalized_model = DirectiveValueParser.normalize_string(model_name, to_lower=True)
 
         # Special case: test model (hardcoded for validation, not in mappings)

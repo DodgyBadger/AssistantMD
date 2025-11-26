@@ -34,7 +34,7 @@ class WebSearchDuckDuckGo(BaseTool):
                 # Perform search with reasonable defaults
                 results = ddgs_client.text(
                     query=query,
-                    max_results=10,
+                    max_results=3,
                     region="us-en",
                     safesearch="moderate"
                 )

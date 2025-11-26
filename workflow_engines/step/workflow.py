@@ -264,15 +264,33 @@ def build_final_prompt(processed_step) -> str:
         
         # Format each file's content for inclusion in prompt
         formatted_content = []
+        path_only_entries = []
         for file_data in flattened_files:
-            if file_data['found'] and file_data['content']:
-                formatted_content.append(f"# File: {file_data['filepath']}\n\n{file_data['content']}")
+            if file_data.get('paths_only'):
+                label = f"- {file_data['filepath']}"
+                if not file_data.get('found', True):
+                    error_msg = file_data.get('error', 'File not found')
+                    label += f" (missing: {error_msg})"
+                path_only_entries.append(label)
+            elif file_data['found'] and file_data['content']:
+                formatted_content.append(
+                    f"# File: {file_data['filepath']}\n\n{file_data['content']}"
+                )
             elif not file_data['found']:
-                formatted_content.append(f"# File: {file_data['filepath']}\n\n[File not found: {file_data['error']}]")
+                formatted_content.append(
+                    f"# File: {file_data['filepath']}\n\n[File not found: {file_data['error']}]"
+                )
         
+        prompt_sections = []
+        if path_only_entries:
+            prompt_sections.append(
+                "File paths (content not inlined):\n" + "\n".join(path_only_entries)
+            )
         if formatted_content:
-            final_prompt += "\n\n---\n\n"
-            final_prompt += "\n\n---\n\n".join(formatted_content)
+            prompt_sections.append("\n\n".join(formatted_content))
+
+        if prompt_sections:
+            final_prompt += "\n\n---\n\n" + "\n\n---\n\n".join(prompt_sections)
     
     return final_prompt
 
@@ -450,4 +468,3 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
         'workflow_instructions': workflow_instructions,
         'workflow_steps': workflow_steps
     }
-

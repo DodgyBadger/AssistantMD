@@ -119,15 +119,18 @@ class InputFileDirective(DirectiveProcessor):
             return False
 
         # Parse base value and parameters
-        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(value.strip())
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value.strip(), allowed_parameters={"required", "paths_only", "paths-only"}
+        )
 
         # Validate base value (file path)
         if base_value.startswith('/') or '..' in base_value:
             return False
 
-        # Validate parameters (currently only 'required' is supported)
+        # Validate parameters (currently 'required' and 'paths_only' are supported)
         for param_name, param_value in parameters.items():
-            if param_name.lower() != 'required':
+            param_name = param_name.lower()
+            if param_name not in {'required', 'paths_only', 'paths-only'}:
                 return False
             # Validate required parameter is a boolean-like value
             if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
@@ -144,8 +147,14 @@ class InputFileDirective(DirectiveProcessor):
         value = value.strip()
 
         # Parse required parameter if present
-        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(value)
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value, allowed_parameters={"required", "paths_only", "paths-only"}
+        )
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
+        paths_only = (
+            parameters.get('paths_only', parameters.get('paths-only', '')).lower()
+            in ['true', 'yes', '1']
+        )
 
         # Use base_value for file resolution (without parameters)
         file_path = base_value.strip()
@@ -179,6 +188,13 @@ class InputFileDirective(DirectiveProcessor):
                     '_workflow_signal': 'skip_step',
                     'reason': f'No required input files found: {file_path}'
                 }]
+
+        # If paths_only=true, strip content to reduce prompt size but retain metadata
+        if paths_only:
+            for file_data in result_files:
+                if isinstance(file_data, dict):
+                    file_data['paths_only'] = True
+                    file_data['content'] = ""
 
         return result_files
     

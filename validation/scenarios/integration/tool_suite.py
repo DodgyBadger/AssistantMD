@@ -1,8 +1,8 @@
 """
-Integration scenario that exercises every configured tool using TestModel.
+Integration scenario that exercises every configured tool with a lightweight model.
 
-Runs a multi-step workflow where each step enables a single tool so we can
-confirm tool wiring without external API calls.
+Runs a multi-step workflow where each step enables a single tool with deterministic,
+small inputs to keep runtime and costs low.
 """
 
 import sys
@@ -14,7 +14,7 @@ from validation.core.base_scenario import BaseScenario
 
 
 class ToolSuiteScenario(BaseScenario):
-    """Validate that every tool can be invoked successfully with TestModel."""
+    """Validate that every tool can be invoked successfully with a lightweight model."""
 
     async def test_scenario(self):
         vault = self.create_vault("ToolSuiteVault")
@@ -57,63 +57,63 @@ TOOL_SUITE_WORKFLOW = """
 ---
 workflow_engine: step
 enabled: false
-description: Validation workflow that exercises every available tool with the TestModel.
+description: Validation workflow that exercises every available tool with a lightweight model.
 ---
 
 ## STEP1_DOCUMENTATION
-@model gpt-mini
+@model gpt-nano
 @tools documentation_access
 @output-file tool-outputs/documentation-access
 
-Provide a quick summary of the documentation home page using the documentation access tool.
+Summarize the documentation home page in 3 bullet points.
 
 ## STEP2_FILE_OPS_SAFE
-@model gpt-mini
+@model gpt-nano
 @tools file_ops_safe
 @output-file tool-outputs/file-ops-safe
 
-Call the safe file operations tool with any operation so we capture the tool output.
+Use the safe file operations tool to list the root of the vault and report the first entry found.
 
 ## STEP3_FILE_OPS_UNSAFE
-@model gpt-mini
+@model gpt-nano
 @tools file_ops_unsafe
 @output-file tool-outputs/file-ops-unsafe
 
-Invoke the unsafe file operations tool once to record its response. Do not rely on any existing files.
+Use the unsafe file operations tool to create a throwaway file named tmp/unsafe-test.txt with the content 'ok', then report success. Do not touch any other files.
 
 ## STEP4_WEB_SEARCH_DUCKDUCKGO
-@model gpt-mini
+@model gpt-nano
 @tools web_search_duckduckgo
 @output-file tool-outputs/web-search-duckduckgo
 
-Use the DuckDuckGo search backend to look up a topic of your choice.
+Search DuckDuckGo for "pydantic ai release" and return the top results in a short list.
 
 ## STEP5_WEB_SEARCH_TAVILY
-@model gpt-mini
+@model gpt-nano
 @tools web_search_tavily
 @output-file tool-outputs/web-search-tavily
 
-Use the Tavily search backend to look up a topic of your choice.
+Search Tavily for "pydantic ai release" using basic depth and summarize the top results briefly.
 
 ## STEP6_TAVILY_EXTRACT
-@model gpt-mini
+@model gpt-nano
 @tools tavily_extract
 @output-file tool-outputs/tavily-extract
 
-Call the Tavily extract tool on any URL so we capture the tool output.
+Extract https://example.com with basic depth; keep the response concise.
 
 ## STEP7_TAVILY_CRAWL
-@model gpt-mini
+@model gpt-nano
 @tools tavily_crawl
 @output-file tool-outputs/tavily-crawl
 
-Call the Tavily crawl tool on any URL so we capture the tool output.
+Crawl https://example.com with minimal depth; summarize what was crawled.
 
 ## STEP8_CODE_EXECUTION
-@model gpt-mini
+@model gpt-nano
 @tools code_execution
 @output-file tool-outputs/code-execution
 
-Run the code execution tool with a short code sample so we capture the tool output.
+Run a tiny Python snippet that prints 2+2.
 
 """
