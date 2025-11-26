@@ -45,7 +45,7 @@ class MultiToolWorkflowScenario(BaseScenario):
         # Check that all output files were created
         self.expect_file_created(vault, "tools/duckduckgo-test.md")
         self.expect_file_created(vault, "tools/tavily-test.md")
-        self.expect_file_created(vault, "tools/librechat-test.md")
+        self.expect_file_created(vault, "tools/piston-test.md")
         self.expect_file_created(vault, "tools/web-search-generic-test.md")
         self.expect_file_created(vault, "tools/code-execution-generic-test.md")
         self.expect_file_created(vault, "tools/tavily-extract-test.md")
@@ -54,9 +54,9 @@ class MultiToolWorkflowScenario(BaseScenario):
         # Verify content in the tool outputs
         self.expect_file_contains(vault, "tools/duckduckgo-test.md", ["Python"])
         self.expect_file_contains(vault, "tools/tavily-test.md", ["machine learning"])
-        self.expect_file_contains(vault, "tools/librechat-test.md", ["5"])  # Length of list
+        self.expect_file_contains(vault, "tools/piston-test.md", ["5"])  # Length of list
         self.expect_file_contains(vault, "tools/web-search-generic-test.md", ["JavaScript"])
-        self.expect_file_contains(vault, "tools/code-execution-generic-test.md", ["56"])  # 7 * 8 (now uses LibreChat)
+        self.expect_file_contains(vault, "tools/code-execution-generic-test.md", ["56"])  # 7 * 8 (via default code execution tool)
         self.expect_file_contains(vault, "tools/tavily-extract-test.md", ["Python"])
         self.expect_file_contains(vault, "tools/tavily-crawl-test.md", ["Python"])
 

@@ -24,6 +24,10 @@ settings:
     value: false
     description: "Enable Logfire telemetry when LOGFIRE_TOKEN is set."
     restart_required: false
+  piston_base_url:
+    value: "https://emkc.org/api/v2/piston"
+    description: "Piston API base URL (public default; override for self-hosted or proxied endpoints)."
+    restart_required: false
 
 models:
   gemini:
@@ -177,8 +181,12 @@ tools:
     requires_secrets: []
     user_editable: false
   code_execution:
-    module: core.tools.code_execution_librechat
-    description: "Multi-language code execution via LibreChat API"
-    requires_secrets:
-      - LIBRECHAT_API_KEY
+    module: core.tools.code_execution_piston
+    description: "Multi-language code execution via Piston API (public endpoint by default)"
+    requires_secrets: []
+    user_editable: false
+  code_execution_piston:
+    module: core.tools.code_execution_piston
+    description: "Explicit Piston backend for code execution"
+    requires_secrets: []
     user_editable: false
