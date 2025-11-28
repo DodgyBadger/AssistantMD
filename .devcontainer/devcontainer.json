@@ -3,16 +3,13 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "remoteUser": "coder",
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "remoteUser": "root",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+  "workspaceFolder": "/app",
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
-  "postCreateCommand": [
-    "/bin/bash",
-    "-lc",
-    "python -m pip install --upgrade pip && python -m pip install --no-cache-dir uv && python -m pip install --no-cache-dir -e ./docker[dev]"
-  ],
+  "postCreateCommand": "/bin/bash -lc 'python3 -m pip install --upgrade pip setuptools wheel && python3 -m pip install --no-cache-dir uv && python3 -m pip install --no-cache-dir -e ./docker[dev]'",
   "customizations": {
     "vscode": {
       "settings": {
