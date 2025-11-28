@@ -24,14 +24,12 @@ class DocumentationAccessTool(BaseTool):
             ctx: RunContext,
             path: str | None = Field(
                 default=None,
-                description="Documentation path (e.g., 'setup/assistant-setup', 'core/patterns'). Leave empty to get a summary of the docs layout."
+                description="Documentation path (e.g., 'setup/workflow-setup', 'core/patterns'). Leave empty to get a summary of the docs layout."
             )
         ) -> str:
             """
             Read AssistantMD documentation. 
-            
-            Start with index for overview and table of contents, then request specific sections as needed.
-            
+                     
             Args:
                 path: Documentation path relative to /app/docs/ (without .md extension)
                 
@@ -50,7 +48,7 @@ class DocumentationAccessTool(BaseTool):
 Use this tool to read AssistantMD documentation. Call it with no arguments to receive a quick guide describing what lives under /docs.
 
 When creating assistants:
-- `documentation_access(path="setup/assistant-setup")` → full assistant template and walkthrough
+- `documentation_access(path="setup/workflow-setup")` → full workflow template and walkthrough
 - `documentation_access(path="core/yaml-frontmatter")` → frontmatter options
 - `documentation_access(path="core/core-directives")` → @directive reference
 - `documentation_access(path="core/patterns")` → pattern variables
@@ -79,7 +77,7 @@ Ask for other paths (security, architecture, validation) only if specifically ne
         docs_root = Path(core.constants.DOCS_ROOT)
 
         focus_sections = [
-            ("setup/assistant-setup", "Complete assistant template and walkthrough"),
+            ("setup/workflow-setup", "Complete workflow template and walkthrough"),
             ("setup/installation", "Deployment prerequisites and docker-compose setup"),
             ("core/yaml-frontmatter", "Frontmatter keys: workflow, schedule, enabled"),
             ("core/core-directives", "Directive reference for @output-file, @tools, etc."),

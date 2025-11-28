@@ -104,7 +104,7 @@ IMPORTANT: You need TWO tools to complete this task:
 
 If these tools are not available, politely ask the user to enable them before continuing.
 
-Start by using documentation_access to read assistant-setup which contains a complete template.
+Start by using documentation_access to read setup/workflow-setup which contains a complete template.
 Pay close attention to the template - it provides a valid, runnable example you can modify.
 
 CRITICAL: Take your time. Have a real conversation with the user. Do NOT rush to create the file.
