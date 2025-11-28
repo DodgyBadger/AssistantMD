@@ -1,9 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/python:3.13-bookworm
 
-# Install Node.js (for global CLI tooling), GitHub CLI, and common build tooling
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates gnupg build-essential python3-dev sudo && \
-    # GitHub CLI repository
     mkdir -p -m 755 /etc/apt/keyrings && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/etc/apt/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
@@ -21,6 +19,5 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Defaults for the devcontainer user
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
