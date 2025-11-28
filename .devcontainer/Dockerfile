@@ -19,6 +19,8 @@ RUN apt-get update && \
         @google/gemini-cli@0.18.4 && \
     rm -rf /var/lib/apt/lists/*
 
+WORKDIR /app
+
 # Defaults for the devcontainer user
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1

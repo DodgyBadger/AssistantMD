@@ -8,7 +8,7 @@ This devcontainer uses envbuilder for Coder workspaces. Key choices:
   - `@anthropic-ai/claude-code@2.0.55`
   - `@openai/codex@0.63.0`
   - `@google/gemini-cli@0.18.4`
-- Host Docker socket mounted (`/var/run/docker.sock`) to enable Docker-in-Docker workflows
+- Host Docker socket mounted (`/var/run/docker.sock`) to enable Docker-in-Docker workflows; workspace bind-mounted to `/app` to mirror runtime path
 - Post-create step (inline) upgrades pip/setuptools/wheel, installs `uv`, then installs project deps from `docker/pyproject.toml` (dev extras) using `python3 -m pip`
 - Runs as root by default (no custom UID/GID)
 

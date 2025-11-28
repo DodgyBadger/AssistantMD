@@ -4,7 +4,8 @@
     "dockerfile": "Dockerfile"
   },
   "remoteUser": "root",
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+  "workspaceFolder": "/app",
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
