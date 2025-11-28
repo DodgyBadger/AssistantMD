@@ -1,33 +1,58 @@
 #!/usr/bin/env bash
-set -e
+# DO NOT use set -e while debugging; we want to see where it breaks
+set -uo pipefail
 
-echo "🛠  Devcontainer setup starting..."
+echo "=== setup.sh: starting ==="
+echo "CWD: $(pwd)"
+echo "User: $(id)"
 
-# In Coder/envbuilder (and local devcontainers), CWD = repo root:
-#   /workspaces/AssistantMD
+# 1. Check that python3 is available
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found on PATH."
+  exit 1
+fi
+
+# 2. Determine repo dir
 REPO_DIR="$(pwd)"
-echo "📂 Repo directory detected as: ${REPO_DIR}"
+echo "Repo dir: ${REPO_DIR}"
 
-# Make /app point to the repo, so runtime paths work the same as prod
-if [ ! -e "/app" ]; then
-  echo "📂 Creating /app symlink to ${REPO_DIR}..."
-  sudo ln -s "${REPO_DIR}" /app
+# 3. Try to create /app symlink (log errors, don't hard-fail)
+if [ -L "/app" ]; then
+  echo "/app is already a symlink -> $(readlink /app || true)"
+elif [ -e "/app" ]; then
+  echo "WARNING: /app exists and is not a symlink; leaving it alone."
 else
-  echo "ℹ️ /app already exists, leaving it as-is."
+  echo "Creating /app symlink to ${REPO_DIR}..."
+  if ln -s "${REPO_DIR}" /app; then
+    echo "Symlink /app -> ${REPO_DIR} created."
+  else
+    echo "ERROR: failed to create symlink /app -> ${REPO_DIR}"
+  fi
 fi
 
-# Upgrade pip tooling
-python3 -m pip install --upgrade pip setuptools wheel
+# 4. Upgrade pip tooling (log, but don't fail hard)
+echo "Upgrading pip/setuptools/wheel..."
+if ! python3 -m pip install --upgrade pip setuptools wheel; then
+  echo "WARNING: failed to upgrade pip tooling."
+fi
 
-# Install uv if you actually use it
-python3 -m pip install --no-cache-dir uv
+# 5. Install uv if missing
+if ! command -v uv >/dev/null 2>&1; then
+  echo "Installing uv..."
+  if ! python3 -m pip install --no-cache-dir uv; then
+    echo "WARNING: failed to install uv."
+  fi
+fi
 
-# Install your package from docker/pyproject.toml
+# 6. Install your package from docker/pyproject.toml
 if [ -f "${REPO_DIR}/docker/pyproject.toml" ]; then
-  echo "📦 Installing editable package from ${REPO_DIR}/docker[dev]..."
-  python3 -m pip install --no-cache-dir -e "${REPO_DIR}/docker[dev]"
+  echo "Installing editable package from ${REPO_DIR}/docker[dev]..."
+  if ! python3 -m pip install --no-cache-dir -e "${REPO_DIR}/docker[dev]"; then
+    echo "ERROR: pip install -e ${REPO_DIR}/docker[dev] failed."
+    exit 1
+  fi
 else
-  echo "⚠️  ${REPO_DIR}/docker/pyproject.toml not found; skipping package install."
+  echo "WARNING: ${REPO_DIR}/docker/pyproject.toml not found; skipping install."
 fi
 
-echo "✅ Devcontainer setup complete. Use /app as the project root."
+echo "=== setup.sh: finished successfully ==="
