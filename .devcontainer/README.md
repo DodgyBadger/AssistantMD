@@ -10,6 +10,6 @@ This devcontainer uses envbuilder for Coder workspaces. Key choices:
   - `@google/gemini-cli@0.18.4`
 - Host Docker socket mounted (`/var/run/docker.sock`) to enable Docker-in-Docker workflows
 - Post-create step installs pip, uv, and project deps from `docker/pyproject.toml` (dev extras)
-- `coder` user (passwordless sudo) created with configurable `UID`/`GID` build args to align with host
+- Runs as root by default (no custom UID/GID)
 
 Security note: In light of recent npm supply-chain incidents (e.g., “Shai-Hulud”), CLI deps are pinned explicitly rather than using `latest`. The repo’s JS deps are minimal (Tailwind) and do not include affected packages, but keep an eye on advisories and avoid pulling unpinned, newly compromised versions.
