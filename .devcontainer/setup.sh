@@ -12,8 +12,10 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-# 2. Determine repo dir
-REPO_DIR="$(pwd)"
+# 2. Determine repo dir (parent of .devcontainer)
+# This works no matter where we run the script from
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo "Repo dir: ${REPO_DIR}"
 
 # 3. Try to create /app symlink (log errors, don't hard-fail)
