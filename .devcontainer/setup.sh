@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
-# DO NOT use set -e while debugging; we want to see where it breaks
 set -uo pipefail
 
 echo "=== setup.sh: starting ==="
 echo "CWD: $(pwd)"
 echo "User: $(id)"
 
-# 1. Check that python3 is available
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "ERROR: python3 not found on PATH."
-  exit 1
-fi
-
-# 2. Determine repo dir (parent of .devcontainer)
-# This works no matter where we run the script from
+# 1. Determine repo dir (parent of .devcontainer)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo "Repo dir: ${REPO_DIR}"
 
-# 3. Try to create /app symlink (log errors, don't hard-fail)
+# 2. Ensure /app points to the repo root
 if [ -L "/app" ]; then
   echo "/app is already a symlink -> $(readlink /app || true)"
 elif [ -e "/app" ]; then
@@ -32,29 +24,30 @@ else
   fi
 fi
 
-# 4. Upgrade pip tooling (log, but don't fail hard)
-echo "Upgrading pip/setuptools/wheel..."
-if ! python3 -m pip install --upgrade pip setuptools wheel; then
-  echo "WARNING: failed to upgrade pip tooling."
+# 3. Check that python3 is available
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found on PATH."
+  exit 1
 fi
 
-# 5. Install uv if missing
+# 4. Install/upgrade uv (we'll use it like in the builder stage)
+echo "Ensuring uv is installed..."
 if ! command -v uv >/dev/null 2>&1; then
-  echo "Installing uv..."
-  if ! python3 -m pip install --no-cache-dir uv; then
-    echo "WARNING: failed to install uv."
-  fi
+  python3 -m pip install --no-cache-dir uv || echo "WARNING: failed to install uv"
 fi
 
-# 6. Install your package from docker/pyproject.toml
-if [ -f "${REPO_DIR}/docker/pyproject.toml" ]; then
-  echo "Installing editable package from ${REPO_DIR}/docker[dev]..."
-  if ! python3 -m pip install --no-cache-dir -e "${REPO_DIR}/docker[dev]"; then
-    echo "ERROR: pip install -e ${REPO_DIR}/docker[dev] failed."
-    exit 1
-  fi
+# 5. Use uv to sync dependencies from docker/pyproject.toml + uv.lock
+if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.lock" ]; then
+  echo "Syncing dependencies with uv (no dev deps)..."
+  (
+    cd "${REPO_DIR}/docker"
+    # Install into system env (no venv), similar to your builder stage
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_CACHE_DIR=/tmp/uv-cache \
+    uv sync --no-install-project --no-dev || echo "WARNING: uv sync failed; continuing"
+  )
 else
-  echo "WARNING: ${REPO_DIR}/docker/pyproject.toml not found; skipping install."
+  echo "WARNING: docker/pyproject.toml or docker/uv.lock not found; skipping uv sync."
 fi
 
-echo "=== setup.sh: finished successfully ==="
+echo "=== setup.sh: finished (no editable docker install) ==="
