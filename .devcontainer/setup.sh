@@ -5,32 +5,34 @@ echo "=== setup.sh: starting ==="
 echo "CWD: $(pwd)"
 echo "User: $(id)"
 
-# 1. Determine repo dir (parent of .devcontainer)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-echo "Repo dir: ${REPO_DIR}"
-
-# 2. Ensure /app points to the repo root
-if [ -L "/app" ]; then
-  echo "/app is already a symlink -> $(readlink /app || true)"
-elif [ -e "/app" ]; then
-  echo "WARNING: /app exists and is not a symlink; leaving it alone."
-else
-  echo "Creating /app symlink to ${REPO_DIR}..."
-  if ln -s "${REPO_DIR}" /app; then
-    echo "Symlink /app -> ${REPO_DIR} created."
-  else
-    echo "ERROR: failed to create symlink /app -> ${REPO_DIR}"
-  fi
-fi
-
-# 3. Check that python3 is available
+# 1. Check that python3 is available
 if ! command -v python3 >/dev/null 2>&1; then
   echo "ERROR: python3 not found on PATH."
   exit 1
 fi
 
-# 4. Install/upgrade uv (we'll use it like in the builder stage)
+# 2. Determine repo dir (parent of .devcontainer)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+echo "Repo dir: ${REPO_DIR}"
+
+# 3. Ensure /app points to the repo root (force replace if needed)
+if [ -L "/app" ]; then
+  echo "/app is a symlink -> $(readlink /app || true); replacing with ${REPO_DIR}"
+  rm -f /app
+elif [ -e "/app" ]; then
+  echo "WARNING: /app exists as a regular file/dir; replacing with symlink."
+  rm -rf /app
+fi
+
+echo "Creating /app symlink to ${REPO_DIR}..."
+if ln -s "${REPO_DIR}" /app; then
+  echo "Symlink /app -> ${REPO_DIR} created."
+else
+  echo "ERROR: failed to create symlink /app -> ${REPO_DIR}"
+fi
+
+# 4. Install/upgrade uv
 echo "Ensuring uv is installed..."
 if ! command -v uv >/dev/null 2>&1; then
   python3 -m pip install --no-cache-dir uv || echo "WARNING: failed to install uv"
@@ -41,7 +43,6 @@ if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.loc
   echo "Syncing dependencies with uv (no dev deps)..."
   (
     cd "${REPO_DIR}/docker"
-    # Install into system env (no venv), similar to your builder stage
     UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_CACHE_DIR=/tmp/uv-cache \
     uv sync --no-install-project --no-dev || echo "WARNING: uv sync failed; continuing"
