@@ -1,19 +1,16 @@
 {
-  "name": "AssistantMD (envbuilder)",
+  "name": "AssistantMD (devcontainer)",
+
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "remoteUser": "root",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
-  "workspaceFolder": "/app",
-  "mounts": [
-    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
-  ],
-  "postCreateCommand": "/bin/bash -lc 'cd /app && python3 -m pip install --upgrade pip setuptools wheel && python3 -m pip install --no-cache-dir uv && python3 -m pip install --no-cache-dir -e ./docker[dev]'",
+
+  "remoteUser": "vscode",
+
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python3.13",
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
         "terminal.integrated.shell.linux": "/bin/bash"
       },
       "extensions": [
@@ -23,8 +20,10 @@
         "tamasfe.even-better-toml",
         "charliermarsh.ruff",
         "qwtel.sqlite-viewer",
-        "codezombiech.gitignore"        
+        "codezombiech.gitignore"
       ]
     }
-  }
+  },
+
+  "updateContentCommand": "bash .devcontainer/setup.sh"
 }
