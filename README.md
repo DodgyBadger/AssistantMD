@@ -50,3 +50,7 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 - **[Workflow Tips](docs/setup/tips.md)** - Additional tips for creating and managing workflows
 - **[Security Considerations](docs/setup/security.md)** - Important security information
 - **[Upgrading](docs/setup/upgrading.md)** - Upgrading to the latest version
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
