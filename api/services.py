@@ -46,8 +46,8 @@ from core.constants import (
     COMPACT_SUMMARY_PROMPT,
     COMPACT_INSTRUCTIONS,
     WORKFLOW_CREATION_SUMMARY_PROMPT,
-    SYSTEM_DATA_ROOT,
 )
+from core.runtime.paths import get_system_root
 from .utils import generate_session_id
 from .models import (
     VaultInfo,
@@ -398,7 +398,7 @@ async def get_system_activity_log(limit_bytes: int = 65_536) -> SystemLogRespons
     Returns:
         SystemLogResponse with the log contents.
     """
-    log_path = Path(SYSTEM_DATA_ROOT) / "activity.log"
+    log_path = get_system_root() / "activity.log"
 
     if limit_bytes is None or limit_bytes <= 0:
         limit_bytes = 65_536
@@ -682,6 +682,7 @@ def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequ
     providers_config = get_providers_config()
     existing_config = providers_config.get(provider_name)
 
+    # Only reference existing secret names; actual secret values are managed via the Secrets form.
     existing_api_key = None
     existing_base_url = None
     if existing_config:
@@ -703,30 +704,6 @@ def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequ
         base_url = _normalize_secret_pointer(payload.base_url)
     else:
         base_url = existing_base_url
-
-    if payload.api_key_value is not None:
-        key_value = (payload.api_key_value or "").strip()
-        if key_value:
-            if not api_key:
-                api_key = _derive_secret_name(provider_name, "API_KEY")
-            set_secret_value(api_key, key_value)
-        else:
-            target = api_key or existing_api_key
-            if target and "://" not in target:
-                remove_secret(target)
-            api_key = None
-
-    if payload.base_url_value is not None:
-        url_value = (payload.base_url_value or "").strip()
-        if url_value:
-            if not base_url or "://" in base_url:
-                base_url = _derive_secret_name(provider_name, "BASE_URL")
-            set_secret_value(base_url, url_value)
-        else:
-            target = base_url or existing_base_url
-            if target and "://" not in target:
-                remove_secret(target)
-            base_url = None
 
     try:
         updated = upsert_provider_config(

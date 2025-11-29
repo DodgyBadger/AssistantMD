@@ -16,7 +16,7 @@ from typing import Any, Dict
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
-from core.constants import SYSTEM_DATA_ROOT
+from core.runtime.paths import get_system_root
 
 
 SETTINGS_TEMPLATE = Path(__file__).parent / "settings.template.yaml"
@@ -68,9 +68,19 @@ class SettingsFile(BaseModel):
     tools: Dict[str, ToolConfig] = Field(default_factory=dict)
 
 
+def _resolve_system_root() -> Path:
+    """
+    Determine the active system root, preferring runtime context over defaults.
+
+    Falls back to environment/default constants when a runtime context has not
+    been established (e.g. before bootstrap).
+    """
+    return get_system_root()
+
+
 def _resolve_settings_path() -> Path:
     """Determine the active settings file path."""
-    return Path(SYSTEM_DATA_ROOT) / "settings.yaml"
+    return _resolve_system_root() / "settings.yaml"
 
 
 def _ensure_settings_file(target_path: Path) -> None:

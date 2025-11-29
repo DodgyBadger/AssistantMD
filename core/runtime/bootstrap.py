@@ -63,7 +63,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         )
 
         # Create persistent job store for scheduler
-        job_store = create_job_store(system_data_root=str(config.system_data_root))
+        job_store = create_job_store(system_root=str(config.system_root))
 
         # Initialize scheduler with job store and worker configuration
         jobstores = {"default": job_store}
@@ -107,7 +107,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             vault="system",
             metadata={
                 "data_root": str(config.data_root),
-                "system_data_root": str(config.system_data_root),
+                "system_root": str(config.system_root),
                 "scheduler_workers": config.max_scheduler_workers,
                 "features": config.features
             }

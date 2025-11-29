@@ -7,9 +7,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 
 from core.logger import UnifiedLogger
-from core.constants import CONTAINER_DATA_ROOT, SYSTEM_DATA_ROOT
 from core.runtime.config import RuntimeConfig
 from core.runtime.bootstrap import bootstrap_runtime
+from core.runtime.paths import get_data_root, get_system_root
 from api.endpoints import router as api_router, register_exception_handlers
 from api.services import set_system_startup_time
 
@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
 
     # Create runtime configuration for production
     config = RuntimeConfig.for_production(
-        data_root=CONTAINER_DATA_ROOT,
-        system_data_root=SYSTEM_DATA_ROOT
+        data_root=get_data_root(),
+        system_root=get_system_root()
     )
 
     # Bootstrap runtime services

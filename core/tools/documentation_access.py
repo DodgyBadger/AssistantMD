@@ -11,7 +11,7 @@ from pydantic import Field
 from pydantic_ai import RunContext
 
 from .base import BaseTool
-import core.constants
+from core.runtime.paths import get_docs_root
 
 
 class DocumentationAccessTool(BaseTool):
@@ -74,7 +74,7 @@ Ask for other paths (security, architecture, validation) only if specifically ne
 
     def _describe_docs(self) -> str:
         """Return a short overview of the docs folder to steer the agent."""
-        docs_root = Path(core.constants.DOCS_ROOT)
+        docs_root = get_docs_root()
 
         focus_sections = [
             ("setup/workflow-setup", "Complete workflow template and walkthrough"),
@@ -113,7 +113,7 @@ Ask for other paths (security, architecture, validation) only if specifically ne
     
     def _normalize_path(self, path: str) -> Path:
         """Normalize documentation path to full file path within docs root."""
-        docs_root = Path(core.constants.DOCS_ROOT).resolve()
+        docs_root = get_docs_root().resolve()
 
         normalized_path = (path or "index").strip()
         normalized_path = normalized_path.strip('/')

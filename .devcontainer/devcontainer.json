@@ -5,7 +5,7 @@
     "dockerfile": "Dockerfile"
   },
 
-  "remoteUser": "vscode",
+  "remoteUser": "root",
 
   "customizations": {
     "vscode": {
@@ -23,6 +23,11 @@
         "codezombiech.gitignore"
       ]
     }
+  },
+
+  "containerEnv": {
+    "CONTAINER_DATA_ROOT": "/workspaces/AssistantMD/data",
+    "CONTAINER_SYSTEM_ROOT": "/workspaces/AssistantMD/system"
   },
 
   "updateContentCommand": "bash .devcontainer/setup.sh"
