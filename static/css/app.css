@@ -1,0 +1,131 @@
+:root {
+  --pico-font-size: 15px;
+  --pico-line-height: 1.45;
+  --pico-spacing: 0.75rem;
+}
+
+/* Align summary chevron to the left */
+details > summary.summary-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Responsive two-column layout for selectors */
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: var(--pico-spacing);
+}
+
+@media (max-width: 700px) {
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Chat layout */
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 65vh;
+  gap: var(--pico-spacing);
+}
+
+.chat-scroll {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--pico-muted-border-color, #e5e7eb);
+  border-radius: 8px;
+  padding: var(--pico-spacing);
+}
+
+.chat-footer {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--pico-spacing);
+  align-items: end;
+  padding: var(--pico-spacing);
+  background: var(--pico-background-color, #fff);
+  border: none;
+  border-top: 1px solid var(--pico-muted-border-color, #e5e7eb);
+}
+
+@media (max-width: 700px) {
+  .chat-footer {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+/* Tool badges */
+.tool-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--pico-spacing) * 0.5);
+}
+
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: auto;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--pico-muted-border-color, #e5e7eb);
+  border-radius: 999px;
+  background: var(--pico-background-color);
+}
+
+.tool-badge input[type="checkbox"] {
+  margin: 0;
+}
+
+.tool-badge input[type="checkbox"]:checked + span {
+  color: var(--pico-primary);
+  font-weight: 600;
+}
+
+/* Config rows: values left, actions right */
+.config-row {
+  display: flex;
+  gap: calc(var(--pico-spacing) * 0.75);
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+
+.config-row > div {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+.config-row footer {
+  display: flex;
+  gap: calc(var(--pico-spacing) * 0.5);
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .config-row {
+    flex-wrap: wrap;
+  }
+  .config-row footer {
+    justify-content: flex-start;
+  }
+}
+/* Simple two-column rows for label/actions */
+.two-col-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: calc(var(--pico-spacing) * 0.5);
+}
+
+@media (max-width: 700px) {
+  .two-col-actions {
+    grid-template-columns: 1fr;
+    gap: var(--pico-spacing);
+  }
+}

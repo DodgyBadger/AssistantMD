@@ -224,8 +224,8 @@ function populateSelectors() {
     const handledTools = new Set();
 
     const createToolElement = (tool) => {
-        const wrapper = document.createElement('label');
-        wrapper.className = 'tool-badge';
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tool-row';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -233,19 +233,23 @@ function populateSelectors() {
         checkbox.value = tool.name;
         checkbox.disabled = tool.available === false;
 
-        const span = document.createElement('span');
-        span.textContent = checkbox.disabled ? `${tool.name} (unavailable)` : tool.name;
-
-        // Default selections
-        if (!checkbox.disabled && (
-            tool.name === 'file_ops_safe' ||
-            (preferredWebTool && tool.name === preferredWebTool)
-        )) {
+        if (
+            !checkbox.disabled &&
+            (
+                tool.name === 'file_ops_safe' ||
+                (preferredWebTool && tool.name === preferredWebTool)
+            )
+        ) {
             checkbox.checked = true;
         }
 
+        const label = document.createElement('label');
+        label.htmlFor = `tool-${tool.name}`;
+        label.className = `text-small ${checkbox.disabled ? 'text-muted' : ''}`;
+        label.innerHTML = `<strong>${tool.name}</strong>: ${tool.description}${checkbox.disabled ? ' (unavailable)' : ''}`;
+
         wrapper.appendChild(checkbox);
-        wrapper.appendChild(span);
+        wrapper.appendChild(label);
         return wrapper;
     };
 

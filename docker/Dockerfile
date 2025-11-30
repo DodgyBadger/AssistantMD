@@ -31,22 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev
 
 #######################################################################
-## Stage 2: Build Tailwind CSS with Node.js
-#######################################################################
-FROM node:22-slim as css-builder
-
-WORKDIR /app
-
-# Copy Tailwind configuration and all source files (HTML/JS/CSS)
-COPY package.json package-lock.json tailwind.config.js ./
-COPY static ./static
-
-# Install dependencies and build CSS
-RUN npm ci && \
-    npm run build:css
-
-#######################################################################
-## Stage 3: Runtime image - minimal and secure
+## Stage 2: Runtime image - minimal and secure
 #######################################################################
 FROM python:3.13-slim as runtime
 
@@ -85,9 +70,6 @@ RUN rm -f /usr/local/bin/uv && rm -rf /root/.cache
 
 # Copy application code and set ownership
 COPY --chown=${USER_ID}:${GROUP_ID} . .
-
-# Copy compiled CSS from css-builder stage
-COPY --from=css-builder --chown=${USER_ID}:${GROUP_ID} /app/static/output.css /app/static/output.css
 
 # Create data directory for vaults (will be mounted) 
 RUN mkdir -p /app/data && chown ${USER_ID}:${GROUP_ID} /app/data

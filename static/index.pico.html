@@ -26,23 +26,26 @@
         <!-- Chat Tab -->
         <section id="chat-content">
             <article>
+                <div class="two-col">
+                    <label>
+                        <span>Vault</span>
+                        <select id="vault-selector">
+                            <option value="">Select vault...</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Model</span>
+                        <select id="model-selector">
+                            <option value="">Select model...</option>
+                        </select>
+                    </label>
+                </div>
+            </article>
+
+            <article>
                 <details>
                     <summary class="summary-left">Chat Settings</summary>
-                    <div class="two-col">
-                        <label>
-                            <span>Vault</span>
-                            <select id="vault-selector">
-                                <option value="">Select vault...</option>
-                            </select>
-                        </label>
-                        <label>
-                            <span>Model</span>
-                            <select id="model-selector">
-                                <option value="">Select model...</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="two-col">
+                    <div>
                         <label>
                             <span>Mode</span>
                             <select id="mode-selector">
@@ -50,22 +53,22 @@
                                 <option value="workflow_creation">Workflow Creation</option>
                             </select>
                         </label>
-                        <div style="display: flex; align-items: flex-end;">
-                            <button id="clear-btn" type="button">🗑️ New Session</button>
-                        </div>
+                    </div>
+                    <div>
+                        <button id="clear-btn" type="button">🗑️ New Session</button>
                     </div>
                     <div>
                         <span>Tools</span>
-                        <div id="tools-checkboxes" class="tool-badges"></div>
+                        <div id="tools-checkboxes"></div>
                     </div>
                 </details>
             </article>
 
-            <article class="chat-pane">
-                <div id="chat-messages" class="chat-scroll">
+            <article>
+                <div id="chat-messages">
                     <p id="chat-empty" class="empty-state">Start a conversation...</p>
                 </div>
-                <footer class="chat-footer">
+                <footer>
                     <label>
                         <textarea
                             id="chat-input"
@@ -129,7 +132,7 @@
                 <details id="config-models-section" open>
                     <summary class="summary-left">Models</summary>
                     <p>Model mappings connect workflow-friendly names to provider models.</p>
-                    <div class="two-col-actions">
+                    <div>
                         <div id="model-feedback"></div>
                         <button id="model-add-row" type="button">Add Model</button>
                     </div>
@@ -160,12 +163,10 @@
                             <span>Base URL Secret (optional)</span>
                             <input id="provider-base-url" name="provider-base-url" type="text" placeholder="SECRET_NAME (optional)">
                         </label>
-                        <div class="two-col-actions">
+                        <div>
                             <span id="provider-form-status"></span>
-                            <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-                                <button type="button" id="provider-reset">Reset</button>
-                                <button type="submit" id="provider-submit">Save Provider</button>
-                            </div>
+                            <button type="button" id="provider-reset">Reset</button>
+                            <button type="submit" id="provider-submit">Save Provider</button>
                         </div>
                     </form>
                 </details>
@@ -195,16 +196,14 @@
                             <span>Secret Value</span>
                             <input id="secret-value" name="secret-value" type="password" placeholder="Enter the credential" required>
                         </label>
-                    <div class="two-col-actions">
-                        <span id="secret-form-status"></span>
-                        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                        <div>
+                            <span id="secret-form-status"></span>
                             <button type="button" id="secret-reset">Reset</button>
                             <button type="submit" id="secret-submit">Save Secret</button>
                         </div>
-                    </div>
-                </form>
-                <div id="secrets-list">
-                    <div>Loading secrets…</div>
+                    </form>
+                    <div id="secrets-list">
+                        <div>Loading secrets…</div>
                     </div>
                 </details>
             </article>
