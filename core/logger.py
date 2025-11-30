@@ -17,6 +17,7 @@ import logfire
 from core import constants as core_constants
 from core.settings.secrets_store import get_secret_value
 from core.settings.store import get_general_settings
+from core.runtime.paths import get_data_root, get_system_root
 
 
 _activity_logger: Optional[logging.Logger] = None
@@ -122,20 +123,10 @@ def _ensure_activity_logger() -> logging.Logger:
 def _resolve_activity_log_path() -> Path:
     """Determine the correct activity log path based on the active runtime context."""
     try:
-        from core.runtime import state as runtime_state
+        return get_system_root() / "activity.log"
     except Exception:
-        runtime_state = None
-
-    if runtime_state:
-        try:
-            if runtime_state.has_runtime_context():
-                context = runtime_state.get_runtime_context()
-                return Path(context.config.system_data_root) / "activity.log"
-        except Exception:
-            # Fall through to default location if context access fails
-            pass
-
-    return Path(core_constants.SYSTEM_DATA_ROOT) / "activity.log"
+        # Last-resort fallback if path resolution fails unexpectedly
+        return Path("/app/system") / "activity.log"
 
 
 class UnifiedLogger:
@@ -378,7 +369,7 @@ def _detect_from_path(path_value: str, *, prefer_workflow: bool = False) -> Opti
     except (TypeError, ValueError):
         return None
 
-    data_root = Path(core_constants.CONTAINER_DATA_ROOT)
+    data_root = get_data_root()
 
     if not path.exists():
         # Allow non-existent targets; rely on path semantics

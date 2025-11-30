@@ -23,7 +23,7 @@ from core.runtime.state import clear_runtime_context
 from core.workflow.loader import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
 import workflow_engines.step.workflow as workflow_module
-from core.constants import SYSTEM_DATA_ROOT
+from core.runtime.paths import get_system_root
 
 
 class SchedulerJobInfo:
@@ -52,12 +52,13 @@ class SystemController:
 
         self._system_root = self.run_path / "system"
         self._system_root.mkdir(parents=True, exist_ok=True)
-        self._secrets_file = self._system_root / "secrets.yaml"
-        base_secrets = Path(SYSTEM_DATA_ROOT) / "secrets.yaml"
-        if base_secrets.exists():
-            self._secrets_file.write_text(base_secrets.read_text(), encoding="utf-8")
-        else:
-            self._secrets_file.touch(exist_ok=True)
+
+        # Use the real secrets file directly to mirror production; no per-run copies.
+        target_secrets = get_system_root() / "secrets.yaml"
+        target_secrets.parent.mkdir(parents=True, exist_ok=True)
+        if not target_secrets.exists():
+            target_secrets.touch(exist_ok=True)
+        self._secrets_file = target_secrets
 
         self._original_secrets_path: Optional[str] = os.environ.get("SECRETS_PATH")
         os.environ["SECRETS_PATH"] = str(self._secrets_file)
@@ -93,6 +94,9 @@ class SystemController:
         """Start real system components with test data isolation using runtime bootstrap."""
         if self.is_running:
             return
+
+        # Ensure secrets path points to the configured base for every start.
+        os.environ["SECRETS_PATH"] = str(self._secrets_file)
 
         self.logger.info("Starting AssistantMD system with runtime bootstrap")
 
@@ -183,13 +187,6 @@ class SystemController:
         else:
             os.environ["SECRETS_PATH"] = self._original_secrets_path
         self._original_secrets_path = None
-
-        # Remove the per-run secrets overlay to avoid lingering copies
-        try:
-            if self._secrets_file.exists():
-                self._secrets_file.unlink()
-        except OSError:
-            pass
 
     
     async def restart_system(self):

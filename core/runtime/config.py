@@ -22,7 +22,7 @@ class RuntimeConfig:
 
     Attributes:
         data_root: Root path for all vault data
-        system_data_root: Path for system data (job store, logs, etc.)
+        system_root: Path for system data (job store, logs, etc.)
         max_scheduler_workers: Maximum APScheduler worker threads
         enable_api: Whether to enable FastAPI endpoints
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
@@ -30,7 +30,7 @@ class RuntimeConfig:
     """
 
     data_root: Path
-    system_data_root: Path
+    system_root: Path
     max_scheduler_workers: int = DEFAULT_MAX_SCHEDULER_WORKERS
     enable_api: bool = True
     log_level: str = "INFO"
@@ -41,13 +41,13 @@ class RuntimeConfig:
         # Convert string paths to Path objects
         if isinstance(self.data_root, str):
             self.data_root = Path(self.data_root)
-        if isinstance(self.system_data_root, str):
-            self.system_data_root = Path(self.system_data_root)
+        if isinstance(self.system_root, str):
+            self.system_root = Path(self.system_root)
 
         # Validate paths exist or can be created
         try:
             self.data_root.mkdir(parents=True, exist_ok=True)
-            self.system_data_root.mkdir(parents=True, exist_ok=True)
+            self.system_root.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
             raise RuntimeConfigError(f"Cannot create required directories: {e}")
 
@@ -61,11 +61,11 @@ class RuntimeConfig:
             raise RuntimeConfigError(f"Invalid log_level '{self.log_level}'. Must be one of: {valid_levels}")
 
     @classmethod
-    def for_production(cls, data_root: str, system_data_root: str) -> "RuntimeConfig":
+    def for_production(cls, data_root: str, system_root: str) -> "RuntimeConfig":
         """Create production configuration with standard settings."""
         return cls(
             data_root=Path(data_root),
-            system_data_root=Path(system_data_root),
+            system_root=Path(system_root),
             max_scheduler_workers=DEFAULT_MAX_SCHEDULER_WORKERS,
             enable_api=True,
             log_level="INFO"
@@ -76,7 +76,7 @@ class RuntimeConfig:
         """Create validation configuration with test isolation."""
         return cls(
             data_root=test_data_root,
-            system_data_root=run_path / "system",
+            system_root=run_path / "system",
             max_scheduler_workers=DEFAULT_MAX_SCHEDULER_WORKERS,
             enable_api=False,
             log_level="DEBUG",

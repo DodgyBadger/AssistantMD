@@ -110,7 +110,7 @@ class RuntimeContext:
 
         return {
             "data_root": str(self.config.data_root),
-            "system_data_root": str(self.config.system_data_root),
+            "system_root": str(self.config.system_root),
             "scheduler": scheduler_info,
             "features": self.config.features,
             "log_level": self.config.log_level

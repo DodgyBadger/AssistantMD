@@ -11,11 +11,8 @@ from datetime import datetime
 from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
 
-from core.constants import (
-    CONTAINER_DATA_ROOT,
-    ASSISTANTMD_ROOT_DIR,
-    WORKFLOW_DEFINITIONS_DIR,
-)
+from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR
+from core.runtime.paths import get_data_root
 from core.runtime.state import get_runtime_context
 from core.workflow.parser import (
     parse_workflow_file,
@@ -39,7 +36,7 @@ class CoreServices:
     
     Attributes:
         global_id: Workflow identifier (format: 'vault/name') 
-        _data_root: Root path for all vault data (defaults to CONTAINER_DATA_ROOT)
+        _data_root: Root path for all vault data (defaults to data root helper)
         
     Computed Properties (resolved automatically):
         vault_name: Name of the vault (e.g., 'HaikuVault')
@@ -50,7 +47,7 @@ class CoreServices:
     """
     
     global_id: str
-    _data_root: str = field(default_factory=lambda: CONTAINER_DATA_ROOT)
+    _data_root: str = field(default_factory=lambda: str(get_data_root()))
     
     # Computed properties (resolved in __post_init__)
     vault_name: str = field(init=False)

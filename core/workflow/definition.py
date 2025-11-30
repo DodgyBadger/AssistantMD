@@ -10,7 +10,7 @@ from typing import Optional, Callable
 from apscheduler.triggers.base import BaseTrigger
 from dataclasses import dataclass
 
-from core.constants import CONTAINER_DATA_ROOT
+from core.runtime.paths import get_data_root
 
 
 @dataclass
@@ -36,7 +36,7 @@ class WorkflowDefinition:
     @property
     def vault_path(self) -> str:
         """Return full vault directory path."""
-        return os.path.join(CONTAINER_DATA_ROOT, self.vault)
+        return os.path.join(str(get_data_root()), self.vault)
 
     @property
     def scheduler_job_id(self) -> str:
@@ -51,5 +51,4 @@ class WorkflowDefinition:
             'friday': 4, 'saturday': 5, 'sunday': 6
         }
         return day_mapping[self.week_start_day]
-
 

@@ -17,7 +17,7 @@ from collections import OrderedDict
 
 import yaml
 
-from core.constants import SYSTEM_DATA_ROOT
+from core.runtime.paths import get_system_root
 
 
 SECRETS_PATH_ENV = "SECRETS_PATH"
@@ -45,12 +45,22 @@ class SecretEntry:
     is_overlay: bool = False
 
 
+def _resolve_system_root() -> Path:
+    """
+    Determine the active system root, preferring runtime context over defaults.
+
+    Falls back to environment/default constants when a runtime context has not
+    been established (e.g. before bootstrap).
+    """
+    return get_system_root()
+
+
 def _resolve_secrets_path() -> Path:
     """Determine the active secrets file path."""
     override = os.environ.get(SECRETS_PATH_ENV)
     if override:
         return Path(override)
-    return Path(SYSTEM_DATA_ROOT) / "secrets.yaml"
+    return _resolve_system_root() / "secrets.yaml"
 
 
 def _resolve_base_secrets_path() -> Optional[Path]:
@@ -58,7 +68,7 @@ def _resolve_base_secrets_path() -> Optional[Path]:
     base_override = os.environ.get(SECRETS_BASE_PATH_ENV)
     if base_override:
         return Path(base_override)
-    default_base = Path(SYSTEM_DATA_ROOT) / "secrets.yaml"
+    default_base = _resolve_system_root() / "secrets.yaml"
     return default_base if default_base.exists() else None
 
 

@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import Column, String, DateTime
 
 from core.database import Base, create_engine_from_system_db, create_session_factory
-from core.constants import CONTAINER_DATA_ROOT
+from core.runtime.paths import get_data_root
 from core.logger import UnifiedLogger
 
 logger = UnifiedLogger(tag="file-state")
@@ -67,7 +67,7 @@ class WorkflowFileStateManager:
         """
         self.vault_name = vault_name
         self.workflow_id = workflow_id
-        self.vault_path = os.path.join(CONTAINER_DATA_ROOT, vault_name)
+        self.vault_path = os.path.join(str(get_data_root()), vault_name)
 
         # Create SQLAlchemy engine and session factory for file_state database
         self.engine = create_engine_from_system_db("file_state")

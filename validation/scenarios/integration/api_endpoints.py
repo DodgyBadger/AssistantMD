@@ -114,8 +114,7 @@ Summarize the validation run context.
             method="PUT",
             data={
                 "api_key": "VALIDATION_PROVIDER_KEY",
-                "api_key_value": "placeholder",
-                "base_url_value": "https://example.com/api",
+                "base_url": "VALIDATION_PROVIDER_BASE_URL",
             },
         )
         self.expect_equals(

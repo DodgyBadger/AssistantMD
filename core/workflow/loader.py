@@ -13,12 +13,8 @@ from datetime import datetime
 
 from .parser import parse_workflow_file, validate_config
 from .definition import WorkflowDefinition
-from core.constants import (
-    CONTAINER_DATA_ROOT,
-    VAULT_IGNORE_FILE,
-    ASSISTANTMD_ROOT_DIR,
-    WORKFLOW_DEFINITIONS_DIR,
-)
+from core.constants import VAULT_IGNORE_FILE, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR
+from core.runtime.paths import get_data_root
 from core.scheduling.parser import parse_schedule_syntax
 from core.scheduling.triggers import create_schedule_trigger
 from core.logger import UnifiedLogger
@@ -48,8 +44,10 @@ class ConfigurationError:
 #######################################################################
 
 @logger.trace("vault_discovery")
-def discover_vaults(data_root: str = CONTAINER_DATA_ROOT) -> List[str]:
+def discover_vaults(data_root: str = None) -> List[str]:
     """Return list of vault names from first-level directories, excluding ignored directories."""
+    if data_root is None:
+        data_root = str(get_data_root())
     if not os.path.exists(data_root) or not os.path.isdir(data_root):
         return []
 
@@ -164,7 +162,7 @@ class WorkflowLoader:
     to ensure proper dependency injection and avoid multiple instances.
     """
 
-    def __init__(self, _data_root: str = CONTAINER_DATA_ROOT, *, _allow_direct_instantiation: bool = False):
+    def __init__(self, _data_root: str = None, *, _allow_direct_instantiation: bool = False):
         """
         Initialize the workflow loader.
 
@@ -180,7 +178,7 @@ class WorkflowLoader:
                 "Direct WorkflowLoader instantiation is discouraged. "
                 "Use get_runtime_context().workflow_loader or bootstrap_runtime() instead."
             )
-        self._data_root = _data_root
+        self._data_root = _data_root or str(get_data_root())
         self._workflows: List[WorkflowDefinition] = []
         self._config_errors: List[ConfigurationError] = []
         self._last_loaded: Optional[datetime] = None
