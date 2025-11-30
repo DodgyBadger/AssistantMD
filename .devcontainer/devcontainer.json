@@ -5,6 +5,10 @@
     "dockerfile": "Dockerfile"
   },
 
+  "workspaceFolder": "/app",
+  
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached",
+
   "remoteUser": "root",
 
   "customizations": {
@@ -20,14 +24,15 @@
         "tamasfe.even-better-toml",
         "charliermarsh.ruff",
         "qwtel.sqlite-viewer",
-        "codezombiech.gitignore"
+        "codezombiech.gitignore",
+        "bradlc.vscode-tailwindcss"
       ]
     }
   },
 
   "containerEnv": {
-    "CONTAINER_DATA_ROOT": "/workspaces/AssistantMD/data",
-    "CONTAINER_SYSTEM_ROOT": "/workspaces/AssistantMD/system"
+    "CONTAINER_DATA_ROOT": "/app/data",
+    "CONTAINER_SYSTEM_ROOT": "/app/system"
   },
 
   "updateContentCommand": "bash .devcontainer/setup.sh"
