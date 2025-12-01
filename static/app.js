@@ -116,8 +116,24 @@ const themeManager = {
 
     current: null,
 
+    safeGet(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    },
+
+    safeSet(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch {
+            // Ignore storage errors (e.g., private mode) but keep UI responsive
+        }
+    },
+
     init() {
-        const saved = localStorage.getItem('theme');
+        const saved = this.safeGet('theme');
         let initialTheme = saved;
 
         if (!saved) {
@@ -148,12 +164,12 @@ const themeManager = {
             button.title = `Theme: ${theme.label} (click to change)`;
         }
 
-        // Save preference
-        localStorage.setItem('theme', theme.name);
+        // Save preference (best-effort)
+        this.safeSet('theme', theme.name);
     },
 
     cycle() {
-        const currentIndex = this.themes.findIndex(t => t.name === this.current.name);
+        const currentIndex = this.themes.findIndex(t => t.name === this.current?.name);
         const nextIndex = (currentIndex + 1) % this.themes.length;
         this.apply(this.themes[nextIndex].name);
     }
