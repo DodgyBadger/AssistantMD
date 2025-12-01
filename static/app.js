@@ -103,8 +103,65 @@ const tabs = {
     }
 };
 
+// Theme management
+const themeManager = {
+    themes: [
+        { name: 'light', label: 'Light' },
+        { name: 'dark', label: 'Dark' },
+        { name: 'ocean', label: 'Ocean' },
+        { name: 'sunset', label: 'Sunset' },
+        { name: 'lavender', label: 'Lavender' },
+        { name: 'forest', label: 'Forest' }
+    ],
+
+    current: null,
+
+    init() {
+        const saved = localStorage.getItem('theme');
+        let initialTheme = saved;
+
+        if (!saved) {
+            // No saved preference - check system preference
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            initialTheme = prefersDark ? 'dark' : 'light';
+        }
+
+        this.apply(initialTheme);
+
+        // Set up click handler
+        const button = document.getElementById('theme-toggle');
+        if (button) {
+            button.addEventListener('click', () => this.cycle());
+        }
+    },
+
+    apply(themeName) {
+        const theme = this.themes.find(t => t.name === themeName) || this.themes[0];
+        this.current = theme;
+
+        // Update DOM
+        document.documentElement.setAttribute('data-theme', theme.name);
+
+        // Update button title
+        const button = document.getElementById('theme-toggle');
+        if (button) {
+            button.title = `Theme: ${theme.label} (click to change)`;
+        }
+
+        // Save preference
+        localStorage.setItem('theme', theme.name);
+    },
+
+    cycle() {
+        const currentIndex = this.themes.findIndex(t => t.name === this.current.name);
+        const nextIndex = (currentIndex + 1) % this.themes.length;
+        this.apply(this.themes[nextIndex].name);
+    }
+};
+
 // Initialize app
 async function init() {
+    themeManager.init();
     setupTabs();
     if (window.ConfigurationPanel) {
         window.ConfigurationPanel.init({
@@ -134,10 +191,10 @@ function switchTab(tabName) {
         if (!tabControls.button || !tabControls.content) return;
 
         const isActive = name === tabName;
-        tabControls.button.classList.toggle('border-blue-500', isActive);
-        tabControls.button.classList.toggle('text-blue-600', isActive);
+        tabControls.button.classList.toggle('border-accent', isActive);
+        tabControls.button.classList.toggle('text-accent', isActive);
         tabControls.button.classList.toggle('border-transparent', !isActive);
-        tabControls.button.classList.toggle('text-gray-500', !isActive);
+        tabControls.button.classList.toggle('text-txt-secondary', !isActive);
         tabControls.content.classList.toggle('hidden', !isActive);
     });
 
@@ -301,7 +358,7 @@ async function fetchSystemStatus() {
         updateStatus();
     } catch (error) {
         console.error('Error fetching status:', error);
-        dashElements.systemStatus.innerHTML = '<p class="text-red-600">Failed to fetch system status</p>';
+        dashElements.systemStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch system status</p>';
     }
 }
 
@@ -314,12 +371,12 @@ function displaySystemStatus() {
     const workflowTypes = [...new Set(combinedWorkflows.map(a => a.workflow_engine))];
 
     const badgeColors = [
-        { bg: '#e8f5e9', color: '#388e3c' },
-        { bg: '#e3f2fd', color: '#1976d2' },
-        { bg: '#fff3e0', color: '#e65100' },
-        { bg: '#f3e5f5', color: '#7b1fa2' },
-        { bg: '#e0f2f1', color: '#00695c' },
-        { bg: '#fce4ec', color: '#c2185b' }
+        { bg: 'rgb(var(--accent-primary) / 0.14)', color: 'rgb(var(--accent-primary))' },
+        { bg: 'rgb(var(--accent-hover) / 0.14)', color: 'rgb(var(--accent-hover))' },
+        { bg: 'rgb(var(--border-primary) / 0.65)', color: 'rgb(var(--text-primary))' },
+        { bg: 'rgb(var(--text-secondary) / 0.14)', color: 'rgb(var(--text-secondary))' },
+        { bg: 'rgb(var(--bg-elevated))', color: 'rgb(var(--text-primary))' },
+        { bg: 'rgb(var(--accent-primary) / 0.22)', color: 'rgb(var(--text-on-accent))' }
     ];
 
     const workflowColorMap = {};
@@ -335,13 +392,18 @@ function displaySystemStatus() {
 
     let html = `
         <style>
-            .dashboard-table { width: 100%; border-collapse: collapse; background: white; font-size: 13px; margin-top: 8px; }
-            .dashboard-table th { background: #f8f9fa; padding: 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #dee2e6; }
-            .dashboard-table td { padding: 8px; border-bottom: 1px solid #f0f0f0; }
-            .dashboard-table tr:hover { background: #f8f9fa; }
+            .dashboard-table { width: 100%; border-collapse: collapse; background: rgb(var(--bg-card)); font-size: 13px; margin-top: 8px; color: rgb(var(--text-primary)); }
+            .dashboard-table th { background: rgb(var(--bg-elevated)); padding: 8px; text-align: left; font-weight: 600; border-bottom: 2px solid rgb(var(--border-primary)); color: rgb(var(--text-primary)); }
+            .dashboard-table td { padding: 8px; border-bottom: 1px solid rgb(var(--border-primary)); color: rgb(var(--text-primary)); }
+            .dashboard-table tr:hover { background: rgb(var(--bg-elevated)); }
+            .dashboard-table .subtle { color: rgb(var(--text-secondary)); }
+            .dashboard-table .cell-center { text-align: center; }
+            .dashboard-table .cell-xs { font-size: 11px; }
+            .dashboard-table .cell-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
             .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
             ${badgeStyles}
-            .badge-running { background: #4caf50; color: white; }
+            .badge-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
+            .badge-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
         </style>
 
         <h3 class="text-lg font-semibold mb-2">🗂️ Vaults</h3>
@@ -350,15 +412,15 @@ function displaySystemStatus() {
                 <tr>
                     <th>Name</th>
                     <th>Path</th>
-                    <th style="text-align: center;">Workflows</th>
+                    <th class="cell-center">Workflows</th>
                 </tr>
             </thead>
             <tbody>
                 ${status.vaults.map(v => `
                     <tr>
                         <td><strong>${v.name}</strong></td>
-                        <td style="font-family: monospace; font-size: 11px; color: #666;">${v.path}</td>
-                        <td style="text-align: center;">${v.workflow_count}</td>
+                        <td class="cell-mono cell-xs subtle">${v.path}</td>
+                        <td class="cell-center">${v.workflow_count}</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -368,7 +430,7 @@ function displaySystemStatus() {
     if (status.scheduler.job_details && status.scheduler.job_details.length > 0) {
         const schedulerBadge = status.scheduler.running
             ? '<span class="badge badge-running">RUNNING</span>'
-            : '<span class="badge" style="background: #ffebee; color: #c62828;">STOPPED</span>';
+            : '<span class="badge badge-stopped">STOPPED</span>';
 
         html += `
             <h3 class="text-lg font-semibold mb-2 mt-6">⏰ Scheduled Jobs ${schedulerBadge}</h3>
@@ -390,7 +452,7 @@ function displaySystemStatus() {
                             <tr>
                                 <td><strong>${workflowName}</strong></td>
                                 <td>${nextRun}</td>
-                                <td style="font-size: 11px;">${job.trigger_description}</td>
+                                <td class="cell-xs subtle">${job.trigger_description}</td>
                             </tr>
                         `;
                     }).join('')}
@@ -419,9 +481,9 @@ function displaySystemStatus() {
                         return `
                             <tr>
                                 <td><strong>${workflow.global_id}</strong></td>
-                                <td style="text-align: center;"><span class="badge ${badgeClass}">${workflow.workflow_engine}</span></td>
-                                <td style="font-size: 11px;">${schedule}</td>
-                                <td style="font-size: 11px; color: #666;">${description}</td>
+                        <td class="cell-center"><span class="badge ${badgeClass}">${workflow.workflow_engine}</span></td>
+                        <td class="cell-xs">${schedule}</td>
+                        <td class="cell-xs subtle">${description}</td>
                             </tr>
                         `;
                     }).join('')}
@@ -665,8 +727,8 @@ function addLoadingMessage() {
     messageDiv.id = 'loading-message';
 
     const contentDiv = document.createElement('div');
-    contentDiv.className = 'max-w-[80%] px-4 py-2 rounded-lg bg-gray-100 text-gray-800';
-    contentDiv.innerHTML = `<div class="flex items-center space-x-2 text-sm text-gray-600">
+    contentDiv.className = 'max-w-[80%] px-4 py-2 rounded-lg message-bubble message-assistant';
+    contentDiv.innerHTML = `<div class="flex items-center space-x-2 text-sm">
         <span class="typing-indicator inline-flex">${TYPING_DOTS_HTML}</span>
         <span class="ml-1">Contacting assistant…</span>
     </div>`;
@@ -696,14 +758,13 @@ function addMessage(role, content, options = {}) {
     messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
 
     const contentDiv = document.createElement('div');
-    contentDiv.className = `max-w-[80%] px-4 py-2 rounded-lg ${
+    contentDiv.className = `max-w-[80%] px-4 py-2 rounded-lg message-bubble ${
         role === 'user'
-            ? 'bg-gray-100 text-gray-800'
+            ? 'message-user'
             : role === 'error'
-            ? 'bg-red-100 text-red-800 border border-red-300'
-            : 'bg-blue-100 text-gray-800 prose prose-sm max-w-none'
+            ? 'state-surface-error border'
+            : 'message-assistant prose prose-sm max-w-none'
     }`;
-    contentDiv.classList.add('message-bubble');
 
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'message-body';
@@ -770,7 +831,7 @@ function createAssistantStreamingMessage() {
     messageDiv.className = 'flex justify-start';
 
     const contentDiv = document.createElement('div');
-    contentDiv.className = 'max-w-[80%] px-4 py-3 rounded-lg bg-blue-100 text-gray-800 prose prose-sm max-w-none message-bubble shadow-sm';
+    contentDiv.className = 'max-w-[80%] px-4 py-3 rounded-lg message-bubble message-assistant prose prose-sm max-w-none shadow-sm';
 
     const progressDiv = document.createElement('div');
     progressDiv.className = 'stream-progress';
@@ -791,7 +852,7 @@ function createAssistantStreamingMessage() {
 
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'message-body prose prose-sm max-w-none';
-    bodyDiv.innerHTML = '<p class="text-sm text-gray-600">Preparing response…</p>';
+    bodyDiv.innerHTML = '<p class="text-sm text-txt-secondary">Preparing response…</p>';
 
     contentDiv.appendChild(progressDiv);
     contentDiv.appendChild(toolList);
@@ -824,7 +885,7 @@ function createAssistantStreamingMessage() {
 
 function renderAssistantMarkdown(context) {
     if (!context.fullText.trim()) {
-        context.bodyDiv.innerHTML = '<p class="text-sm text-gray-600">Thinking…</p>';
+        context.bodyDiv.innerHTML = '<p class="text-sm text-txt-secondary">Thinking…</p>';
     } else {
         context.bodyDiv.innerHTML = marked.parse(context.fullText);
         attachCodeCopyButtons(context.bodyDiv);
@@ -1154,8 +1215,11 @@ function flashCopyFeedback(button, didCopy) {
 
 // Clear session
 async function clearSession() {
+    const confirmed = window.confirm('Do you want to start a new chat session? The current session is saved as a markdown file in your vault.');
+    if (!confirmed) return;
+
     state.sessionId = null;
-    chatElements.chatMessages.innerHTML = '<div class="text-center text-gray-500 text-sm">Start a conversation...</div>';
+    chatElements.chatMessages.innerHTML = '<div class="text-center text-txt-secondary text-sm">Start a conversation...</div>';
     updateStatus();
 }
 
@@ -1163,7 +1227,7 @@ async function clearSession() {
 async function rescanVaults() {
     if (!dashElements.rescanResult) return;
 
-    dashElements.rescanResult.innerHTML = '<p class="text-gray-600">Rescanning...</p>';
+    dashElements.rescanResult.innerHTML = '<p class="text-txt-secondary">Rescanning...</p>';
     dashElements.rescanBtn.disabled = true;
 
     try {
@@ -1177,7 +1241,7 @@ async function rescanVaults() {
 
         const data = await response.json();
         dashElements.rescanResult.innerHTML = `
-            <div class="text-green-700 bg-green-50 p-3 rounded border border-green-200">
+            <div class="state-surface-success p-3 rounded border">
                 <p class="font-medium">✅ Rescan Completed</p>
                 <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
                 <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
@@ -1192,7 +1256,7 @@ async function rescanVaults() {
 
     } catch (error) {
         console.error('Error rescanning:', error);
-        dashElements.rescanResult.innerHTML = `<p class="text-red-600">❌ Error: ${error.message}</p>`;
+        dashElements.rescanResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
     } finally {
         dashElements.rescanBtn.disabled = false;
     }
@@ -1208,7 +1272,7 @@ async function executeWorkflow() {
         return;
     }
 
-    dashElements.executeWorkflowResult.innerHTML = '<p class="text-gray-600">Executing...</p>';
+    dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Executing...</p>';
     dashElements.executeWorkflowBtn.disabled = true;
 
     try {
@@ -1230,7 +1294,7 @@ async function executeWorkflow() {
         const outputFiles = data.output_files || [];
 
         dashElements.executeWorkflowResult.innerHTML = `
-            <div class="text-green-700 bg-green-50 p-3 rounded border border-green-200">
+            <div class="state-surface-success p-3 rounded border">
                 <p class="font-medium">✅ Execution Completed</p>
                 <p>Workflow: ${data.global_id || ''}</p>
                 <p>Execution time: ${data.execution_time_seconds?.toFixed(2) || 0}s</p>
@@ -1246,7 +1310,7 @@ async function executeWorkflow() {
 
     } catch (error) {
         console.error('Error executing workflow:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="text-red-600">❌ Error: ${error.message}</p>`;
+        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
     } finally {
         dashElements.executeWorkflowBtn.disabled = false;
     }
@@ -1276,19 +1340,19 @@ function updateStatus(message) {
         // No warnings - hide banner and remove tab highlight
         configElements.statusBanner.classList.add('hidden');
         configElements.statusMessages.innerHTML = '';
-        configElements.configTab.classList.remove('text-amber-900', 'font-semibold', 'bg-amber-100', 'border-amber-300', 'px-3', 'rounded-t-md');
+        configElements.configTab.classList.remove('font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md', 'text-accent');
+        configElements.configTab.classList.add('text-txt-secondary');
+        configElements.configTab.style.borderColor = '';
         configElements.configTab.textContent = 'Configuration';
-        if (!configElements.configTab.classList.contains('text-blue-600')) {
-            configElements.configTab.classList.add('text-gray-500');
-        }
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
         configElements.statusMessages.innerHTML = noticeLines.map(line =>
             `<div>• ${line}</div>`
         ).join('');
-        configElements.configTab.classList.remove('text-gray-500', 'text-gray-700');
-        configElements.configTab.classList.add('text-amber-900', 'font-semibold', 'bg-amber-100', 'border-amber-300', 'px-3', 'rounded-t-md');
+        configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
+        configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
+        configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
         configElements.configTab.textContent = 'Configuration ⚠️';
     }
 }
