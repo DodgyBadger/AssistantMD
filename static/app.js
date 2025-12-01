@@ -34,8 +34,6 @@ const state = {
 
 // DOM elements - Chat
 const chatElements = {
-    statusIcon: document.getElementById('status-icon'),
-    statusText: document.getElementById('status-text'),
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
     modeSelector: document.getElementById('mode-selector'),
@@ -43,7 +41,7 @@ const chatElements = {
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
     sendBtn: document.getElementById('send-btn'),
-    clearBtn: document.getElementById('clear-btn')
+    newSessionBtn: document.getElementById('new-session-btn')
 };
 
 // DOM elements - Dashboard
@@ -55,6 +53,13 @@ const dashElements = {
     stepNameInput: document.getElementById('step-name-input'),
     executeWorkflowBtn: document.getElementById('execute-workflow-btn'),
     executeWorkflowResult: document.getElementById('execute-workflow-result')
+};
+
+// DOM elements - Configuration
+const configElements = {
+    statusBanner: document.getElementById('config-status-banner'),
+    statusMessages: document.getElementById('config-status-messages'),
+    configTab: document.getElementById('configuration-tab')
 };
 
 function isChatNearBottom(element, threshold = 64) {
@@ -138,8 +143,11 @@ function switchTab(tabName) {
 
     if (tabName === 'dashboard') {
         fetchSystemStatus();
-    } else if (tabName === 'configuration' && window.ConfigurationPanel) {
-        window.ConfigurationPanel.onTabActivated();
+    } else if (tabName === 'configuration') {
+        fetchSystemStatus();
+        if (window.ConfigurationPanel) {
+            window.ConfigurationPanel.onTabActivated();
+        }
     }
 }
 
@@ -225,13 +233,12 @@ function populateSelectors() {
 
     const createToolElement = (tool) => {
         const wrapper = document.createElement('div');
-        wrapper.className = 'flex items-center';
+        wrapper.className = 'tool-checkbox-wrapper';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.id = `tool-${tool.name}`;
         checkbox.value = tool.name;
-        checkbox.className = 'mr-2';
         checkbox.disabled = tool.available === false;
 
         if (
@@ -246,56 +253,37 @@ function populateSelectors() {
 
         const label = document.createElement('label');
         label.htmlFor = `tool-${tool.name}`;
-        label.className = `text-sm ${checkbox.disabled ? 'text-gray-400' : 'text-gray-700'}`;
-        label.innerHTML = `<strong>${tool.name}</strong>: ${tool.description}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        label.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
 
         wrapper.appendChild(checkbox);
         wrapper.appendChild(label);
         return wrapper;
     };
 
-    const leftColumnOrder = [
+    const toolOrder = [
         'web_search_duckduckgo',
         'web_search_tavily',
         'file_ops_safe',
-        'file_ops_unsafe'
-    ];
-    const rightColumnOrder = [
+        'file_ops_unsafe',
         'documentation_access',
         'tavily_extract',
         'tavily_crawl',
         'code_execution'
     ];
 
-    const leftColumn = document.createElement('div');
-    leftColumn.className = 'flex flex-col gap-2';
-    const rightColumn = document.createElement('div');
-    rightColumn.className = 'flex flex-col gap-2';
-
-    const appendTools = (order, column) => {
-        order.forEach(name => {
-            const tool = toolMap.get(name);
-            if (!tool) return;
-            column.appendChild(createToolElement(tool));
-            handledTools.add(name);
-        });
-    };
-
-    appendTools(leftColumnOrder, leftColumn);
-    appendTools(rightColumnOrder, rightColumn);
+    toolOrder.forEach(name => {
+        const tool = toolMap.get(name);
+        if (!tool) return;
+        chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
+        handledTools.add(name);
+    });
 
     state.metadata.tools.forEach(tool => {
         if (handledTools.has(tool.name)) {
             return;
         }
-        const targetColumn = leftColumn.childElementCount <= rightColumn.childElementCount
-            ? leftColumn
-            : rightColumn;
-        targetColumn.appendChild(createToolElement(tool));
+        chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
     });
-
-    chatElements.toolsCheckboxes.appendChild(leftColumn);
-    chatElements.toolsCheckboxes.appendChild(rightColumn);
 
     applyModeToolPreferences();
 }
@@ -479,8 +467,8 @@ function setupEventListeners() {
         });
     }
 
-    if (chatElements.clearBtn) {
-        chatElements.clearBtn.addEventListener('click', clearSession);
+    if (chatElements.newSessionBtn) {
+        chatElements.newSessionBtn.addEventListener('click', clearSession);
     }
 
     if (dashElements.rescanBtn) {
@@ -1265,7 +1253,7 @@ async function executeWorkflow() {
 }
 
 function updateStatus(message) {
-    if (!chatElements.statusIcon || !chatElements.statusText) return;
+    if (!configElements.statusBanner || !configElements.statusMessages || !configElements.configTab) return;
 
     const warnings = getConfigurationWarnings();
     const noticeLines = [];
@@ -1283,15 +1271,25 @@ function updateStatus(message) {
         noticeLines.push('No vaults found. Review installation instructions.');
     }
 
-    // Show only icon when everything is good, or icon + text when there are issues
-    if (!noticeLines.length) {
-        chatElements.statusIcon.textContent = '✅';
-        chatElements.statusText.classList.add('hidden');
-        chatElements.statusText.innerHTML = '';
+    // Update Configuration tab and banner
+    if (noticeLines.length === 0) {
+        // No warnings - hide banner and remove tab highlight
+        configElements.statusBanner.classList.add('hidden');
+        configElements.statusMessages.innerHTML = '';
+        configElements.configTab.classList.remove('text-amber-900', 'font-semibold', 'bg-amber-100', 'border-amber-300', 'px-3', 'rounded-t-md');
+        configElements.configTab.textContent = 'Configuration';
+        if (!configElements.configTab.classList.contains('text-blue-600')) {
+            configElements.configTab.classList.add('text-gray-500');
+        }
     } else {
-        chatElements.statusIcon.textContent = '⚠️';
-        chatElements.statusText.classList.remove('hidden');
-        chatElements.statusText.innerHTML = `<span class="text-amber-600">${noticeLines.join(' • ')}</span>`;
+        // Show warnings in banner and highlight tab with background
+        configElements.statusBanner.classList.remove('hidden');
+        configElements.statusMessages.innerHTML = noticeLines.map(line =>
+            `<div>• ${line}</div>`
+        ).join('');
+        configElements.configTab.classList.remove('text-gray-500', 'text-gray-700');
+        configElements.configTab.classList.add('text-amber-900', 'font-semibold', 'bg-amber-100', 'border-amber-300', 'px-3', 'rounded-t-md');
+        configElements.configTab.textContent = 'Configuration ⚠️';
     }
 }
 
