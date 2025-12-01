@@ -80,10 +80,10 @@
     };
 
     const toneClasses = {
-        info: 'text-gray-600',
-        success: 'text-green-600',
-        warning: 'text-amber-600',
-        error: 'text-red-600'
+        info: 'text-txt-secondary',
+        success: 'state-success',
+        warning: 'state-warning',
+        error: 'state-error'
     };
     function cacheElements() {
         elements.activityLogViewer = document.getElementById('activity-log-viewer');
@@ -179,7 +179,7 @@
             state.activityLog = data;
 
             const bodyContent = data.content || '(log is empty)';
-            elements.activityLogViewer.textContent = bodyContent;
+            elements.activityLogViewer.innerHTML = formatLogContent(bodyContent);
             elements.activityLogViewer.scrollTop = elements.activityLogViewer.scrollHeight;
         } catch (error) {
             elements.activityLogViewer.textContent = `Failed to load activity log: ${error.message}`;
@@ -224,7 +224,7 @@
                 ? 'Unable to load settings.'
                 : 'No configurable settings found.';
             elements.settingsList.innerHTML = `
-                <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     ${escapeHtml(message)}
                 </div>
             `;
@@ -243,19 +243,19 @@
 
     function renderSettingViewCard(setting) {
         const description = setting.description
-            ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(setting.description)}</div>`
+            ? `<div class="text-xs text-txt-secondary mt-1">${escapeHtml(setting.description)}</div>`
             : '';
 
         return `
-            <div class="setting-card rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm hover:shadow transition-shadow" data-setting="${escapeHtml(setting.key)}" data-mode="view" style="max-width: 1400px;">
+            <div class="setting-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-setting="${escapeHtml(setting.key)}" data-mode="view" style="max-width: 1400px;">
                 <div class="flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
                     <div class="flex-1">
-                        <div class="font-semibold text-gray-900 text-sm">${escapeHtml(setting.key)}</div>
+                        <div class="font-semibold text-txt-primary text-sm">${escapeHtml(setting.key)}</div>
                         ${description}
                     </div>
                     <div class="flex items-center gap-4">
-                        <div class="text-sm text-gray-700 font-mono bg-gray-50 px-3 py-2 rounded border border-gray-100 break-words inline-block max-w-xs">${escapeHtml(setting.value ?? '')}</div>
-                        <button data-action="edit-setting" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors shrink-0">
+                        <div class="text-sm text-txt-primary font-mono bg-app-elevated px-3 py-2 rounded border border-border-primary break-words inline-block max-w-xs">${escapeHtml(setting.value ?? '')}</div>
+                        <button data-action="edit-setting" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors shrink-0">
                             Edit
                         </button>
                     </div>
@@ -266,27 +266,27 @@
 
     function renderSettingEditCard(setting) {
         const description = setting.description
-            ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(setting.description)}</div>`
+            ? `<div class="text-xs text-txt-secondary mt-1">${escapeHtml(setting.description)}</div>`
             : '';
 
         const draftValue = state.settingDraftValue ?? setting.value ?? '';
 
         return `
-            <div class="setting-card rounded-lg bg-blue-50/50 ring-2 ring-blue-200/50 px-5 py-4 shadow-sm" data-setting="${escapeHtml(setting.key)}" data-mode="edit" style="max-width: 1400px;">
+            <div class="setting-card rounded-lg border border-border-primary bg-app-card editing-highlight px-5 py-4 shadow-sm" data-setting="${escapeHtml(setting.key)}" data-mode="edit" style="max-width: 1400px;">
                 <div class="space-y-4">
                     <div>
-                        <div class="font-semibold text-gray-900 text-sm">${escapeHtml(setting.key)}</div>
+                        <div class="font-semibold text-txt-primary text-sm">${escapeHtml(setting.key)}</div>
                         ${description}
                     </div>
                     <div class="space-y-2">
-                        <input data-field="setting-value" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm bg-white transition-colors" value="${escapeHtml(draftValue)}" />
-                        <p class="text-xs text-gray-600">Values are stored as plain text; lists/objects use JSON.</p>
+                        <input data-field="setting-value" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent font-mono text-sm bg-app-card text-txt-primary transition-colors" value="${escapeHtml(draftValue)}" />
+                        <p class="text-xs text-txt-secondary">Values are stored as plain text; lists/objects use JSON.</p>
                     </div>
                     <div class="flex justify-end gap-2">
-                        <button data-action="cancel-setting" class="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors">
+                        <button data-action="cancel-setting" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
                             Cancel
                         </button>
-                        <button data-action="save-setting" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors">
+                        <button data-action="save-setting" class="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
                             Save
                         </button>
                     </div>
@@ -416,7 +416,7 @@
                 ? 'Unable to load providers.'
                 : 'No custom providers configured.';
             elements.providerList.innerHTML = `
-                <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     ${escapeHtml(message)}
                 </div>
             `;
@@ -429,44 +429,44 @@
             const apiKeyDisplay = provider.api_key
                 ? provider.api_key_has_value
                     ? `<div class="flex items-center gap-2">
-                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20">Set</span></div>
-                        <div class="text-xs text-gray-400 font-mono">${escapeHtml(provider.api_key)}</div>
+                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-success border">${'Set'}</span></div>
+                        <div class="text-xs text-txt-secondary font-mono">${escapeHtml(provider.api_key)}</div>
                     </div>`
                     : `<div class="flex items-center gap-2">
-                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 ring-1 ring-red-600/20">Not set</span></div>
-                        <div class="text-xs text-red-600">Configure ${escapeHtml(provider.api_key)}</div>
+                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-error border">Not set</span></div>
+                        <div class="text-xs state-error">Configure ${escapeHtml(provider.api_key)}</div>
                     </div>`
-                : `<div class="flex items-center gap-2"><span class="text-sm text-gray-500">No key required</span></div>`;
+                : `<div class="flex items-center gap-2"><span class="text-sm text-txt-secondary">No key required</span></div>`;
 
             const baseUrlDisplay = provider.base_url
                 ? provider.base_url_has_value
                     ? `<div class="flex items-center gap-2">
-                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20">Set</span></div>
-                        <div class="text-xs text-gray-400 font-mono">${escapeHtml(provider.base_url)}</div>
+                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-success border">Set</span></div>
+                        <div class="text-xs text-txt-secondary font-mono">${escapeHtml(provider.base_url)}</div>
                     </div>`
                     : `<div class="flex items-center gap-2">
-                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 ring-1 ring-red-600/20">Not set</span></div>
-                        <div class="text-xs text-red-600">Configure ${escapeHtml(provider.base_url)}</div>
+                        <div class="w-fit"><span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-error border">Not set</span></div>
+                        <div class="text-xs state-error">Configure ${escapeHtml(provider.base_url)}</div>
                     </div>`
-                : `<div class="flex items-center gap-2"><span class="text-sm text-gray-500">No base URL configured</span></div>`;
+                : `<div class="flex items-center gap-2"><span class="text-sm text-txt-secondary">No base URL configured</span></div>`;
 
             const actions = editable
                 ? `
-                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors">Edit</button>
-                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 transition-colors">Delete</button>
+                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Edit</button>
+                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Delete</button>
                 `
                 : '';
 
             const providerMeta = provider.user_editable === false
-                ? '<div class="text-xs text-gray-500 mt-0.5">Built-in provider</div>'
+                ? '<div class="text-xs text-txt-secondary mt-0.5">Built-in provider</div>'
                 : '';
 
             return `
-                <div class="provider-card rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm hover:shadow transition-shadow" data-provider-row="${escapeHtml(provider.name)}" style="max-width: 1400px;">
+                <div class="provider-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-provider-row="${escapeHtml(provider.name)}" style="max-width: 1400px;">
                     <div class="space-y-4">
                         <div class="flex items-center justify-between gap-4">
                             <div>
-                                <div class="font-semibold text-gray-900 text-sm">${escapeHtml(provider.name)}</div>
+                                <div class="font-semibold text-txt-primary text-sm">${escapeHtml(provider.name)}</div>
                                 ${providerMeta}
                             </div>
                             <div class="flex gap-2 shrink-0">
@@ -475,11 +475,11 @@
                         </div>
                         <div class="grid gap-6 md:grid-cols-2">
                             <div>
-                                <div class="text-xs font-medium text-gray-500 mb-2">API Key</div>
+                                <div class="text-xs font-medium text-txt-secondary mb-2">API Key</div>
                                 <div>${apiKeyDisplay}</div>
                             </div>
                             <div>
-                                <div class="text-xs font-medium text-gray-500 mb-2">Base URL</div>
+                                <div class="text-xs font-medium text-txt-secondary mb-2">Base URL</div>
                                 <div>${baseUrlDisplay}</div>
                             </div>
                         </div>
@@ -540,7 +540,7 @@
         if (!state.models.length) {
             const message = emptyOnError ? 'Unable to load model mappings.' : 'No models configured.';
             cards.push(`
-                <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     ${escapeHtml(message)}
                 </div>
             `);
@@ -567,6 +567,26 @@
         }[char]));
     }
 
+    function formatLogContent(content) {
+        const lines = (content || '').split(/\r?\n/);
+        const levelClass = (line) => {
+            const match = line.match(/\b(CRITICAL|FATAL|ERROR|WARN|WARNING|INFO|DEBUG)\b/i);
+            if (!match) return '';
+            const level = match[1].toUpperCase();
+            if (level === 'ERROR' || level === 'CRITICAL' || level === 'FATAL') return 'log-level-error';
+            if (level === 'WARN' || level === 'WARNING') return 'log-level-warn';
+            if (level === 'INFO') return 'log-level-info';
+            if (level === 'DEBUG') return 'log-level-debug';
+            return '';
+        };
+
+        return lines.map((line) => {
+            const cls = levelClass(line);
+            const escaped = escapeHtml(line);
+            return `<span class="log-line ${cls}">${escaped || '&nbsp;'}</span>`;
+        }).join('\n');
+    }
+
     function buildProviderOptions(selected) {
         if (!state.providers.length) {
             return '<option value="">No providers available</option>';
@@ -584,29 +604,29 @@
     function renderModelViewCard(model) {
         const editable = model.user_editable !== false;
         const availabilityBadge = model.available
-            ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20">Available</span>'
-            : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 ring-1 ring-red-600/20">Unavailable</span>';
+            ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-success border">Available</span>'
+            : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-error border">Unavailable</span>';
 
         const reasonLine = model.status_message && !model.available
-            ? `<div class="text-xs text-red-600 mt-1">${escapeHtml(model.status_message)}</div>`
+            ? `<div class="text-xs state-error mt-1">${escapeHtml(model.status_message)}</div>`
             : '';
 
-        const actions = editable
-            ? `
-                <button data-action="edit" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors">
-                    Edit
-                </button>
-                <button data-action="delete" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 transition-colors">
-                    Delete
-                </button>
-            `
-            : `<span class="inline-block px-2 py-0.5 text-xs text-gray-500 bg-gray-50 rounded border border-gray-200">Read-only</span>`;
+                const actions = editable
+                    ? `
+                        <button data-action="edit" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
+                            Edit
+                        </button>
+                        <button data-action="delete" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
+                            Delete
+                        </button>
+                    `
+                    : `<span class="inline-block px-2 py-0.5 text-xs text-txt-secondary bg-app-elevated rounded border border-border-primary">Read-only</span>`;
 
         return `
-            <div class="model-card rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm hover:shadow transition-shadow" data-row="${escapeHtml(model.name)}" data-mode="view" style="max-width: 1400px;">
+            <div class="model-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-row="${escapeHtml(model.name)}" data-mode="view" style="max-width: 1400px;">
                 <div class="grid gap-4 md:grid-cols-[minmax(180px,1fr)_minmax(400px,2.5fr)_minmax(140px,auto)] md:items-center">
                     <div>
-                        <div class="font-semibold text-gray-900 text-sm">${escapeHtml(model.name)}</div>
+                        <div class="font-semibold text-txt-primary text-sm">${escapeHtml(model.name)}</div>
                         <div class="flex items-center gap-2 mt-1">
                             <div class="w-fit">${availabilityBadge}</div>
                         </div>
@@ -614,12 +634,12 @@
                     </div>
                     <div class="flex gap-6 items-start">
                         <div>
-                            <div class="text-xs font-medium text-gray-500 mb-1">Provider</div>
-                            <div class="text-sm text-gray-900">${escapeHtml(model.provider)}</div>
+                            <div class="text-xs font-medium text-txt-secondary mb-1">Provider</div>
+                            <div class="text-sm text-txt-primary">${escapeHtml(model.provider)}</div>
                         </div>
                         <div>
-                            <div class="text-xs font-medium text-gray-500 mb-1">Model Identifier</div>
-                            <div class="text-xs font-mono text-gray-700 bg-gray-50 px-2 py-1 rounded border border-gray-100 inline-block max-w-xs break-words">${escapeHtml(model.model_string)}</div>
+                            <div class="text-xs font-medium text-txt-secondary mb-1">Model Identifier</div>
+                            <div class="text-xs font-mono text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(model.model_string)}</div>
                         </div>
                     </div>
                     <div class="flex gap-2 justify-start md:justify-end shrink-0">
@@ -638,35 +658,35 @@
         const providerDisabled = state.providers.length === 0 ? 'disabled' : '';
 
         const renameHint = isNew
-            ? '<p class="text-xs text-gray-500 mt-1">Lowercase alias used in assistant files.</p>'
-            : '<p class="text-xs text-gray-500 mt-1">Renaming updates the model alias used in assistants.</p>';
+            ? '<p class="text-xs text-txt-secondary mt-1">Lowercase alias used in assistant files.</p>'
+            : '<p class="text-xs text-txt-secondary mt-1">Renaming updates the model alias used in assistants.</p>';
 
         return `
-            <div class="model-card rounded-lg bg-blue-50/50 ring-2 ring-blue-200/50 px-5 py-4 shadow-sm" data-row="${escapeHtml(rowKey)}" data-mode="edit" style="max-width: 1400px;">
+            <div class="model-card rounded-lg border border-border-primary bg-app-card editing-highlight px-5 py-4 shadow-sm" data-row="${escapeHtml(rowKey)}" data-mode="edit" style="max-width: 1400px;">
                 <div class="space-y-4">
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1.5">Model Name</label>
-                            <input data-field="name" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm transition-colors" placeholder="e.g. planning" value="${escapeHtml(draft.name || '')}" />
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Model Name</label>
+                            <input data-field="name" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="e.g. planning" value="${escapeHtml(draft.name || '')}" />
                             ${renameHint}
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1.5">Provider</label>
-                            <select data-field="provider" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm transition-colors" ${providerDisabled}>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Provider</label>
+                            <select data-field="provider" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" ${providerDisabled}>
                                 ${providerOptions}
                             </select>
-                            <p class="text-xs text-gray-500 mt-1">${state.providers.length ? 'Select the provider powering this model.' : 'Add a provider before creating models.'}</p>
+                            <p class="text-xs text-txt-secondary mt-1">${state.providers.length ? 'Select the provider powering this model.' : 'Add a provider before creating models.'}</p>
                         </div>
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-700 mb-1.5">Model Identifier</label>
-                        <input data-field="model_string" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white font-mono text-sm transition-colors" placeholder="e.g. claude-sonnet-4-5" value="${escapeHtml(draft.model_string || '')}" />
+                        <label class="block text-xs font-medium text-txt-primary mb-1.5">Model Identifier</label>
+                        <input data-field="model_string" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary font-mono text-sm transition-colors" placeholder="e.g. claude-sonnet-4-5" value="${escapeHtml(draft.model_string || '')}" />
                     </div>
                     <div class="flex justify-end gap-2">
-                        <button data-action="cancel-model" class="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors">
+                        <button data-action="cancel-model" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
                             Cancel
                         </button>
-                        <button data-action="save-model" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors">
+                        <button data-action="save-model" class="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
                             Save
                         </button>
                     </div>
@@ -1059,7 +1079,7 @@ async function saveModelRow(rowKey) {
             renderSecretsTable();
         } catch (error) {
             elements.secretsList.innerHTML = `
-                <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 text-center shadow-sm">
+                <div class="rounded-lg border state-surface-error px-4 py-3 text-sm text-center shadow-sm">
                     Failed to load secrets: ${escapeHtml(error.message)}
                 </div>
             `;
@@ -1073,7 +1093,7 @@ async function saveModelRow(rowKey) {
 
         if (!state.secrets.length) {
             elements.secretsList.innerHTML = `
-                <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 text-center shadow-sm">
+                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     No secrets registered yet.
                 </div>
             `;
@@ -1087,31 +1107,31 @@ async function saveModelRow(rowKey) {
                 const hasValue = Boolean(entry.has_value);
                 const stored = Boolean(entry.stored);
                 const statusBadge = hasValue
-                    ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20">Set</span>'
-                    : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 ring-1 ring-red-600/20">Not set</span>';
+                    ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-success border">Set</span>'
+                    : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-error border">Not set</span>';
 
                 const description = metadata?.description
-                    ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(metadata.description)}</div>`
+                    ? `<div class="text-xs text-txt-secondary mt-1">${escapeHtml(metadata.description)}</div>`
                     : '';
 
                 const deleteButton = stored
-                    ? '<button data-secret-action="delete" class="px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 transition-colors">Delete</button>'
+                    ? '<button data-secret-action="delete" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Delete</button>'
                     : '';
 
                 return `
-                    <div class="secret-card rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm hover:shadow transition-shadow" data-secret="${escapeHtml(entry.name)}" style="max-width: 1400px;">
+                    <div class="secret-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-secret="${escapeHtml(entry.name)}" style="max-width: 1400px;">
                         <div class="grid gap-4 md:grid-cols-[minmax(200px,2fr)_minmax(140px,auto)] md:items-center">
                             <div>
                                 <div class="flex items-center gap-2">
-                                    <div class="font-medium text-gray-900 text-sm">${escapeHtml(label)}</div>
+                                    <div class="font-medium text-txt-primary text-sm">${escapeHtml(label)}</div>
                                     <div class="w-fit">${statusBadge}</div>
                                 </div>
-                                <div class="font-mono text-xs text-gray-500 mt-0.5">${escapeHtml(entry.name)}</div>
+                                <div class="font-mono text-xs text-txt-secondary mt-0.5">${escapeHtml(entry.name)}</div>
                                 ${description}
                             </div>
                             <div class="flex items-center gap-2 justify-start md:justify-end shrink-0 flex-wrap">
-                                <button data-secret-action="set" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors">Update</button>
-                                <button data-secret-action="clear" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors">Clear</button>
+                                <button data-secret-action="set" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Update</button>
+                                <button data-secret-action="clear" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Clear</button>
                                 ${deleteButton}
                             </div>
                         </div>
