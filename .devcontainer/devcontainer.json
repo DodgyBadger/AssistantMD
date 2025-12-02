@@ -11,6 +11,12 @@
 
   "remoteUser": "root",
 
+  // Attach to caddy network and use stable container name for inspection/scripting
+  // "runArgs": ["--network=my_network", "--name=assistantMD_dev"],
+
+  // Uncomment to forward API/UI ports to host
+  // "forwardPorts": [8000, 3000],
+
   "customizations": {
     "vscode": {
       "settings": {
@@ -35,5 +41,10 @@
     "CONTAINER_SYSTEM_ROOT": "/app/system"
   },
 
-  "updateContentCommand": "bash .devcontainer/setup.sh"
+  // Run setup once after container creation (avoid rerunning on every reopen)
+  "postCreateCommand": "bash .devcontainer/setup.sh"
+  ,
+
+  // Rebuild Tailwind CSS on content refresh if deps are present (fast, no installs)
+  "updateContentCommand": "bash -lc 'if [ -f package.json ] && [ -d node_modules ]; then echo \"Rebuilding Tailwind CSS...\"; npm run build:css || echo \"WARNING: npm run build:css failed\"; else echo \"Skipping css build (deps not installed)\"; fi'"
 }
