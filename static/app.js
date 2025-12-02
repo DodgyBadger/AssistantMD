@@ -62,6 +62,30 @@ const configElements = {
     configTab: document.getElementById('configuration-tab')
 };
 
+// Refresh DOM references (helps if the script runs before the body finishes rendering)
+function refreshDomReferences() {
+    chatElements.vaultSelector = document.getElementById('vault-selector');
+    chatElements.modelSelector = document.getElementById('model-selector');
+    chatElements.modeSelector = document.getElementById('mode-selector');
+    chatElements.toolsCheckboxes = document.getElementById('tools-checkboxes');
+    chatElements.chatMessages = document.getElementById('chat-messages');
+    chatElements.chatInput = document.getElementById('chat-input');
+    chatElements.sendBtn = document.getElementById('send-btn');
+    chatElements.newSessionBtn = document.getElementById('new-session-btn');
+
+    dashElements.systemStatus = document.getElementById('system-status');
+    dashElements.rescanBtn = document.getElementById('rescan-btn');
+    dashElements.rescanResult = document.getElementById('rescan-result');
+    dashElements.workflowSelector = document.getElementById('workflow-selector');
+    dashElements.stepNameInput = document.getElementById('step-name-input');
+    dashElements.executeWorkflowBtn = document.getElementById('execute-workflow-btn');
+    dashElements.executeWorkflowResult = document.getElementById('execute-workflow-result');
+
+    configElements.statusBanner = document.getElementById('config-status-banner');
+    configElements.statusMessages = document.getElementById('config-status-messages');
+    configElements.configTab = document.getElementById('configuration-tab');
+}
+
 function isChatNearBottom(element, threshold = 64) {
     if (!element) return true;
     const distance = element.scrollHeight - element.clientHeight - element.scrollTop;
@@ -177,6 +201,7 @@ const themeManager = {
 
 // Initialize app
 async function init() {
+    refreshDomReferences();
     themeManager.init();
     setupTabs();
     if (window.ConfigurationPanel) {
@@ -1447,4 +1472,8 @@ function syncRestartFlagWithStorage() {
 window.App = window.App || {};
 window.App.setRestartRequired = setRestartRequired;
 
-init();
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
