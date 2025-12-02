@@ -4,6 +4,7 @@ set -uo pipefail
 echo "=== setup.sh: starting ==="
 echo "CWD: $(pwd)"
 echo "User: $(id)"
+# Note: invoked by devcontainer postCreateCommand
 
 # 1. Check that python3 is available
 if ! command -v python3 >/dev/null 2>&1; then
@@ -23,12 +24,12 @@ fi
 
 # 3. Use uv to sync dependencies from docker/pyproject.toml + uv.lock
 if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.lock" ]; then
-  echo "Syncing dependencies with uv (no dev deps)..."
+  echo "Syncing dependencies with uv (including dev deps)..."
   (
     cd "${REPO_DIR}/docker"
     UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_CACHE_DIR=/tmp/uv-cache \
-    uv sync --no-install-project --no-dev || echo "WARNING: uv sync failed; continuing"
+    uv sync --no-install-project || echo "WARNING: uv sync failed; continuing"
   )
 else
   echo "WARNING: docker/pyproject.toml or docker/uv.lock not found; skipping uv sync."
