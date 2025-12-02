@@ -171,6 +171,29 @@
         .tab-button.text-amber-600 {
             font-weight: 600;
         }
+        .icon-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
+            padding: 6px 10px;
+            border: 1px solid rgb(var(--border-primary));
+            border-radius: 0.5rem;
+            background: rgb(var(--bg-card));
+            color: rgb(var(--text-primary));
+            font-size: 14px;
+            line-height: 1;
+            transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .icon-button:hover {
+            background: rgb(var(--bg-elevated));
+            border-color: rgb(var(--border-secondary));
+        }
+        .icon-button:focus {
+            outline: 2px solid transparent;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.35);
+        }
         .message-bubble {
             position: relative;
             display: flex;
@@ -616,11 +639,13 @@
                         </button>
                     </nav>
                     <div class="flex items-center gap-3 flex-shrink-0 relative z-10">
-                        <button id="theme-toggle" type="button" class="text-2xl hover:opacity-75 transition-opacity focus:outline-none" title="Change theme">
-                            🎨
+                        <button id="theme-toggle" type="button" class="icon-button" title="Change theme">
+                            <span aria-hidden="true">🎨</span>
+                            <span class="sr-only">Change theme</span>
                         </button>
-                        <button id="new-session-btn" type="button" class="text-2xl text-txt-secondary hover:text-txt-primary focus:outline-none mr-2" title="New Session">
-                            ➕
+                        <button id="new-session-btn" type="button" class="icon-button" title="New Session">
+                            <span aria-hidden="true">➕</span>
+                            <span class="sr-only">New session</span>
                         </button>
                     </div>
                 </div>
