@@ -11,6 +11,8 @@ from core.workflow.loader import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.settings import validate_settings
+from core.ingestion.service import IngestionService
+from core.ingestion.worker import IngestionWorker
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
@@ -62,6 +64,15 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             _allow_direct_instantiation=True
         )
 
+        # Initialize ingestion service
+        ingestion_service = IngestionService()
+        ingestion_worker = IngestionWorker(
+            process_job_fn=ingestion_service.process_job,
+            max_concurrent=config.features.get("ingestion_max_concurrent", 1)
+            if isinstance(config.features, dict)
+            else 1,
+        )
+
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
 
@@ -81,7 +92,8 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             config=config,
             scheduler=scheduler,
             workflow_loader=workflow_loader,
-            logger=logger
+            logger=logger,
+            ingestion=ingestion_service
         )
 
         # Register context globally before job synchronization
@@ -91,6 +103,17 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             # Load workflow configurations and synchronize jobs using runtime context
             await runtime_context.reload_workflows(manual=False)
             logger.info("Workflow configurations loaded and jobs synchronized")
+
+            # Schedule ingestion worker
+            scheduler.add_job(
+                ingestion_worker.run_once,
+                "interval",
+                seconds=5,
+                id="ingestion-worker",
+                name="Ingestion worker",
+                max_instances=1,
+                replace_existing=True,
+            )
 
             # Resume scheduler after successful synchronization
             scheduler.resume()

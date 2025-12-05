@@ -73,6 +73,10 @@ from .models import (
     SystemSettingsResponse,
 )
 from .exceptions import SystemConfigurationError
+from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
+from core.ingestion.models import SourceKind
+import os
+from core.ingestion.service import IngestionService
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -197,6 +201,39 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
             disabled_workflows=0,
             job_details=[]
         )
+
+
+def scan_import_folder(vault: str, force: bool = False, extensions: list[str] | None = None):
+    """
+    Enqueue ingestion jobs for files in AssistantMD/import for a vault.
+    """
+    runtime = get_runtime_context()
+    vault_path = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
+    vault_path.mkdir(parents=True, exist_ok=True)
+
+    ingest_service: IngestionService = runtime.ingestion
+
+    jobs_created = []
+    skipped = []
+    exts = {ext.lower() for ext in extensions} if extensions else None
+
+    for item in sorted(vault_path.iterdir()):
+        if item.is_dir():
+            continue
+        if exts and item.suffix.lower() not in exts:
+            skipped.append(str(item.name))
+            continue
+
+        job = ingest_service.enqueue_job(
+            source_uri=item.name,
+            vault=vault,
+            source_type=SourceKind.FILE.value,
+            mime_hint=None,
+            options={},
+        )
+        jobs_created.append(job)
+
+    return jobs_created, skipped
 
 
 def collect_system_health() -> SystemInfo:

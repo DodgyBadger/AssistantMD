@@ -59,7 +59,9 @@ from .services import (
     list_secrets,
     update_secret,
     delete_secret_entry,
+    scan_import_folder,
 )
+from api.import_models import ImportScanRequest, ImportScanResponse, ImportJobInfo
 
 # Create API router
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
@@ -182,6 +184,35 @@ async def update_general_setting(setting_key: str, request: SettingUpdateRequest
     """Update a general setting value."""
     try:
         return update_general_setting_value(setting_key, request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+#######################################################################
+## Import Endpoints
+#######################################################################
+
+
+@router.post("/import/scan", response_model=ImportScanResponse)
+async def import_scan(request: ImportScanRequest):
+    try:
+        jobs, skipped = scan_import_folder(
+            vault=request.vault,
+            force=request.force,
+            extensions=request.extensions,
+        )
+        job_infos = [
+            ImportJobInfo(
+                id=job.id,
+                source_uri=job.source_uri,
+                vault=job.vault or request.vault,
+                status=job.status,
+                error=job.error,
+                outputs=job.outputs,
+            )
+            for job in jobs
+        ]
+        return ImportScanResponse(jobs_created=job_infos, skipped=skipped)
     except Exception as e:
         return create_error_response(e)
 

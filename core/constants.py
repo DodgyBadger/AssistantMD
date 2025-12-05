@@ -19,6 +19,9 @@ ASSISTANTMD_ROOT_DIR = "AssistantMD"
 WORKFLOW_DEFINITIONS_DIR = "Workflows"
 CHAT_SESSIONS_DIR = "Chat_Sessions"
 WORKFLOW_LOGS_DIR = "Logs"
+IMPORT_DIR = "import"
+IMPORT_COLLECTION_DIR = "Imports"
+IMPORT_ATTACHMENTS_DIR = "_attachments"
 
 # Assistant timeout validation bounds
 TIMEOUT_MIN = 30        # Minimum timeout in seconds
