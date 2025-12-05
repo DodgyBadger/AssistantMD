@@ -107,6 +107,22 @@ def get_job(job_id: int) -> Optional[IngestionJob]:
         return session.get(IngestionJob, job_id)
 
 
+def find_job_for_source(source_uri: str, vault: str, statuses: Optional[list[str]] = None) -> Optional[IngestionJob]:
+    """
+    Find the most recent job for a source/vault matching optional statuses.
+    """
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        query = (
+            session.query(IngestionJob)
+            .filter(IngestionJob.source_uri == source_uri, IngestionJob.vault == vault)
+            .order_by(IngestionJob.created_at.desc())
+        )
+        if statuses:
+            query = query.filter(IngestionJob.status.in_(statuses))
+        return query.first()
+
+
 def list_jobs(limit: int = 50) -> list[IngestionJob]:
     session_factory = _get_session_factory()
     with session_factory() as session:

@@ -4,6 +4,7 @@ APScheduler-driven worker to drain ingestion job queue.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Callable
 
 from core.ingestion.jobs import list_jobs
@@ -22,11 +23,19 @@ class IngestionWorker:
         if not queued:
             return
 
-        for job in queued[: self.max_concurrent]:
-            try:
-                self.process_job_fn(job.id)
-            except Exception as exc:
-                self.logger.error(
-                    "Failed to process ingestion job",
-                    metadata={"job_id": job.id, "error": str(exc)},
-                )
+        tasks = [
+            asyncio.create_task(self._process_job(job.id))
+            for job in queued[: self.max_concurrent]
+        ]
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def _process_job(self, job_id: int) -> None:
+        try:
+            # Run the CPU/disk-bound pipeline in a worker thread so we do not block the event loop
+            await asyncio.to_thread(self.process_job_fn, job_id)
+        except Exception as exc:
+            self.logger.error(
+                "Failed to process ingestion job",
+                metadata={"job_id": job_id, "error": str(exc)},
+            )

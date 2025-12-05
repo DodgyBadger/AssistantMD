@@ -74,9 +74,11 @@ from .models import (
 )
 from .exceptions import SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
-from core.ingestion.models import SourceKind
+from core.ingestion.models import SourceKind, JobStatus
 import os
 from core.ingestion.service import IngestionService
+from core.ingestion.registry import importer_registry
+from core.ingestion.jobs import find_job_for_source
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -215,14 +217,34 @@ def scan_import_folder(vault: str, force: bool = False, extensions: list[str] | 
 
     jobs_created = []
     skipped = []
+    # Extensions filter from request (if provided)
     exts = {ext.lower() for ext in extensions} if extensions else None
+    # Registry-backed filter for supported types
+    supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
 
     for item in sorted(vault_path.iterdir()):
         if item.is_dir():
             continue
-        if exts and item.suffix.lower() not in exts:
+        suffix = item.suffix.lower()
+        if exts and suffix not in exts:
             skipped.append(str(item.name))
             continue
+        if suffix not in supported_exts:
+            skipped.append(str(item.name))
+            continue
+        if not force:
+            existing_job = find_job_for_source(
+                source_uri=item.name,
+                vault=vault,
+                statuses=[
+                    JobStatus.QUEUED.value,
+                    JobStatus.PROCESSING.value,
+                    JobStatus.COMPLETED.value,
+                ],
+            )
+            if existing_job:
+                skipped.append(str(item.name))
+                continue
 
         job = ingest_service.enqueue_job(
             source_uri=item.name,

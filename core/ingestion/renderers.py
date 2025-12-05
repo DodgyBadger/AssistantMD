@@ -49,6 +49,15 @@ def default_renderer(doc: ExtractedDocument, chunks: List[Chunk], options: Rende
         "chunk_count": len(chunks),
     }
 
+    # Record any attachments the extractor saw but intentionally dropped to keep vault markdown-only
+    attachments = doc.meta.get("attachments") if isinstance(doc.meta, dict) else None
+    if attachments:
+        # Only store the names/identifiers to avoid embedding binary references
+        frontmatter["dropped_attachments"] = [str(att) for att in attachments]
+    warnings = doc.meta.get("warnings") if isinstance(doc.meta, dict) else None
+    if warnings:
+        frontmatter["warnings"] = [str(w) for w in warnings]
+
     body_lines = []
     for chunk in chunks:
         body_lines.append(chunk.text)

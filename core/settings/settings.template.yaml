@@ -28,6 +28,24 @@ settings:
     value: "https://emkc.org/api/v2/piston"
     description: "Piston API base URL (public default; override for self-hosted or proxied endpoints)."
     restart_required: false
+  ingestion_pdf_enable_ocr:
+    value: false
+    description: "Enable PDF OCR ingestion strategy (requires MISTRAL_API_KEY)."
+    restart_required: false
+  ingestion_pdf_default_strategies:
+    value:
+      - pdf_text
+      - pdf_ocr
+    description: "Default strategy order for PDF ingestion; set to ['pdf_ocr'] to force OCR."
+    restart_required: false
+  ingestion_pdf_ocr_model:
+    value: "mistral-ocr-latest"
+    description: "Model used for OCR extraction."
+    restart_required: false
+  ingestion_pdf_ocr_endpoint:
+    value: "https://api.mistral.ai/v1/ocr"
+    description: "HTTP endpoint for OCR extraction."
+    restart_required: false
 
 models:
   gemini:

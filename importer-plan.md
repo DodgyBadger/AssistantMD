@@ -77,16 +77,17 @@
    - Unit tests for models/registries/job DAL.
 2) **PDF happy path**
    - Implemented PDF importer/extractor end-to-end: scan enqueues jobs from `AssistantMD/import/` and processes via worker.
-   - Rendered outputs now write to vault-root `Imported/{relative_dir}{slug}/index.md`; preserve subfolders from import source.
-   - Source files are deleted after successful ingestion; no `_attachments` copy.
-   - Frontmatter `source_path` is vault-relative (e.g. `AssistantMD/import/foo.pdf`).
-   - Tested manually with sample PDFs in `data/TestVault`; latest run outputs in `data/TestVault/Imported/...`.
-   - File importer + text extractor; stub OCR strategy (config-gated).
-   - Segmenter + renderer (full mode) → writes markdown and attachments.
-   - Golden tests on sample PDF.
+   - Rendered outputs write to vault-root `Imported/{relative_dir}{slug}/index.md`; preserve subfolders from import source; job outputs are vault-relative.
+   - Source files are deleted after successful ingestion; no `_attachments` copy (attachments are dropped and listed in frontmatter).
+   - Frontmatter `source_path` is vault-relative (e.g. `AssistantMD/import/foo.pdf`) with warnings for disabled/missing strategies.
+   - Text extractor + OCR strategy (config-gated, uses Mistral OCR).
+   - Segmenter + renderer (full mode) → writes markdown.
+   - Manual verification against sample PDFs; clean ingestion DB.
 3) **DOCX and EML support**
-   - Add docx/eml extractors; ensure attachments for eml.
-   - Extend renderer tests with fixtures.
+   - DOCX: markitdown-based extractor wired as default strategy; fallback stub retained for missing dependency. Manual tests show better list fidelity than docling; attachments dropped and noted as warnings.
+   - EML: stub extractor in place (no attachments handled yet).
+   - Decision point: either require users to export other formats (DOCX/PPTX/etc.) to PDF or add a heavy conversion dependency (e.g., LibreOffice) and reuse the PDF/OCR path. Current stance: prefer user-export-to-PDF to keep runtime light.
+   - Extend renderer/tests with fixtures.
 4) **HTML/web ingestion**
    - Web importer using existing fetch/crawl; readability strategy; chunked render mode.
    - Chunker tests for size budgets and stable IDs.
@@ -100,6 +101,7 @@
    - Add end-to-end scenarios under `validation/scenarios/` (e.g., PDF happy path, oversize web page chunk/condense, sidecar overrides, failure handling) using BaseScenario helpers; verify outputs, provenance, and job statuses with artifacts captured.
 8) **UI**
    - Import tab: upload, URL submit, “scan import folder” button, job list/status/warnings/links.
+   - Surface ingestion settings in Configuration UI (enable PDF OCR, default strategies, OCR model/endpoint) and warn when OCR enabled but MISTRAL_API_KEY is missing.
    - Frontend integration with API.
 9) **Polish**
    - Error handling, warnings surfaced in frontmatter/status; docs/examples.

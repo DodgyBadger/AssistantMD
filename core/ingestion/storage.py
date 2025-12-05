@@ -25,12 +25,15 @@ def default_storage(rendered: List[Dict], options: RenderOptions) -> List[str]:
     outputs: List[str] = []
 
     for artifact in rendered:
-        rel_path = artifact["path"]
+        raw_rel_path = Path(artifact["path"])
+        # Normalize away any stray "." segments to keep vault-relative paths clean
+        rel_path = Path(*[part for part in raw_rel_path.parts if part not in ("", ".")])
         full_path = vault_root / rel_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         content = artifact["content"]
         full_path.write_text(content, encoding="utf-8")
-        outputs.append(str(full_path))
+        # Return vault-relative path for API/status reporting
+        outputs.append(rel_path.as_posix())
 
     # Clean up source file after successful write to avoid clutter in vaults
     if options.source_filename:

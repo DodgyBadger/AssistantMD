@@ -8,6 +8,7 @@ from typing import List
 from pathlib import Path
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
+from core.ingestion.registry import importer_registry, extractor_registry
 from core.ingestion.segmenter import default_segmenter
 from core.ingestion.renderers import default_renderer
 from core.ingestion.storage import default_storage
@@ -16,8 +17,8 @@ from core.ingestion.models import (
     RenderOptions,
     RenderMode,
 )
-from core.ingestion.sources.pdf import load_pdf_from_path
-from core.ingestion.strategies.pdf_text import extract_pdf_text
+from core.settings.secrets_store import secret_has_value
+from core.settings.store import get_general_settings
 from core.runtime.paths import get_data_root
 
 from core.ingestion.jobs import (
@@ -33,12 +34,18 @@ from core.logger import UnifiedLogger
 
 
 class IngestionService:
+    _STRATEGY_SECRET_REQUIREMENTS = {
+        "pdf_ocr": "MISTRAL_API_KEY",
+    }
+
     def __init__(self):
         self.logger = UnifiedLogger(tag="ingestion")
+        self._load_builtin_handlers()
         init_db()
 
     def enqueue_job(self, source_uri: str, vault: str, source_type: str, mime_hint: str | None, options: dict | None) -> IngestionJob:
-        return create_job(source_uri, vault, source_type, mime_hint, options)
+        opts = options or {}
+        return create_job(source_uri, vault, source_type, mime_hint, opts)
 
     def list_recent_jobs(self, limit: int = 50) -> List[IngestionJob]:
         return list_jobs(limit)
@@ -78,8 +85,23 @@ class IngestionService:
             if not source_path.exists():
                 raise FileNotFoundError(f"Source file not found: {source_path}")
 
-            raw_doc = load_pdf_from_path(source_path)
-            extracted = extract_pdf_text(raw_doc)
+            importer_fn = self._resolve_importer(source_path, job.mime_hint)
+            if importer_fn is None:
+                msg = f"Unsupported file type for ingestion: {source_path.name}"
+                self.logger.warning(msg, metadata={"job_id": job_id, "mime_hint": job.mime_hint})
+                self.mark_failed(job_id, msg)
+                return
+
+            raw_doc = importer_fn(source_path)
+
+            ingestion_settings = self._get_ingestion_settings()
+            strategies = self._get_strategies(job, source_path.suffix.lower(), ingestion_settings)
+            extracted, warnings = self._run_strategies(raw_doc, strategies, ingestion_settings)
+            if extracted is None:
+                msg = f"No extractor succeeded for {raw_doc.mime or 'unknown mime'}"
+                self.logger.warning(msg, metadata={"job_id": job_id, "strategies": strategies})
+                self.mark_failed(job_id, msg)
+                return
 
             relative_dir = ""
             try:
@@ -87,7 +109,9 @@ class IngestionService:
                 import_root_resolved = import_root.resolve()
                 if str(source_parent).startswith(str(import_root_resolved)):
                     relative_dir = str(source_parent.relative_to(import_root_resolved)).strip("/")
-                    if relative_dir:
+                    if relative_dir in ("", "."):
+                        relative_dir = ""
+                    else:
                         relative_dir = relative_dir + "/"
             except Exception:
                 relative_dir = ""
@@ -100,6 +124,8 @@ class IngestionService:
                 source_filename=str(source_path),
                 relative_dir=relative_dir,
             )
+            if warnings:
+                extracted.meta.setdefault("warnings", []).extend(warnings)
             chunks = default_segmenter(extracted, render_options)
             rendered = default_renderer(extracted, chunks, render_options)
             outputs = default_storage(rendered, render_options)
@@ -109,3 +135,149 @@ class IngestionService:
         except Exception as exc:
             self.mark_failed(job_id, str(exc))
             raise
+
+    def _resolve_importer(self, source_path: Path, mime_hint: str | None):
+        """
+        Pick the first registered importer matching mime hint or file extension.
+        """
+        candidates = []
+        if mime_hint:
+            candidates.extend(importer_registry.get(mime_hint.lower()))
+
+        suffix = source_path.suffix.lower()
+        if suffix:
+            candidates.extend(importer_registry.get(suffix))
+
+        return candidates[0] if candidates else None
+
+    def _get_ingestion_settings(self) -> dict:
+        """
+        Map general settings entries to a simple ingestion settings dict.
+        """
+        general_settings = get_general_settings()
+        pdf_enable_ocr = False
+        pdf_default_strategies: list[str] = []
+        pdf_ocr_model = "mistral-ocr-latest"
+        pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        try:
+            pdf_enable_ocr = bool(general_settings.get("ingestion_pdf_enable_ocr").value)
+        except Exception:
+            pdf_enable_ocr = False
+        try:
+            pdf_default_strategies = list(general_settings.get("ingestion_pdf_default_strategies").value)
+        except Exception:
+            pdf_default_strategies = []
+        try:
+            pdf_ocr_model = str(general_settings.get("ingestion_pdf_ocr_model").value)
+        except Exception:
+            pdf_ocr_model = "mistral-ocr-latest"
+        try:
+            pdf_ocr_endpoint = str(general_settings.get("ingestion_pdf_ocr_endpoint").value)
+        except Exception:
+            pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+
+        return {
+            "pdf": {
+                "enable_ocr": pdf_enable_ocr,
+                "default_strategies": pdf_default_strategies,
+                "ocr_model": pdf_ocr_model,
+                "ocr_endpoint": pdf_ocr_endpoint,
+            }
+        }
+
+    def _resolve_extractor(self, mime: str | None):
+        """
+        Pick the first registered extractor for the given MIME type.
+        """
+        if not mime:
+            return None
+        candidates = extractor_registry.get(mime.lower())
+        return candidates[0] if candidates else None
+
+    def _resolve_extractor_by_strategy(self, strategy_id: str):
+        """
+        Pick extractor registered for a specific strategy id, falling back to MIME when strategy matches known mime.
+        """
+        candidates = extractor_registry.get(f"strategy:{strategy_id}")
+        if candidates:
+            return candidates[0]
+        # Allow strategy ids that equal a MIME type
+        candidates = extractor_registry.get(strategy_id.lower())
+        return candidates[0] if candidates else None
+
+    def _get_strategies(self, job: IngestionJob, suffix: str, ingestion_settings: dict) -> list[str]:
+        """
+        Determine strategy order for a job from options or mime defaults.
+        """
+        opts = job.options or {}
+        strategies = opts.get("strategies")
+        if isinstance(strategies, list) and strategies:
+            return [str(s) for s in strategies]
+
+        # Defaults from settings
+        pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
+        if suffix == ".pdf":
+            cfg_strategies = pdf_cfg.get("default_strategies") or []
+            enable_ocr = bool(pdf_cfg.get("enable_ocr"))
+            default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["pdf_text", "pdf_ocr"]
+            if not enable_ocr:
+                default_strats = [s for s in default_strats if s != "pdf_ocr"]
+            return default_strats
+        if suffix == ".docx":
+            return ["docx_text"]
+        if suffix == ".eml":
+            return ["eml_stub"]
+        return []
+
+    def _strategy_enabled(self, strat: str, ingestion_settings: dict) -> bool:
+        if strat == "pdf_ocr":
+            pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
+            return bool(pdf_cfg.get("enable_ocr", False))
+        return True
+
+    def _run_strategies(self, raw_doc, strategies: list[str], ingestion_settings: dict):
+        """
+        Try extractors in order; return first non-empty result.
+        """
+        warnings: list[str] = []
+        for strat in strategies:
+            if not self._strategy_enabled(strat, ingestion_settings):
+                warnings.append(f"{strat}:disabled")
+                continue
+            secret_name = self._STRATEGY_SECRET_REQUIREMENTS.get(strat)
+            if secret_name and not secret_has_value(secret_name):
+                warnings.append(f"{strat}:missing_secret:{secret_name}")
+                continue
+
+            extractor_fn = self._resolve_extractor_by_strategy(strat)
+            if extractor_fn is None:
+                warnings.append(f"{strat}:missing")
+                continue
+            try:
+                result = extractor_fn(raw_doc)
+            except Exception as exc:
+                warnings.append(f"{strat}:error:{exc}")
+                continue
+
+            text = (result.plain_text or "").strip()
+            if text:
+                if strat != result.strategy_id:
+                    result.strategy_id = strat
+                return result, warnings if warnings else None
+            warnings.append(f"{strat}:empty")
+
+        return None, warnings if warnings else None
+
+    def _load_builtin_handlers(self) -> None:
+        """
+        Import built-in source/extractor modules so they register themselves.
+        """
+        # Imports are intentional for side effects (registry registration).
+        import core.ingestion.sources.pdf  # noqa: F401
+        import core.ingestion.sources.docx  # noqa: F401
+        import core.ingestion.sources.eml  # noqa: F401
+        import core.ingestion.strategies.pdf_text  # noqa: F401
+        import core.ingestion.strategies.pdf_ocr  # noqa: F401
+        import core.ingestion.strategies.docx_text  # noqa: F401
+        import core.ingestion.strategies.docx_text_fallback  # noqa: F401
+        import core.ingestion.strategies.eml_text  # noqa: F401

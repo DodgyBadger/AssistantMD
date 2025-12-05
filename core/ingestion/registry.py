@@ -20,7 +20,10 @@ class Registry:
     def get(self, key: str) -> List[Callable]:
         return self._items.get(key, [])
 
+    def keys(self) -> List[str]:
+        """Return registered keys."""
+        return list(self._items.keys())
+
 
 importer_registry = Registry()
 extractor_registry = Registry()
-
