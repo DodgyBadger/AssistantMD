@@ -258,6 +258,28 @@ def scan_import_folder(vault: str, force: bool = False, extensions: list[str] | 
     return jobs_created, skipped
 
 
+def ingest_url_direct(vault: str, url: str, clean_html: bool = True):
+    """
+    Synchronously ingest a single URL and return the job record after processing.
+    """
+    runtime = get_runtime_context()
+    ingest_service: IngestionService = runtime.ingestion
+
+    job = ingest_service.enqueue_job(
+        source_uri=url,
+        vault=vault,
+        source_type=SourceKind.URL.value,
+        mime_hint="text/html",
+        options={"extractor_options": {"clean_html": clean_html}},
+    )
+    try:
+        ingest_service.process_job(job.id)
+    except Exception:
+        # process_job records failure status; propagate via job state
+        pass
+    return ingest_service.get_job(job.id)
+
+
 def collect_system_health() -> SystemInfo:
     """
     Collect system health information.

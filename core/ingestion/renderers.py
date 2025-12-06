@@ -15,13 +15,16 @@ def default_renderer(doc: ExtractedDocument, chunks: List[Chunk], options: Rende
     """
     Placeholder renderer that returns structured artifacts ready for storage.
     """
-    slug = options.title or options.source_filename or "import"
-    slug = _slugify(slug)
-    base = options.path_pattern or "Imported/"
-    rel_dir = base.rstrip("/") + "/" + (options.relative_dir or "")
-    rel_dir = rel_dir.lstrip("/")
-    rel_dir = rel_dir + slug + "/"
-    rel_path = os.path.join(rel_dir, "index.md")
+    slug_source = options.title or None
+    if slug_source is None and options.source_filename:
+        slug_source = Path(options.source_filename).stem
+    slug = _slugify(slug_source or "import")
+
+    base_dir = options.path_pattern or "Imported/"
+    rel_dir = base_dir.rstrip("/")
+    if options.relative_dir:
+        rel_dir = os.path.join(rel_dir, options.relative_dir.strip("/"))
+    rel_path = os.path.join(rel_dir, f"{slug}.md").lstrip("/")
 
     display_source_path = None
     if options.source_filename:

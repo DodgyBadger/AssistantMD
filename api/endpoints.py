@@ -60,8 +60,15 @@ from .services import (
     update_secret,
     delete_secret_entry,
     scan_import_folder,
+    ingest_url_direct,
 )
-from api.import_models import ImportScanRequest, ImportScanResponse, ImportJobInfo
+from api.import_models import (
+    ImportScanRequest,
+    ImportScanResponse,
+    ImportJobInfo,
+    ImportUrlRequest,
+    ImportUrlResponse,
+)
 
 # Create API router
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
@@ -213,6 +220,26 @@ async def import_scan(request: ImportScanRequest):
             for job in jobs
         ]
         return ImportScanResponse(jobs_created=job_infos, skipped=skipped)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/import/url", response_model=ImportUrlResponse)
+async def import_url(request: ImportUrlRequest):
+    try:
+        job = ingest_url_direct(
+            vault=request.vault,
+            url=request.url,
+            clean_html=request.clean_html,
+        )
+        return ImportUrlResponse(
+            id=job.id,
+            source_uri=job.source_uri,
+            vault=job.vault or request.vault,
+            status=job.status,
+            error=job.error,
+            outputs=job.outputs,
+        )
     except Exception as e:
         return create_error_response(e)
 

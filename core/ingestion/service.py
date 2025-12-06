@@ -16,6 +16,7 @@ from core.ingestion.models import (
     JobStatus,
     RenderOptions,
     RenderMode,
+    SourceKind,
 )
 from core.settings.secrets_store import secret_has_value
 from core.settings.store import get_general_settings
@@ -79,49 +80,67 @@ class IngestionService:
 
             data_root = Path(get_data_root())
             import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
-            source_path = Path(job.source_uri)
-            if not source_path.is_absolute():
-                source_path = import_root / source_path
-            if not source_path.exists():
-                raise FileNotFoundError(f"Source file not found: {source_path}")
 
-            importer_fn = self._resolve_importer(source_path, job.mime_hint)
-            if importer_fn is None:
-                msg = f"Unsupported file type for ingestion: {source_path.name}"
-                self.logger.warning(msg, metadata={"job_id": job_id, "mime_hint": job.mime_hint})
-                self.mark_failed(job_id, msg)
-                return
+            source_path: Path | None = None
+            raw_doc = None
+            relative_dir = ""
 
-            raw_doc = importer_fn(source_path)
+            if job.source_type == SourceKind.URL.value:
+                importer_fn = self._resolve_importer_for_url(job.source_uri, job.mime_hint)
+                if importer_fn is None:
+                    msg = "Unsupported URL ingestion source"
+                    self.logger.warning(msg, metadata={"job_id": job_id, "source": job.source_uri})
+                    self.mark_failed(job_id, msg)
+                    return
+                raw_doc = importer_fn(job.source_uri)
+            else:
+                source_path = Path(job.source_uri)
+                if not source_path.is_absolute():
+                    source_path = import_root / source_path
+                if not source_path.exists():
+                    raise FileNotFoundError(f"Source file not found: {source_path}")
+
+                importer_fn = self._resolve_importer(source_path, job.mime_hint)
+                if importer_fn is None:
+                    msg = f"Unsupported file type for ingestion: {source_path.name}"
+                    self.logger.warning(msg, metadata={"job_id": job_id, "mime_hint": job.mime_hint})
+                    self.mark_failed(job_id, msg)
+                    return
+
+                raw_doc = importer_fn(source_path)
 
             ingestion_settings = self._get_ingestion_settings()
-            strategies = self._get_strategies(job, source_path.suffix.lower(), ingestion_settings)
-            extracted, warnings = self._run_strategies(raw_doc, strategies, ingestion_settings)
+            suffix = source_path.suffix.lower() if source_path else ""
+            strategies = self._get_strategies(job, suffix, ingestion_settings)
+            extractor_opts = {}
+            if job.options and isinstance(job.options, dict):
+                extractor_opts = job.options.get("extractor_options", {})
+            extracted, warnings = self._run_strategies(raw_doc, strategies, ingestion_settings, extractor_opts)
             if extracted is None:
                 msg = f"No extractor succeeded for {raw_doc.mime or 'unknown mime'}"
                 self.logger.warning(msg, metadata={"job_id": job_id, "strategies": strategies})
                 self.mark_failed(job_id, msg)
                 return
 
-            relative_dir = ""
-            try:
-                source_parent = source_path.parent.resolve()
-                import_root_resolved = import_root.resolve()
-                if str(source_parent).startswith(str(import_root_resolved)):
-                    relative_dir = str(source_parent.relative_to(import_root_resolved)).strip("/")
-                    if relative_dir in ("", "."):
-                        relative_dir = ""
-                    else:
-                        relative_dir = relative_dir + "/"
-            except Exception:
-                relative_dir = ""
+            if source_path:
+                try:
+                    source_parent = source_path.parent.resolve()
+                    import_root_resolved = import_root.resolve()
+                    if str(source_parent).startswith(str(import_root_resolved)):
+                        relative_dir = str(source_parent.relative_to(import_root_resolved)).strip("/")
+                        if relative_dir in ("", "."):
+                            relative_dir = ""
+                        else:
+                            relative_dir = relative_dir + "/"
+                except Exception:
+                    relative_dir = ""
 
             render_options = RenderOptions(
                 mode=RenderMode.FULL,
                 store_original=False,
                 title=raw_doc.suggested_title,
                 vault=vault,
-                source_filename=str(source_path),
+                source_filename=str(source_path) if source_path else job.source_uri,
                 relative_dir=relative_dir,
                 path_pattern=ingestion_settings.get("output_base_dir", "Imported/"),
             )
@@ -149,6 +168,24 @@ class IngestionService:
         if suffix:
             candidates.extend(importer_registry.get(suffix))
 
+        return candidates[0] if candidates else None
+
+    def _resolve_importer_for_url(self, source_uri: str, mime_hint: str | None):
+        """
+        Pick importer for URLs based on scheme/mime.
+        """
+        candidates = []
+        if mime_hint:
+            candidates.extend(importer_registry.get(mime_hint.lower()))
+        try:
+            from urllib.parse import urlparse
+
+            scheme = urlparse(source_uri).scheme.lower()
+            if scheme:
+                candidates.extend(importer_registry.get(f"scheme:{scheme}"))
+        except Exception:
+            pass
+        candidates.extend(importer_registry.get("url"))
         return candidates[0] if candidates else None
 
     def _get_ingestion_settings(self) -> dict:
@@ -221,6 +258,10 @@ class IngestionService:
         if isinstance(strategies, list) and strategies:
             return [str(s) for s in strategies]
 
+        if job.source_type == SourceKind.URL.value:
+            # Single HTML strategy with optional cleaning
+            return ["html_markitdown"]
+
         # Defaults from settings
         pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
         if suffix == ".pdf":
@@ -244,11 +285,12 @@ class IngestionService:
             return bool(pdf_cfg.get("enable_ocr", False))
         return True
 
-    def _run_strategies(self, raw_doc, strategies: list[str], ingestion_settings: dict):
+    def _run_strategies(self, raw_doc, strategies: list[str], ingestion_settings: dict, options: dict | None = None):
         """
         Try extractors in order; return first non-empty result.
         """
         warnings: list[str] = []
+        extractor_options = options or {}
         for strat in strategies:
             if not self._strategy_enabled(strat, ingestion_settings):
                 warnings.append(f"{strat}:disabled")
@@ -263,7 +305,7 @@ class IngestionService:
                 warnings.append(f"{strat}:missing")
                 continue
             try:
-                result = extractor_fn(raw_doc)
+                result = extractor_fn(raw_doc, extractor_options) if extractor_fn.__code__.co_argcount > 1 else extractor_fn(raw_doc)
             except Exception as exc:
                 warnings.append(f"{strat}:error:{exc}")
                 continue
@@ -284,6 +326,8 @@ class IngestionService:
         # Imports are intentional for side effects (registry registration).
         import core.ingestion.sources.pdf  # noqa: F401
         import core.ingestion.sources.docx  # noqa: F401
+        import core.ingestion.sources.web  # noqa: F401
         import core.ingestion.strategies.pdf_text  # noqa: F401
         import core.ingestion.strategies.pdf_ocr  # noqa: F401
         import core.ingestion.strategies.markitdown  # noqa: F401
+        import core.ingestion.strategies.html_raw  # noqa: F401

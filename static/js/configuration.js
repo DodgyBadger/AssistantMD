@@ -20,12 +20,14 @@
         isSavingSecret: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
+        isImportingUrl: false,
         settings: [],
         models: [],
         providers: [],
         secrets: [],
         importVaults: [],
         importResults: null,
+        importUrlResult: null,
         settingEditKey: null,
         settingDraftValue: '',
         modelEdit: null,
@@ -88,7 +90,10 @@
         importStatus: null,
         importScanBtn: null,
         importRefreshVaultsBtn: null,
-        importResults: null
+        importResults: null,
+        importUrlInput: null,
+        importUrlSubmit: null,
+        importUrlResults: null
     };
 
     const toneClasses = {
@@ -133,6 +138,9 @@
         elements.importScanBtn = document.getElementById('import-scan');
         elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
         elements.importResults = document.getElementById('import-results');
+        elements.importUrlInput = document.getElementById('import-url-input');
+        elements.importUrlSubmit = document.getElementById('import-url-submit');
+        elements.importUrlResults = document.getElementById('import-url-results');
     }
 
     function bindEvents() {
@@ -156,6 +164,7 @@
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
+        elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
     }
 
     const restartNoticeText = 'Restart recommended: restart the container to apply pending changes.';
@@ -1357,6 +1366,7 @@ async function saveModelRow(rowKey) {
 
         cacheElements();
         bindEvents();
+        renderImportUrlResults();
 
         state.initialized = true;
     }
@@ -1367,21 +1377,22 @@ async function saveModelRow(rowKey) {
     }
 
     function renderImportVaults() {
-        if (!elements.importVaultSelect) return;
-        elements.importVaultSelect.innerHTML = '<option value="">Select vault…</option>';
+        const select = elements.importVaultSelect;
+        if (!select) return;
+        select.innerHTML = '<option value="">Select vault…</option>';
         if (!state.importVaults || state.importVaults.length === 0) {
             const opt = document.createElement('option');
             opt.value = '';
             opt.textContent = 'No vaults detected';
             opt.disabled = true;
-            elements.importVaultSelect.appendChild(opt);
+            select.appendChild(opt);
             return;
         }
         state.importVaults.forEach((vault) => {
             const opt = document.createElement('option');
             opt.value = vault;
             opt.textContent = vault;
-            elements.importVaultSelect.appendChild(opt);
+            select.appendChild(opt);
         });
     }
 
@@ -1497,6 +1508,31 @@ async function saveModelRow(rowKey) {
         elements.importResults.innerHTML = html || 'No jobs created. Adjust filters or add files to AssistantMD/import/.';
     }
 
+    function renderImportUrlResults() {
+        if (!elements.importUrlResults) return;
+        const result = state.importUrlResult;
+        if (!result) {
+            elements.importUrlResults.textContent = 'No URL ingests yet.';
+            return;
+        }
+        const outputs = Array.isArray(result.outputs) ? result.outputs : [];
+        const status = result.status || 'unknown';
+        const error = result.error;
+        const source = result.source_uri || result.url || 'unknown';
+
+        let html = `<div class="space-y-2"><div class="font-medium text-txt-primary">Latest ingest</div>`;
+        html += `<div class="text-sm"><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span></div>`;
+        if (outputs.length) {
+            html += '<div class="text-sm">Outputs: ' + outputs.join(', ') + '</div>';
+        }
+        if (error) {
+            html += `<div class="text-sm state-error">Error: ${error}</div>`;
+        }
+        html += '</div>';
+
+        elements.importUrlResults.innerHTML = html;
+    }
+
     async function handleImportScan() {
         if (!elements.importScanBtn || state.isScanningImport) return;
 
@@ -1537,6 +1573,44 @@ async function saveModelRow(rowKey) {
             btn.disabled = false;
             btn.textContent = originalLabel;
             state.isScanningImport = false;
+        }
+    }
+
+    async function handleImportUrl() {
+        if (!elements.importUrlSubmit || state.isImportingUrl) return;
+
+        const vault = elements.importVaultSelect?.value || '';
+        const url = (elements.importUrlInput?.value || '').trim();
+        if (!vault || !url) {
+            setStatus(elements.importStatus, 'Select a vault and enter a URL.', 'warning');
+            return;
+        }
+
+        state.isImportingUrl = true;
+        const btn = elements.importUrlSubmit;
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Ingesting…';
+        setStatus(elements.importStatus, 'Ingesting URL…', 'info');
+
+        try {
+            const response = await fetch('api/import/url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vault, url, clean_html: true })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            state.importUrlResult = data;
+            renderImportUrlResults();
+            setStatus(elements.importStatus, 'URL ingested.', data.error ? 'warning' : 'success');
+            if (callbacks.refreshStatus) callbacks.refreshStatus();
+        } catch (error) {
+            setStatus(elements.importStatus, `Ingest failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+            state.isImportingUrl = false;
         }
     }
 

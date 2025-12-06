@@ -201,6 +201,11 @@ tools:
     requires_secrets:
       - TAVILY_API_KEY
     user_editable: false
+  ingest_url:
+    module: core.tools.ingest_url
+    description: "Ingest a single URL into a vault via the ingestion pipeline"
+    requires_secrets: []
+    user_editable: false
   documentation_access:
     module: core.tools.documentation_access
     description: "Create workflows via chat"

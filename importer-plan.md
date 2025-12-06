@@ -72,35 +72,45 @@
 
 ## Iteration Steps (testable phases)
 1) **Scaffold core types + DAL** ✅
-   - Add `core/ingestion` with models/registry/pipeline skeleton; job table via `core/database`.
-   - Add import constants and path helpers.
+   - `core/ingestion` models/registry/pipeline skeleton; job table via `core/database`.
+   - Import constants and path helpers.
    - Unit tests for models/registries/job DAL.
 2) **PDF happy path** ✅
-   - Implemented PDF importer/extractor end-to-end: scan enqueues jobs from `AssistantMD/import/` and processes via worker.
-   - Rendered outputs write to vault-root `Imported/{relative_dir}{slug}/index.md`; preserve subfolders from import source; job outputs are vault-relative.
+   - PDF importer/extractor end-to-end: scan enqueues jobs from `AssistantMD/import/` and processes via worker.
+   - Rendered outputs write to vault-root `Imported/{relative_dir}{source-name}.md`; preserve subfolders from import source; job outputs are vault-relative.
    - Source files are deleted after successful ingestion; no `_attachments` copy (attachments are dropped and listed in frontmatter).
    - Frontmatter `source_path` is vault-relative (e.g. `AssistantMD/import/foo.pdf`) with warnings for disabled/missing strategies.
    - Text extractor + OCR strategy (config-gated, uses Mistral OCR).
-   - Segmenter + renderer (full mode) → writes markdown.
-   - Manual verification against sample PDFs; clean ingestion DB.
+   - Segmenter + renderer (full mode placeholder) → writes markdown.
 3) **DOCX/Office support** ✅
    - Office docs (docx/pptx/xlsx): markitdown-based extractor wired as default strategy. Attachments dropped and noted as warnings.
    - Other formats: not ingested by default; users can export to PDF for best fidelity or accept best-effort markitdown where registered.
-   - Extend renderer/tests with fixtures (pending).
 4) **HTML/web ingestion**
-   - Web importer using existing fetch/crawl; readability strategy; chunked render mode.
-   - Chunker tests for size budgets and stable IDs.
-5) **Job runner + API**
-   - Job orchestration (queue, statuses), `POST /api/import/jobs`, `GET /api/import/jobs`, `POST /api/import/scan` (vault import folder trigger).
-   - Integration tests: enqueue → process → outputs.
-6) **Import folder flow**
-   - Implement scan of `AssistantMD/import/` per vault, sidecar overrides, processed/failed moves.
-   - Tests for scan/enqueue behavior.
-7) **Validation scenarios**
-   - Add end-to-end scenarios under `validation/scenarios/` (e.g., PDF happy path, oversize web page chunk/condense, sidecar overrides, failure handling) using BaseScenario helpers; verify outputs, provenance, and job statuses with artifacts captured.
+   - Build URL importer (fetch + mime sniff) and HTML extractor (readability-first, raw fallback).
+   - Chunked render mode with token/overlap guards; stable chunk IDs.
+   - Use same renderer/storage; record provenance (URL, strategy, warnings).
+5) **Job runner + API surface**
+   - Expose ingestion as synchronous APIs for URLs/uploads (bypass worker latency): e.g., `POST /api/import/url` runs pipeline immediately and returns `{paths, warnings, cached?, preview?}`.
+   - Keep existing `/import/scan` for import-folder jobs; add job list/status endpoints.
+   - If we keep the job table for tool/API calls, create job row and run `process_job` inline rather than waiting on the interval worker.
+6) **Tooling**
+   - Add `ingest_url` tool: inputs `url`, `vault`, optional `mode` (`full|summary_only`), `force`, `inline_preview`, `path_hint`.
+   - Tool executes the pipeline synchronously (same code path as APIs), returns vault-relative paths plus optional preview and warnings; respect size/token caps and caching.
+   - Allow segmenter selection via tool inputs (e.g., `segmenter`, `target_tokens`, `overlap`); default remains if unset.
+7) **Import folder polish**
+   - Sidecar overrides, processed/failed moves, better skip/caching logic.
+   - Tests for scan/enqueue behavior and cleanup.
 8) **UI**
-   - Import controls surfaced in Configuration tab (scan import folder, vault selection, results).
-   - Ingestion settings exposed via general settings (OCR, strategies, output path).
-   - Next: Add upload/URL ingestion UI once endpoints exist; job list/status/warnings; handle ingestion-worker scheduling namespace decision (protect from workflow cleanup).
-9) **Polish**
-   - Error handling, warnings surfaced in frontmatter/status; docs/examples.
+   - Current: Config tab import scan panel (vault select, extensions, force, results).
+   - Next: Upload/URL ingestion UI; job list/status/warnings; expose ingestion settings (OCR, strategies, output path); ensure non-workflow jobs (e.g., ingestion-worker) stay pinned during workflow resync.
+9) **Validation scenarios**
+   - End-to-end scenarios under `validation/scenarios/` (PDF happy path, web ingestion with chunk/condense, sidecar overrides, failure handling); verify outputs/provenance/job statuses with artifacts.
+10) **Polish**
+   - Error handling, warnings surfaced in frontmatter/status; docs/examples; caching/idempotency (`force` vs reuse), attachment policy.
+
+## Segmenter/preview architecture (future work)
+- Segmenter choice is explicit, not magic. Add a segmenter registry (e.g., `single`, `paragraph_packer`, `heading_aware`, `page_packer`) and let requests pick via `segmenter` option; keep sensible defaults per mime but user input wins.
+- Expose size knobs (`target_tokens`/chars, `overlap`, `mode` `full|chunked|summary_only`) on API/tool/UI; enforce caps.
+- Add a preview path: run fetch + extraction + chosen segmenter, return chunk summaries/text (truncated), counts, and warnings without writing files. Let users iterate before committing.
+- Ingest path reuses the same parameters to write artifacts; caching/idempotency still apply (`force` vs reuse).
+- UI: segmenter dropdown + settings on upload/URL form, with “Preview” then “Ingest” flow. Tools: `preview=true` flag to get chunks only; `preview=false` to write and return paths (plus optional inline preview).

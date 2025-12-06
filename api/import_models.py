@@ -23,3 +23,18 @@ class ImportJobInfo(BaseModel):
 class ImportScanResponse(BaseModel):
     jobs_created: List[ImportJobInfo]
     skipped: List[str]
+
+
+class ImportUrlRequest(BaseModel):
+    vault: str
+    url: str
+    clean_html: bool = True
+
+
+class ImportUrlResponse(BaseModel):
+    id: int
+    source_uri: str
+    vault: str
+    status: str
+    error: Optional[str] = None
+    outputs: Optional[list[str]] = None

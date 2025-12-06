@@ -939,36 +939,61 @@
                         <p class="text-sm text-txt-secondary">
                             Drop files into <code>AssistantMD/import/</code> inside your vault, then scan to enqueue ingestion jobs. Files are removed after successful ingestion. Upload/URL ingestion will land here later—this panel focuses on the import folder flow.
                         </p>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-app-elevated border border-border-primary rounded-md p-4">
-                            <div class="md:col-span-1">
-                                <label for="import-vault-select" class="block text-sm font-medium text-txt-primary mb-1">Vault</label>
-                                <select id="import-vault-select" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
-                                    <option value="">Select vault…</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label for="import-extensions" class="block text-sm font-medium text-txt-primary mb-1">Extensions (optional)</label>
-                                <input id="import-extensions" type="text" placeholder=".pdf, .docx" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
-                                <p class="text-xs text-txt-secondary mt-1">Filter scan to these extensions; leave blank for all supported types.</p>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <input id="import-force" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
-                                <label for="import-force" class="text-sm text-txt-primary">Re-enqueue even if recently scanned</label>
-                            </div>
-                            <div class="md:col-span-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                <span id="import-status" class="text-sm text-txt-secondary"></span>
-                                <div class="flex items-center gap-2">
-                                    <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent">
+                        <div class="space-y-3 bg-app-elevated border border-border-primary rounded-md p-4">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                <div class="md:col-span-2">
+                                    <label for="import-vault-select" class="block text-sm font-medium text-txt-primary mb-1">Vault</label>
+                                    <select id="import-vault-select" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="">Select vault…</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-end justify-end gap-2">
+                                    <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent h-10">
                                         Refresh Vaults
                                     </button>
-                                    <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                <div>
+                                    <label for="import-extensions" class="block text-sm font-medium text-txt-primary mb-1">Extensions (optional)</label>
+                                    <input id="import-extensions" type="text" placeholder=".pdf, .docx" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <p class="text-xs text-txt-secondary mt-1">Filter scan to these extensions; leave blank for all supported types.</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <input id="import-force" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                    <label for="import-force" class="text-sm text-txt-primary">Import again</label>
+                                </div>
+                                <div class="flex items-end justify-end">
+                                    <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
                                         Scan Import Folder
                                     </button>
                                 </div>
                             </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                <div class="md:col-span-2">
+                                    <label for="import-url-input" class="block text-sm font-medium text-txt-primary mb-1">URL</label>
+                                    <input id="import-url-input" type="text" placeholder="https://example.com/article" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <p class="text-xs text-txt-secondary mt-1">Minimal cleaning is applied; output is written under Imported/.</p>
+                                </div>
+                                <div class="flex items-end justify-end">
+                                    <button id="import-url-submit" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
+                                        Ingest URL
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="text-sm text-txt-secondary">
+                                <span id="import-status"></span>
+                            </div>
                         </div>
+
                         <div id="import-results" class="border border-border-primary rounded-md bg-app-elevated p-4 text-sm text-txt-secondary">
                             No scans yet.
+                        </div>
+                        <div id="import-url-results" class="border border-border-primary rounded-md bg-app-elevated p-4 text-sm text-txt-secondary">
+                            No URL ingests yet.
                         </div>
                     </div>
                 </details>
