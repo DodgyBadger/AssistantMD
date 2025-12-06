@@ -1,5 +1,5 @@
 """
-DOCX extractor using markitdown for markdown conversion.
+Office document extractor using markitdown for markdown conversion (docx/pptx/xlsx/etc.).
 """
 
 from __future__ import annotations
@@ -10,9 +10,10 @@ from core.ingestion.models import ExtractedDocument, RawDocument
 from core.ingestion.registry import extractor_registry
 
 try:
-    from markitdown import MarkItDown
+    from markitdown import MarkItDown, StreamInfo
 except ImportError as exc:
     MarkItDown = None  # type: ignore[assignment]
+    StreamInfo = None  # type: ignore[assignment]
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
@@ -20,9 +21,9 @@ else:
 
 def extract_docx_text(raw: RawDocument) -> ExtractedDocument:
     """
-    Convert DOCX to markdown using markitdown.
+    Convert Office documents to markdown using markitdown.
     """
-    if MarkItDown is None:
+    if MarkItDown is None or StreamInfo is None:
         raise RuntimeError(f"markitdown is required for DOCX extraction: {_IMPORT_ERROR}")
 
     md = MarkItDown()
@@ -32,7 +33,9 @@ def extract_docx_text(raw: RawDocument) -> ExtractedDocument:
     elif isinstance(source, str):
         source = io.BytesIO(source.encode("utf-8"))
 
-    result = md.convert(source)
+    filename = raw.meta.get("filename") if isinstance(raw.meta, dict) else None
+    stream_info = StreamInfo(filename=filename) if filename else None
+    result = md.convert(source, stream_info=stream_info)
     text = result.text_content or ""
     if not text.strip():
         raise RuntimeError("DOCX extraction produced no content")
@@ -44,7 +47,7 @@ def extract_docx_text(raw: RawDocument) -> ExtractedDocument:
     return ExtractedDocument(
         plain_text=text.strip(),
         mime=raw.mime or "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        strategy_id="docx_text",
+        strategy_id="markitdown",
         blocks=None,
         meta={"warnings": warnings} if warnings else {},
     )
@@ -55,4 +58,6 @@ extractor_registry.register(
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     extract_docx_text,
 )
-extractor_registry.register("strategy:docx_text", extract_docx_text)
+extractor_registry.register("application/vnd.openxmlformats-officedocument.presentationml.presentation", extract_docx_text)
+extractor_registry.register("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extract_docx_text)
+extractor_registry.register("strategy:markitdown", extract_docx_text)

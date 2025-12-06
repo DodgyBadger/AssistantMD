@@ -83,9 +83,9 @@
    - Text extractor + OCR strategy (config-gated, uses Mistral OCR).
    - Segmenter + renderer (full mode) → writes markdown.
    - Manual verification against sample PDFs; clean ingestion DB.
-3) **DOCX support**
-   - DOCX: markitdown-based extractor wired as default strategy; fallback stub retained for missing dependency. Manual tests show better list fidelity than docling; attachments dropped and noted as warnings.
-   - Decision point: either require users to export other formats (DOCX/PPTX/etc.) to PDF or add a heavy conversion dependency (e.g., LibreOffice) and reuse the PDF/OCR path. Current stance: prefer user-export-to-PDF to keep runtime light.
+3) **DOCX/Office support**
+   - Office docs (docx/pptx/xlsx): markitdown-based extractor wired as default strategy; fallback stub retained for missing dependency. Attachments dropped and noted as warnings.
+   - Other formats: not ingested by default; users can export to PDF for best fidelity or accept best-effort markitdown where registered.
    - Extend renderer/tests with fixtures.
 4) **HTML/web ingestion**
    - Web importer using existing fetch/crawl; readability strategy; chunked render mode.

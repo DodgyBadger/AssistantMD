@@ -224,7 +224,11 @@ class IngestionService:
                 default_strats = [s for s in default_strats if s != "pdf_ocr"]
             return default_strats
         if suffix == ".docx":
-            return ["docx_text"]
+            return ["markitdown"]
+        if suffix == ".pptx":
+            return ["markitdown"]
+        if suffix == ".xlsx":
+            return ["markitdown"]
         return []
 
     def _strategy_enabled(self, strat: str, ingestion_settings: dict) -> bool:
