@@ -99,8 +99,8 @@
 7) **Validation scenarios**
    - Add end-to-end scenarios under `validation/scenarios/` (e.g., PDF happy path, oversize web page chunk/condense, sidecar overrides, failure handling) using BaseScenario helpers; verify outputs, provenance, and job statuses with artifacts captured.
 8) **UI**
-   - Import tab: upload, URL submit, “scan import folder” button, job list/status/warnings/links.
-   - Surface ingestion settings in Configuration UI (enable PDF OCR, default strategies, OCR model/endpoint) and warn when OCR enabled but MISTRAL_API_KEY is missing.
-   - Frontend integration with API.
+   - Import controls surfaced in Configuration tab (scan import folder, vault selection, results).
+   - Ingestion settings exposed via general settings (OCR, strategies, output path).
+   - Next: Add upload/URL ingestion UI once endpoints exist; job list/status/warnings; handle ingestion-worker scheduling namespace decision (protect from workflow cleanup).
 9) **Polish**
    - Error handling, warnings surfaced in frontmatter/status; docs/examples.

@@ -18,10 +18,14 @@
         isSavingProvider: false,
         isLoadingSecrets: false,
         isSavingSecret: false,
+        isScanningImport: false,
+        isLoadingImportVaults: false,
         settings: [],
         models: [],
         providers: [],
         secrets: [],
+        importVaults: [],
+        importResults: null,
         settingEditKey: null,
         settingDraftValue: '',
         modelEdit: null,
@@ -76,7 +80,15 @@
         secretValueInput: null,
         secretFormStatus: null,
         secretSubmitBtn: null,
-        secretResetBtn: null
+        secretResetBtn: null,
+
+        importVaultSelect: null,
+        importExtensionsInput: null,
+        importForceCheckbox: null,
+        importStatus: null,
+        importScanBtn: null,
+        importRefreshVaultsBtn: null,
+        importResults: null
     };
 
     const toneClasses = {
@@ -113,6 +125,14 @@
         elements.secretFormStatus = document.getElementById('secret-form-status');
         elements.secretSubmitBtn = document.getElementById('secret-submit');
         elements.secretResetBtn = document.getElementById('secret-reset');
+
+        elements.importVaultSelect = document.getElementById('import-vault-select');
+        elements.importExtensionsInput = document.getElementById('import-extensions');
+        elements.importForceCheckbox = document.getElementById('import-force');
+        elements.importStatus = document.getElementById('import-status');
+        elements.importScanBtn = document.getElementById('import-scan');
+        elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
+        elements.importResults = document.getElementById('import-results');
     }
 
     function bindEvents() {
@@ -133,6 +153,9 @@
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
+
+        elements.importScanBtn?.addEventListener('click', handleImportScan);
+        elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
     }
 
     const restartNoticeText = 'Restart recommended: restart the container to apply pending changes.';
@@ -1318,6 +1341,7 @@ async function saveModelRow(rowKey) {
         await loadGeneralSettings();
         await loadModels();
         await loadSecrets();
+        await loadImportVaults();
         state.hasLoadedOnce = true;
     }
 
@@ -1340,6 +1364,180 @@ async function saveModelRow(rowKey) {
     function onTabActivated() {
         if (!state.initialized) return;
         refreshAll();
+    }
+
+    function renderImportVaults() {
+        if (!elements.importVaultSelect) return;
+        elements.importVaultSelect.innerHTML = '<option value="">Select vault…</option>';
+        if (!state.importVaults || state.importVaults.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No vaults detected';
+            opt.disabled = true;
+            elements.importVaultSelect.appendChild(opt);
+            return;
+        }
+        state.importVaults.forEach((vault) => {
+            const opt = document.createElement('option');
+            opt.value = vault;
+            opt.textContent = vault;
+            elements.importVaultSelect.appendChild(opt);
+        });
+    }
+
+    async function loadImportVaults(force = false) {
+        if (state.isLoadingImportVaults) return;
+        state.isLoadingImportVaults = true;
+        setStatus(elements.importStatus, 'Loading vaults…', 'info');
+
+        // Prefer cached metadata from main app if available
+        const cachedVaults = window.App && window.App.metadata && Array.isArray(window.App.metadata.vaults)
+            ? window.App.metadata.vaults
+            : null;
+        if (cachedVaults && !force) {
+            state.importVaults = cachedVaults;
+            renderImportVaults();
+            setStatus(elements.importStatus, '', 'info');
+        }
+
+        try {
+            // Always refresh from API to stay current
+            const response = await fetch('api/metadata');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            state.importVaults = Array.isArray(data?.vaults) ? data.vaults : [];
+            renderImportVaults();
+            setStatus(elements.importStatus, '', 'info');
+            // Keep cache in sync for other modules
+            window.App = window.App || {};
+            window.App.metadata = data;
+        } catch (error) {
+            if (!cachedVaults) {
+                state.importVaults = [];
+                renderImportVaults();
+            }
+            setStatus(elements.importStatus, `Failed to load vaults: ${error.message}`, 'error');
+        } finally {
+            state.isLoadingImportVaults = false;
+        }
+    }
+
+    async function handleImportVaultRescan() {
+        if (!elements.importRefreshVaultsBtn || state.isLoadingImportVaults) return;
+        const btn = elements.importRefreshVaultsBtn;
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Rescanning…';
+        setStatus(elements.importStatus, 'Rescanning vaults…', 'info');
+        try {
+            const response = await fetch('api/vaults/rescan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            // Refresh global status/metadata if caller provided callbacks
+            if (callbacks.refreshStatus) await callbacks.refreshStatus();
+            if (callbacks.refreshMetadata) await callbacks.refreshMetadata();
+            // Reload vault list for import select
+            await loadImportVaults(true);
+            setStatus(elements.importStatus, 'Vaults refreshed.', 'success');
+        } catch (error) {
+            setStatus(elements.importStatus, `Rescan failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        }
+    }
+
+    function parseExtensions(raw) {
+        if (!raw) return [];
+        return raw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((ext) => (ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`));
+    }
+
+    function renderImportResults() {
+        if (!elements.importResults) return;
+        const results = state.importResults;
+        if (!results) {
+            elements.importResults.textContent = 'No scans yet.';
+            return;
+        }
+
+        const jobs = Array.isArray(results.jobs_created) ? results.jobs_created : [];
+        const skipped = Array.isArray(results.skipped) ? results.skipped : [];
+
+        let html = '';
+        if (jobs.length > 0) {
+            html += `<div class="space-y-2"><div class="font-medium text-txt-primary">Jobs created (${jobs.length})</div>`;
+            html += '<ul class="list-disc list-inside space-y-1">';
+            html += jobs
+                .map((job) => {
+                    const outputs = Array.isArray(job.outputs) && job.outputs.length
+                        ? ` → ${job.outputs.join(', ')}`
+                        : '';
+                    const status = job.status || 'queued';
+                    const source = job.source_uri || 'unknown';
+                    return `<li><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span>${outputs ? ` <span class="subtle">${outputs}</span>` : ''}</li>`;
+                })
+                .join('');
+            html += '</ul></div>';
+        }
+
+        if (skipped.length > 0) {
+            html += `<div class="space-y-2 pt-3 border-t border-border-primary"><div class="font-medium text-txt-primary">Skipped (${skipped.length})</div>`;
+            html += '<ul class="list-disc list-inside space-y-1">';
+            html += skipped.map((name) => `<li>${name}</li>`).join('');
+            html += '</ul></div>';
+        }
+
+        elements.importResults.innerHTML = html || 'No jobs created. Adjust filters or add files to AssistantMD/import/.';
+    }
+
+    async function handleImportScan() {
+        if (!elements.importScanBtn || state.isScanningImport) return;
+
+        const vault = elements.importVaultSelect?.value || '';
+        if (!vault) {
+            setStatus(elements.importStatus, 'Select a vault before scanning.', 'warning');
+            return;
+        }
+
+        const extensions = parseExtensions(elements.importExtensionsInput?.value || '');
+        const force = Boolean(elements.importForceCheckbox?.checked);
+
+        const payload = { vault, force };
+        if (extensions.length > 0) payload.extensions = extensions;
+
+        state.isScanningImport = true;
+        const btn = elements.importScanBtn;
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Scanning…';
+        setStatus(elements.importStatus, 'Scanning import folder…', 'info');
+
+        try {
+            const response = await fetch('api/import/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            state.importResults = data;
+            renderImportResults();
+            setStatus(elements.importStatus, 'Scan complete.', 'success');
+            if (callbacks.refreshStatus) callbacks.refreshStatus();
+        } catch (error) {
+            setStatus(elements.importStatus, `Scan failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+            state.isScanningImport = false;
+        }
     }
 
     window.ConfigurationPanel = {

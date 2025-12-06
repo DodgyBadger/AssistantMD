@@ -11,6 +11,7 @@ from core.workflow.loader import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.settings import validate_settings
+from core.settings.store import get_general_settings
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 # Note: Job setup now handled via runtime_context.reload_workflows()
@@ -72,6 +73,12 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             if isinstance(config.features, dict)
             else 1,
         )
+        # Determine ingestion worker interval from settings (fallback to 120s)
+        try:
+            general_settings = get_general_settings()
+            ingestion_interval = int(general_settings.get("ingestion_worker_interval_seconds").value)
+        except Exception:
+            ingestion_interval = 120
 
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
@@ -108,7 +115,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             scheduler.add_job(
                 ingestion_worker.run_once,
                 "interval",
-                seconds=5,
+                seconds=ingestion_interval,
                 id="ingestion-worker",
                 name="Ingestion worker",
                 max_instances=1,

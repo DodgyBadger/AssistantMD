@@ -247,10 +247,13 @@ function getConfigurationWarnings() {
 // Fetch metadata from API
 async function fetchMetadata() {
     try {
-        const response = await fetch('api/chat/metadata');
+        const response = await fetch('api/metadata');
         if (!response.ok) throw new Error('Failed to fetch metadata');
 
         state.metadata = await response.json();
+        // Expose for other modules (e.g., configuration import panel) to avoid duplicate fetches.
+        window.App = window.App || {};
+        window.App.metadata = state.metadata;
         populateSelectors();
         updateStatus();
     } catch (error) {
@@ -1267,8 +1270,16 @@ async function rescanVaults() {
             </div>
         `;
 
+        if (data.metadata) {
+            state.metadata = data.metadata;
+            window.App = window.App || {};
+            window.App.metadata = data.metadata;
+            populateSelectors();
+        } else {
+            await fetchMetadata();
+        }
+
         await fetchSystemStatus();
-        await fetchMetadata();
 
     } catch (error) {
         console.error('Error rescanning:', error);

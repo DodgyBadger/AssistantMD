@@ -20,7 +20,6 @@ from .models import (
     StatusResponse,
     ChatExecuteRequest,
     ChatExecuteResponse,
-    ChatMetadataResponse,
     ChatSessionTransformRequest,
     ChatSessionTransformResponse,
     SystemLogResponse,
@@ -35,6 +34,7 @@ from .models import (
     SecretUpdateRequest,
     SettingInfo,
     SettingUpdateRequest,
+    MetadataResponse,
 )
 from .exceptions import APIException
 from .utils import create_error_response, generate_session_id
@@ -42,7 +42,7 @@ from .services import (
     rescan_vaults_and_update_scheduler,
     get_system_status,
     execute_workflow_manually,
-    get_chat_metadata,
+    get_metadata,
     compact_conversation_history,
     start_workflow_creation,
     get_system_activity_log,
@@ -324,18 +324,17 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
 
         # Perform the rescan operation
         results = await rescan_vaults_and_update_scheduler(scheduler)
-        
-        # Format the response
-        response = VaultRescanResponse(
+        metadata = await get_metadata()
+
+        return VaultRescanResponse(
             success=True,
             vaults_discovered=results['vaults_discovered'],
             workflows_loaded=results['workflows_loaded'],
             enabled_workflows=results['enabled_workflows'],
             scheduler_jobs_synced=results['scheduler_jobs_synced'],
-            message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_workflows']} enabled workflows, {results['scheduler_jobs_synced']} jobs synced"
+            message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_workflows']} enabled workflows, {results['scheduler_jobs_synced']} jobs synced",
+            metadata=metadata,
         )
-        
-        return response
         
     except Exception as e:
         return create_error_response(e)
@@ -436,16 +435,13 @@ async def chat_execute(request: ChatExecuteRequest):
         return create_error_response(e)
 
 
-@router.get("/chat/metadata", response_model=ChatMetadataResponse)
-async def chat_metadata():
+@router.get("/metadata", response_model=MetadataResponse)
+async def metadata():
     """
-    Get metadata for chat UI configuration.
-
-    Returns available vaults, models, and tools dynamically loaded
-    from runtime context and settings.yaml.
+    Get metadata for UI (vaults, models, tools).
     """
     try:
-        return await get_chat_metadata()
+        return await get_metadata()
     except Exception as e:
         return create_error_response(e)
 

@@ -58,7 +58,7 @@ from .models import (
     ConfigurationError as APIConfigurationError,
     ModelInfo,
     ToolInfo,
-    ChatMetadataResponse,
+    MetadataResponse,
     ConfigurationStatusInfo,
     ConfigurationIssueInfo,
     ProviderInfo,
@@ -947,15 +947,12 @@ async def execute_workflow_manually(global_id: str, step_name: str = None) -> Di
         raise SystemConfigurationError(error_msg) from e
 
 
-async def get_chat_metadata() -> ChatMetadataResponse:
+async def get_metadata() -> MetadataResponse:
     """
-    Get metadata for chat UI configuration.
-
-    Returns available vaults, models, and tools dynamically from
-    runtime context and settings.yaml.
+    Get metadata for UI configuration (vaults, models, tools).
 
     Returns:
-        ChatMetadataResponse with vaults, models, and tools
+        MetadataResponse with vaults, models, and tools
     """
     # Get vaults from runtime context
     vault_data = _get_workflow_loader().get_vault_info()
@@ -1023,7 +1020,7 @@ async def get_chat_metadata() -> ChatMetadataResponse:
             )
         )
 
-    return ChatMetadataResponse(
+    return MetadataResponse(
         vaults=vaults,
         models=models,
         tools=tools
