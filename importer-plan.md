@@ -83,10 +83,10 @@
    - Text extractor + OCR strategy (config-gated, uses Mistral OCR).
    - Segmenter + renderer (full mode) → writes markdown.
    - Manual verification against sample PDFs; clean ingestion DB.
-3) **DOCX/Office support**
-   - Office docs (docx/pptx/xlsx): markitdown-based extractor wired as default strategy; fallback stub retained for missing dependency. Attachments dropped and noted as warnings.
+3) **DOCX/Office support** ✅
+   - Office docs (docx/pptx/xlsx): markitdown-based extractor wired as default strategy. Attachments dropped and noted as warnings.
    - Other formats: not ingested by default; users can export to PDF for best fidelity or accept best-effort markitdown where registered.
-   - Extend renderer/tests with fixtures.
+   - Extend renderer/tests with fixtures (pending).
 4) **HTML/web ingestion**
    - Web importer using existing fetch/crawl; readability strategy; chunked render mode.
    - Chunker tests for size budgets and stable IDs.

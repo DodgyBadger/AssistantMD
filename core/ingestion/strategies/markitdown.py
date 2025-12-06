@@ -19,12 +19,12 @@ else:
     _IMPORT_ERROR = None
 
 
-def extract_docx_text(raw: RawDocument) -> ExtractedDocument:
+def extract_markitdown(raw: RawDocument) -> ExtractedDocument:
     """
     Convert Office documents to markdown using markitdown.
     """
     if MarkItDown is None or StreamInfo is None:
-        raise RuntimeError(f"markitdown is required for DOCX extraction: {_IMPORT_ERROR}")
+        raise RuntimeError(f"markitdown is required for Office extraction: {_IMPORT_ERROR}")
 
     md = MarkItDown()
     source = raw.payload
@@ -38,7 +38,7 @@ def extract_docx_text(raw: RawDocument) -> ExtractedDocument:
     result = md.convert(source, stream_info=stream_info)
     text = result.text_content or ""
     if not text.strip():
-        raise RuntimeError("DOCX extraction produced no content")
+        raise RuntimeError("markitdown extraction produced no content")
 
     warnings = []
     if hasattr(result, "attachment_links") and result.attachment_links:
@@ -46,18 +46,24 @@ def extract_docx_text(raw: RawDocument) -> ExtractedDocument:
 
     return ExtractedDocument(
         plain_text=text.strip(),
-        mime=raw.mime or "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        mime=raw.mime or "application/octet-stream",
         strategy_id="markitdown",
         blocks=None,
         meta={"warnings": warnings} if warnings else {},
     )
 
 
-# Register extractor for DOCX MIME type
+# Register extractor for Office MIME types and strategy id
 extractor_registry.register(
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    extract_docx_text,
+    extract_markitdown,
 )
-extractor_registry.register("application/vnd.openxmlformats-officedocument.presentationml.presentation", extract_docx_text)
-extractor_registry.register("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extract_docx_text)
-extractor_registry.register("strategy:markitdown", extract_docx_text)
+extractor_registry.register(
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extract_markitdown,
+)
+extractor_registry.register(
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    extract_markitdown,
+)
+extractor_registry.register("strategy:markitdown", extract_markitdown)
