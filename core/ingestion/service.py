@@ -279,5 +279,4 @@ class IngestionService:
         import core.ingestion.sources.docx  # noqa: F401
         import core.ingestion.strategies.pdf_text  # noqa: F401
         import core.ingestion.strategies.pdf_ocr  # noqa: F401
-        import core.ingestion.strategies.docx_text  # noqa: F401
-        import core.ingestion.strategies.docx_text_fallback  # noqa: F401
+        import core.ingestion.strategies.markitdown  # noqa: F401
