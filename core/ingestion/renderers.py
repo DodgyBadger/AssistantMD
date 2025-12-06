@@ -17,10 +17,10 @@ def default_renderer(doc: ExtractedDocument, chunks: List[Chunk], options: Rende
     """
     slug = options.title or options.source_filename or "import"
     slug = _slugify(slug)
-    rel_dir = options.path_pattern.format(
-        slug=slug,
-        relative_dir=options.relative_dir,
-    )
+    base = options.path_pattern or "Imported/"
+    rel_dir = base.rstrip("/") + "/" + (options.relative_dir or "")
+    rel_dir = rel_dir.lstrip("/")
+    rel_dir = rel_dir + slug + "/"
     rel_path = os.path.join(rel_dir, "index.md")
 
     display_source_path = None

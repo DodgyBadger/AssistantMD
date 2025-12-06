@@ -75,7 +75,7 @@
    - Add `core/ingestion` with models/registry/pipeline skeleton; job table via `core/database`.
    - Add import constants and path helpers.
    - Unit tests for models/registries/job DAL.
-2) **PDF happy path**
+2) **PDF happy path** ✅
    - Implemented PDF importer/extractor end-to-end: scan enqueues jobs from `AssistantMD/import/` and processes via worker.
    - Rendered outputs write to vault-root `Imported/{relative_dir}{slug}/index.md`; preserve subfolders from import source; job outputs are vault-relative.
    - Source files are deleted after successful ingestion; no `_attachments` copy (attachments are dropped and listed in frontmatter).

@@ -123,7 +123,7 @@ class IngestionService:
                 vault=vault,
                 source_filename=str(source_path),
                 relative_dir=relative_dir,
-                path_pattern=ingestion_settings.get("output_path_pattern", RenderOptions.path_pattern),
+                path_pattern=ingestion_settings.get("output_base_dir", "Imported/"),
             )
             if warnings:
                 extracted.meta.setdefault("warnings", []).extend(warnings)
@@ -160,7 +160,7 @@ class IngestionService:
         pdf_default_strategies: list[str] = []
         pdf_ocr_model = "mistral-ocr-latest"
         pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
-        output_path_pattern = "Imported/{relative_dir}{slug}/"
+        base_output_dir = "Imported/"
         try:
             pdf_enable_ocr = bool(general_settings.get("ingestion_pdf_enable_ocr").value)
         except Exception:
@@ -178,9 +178,9 @@ class IngestionService:
         except Exception:
             pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
         try:
-            output_path_pattern = str(general_settings.get("ingestion_output_path_pattern").value)
+            base_output_dir = str(general_settings.get("ingestion_output_path_pattern").value)
         except Exception:
-            output_path_pattern = "Imported/{relative_dir}{slug}/"
+            base_output_dir = "Imported/"
 
         return {
             "pdf": {
@@ -189,7 +189,7 @@ class IngestionService:
                 "ocr_model": pdf_ocr_model,
                 "ocr_endpoint": pdf_ocr_endpoint,
             },
-            "output_path_pattern": output_path_pattern,
+            "output_base_dir": base_output_dir,
         }
 
     def _resolve_extractor(self, mime: str | None):

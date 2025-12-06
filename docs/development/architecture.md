@@ -72,7 +72,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - `IngestionService` resolves strategies per job (defaults from settings, per-job overrides), skips unsupported or missing-secret strategies with warnings, and runs extractors in order until one returns text.
 - PDF: default strategies are PyMuPDF text, then optional Mistral OCR (`ingestion_pdf_enable_ocr`, `ingestion_pdf_ocr_model/endpoint`, requires `MISTRAL_API_KEY`); frontmatter records source_path, strategy, warnings, dropped attachments.
 - DOCX/Office: markitdown-based extractor (`markitdown`) is the default for docx/pptx/xlsx; attachment binaries are dropped and listed in warnings. Other formats are not ingested by default (users should export to PDF).
-- Worker: `IngestionWorker` runs in APScheduler, offloading jobs via `asyncio.to_thread`; outputs are written vault-relative under `Imported/...`, and source files are removed after success to keep import folders clean.
+- Worker: `IngestionWorker` runs in APScheduler, offloading jobs via `asyncio.to_thread`; outputs are written vault-relative under `Imported/` (configurable base), slugged by filename and preserving import subfolders; source files are removed after success to keep import folders clean.
 
 ## When the Code Changes
 

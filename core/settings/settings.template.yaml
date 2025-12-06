@@ -47,8 +47,8 @@ settings:
     description: "HTTP endpoint for OCR extraction."
     restart_required: false
   ingestion_output_path_pattern:
-    value: "Imported/{relative_dir}{slug}/"
-    description: "Output path pattern for ingestion artifacts (vault-relative)."
+    value: "Imported/"
+    description: "Vault-relative folder where ingestion artifacts are written."
     restart_required: false
 
 models:
