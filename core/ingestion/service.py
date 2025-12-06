@@ -225,8 +225,6 @@ class IngestionService:
             return default_strats
         if suffix == ".docx":
             return ["docx_text"]
-        if suffix == ".eml":
-            return ["eml_stub"]
         return []
 
     def _strategy_enabled(self, strat: str, ingestion_settings: dict) -> bool:
@@ -275,9 +273,7 @@ class IngestionService:
         # Imports are intentional for side effects (registry registration).
         import core.ingestion.sources.pdf  # noqa: F401
         import core.ingestion.sources.docx  # noqa: F401
-        import core.ingestion.sources.eml  # noqa: F401
         import core.ingestion.strategies.pdf_text  # noqa: F401
         import core.ingestion.strategies.pdf_ocr  # noqa: F401
         import core.ingestion.strategies.docx_text  # noqa: F401
         import core.ingestion.strategies.docx_text_fallback  # noqa: F401
-        import core.ingestion.strategies.eml_text  # noqa: F401
