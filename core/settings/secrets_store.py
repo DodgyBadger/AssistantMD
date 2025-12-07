@@ -65,6 +65,10 @@ def _resolve_secrets_path() -> Path:
 
 def _resolve_base_secrets_path() -> Optional[Path]:
     """Optional base secrets path used for read-only fallbacks."""
+    # If an explicit secrets path is set, treat it as authoritative and skip base merging.
+    if os.environ.get(SECRETS_PATH_ENV):
+        return None
+
     base_override = os.environ.get(SECRETS_BASE_PATH_ENV)
     if base_override:
         return Path(base_override)

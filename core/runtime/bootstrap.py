@@ -64,6 +64,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         os.environ["CONTAINER_DATA_ROOT"] = str(config.data_root)
         os.environ["CONTAINER_SYSTEM_ROOT"] = str(config.system_root)
+        os.environ.setdefault("SECRETS_PATH", str(Path(config.system_root) / "secrets.yaml"))
 
         # Initialize workflow loader with configured data root
         workflow_loader = WorkflowLoader(

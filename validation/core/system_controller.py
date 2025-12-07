@@ -53,8 +53,12 @@ class SystemController:
         self._system_root = self.run_path / "system"
         self._system_root.mkdir(parents=True, exist_ok=True)
 
-        # Use the real secrets file directly to mirror production; no per-run copies.
-        target_secrets = get_system_root() / "secrets.yaml"
+        # Use the real secrets file by default; allow override via env.
+        target_secrets = (
+            Path(os.environ["SECRETS_PATH"])
+            if os.environ.get("SECRETS_PATH")
+            else Path("/app/system/secrets.yaml")
+        )
         target_secrets.parent.mkdir(parents=True, exist_ok=True)
         if not target_secrets.exists():
             target_secrets.touch(exist_ok=True)
