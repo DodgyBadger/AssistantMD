@@ -59,6 +59,12 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 metadata={"issue": warning.name, "severity": warning.severity},
             )
 
+        # Ensure env defaults reflect the configured roots before services that read env/context
+        import os
+
+        os.environ["CONTAINER_DATA_ROOT"] = str(config.data_root)
+        os.environ["CONTAINER_SYSTEM_ROOT"] = str(config.system_root)
+
         # Initialize workflow loader with configured data root
         workflow_loader = WorkflowLoader(
             _data_root=str(config.data_root),
@@ -67,18 +73,31 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         # Initialize ingestion service
         ingestion_service = IngestionService()
-        ingestion_worker = IngestionWorker(
-            process_job_fn=ingestion_service.process_job,
-            max_concurrent=config.features.get("ingestion_max_concurrent", 1)
+        # Determine ingestion worker interval and batch size from settings (with safe fallbacks)
+        ingestion_interval = 120
+        ingestion_max_concurrent = (
+            config.features.get("ingestion_max_concurrent", 1)
             if isinstance(config.features, dict)
-            else 1,
+            else 1
         )
-        # Determine ingestion worker interval from settings (fallback to 120s)
         try:
             general_settings = get_general_settings()
-            ingestion_interval = int(general_settings.get("ingestion_worker_interval_seconds").value)
+            ingestion_interval = int(
+                general_settings.get("ingestion_worker_interval_seconds").value
+            )
+            try:
+                ingestion_max_concurrent = int(
+                    general_settings.get("ingestion_worker_batch_size").value
+                )
+            except Exception:
+                pass
         except Exception:
-            ingestion_interval = 120
+            pass
+
+        ingestion_worker = IngestionWorker(
+            process_job_fn=ingestion_service.process_job,
+            max_concurrent=ingestion_max_concurrent,
+        )
 
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))

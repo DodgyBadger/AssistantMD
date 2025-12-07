@@ -205,7 +205,11 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         )
 
 
-def scan_import_folder(vault: str, force: bool = False, extensions: list[str] | None = None):
+def scan_import_folder(
+    vault: str,
+    queue_only: bool = False,
+    strategies: list[str] | None = None,
+):
     """
     Enqueue ingestion jobs for files in AssistantMD/import for a vault.
     """
@@ -217,8 +221,6 @@ def scan_import_folder(vault: str, force: bool = False, extensions: list[str] | 
 
     jobs_created = []
     skipped = []
-    # Extensions filter from request (if provided)
-    exts = {ext.lower() for ext in extensions} if extensions else None
     # Registry-backed filter for supported types
     supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
 
@@ -226,34 +228,41 @@ def scan_import_folder(vault: str, force: bool = False, extensions: list[str] | 
         if item.is_dir():
             continue
         suffix = item.suffix.lower()
-        if exts and suffix not in exts:
-            skipped.append(str(item.name))
-            continue
         if suffix not in supported_exts:
             skipped.append(str(item.name))
             continue
-        if not force:
-            existing_job = find_job_for_source(
-                source_uri=item.name,
-                vault=vault,
-                statuses=[
-                    JobStatus.QUEUED.value,
-                    JobStatus.PROCESSING.value,
-                    JobStatus.COMPLETED.value,
-                ],
-            )
-            if existing_job:
-                skipped.append(str(item.name))
-                continue
+        existing_job = find_job_for_source(
+            source_uri=item.name,
+            vault=vault,
+            statuses=[
+                JobStatus.QUEUED.value,
+                JobStatus.PROCESSING.value,
+            ],
+        )
+        if existing_job:
+            skipped.append(str(item.name))
+            continue
 
         job = ingest_service.enqueue_job(
             source_uri=item.name,
             vault=vault,
             source_type=SourceKind.FILE.value,
             mime_hint=None,
-            options={},
+            options={"strategies": strategies} if strategies else {},
         )
         jobs_created.append(job)
+
+    # If not queuing, process immediately for fast-path UX
+    if not queue_only and jobs_created:
+        refreshed_jobs = []
+        for job in jobs_created:
+            try:
+                ingest_service.process_job(job.id)
+            except Exception:
+                # process_job updates status/error; continue to next job
+                pass
+            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
+        jobs_created = refreshed_jobs
 
     return jobs_created, skipped
 

@@ -9,7 +9,6 @@ from pathlib import Path
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.registry import importer_registry, extractor_registry
-from core.ingestion.segmenter import default_segmenter
 from core.ingestion.renderers import default_renderer
 from core.ingestion.storage import default_storage
 from core.ingestion.models import (
@@ -146,8 +145,7 @@ class IngestionService:
             )
             if warnings:
                 extracted.meta.setdefault("warnings", []).extend(warnings)
-            chunks = default_segmenter(extracted, render_options)
-            rendered = default_renderer(extracted, chunks, render_options)
+            rendered = default_renderer(extracted, render_options)
             outputs = default_storage(rendered, render_options)
 
             update_job_outputs(job_id, outputs)

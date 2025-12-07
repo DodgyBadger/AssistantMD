@@ -26,7 +26,7 @@ You are a helpful assistant.
 ## Daily haiku
 @output-file test/{today}
 @header Weekly Haiku
-@model gpt-5-mini
+@model gpt-mini
 
 Write a haiku to go with the current season or nearest holiday.
 
@@ -35,7 +35,7 @@ Write a haiku to go with the current season or nearest holiday.
 @input-file test/{today}
 @write-mode append
 @header Haiku feedback
-@model gpt-5-mini
+@model gpt-mini
 
 Read the haiku above and provide your feedback.
 - Does it meet the criteria of being appropriate to the current season or nearest holiday?

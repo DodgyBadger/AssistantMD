@@ -1,16 +1,15 @@
 """
-Orchestrates ingestion jobs through importer, extractor, segmenter, renderer, and storage.
+Orchestrates ingestion jobs through importer, extractor, renderer, and storage.
 """
 
 from typing import Any
 
-from core.ingestion.models import RawDocument, ExtractedDocument, Chunk, RenderOptions
+from core.ingestion.models import RawDocument, ExtractedDocument, RenderOptions
 
 
 def run_pipeline(
     raw: RawDocument,
     extractor_fn: Any,
-    segmenter_fn: Any,
     renderer_fn: Any,
     storage_fn: Any,
     render_options: RenderOptions,
@@ -21,6 +20,4 @@ def run_pipeline(
     Returns list of written artifact paths.
     """
     extracted: ExtractedDocument = extractor_fn(raw)
-    chunks: list[Chunk] = segmenter_fn(extracted, render_options)
-    return storage_fn(renderer_fn(extracted, chunks, render_options))
-
+    return storage_fn(renderer_fn(extracted, render_options))

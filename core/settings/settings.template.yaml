@@ -54,6 +54,10 @@ settings:
     value: 120
     description: "How often the ingestion worker runs (seconds)."
     restart_required: true
+  ingestion_worker_batch_size:
+    value: 5
+    description: "Number of ingestion jobs to process per worker run."
+    restart_required: true
 
 models:
   gemini:

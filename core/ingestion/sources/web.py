@@ -5,6 +5,7 @@ Basic URL importer for web-based sources.
 from __future__ import annotations
 
 from typing import Optional
+import re
 
 import requests
 
@@ -40,6 +41,10 @@ def load_url(source_uri: str, *, timeout: Optional[int] = None, max_bytes: int =
     """
     to = timeout or _DEFAULT_TIMEOUT
     resp = requests.get(source_uri, timeout=to, stream=True, headers=_DEFAULT_HEADERS)
+    if resp.status_code in (401, 403, 429):
+        raise RuntimeError(
+            f"Access blocked ({resp.status_code}). Some sites require a browser/session; save as PDF or paste content manually."
+        )
     resp.raise_for_status()
     body = _read_limited_content(resp, max_bytes)
 
@@ -52,12 +57,14 @@ def load_url(source_uri: str, *, timeout: Optional[int] = None, max_bytes: int =
     except Exception:
         text = body.decode("utf-8", errors="replace")
 
+    title = _extract_title(text) or source_uri
+
     return RawDocument(
         source_uri=source_uri,
         kind=SourceKind.URL,
         mime=mime or "text/html",
         payload=text,
-        suggested_title=source_uri,
+        suggested_title=title,
         meta={"status": resp.status_code, "headers": dict(resp.headers)},
     )
 
@@ -66,3 +73,19 @@ def load_url(source_uri: str, *, timeout: Optional[int] = None, max_bytes: int =
 importer_registry.register("url", load_url)
 importer_registry.register("scheme:http", load_url)
 importer_registry.register("scheme:https", load_url)
+
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _extract_title(html: str) -> str | None:
+    """
+    Extract the contents of the <title> element from HTML.
+    """
+    match = _TITLE_RE.search(html)
+    if not match:
+        return None
+    title = match.group(1)
+    # Collapse whitespace
+    cleaned = " ".join(title.split()).strip()
+    return cleaned or None

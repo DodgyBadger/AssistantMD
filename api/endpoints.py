@@ -205,8 +205,8 @@ async def import_scan(request: ImportScanRequest):
     try:
         jobs, skipped = scan_import_folder(
             vault=request.vault,
-            force=request.force,
-            extensions=request.extensions,
+            queue_only=request.queue_only,
+            strategies=request.strategies,
         )
         job_infos = [
             ImportJobInfo(

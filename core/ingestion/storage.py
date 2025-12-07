@@ -29,6 +29,17 @@ def default_storage(rendered: List[Dict], options: RenderOptions) -> List[str]:
         # Normalize away any stray "." segments to keep vault-relative paths clean
         rel_path = Path(*[part for part in raw_rel_path.parts if part not in ("", ".")])
         full_path = vault_root / rel_path
+        if full_path.exists():
+            stem = full_path.stem
+            suffix = full_path.suffix
+            counter = 1
+            while True:
+                candidate = full_path.with_name(f"{stem}_{counter}{suffix}")
+                if not candidate.exists():
+                    full_path = candidate
+                    rel_path = Path(*candidate.relative_to(vault_root).parts)
+                    break
+                counter += 1
         full_path.parent.mkdir(parents=True, exist_ok=True)
         content = artifact["content"]
         full_path.write_text(content, encoding="utf-8")

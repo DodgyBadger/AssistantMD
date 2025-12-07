@@ -7,8 +7,8 @@ from pydantic import BaseModel
 
 class ImportScanRequest(BaseModel):
     vault: str
-    force: bool = False
-    extensions: Optional[List[str]] = None  # e.g., [".pdf"]
+    queue_only: bool = False
+    strategies: Optional[List[str]] = None  # Optional per-run strategy override
 
 
 class ImportJobInfo(BaseModel):

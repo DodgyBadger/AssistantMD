@@ -1,58 +1,52 @@
 # Importer/Ingestion Pipeline – Implementation Plan
 
 ## Objectives
-- Import non-markdown content (PDF, DOCX, EML; later URLs/APIs) into vault as markdown.
+- Import non-markdown content (PDF, DOCX; later URLs/APIs) into vault as markdown.
 - Keep pipeline pluggable: multiple strategies per format (e.g., PDF text vs. OCR) with configurable ordering.
-- Enforce size/token budgets via chunking/condensing to avoid oversized LLM inputs while keeping provenance.
+- Keep ingestion simple; segmenting/condensing is a future, standalone capability.
 - Reuse artifacts later for embedding/RAG if desired.
 
 ## Core Data Shapes
-- **RawDocument**: `{source_uri, kind (file|url|api|mail), mime, bytes|text, suggested_title, fetched_at, meta}`.
-- **ExtractedDocument**: `{blocks, plain_text, mime, strategy_id, meta (pages/sections, confidence)}`.
-- **Chunk**: `{id, parent_id?, order, title, text, offsets/meta (page range, dom path, email part), hash}`.
-- **RenderOptions**: `{mode: full|chunked|summary_only, path_pattern, max_tokens_per_chunk, overlap, attachments}`.
+- **RawDocument**: `{source_uri, kind (file|url|api), mime, bytes|text, suggested_title, fetched_at, meta}`.
+- **ExtractedDocument**: `{plain_text, mime, strategy_id, blocks?, meta (pages/sections, confidence, warnings)}`.
+- **RenderOptions**: `{mode: full, path_pattern, store_original, title, vault, source_filename, relative_dir}`.
 
 ## Stages & Responsibilities
 1) **Source adapters/importers** (per mime/source):
    - Read/fetch → RawDocument.
-   - Examples: `PdfImporter`, `DocxImporter`, `EmlImporter`, `WebPageImporter` (URL + fetch), `ApiImporter` (HTTP request).
+   - Examples: `PdfImporter`, `DocxImporter`, `WebPageImporter` (URL + fetch), `ApiImporter` (HTTP request).
 2) **Extractors** (registered per mime/strategy):
    - Convert RawDocument to ExtractedDocument.
-   - Examples: `PdfTextExtractor`, `PdfOcrExtractor`, `DocxExtractor`, `EmlExtractor`, `HtmlReadabilityExtractor`, `HtmlRawExtractor`.
-3) **Segmenter**:
-   - Chunk by structure (pages/headings/DOM/email parts) with token or char budgets + overlap.
-   - Stable chunk IDs: hash(source_uri + section content + offsets).
-4) **Reducer (optional)**:
-   - Condense oversized chunks (LLM/rules) but keep links to originals (hash/offsets).
-5) **Renderer**:
-   - Markdown frontmatter with provenance: `source`, `mime`, `importer`, `strategy`, `fetched_at`, `hash`, `chunk_index/total`, `parent_chunk`, `warnings`.
-   - Body: summary + chunk content; link siblings and raw/attachments.
-6) **Vault writer**:
-   - Path policy e.g., `Imports/{today}/{slug}/index.md`, `chunk_###.md`, `_attachments/<hash>.<ext>`.
+   - Examples: `PdfTextExtractor`, `PdfOcrExtractor`, `DocxExtractor`, `HtmlReadabilityExtractor`, `HtmlRawExtractor`.
+3) **Renderer**:
+   - Markdown frontmatter with provenance: `source`, `mime`, `importer`, `strategy`, `fetched_at`, `warnings`.
+   - Body: extracted content; link raw/attachments.
+4) **Vault writer**:
+   - Path policy e.g., `Imports/{today}/{slug}.md`, `_attachments/<hash>.<ext>`.
    - Collision-safe filenames; optional copy of original binary.
-7) **Registry/config**:
+5) **Registry/config**:
    - Simple lookup tables keyed by mime/strategy.
    - Settings to enable/disable strategies, prefer ordering, size limits, OCR toggle, output path pattern.
 
 ## Surfaces
 - **Web UI Import tab**:
-  - Upload files (PDF/DOCX/EML).
+  - Upload files (PDF/DOCX).
   - Submit URLs (single/list) → fetch then ingest.
-  - Button per vault: “Scan & ingest `AssistantMD/import/`” (manual trigger; no background watcher). Applies optional sidecar `.import.json` per file for overrides.
+  - Button per vault: “Scan & ingest `AssistantMD/import/`” (manual trigger; no background watcher).
   - Job list with status, warnings (e.g., OCR fallback), and links to outputs.
 - **API endpoints** (no CLI path needed):
   - `POST /api/import/jobs` for direct uploads/URLs.
   - `POST /api/import/scan` `{vault_id, force?}` to enqueue everything currently in the vault’s import folder.
   - `GET /api/import/jobs` / `/:id` for status/results.
-- Lightweight in-app worker (APScheduler or similar) drains the queue with a concurrency limit.
+- Lightweight in-app worker (APScheduler or similar) drains the queue with a concurrency limit; UI-triggered imports can process immediately by default with an opt-in for queueing.
 
 ## Proposed Module Structure (backend)
 - `core/ingestion/`:
-  - `models.py` (RawDocument, ExtractedDocument, Chunk, RenderOptions, Job states)
+  - `models.py` (RawDocument, ExtractedDocument, RenderOptions, Job states)
   - `registry.py` (importer/extractor registries)
   - `pipeline.py` (run_job orchestrator)
-  - `segmenter.py`, `renderers.py`, `storage.py` (path policy, attachments)
-  - `sources/` (pdf/docx/eml/web/api importers), `strategies/` (pdf_text, pdf_ocr, html_readability)
+  - `renderers.py`, `storage.py` (path policy, attachments)
+  - `sources/` (pdf/docx/web/api importers), `strategies/` (pdf_text, pdf_ocr, html_readability)
   - `jobs.py` (SQLAlchemy models + DAL using `core/database.py`)
 - Runtime hook: instantiate ingestion service in `core/runtime/bootstrap.py` and expose via `RuntimeContext`.
 - API: import endpoints in `api/endpoints.py` (or `api/import_services.py` for logic) + models.
@@ -65,7 +59,7 @@
 - Keep originals hashed; never execute attachments.
 
 ## Testing Strategy
-- Golden markdown snapshots for sample PDF/DOCX/EML/HTML.
+- Golden markdown snapshots for sample PDF/DOCX/HTML.
 - Contract tests: every importer returns RawDocument; every extractor handles bad input gracefully.
 - Chunker tests for size budgets and stable IDs.
 - Integration: end-to-end import of a sample file/URL → expected files on disk.
@@ -81,13 +75,12 @@
    - Source files are deleted after successful ingestion; no `_attachments` copy (attachments are dropped and listed in frontmatter).
    - Frontmatter `source_path` is vault-relative (e.g. `AssistantMD/import/foo.pdf`) with warnings for disabled/missing strategies.
    - Text extractor + OCR strategy (config-gated, uses Mistral OCR).
-   - Segmenter + renderer (full mode placeholder) → writes markdown.
+   - Renderer writes markdown; filenames mirror source (slugged for URLs); collision-safe suffixing.
 3) **DOCX/Office support** ✅
    - Office docs (docx/pptx/xlsx): markitdown-based extractor wired as default strategy. Attachments dropped and noted as warnings.
    - Other formats: not ingested by default; users can export to PDF for best fidelity or accept best-effort markitdown where registered.
 4) **HTML/web ingestion**
    - Build URL importer (fetch + mime sniff) and HTML extractor (readability-first, raw fallback).
-   - Chunked render mode with token/overlap guards; stable chunk IDs.
    - Use same renderer/storage; record provenance (URL, strategy, warnings).
 5) **Job runner + API surface**
    - Expose ingestion as synchronous APIs for URLs/uploads (bypass worker latency): e.g., `POST /api/import/url` runs pipeline immediately and returns `{paths, warnings, cached?, preview?}`.
@@ -96,21 +89,13 @@
 6) **Tooling**
    - Add `ingest_url` tool: inputs `url`, `vault`, optional `mode` (`full|summary_only`), `force`, `inline_preview`, `path_hint`.
    - Tool executes the pipeline synchronously (same code path as APIs), returns vault-relative paths plus optional preview and warnings; respect size/token caps and caching.
-   - Allow segmenter selection via tool inputs (e.g., `segmenter`, `target_tokens`, `overlap`); default remains if unset.
 7) **Import folder polish**
-   - Sidecar overrides, processed/failed moves, better skip/caching logic.
+   - Processed/failed moves, better skip/caching logic.
    - Tests for scan/enqueue behavior and cleanup.
 8) **UI**
    - Current: Config tab import scan panel (vault select, extensions, force, results).
    - Next: Upload/URL ingestion UI; job list/status/warnings; expose ingestion settings (OCR, strategies, output path); ensure non-workflow jobs (e.g., ingestion-worker) stay pinned during workflow resync.
 9) **Validation scenarios**
-   - End-to-end scenarios under `validation/scenarios/` (PDF happy path, web ingestion with chunk/condense, sidecar overrides, failure handling); verify outputs/provenance/job statuses with artifacts.
+   - End-to-end scenarios under `validation/scenarios/` (PDF happy path, web ingestion, sidecar overrides, failure handling); verify outputs/provenance/job statuses with artifacts.
 10) **Polish**
    - Error handling, warnings surfaced in frontmatter/status; docs/examples; caching/idempotency (`force` vs reuse), attachment policy.
-
-## Segmenter/preview architecture (future work)
-- Segmenter choice is explicit, not magic. Add a segmenter registry (e.g., `single`, `paragraph_packer`, `heading_aware`, `page_packer`) and let requests pick via `segmenter` option; keep sensible defaults per mime but user input wins.
-- Expose size knobs (`target_tokens`/chars, `overlap`, `mode` `full|chunked|summary_only`) on API/tool/UI; enforce caps.
-- Add a preview path: run fetch + extraction + chosen segmenter, return chunk summaries/text (truncated), counts, and warnings without writing files. Let users iterate before committing.
-- Ingest path reuses the same parameters to write artifacts; caching/idempotency still apply (`force` vs reuse).
-- UI: segmenter dropdown + settings on upload/URL form, with “Preview” then “Ingest” flow. Tools: `preview=true` flag to get chunks only; `preview=false` to write and return paths (plus optional inline preview).

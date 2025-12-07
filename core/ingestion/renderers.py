@@ -7,24 +7,33 @@ from datetime import datetime
 import os
 from pathlib import Path
 
-from core.ingestion.models import ExtractedDocument, Chunk, RenderOptions
+from core.ingestion.models import ExtractedDocument, RenderOptions
 from core.runtime.paths import get_data_root
 
 
-def default_renderer(doc: ExtractedDocument, chunks: List[Chunk], options: RenderOptions) -> List[dict]:
+def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> List[dict]:
     """
-    Placeholder renderer that returns structured artifacts ready for storage.
+    Render a single markdown artifact for the extracted document.
     """
-    slug_source = options.title or None
-    if slug_source is None and options.source_filename:
-        slug_source = Path(options.source_filename).stem
-    slug = _slugify(slug_source or "import")
-
     base_dir = options.path_pattern or "Imported/"
     rel_dir = base_dir.rstrip("/")
     if options.relative_dir:
         rel_dir = os.path.join(rel_dir, options.relative_dir.strip("/"))
-    rel_path = os.path.join(rel_dir, f"{slug}.md").lstrip("/")
+
+    # Prefer original filename when available; otherwise derive from title/URL
+    filename = None
+    if options.source_filename:
+        filename = Path(options.source_filename).stem
+    if not filename:
+        filename = options.title or "import"
+
+    if options.source_filename and options.source_filename.startswith("http"):
+        filename = _slugify(filename)
+    else:
+        # Keep file-like names but strip path separators
+        filename = filename.replace("/", "_").replace("\\", "_").strip() or "import"
+
+    rel_path = os.path.join(rel_dir, f"{filename}.md").lstrip("/")
 
     display_source_path = None
     if options.source_filename:
@@ -49,7 +58,6 @@ def default_renderer(doc: ExtractedDocument, chunks: List[Chunk], options: Rende
         "mime": doc.mime,
         "strategy": doc.strategy_id,
         "fetched_at": datetime.utcnow().isoformat(),
-        "chunk_count": len(chunks),
     }
 
     # Record any attachments the extractor saw but intentionally dropped to keep vault markdown-only
@@ -61,16 +69,12 @@ def default_renderer(doc: ExtractedDocument, chunks: List[Chunk], options: Rende
     if warnings:
         frontmatter["warnings"] = [str(w) for w in warnings]
 
-    body_lines = []
-    for chunk in chunks:
-        body_lines.append(chunk.text)
-
     content = "---\n"
     for key, val in frontmatter.items():
         if val is not None:
             content += f"{key}: {val}\n"
     content += "---\n\n"
-    content += "\n\n".join(body_lines)
+    content += doc.plain_text or ""
 
     return [
         {
