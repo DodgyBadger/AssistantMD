@@ -4,7 +4,6 @@
 
 ### Feature: Import to markdown pipeline
 - Import PDF using pymupdf and optional Mistral OCR (with API key)
-- Import Office docs using markitdown
 - Import URLs
 - Ingestion settings and UI controls
 - URL import accessible via LLM tool call

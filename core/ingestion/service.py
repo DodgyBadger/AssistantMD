@@ -264,7 +264,7 @@ class IngestionService:
 
         if job.source_type == SourceKind.URL.value:
             # Single HTML strategy with optional cleaning
-            return ["html_markitdown"]
+            return ["html_markdownify"]
 
         # Defaults from settings
         pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
@@ -275,12 +275,6 @@ class IngestionService:
             if not enable_ocr:
                 default_strats = [s for s in default_strats if s != "pdf_ocr"]
             return default_strats
-        if suffix == ".docx":
-            return ["markitdown"]
-        if suffix == ".pptx":
-            return ["markitdown"]
-        if suffix == ".xlsx":
-            return ["markitdown"]
         return []
 
     def _strategy_enabled(self, strat: str, ingestion_settings: dict) -> bool:
@@ -329,9 +323,7 @@ class IngestionService:
         """
         # Imports are intentional for side effects (registry registration).
         import core.ingestion.sources.pdf  # noqa: F401
-        import core.ingestion.sources.docx  # noqa: F401
         import core.ingestion.sources.web  # noqa: F401
         import core.ingestion.strategies.pdf_text  # noqa: F401
         import core.ingestion.strategies.pdf_ocr  # noqa: F401
-        import core.ingestion.strategies.markitdown  # noqa: F401
         import core.ingestion.strategies.html_raw  # noqa: F401

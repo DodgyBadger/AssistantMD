@@ -1,70 +1,74 @@
 """
-HTML extractor using markitdown to convert to markdown text.
+HTML extractor using markdownify (lightweight HTML→Markdown) with basic cleaning.
 """
 
 from __future__ import annotations
 
-import io
 import re
 from typing import Any
 
-from core.ingestion.models import ExtractedDocument, RawDocument
-from core.ingestion.registry import extractor_registry
-
 try:
-    from markitdown import MarkItDown
+    from markdownify import markdownify as md
 except ImportError as exc:
-    MarkItDown = None  # type: ignore[assignment]
+    md = None  # type: ignore[assignment]
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
 
+from core.ingestion.models import ExtractedDocument, RawDocument
+from core.ingestion.registry import extractor_registry
 
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\\1>", re.IGNORECASE | re.DOTALL)
+
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
-def extract_html_markitdown(raw: RawDocument, options: dict | None = None) -> ExtractedDocument:
+def _clean_html(html_source: str, clean_html: bool) -> str:
+    text = html_source
+    if clean_html:
+        text = _SCRIPT_STYLE_RE.sub("", text)
+        text = _COMMENT_RE.sub("", text)
+    return text
+
+
+def extract_html_markdownify(raw: RawDocument, options: dict | None = None) -> ExtractedDocument:
     """
-    Convert HTML to markdown using markitdown, with optional cleaning.
+    Convert HTML to markdown using markdownify, with optional cleaning.
 
     Options:
-      - clean_html: bool (default True) to enable readability-style filtering.
+      - clean_html: bool (default True) to drop scripts/styles/comments.
+      - markdownify_options: dict passed through to markdownify.markdownify
     """
-    if MarkItDown is None:
-        raise RuntimeError(f"markitdown is required for HTML extraction: {_IMPORT_ERROR}")
+    if md is None:
+        raise RuntimeError(f"markdownify is required for HTML extraction: {_IMPORT_ERROR}")
 
     opts = options or {}
     clean_html = opts.get("clean_html", True)
+    md_opts = opts.get("markdownify_options", {}) if isinstance(opts.get("markdownify_options"), dict) else {}
 
     source = raw.payload
     if isinstance(source, str):
-        html = source
+        html_source = source
     elif isinstance(source, (bytes, bytearray)):
-        html = source.decode("utf-8", errors="replace")
+        html_source = source.decode("utf-8", errors="replace")
     else:
         raise RuntimeError("Unsupported HTML payload")
 
-    if clean_html:
-        # Minimal cleaning: drop scripts/styles/comments to reduce noise
-        html = _SCRIPT_STYLE_RE.sub("", html)
-        html = _COMMENT_RE.sub("", html)
-
-    md = MarkItDown()
-    result = md.convert(io.BytesIO(html.encode("utf-8")), content_type="text/html")
-    text = result.text_content or ""
-    if not text.strip():
+    cleaned = _clean_html(html_source, clean_html)
+    markdown = md(cleaned, heading_style="ATX", **md_opts)
+    markdown = markdown.strip()
+    if not markdown:
         raise RuntimeError("HTML extraction produced no content")
 
     return ExtractedDocument(
-        plain_text=text.strip(),
+        plain_text=markdown,
         mime=raw.mime or "text/html",
-        strategy_id="html_markitdown",
+        strategy_id="html_markdownify",
         blocks=None,
         meta={"source_uri": raw.source_uri, "clean_html": clean_html},
     )
 
 
 # Register extractor for HTML MIME type and explicit strategy
-extractor_registry.register("text/html", extract_html_markitdown)
-extractor_registry.register("strategy:html_markitdown", extract_html_markitdown)
+extractor_registry.register("text/html", extract_html_markdownify)
+extractor_registry.register("strategy:html_markdownify", extract_html_markdownify)
