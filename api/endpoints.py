@@ -48,6 +48,7 @@ from .services import (
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
+    repair_settings_from_template,
     get_general_settings_config,
     update_general_setting_value,
     get_configurable_models,
