@@ -5,6 +5,7 @@ Handles business logic for status reporting, vault management, etc.
 
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
