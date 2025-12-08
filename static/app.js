@@ -1396,6 +1396,11 @@ function updateStatus(message) {
         const repairBtn = document.getElementById('repair-settings-btn');
         if (repairBtn) {
             repairBtn.addEventListener('click', async () => {
+                const confirmed = window.confirm(
+                    'Repair settings from template?\n\nThis will add missing keys from settings.template.yaml into system/settings.yaml.\nA backup will be written to system/settings.bak. Reload the page after repair to see new defaults.'
+                );
+                if (!confirmed) return;
+
                 repairBtn.disabled = true;
                 repairBtn.textContent = 'Repairing…';
                 let alertEl = document.getElementById('config-repair-alert');
