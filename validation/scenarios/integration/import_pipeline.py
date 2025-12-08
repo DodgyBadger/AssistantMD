@@ -1,7 +1,7 @@
 """
 Validation scenario for the ingestion pipeline (file import flow).
 
-Creates a small PDF in AssistantMD/import, runs the import scan via API,
+Creates a small PDF in AssistantMD/Import, runs the import scan via API,
 and asserts the rendered markdown output exists while the source file is removed.
 """
 
@@ -14,14 +14,14 @@ from validation.core.base_scenario import BaseScenario
 
 
 class ImportPipelineScenario(BaseScenario):
-    """Validate importing a PDF from AssistantMD/import and ingesting a URL."""
+    """Validate importing a PDF from AssistantMD/Import and ingesting a URL."""
 
     async def test_scenario(self):
         vault = self.create_vault("ImportPipelineVault")
 
         # Create a tiny PDF in the import folder
         pdf_bytes = self.make_pdf("Import validation\nLine two")
-        import_path = vault / "AssistantMD" / "import" / "sample.pdf"
+        import_path = vault / "AssistantMD" / "Import" / "sample.pdf"
         import_path.parent.mkdir(parents=True, exist_ok=True)
         import_path.write_bytes(pdf_bytes)
 

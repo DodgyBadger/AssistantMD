@@ -214,11 +214,12 @@ def scan_import_folder(
     strategies: list[str] | None = None,
 ):
     """
-    Enqueue ingestion jobs for files in AssistantMD/import for a vault.
+    Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
     """
     runtime = get_runtime_context()
-    vault_path = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
-    vault_path.mkdir(parents=True, exist_ok=True)
+    import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
+    legacy_import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
+    import_root.mkdir(parents=True, exist_ok=True)
 
     ingest_service: IngestionService = runtime.ingestion
 
@@ -227,33 +228,38 @@ def scan_import_folder(
     # Registry-backed filter for supported types
     supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
 
-    for item in sorted(vault_path.iterdir()):
-        if item.is_dir():
-            continue
-        suffix = item.suffix.lower()
-        if suffix not in supported_exts:
-            skipped.append(str(item.name))
-            continue
-        existing_job = find_job_for_source(
-            source_uri=item.name,
-            vault=vault,
-            statuses=[
-                JobStatus.QUEUED.value,
-                JobStatus.PROCESSING.value,
-            ],
-        )
-        if existing_job:
-            skipped.append(str(item.name))
-            continue
+    search_roots = [import_root]
+    if legacy_import_root.exists():
+        search_roots.append(legacy_import_root)
 
-        job = ingest_service.enqueue_job(
-            source_uri=item.name,
-            vault=vault,
-            source_type=SourceKind.FILE.value,
-            mime_hint=None,
-            options={"strategies": strategies} if strategies else {},
-        )
-        jobs_created.append(job)
+    for root in search_roots:
+        for item in sorted(root.iterdir()):
+            if item.is_dir():
+                continue
+            suffix = item.suffix.lower()
+            if suffix not in supported_exts:
+                skipped.append(str(item.name))
+                continue
+            existing_job = find_job_for_source(
+                source_uri=item.name,
+                vault=vault,
+                statuses=[
+                    JobStatus.QUEUED.value,
+                    JobStatus.PROCESSING.value,
+                ],
+            )
+            if existing_job:
+                skipped.append(str(item.name))
+                continue
+
+            job = ingest_service.enqueue_job(
+                source_uri=item.name,
+                vault=vault,
+                source_type=SourceKind.FILE.value,
+                mime_hint=None,
+                options={"strategies": strategies} if strategies else {},
+            )
+            jobs_created.append(job)
 
     # If not queuing, process immediately for fast-path UX
     if not queue_only and jobs_created:

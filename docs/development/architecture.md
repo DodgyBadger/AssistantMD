@@ -67,7 +67,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 
 ## Ingestion Pipeline
 
-- `api/services.py` exposes `/api/import/scan` to enqueue files from `AssistantMD/import/` per vault; jobs persist in `ingestion_jobs.db`.
+- `api/services.py` exposes `/api/import/scan` to enqueue files from `AssistantMD/Import/` per vault; jobs persist in `ingestion_jobs.db`.
 - `core/ingestion/` hosts the pipeline: source loaders (`sources/`), extractors (`strategies/`), renderer/storage, and a registry that maps MIME/strategy ids to functions.
 - `IngestionService` resolves strategies per job (defaults from settings, per-job overrides), skips unsupported or missing-secret strategies with warnings, and runs extractors in order until one returns text.
 - PDF: default strategies are PyMuPDF text, then optional Mistral OCR (`ingestion_pdf_enable_ocr`, `ingestion_pdf_ocr_model/endpoint`, requires `MISTRAL_API_KEY`); frontmatter records source_path, strategy, warnings, dropped attachments.

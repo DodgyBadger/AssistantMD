@@ -79,6 +79,8 @@ class IngestionService:
 
             data_root = Path(get_data_root())
             import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
+            legacy_import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / "import"
+            import_root.mkdir(parents=True, exist_ok=True)
 
             source_path: Path | None = None
             raw_doc = None
@@ -96,6 +98,10 @@ class IngestionService:
                 source_path = Path(job.source_uri)
                 if not source_path.is_absolute():
                     source_path = import_root / source_path
+                if not source_path.exists() and legacy_import_root.exists():
+                    alt_path = legacy_import_root / Path(job.source_uri)
+                    if alt_path.exists():
+                        source_path = alt_path
                 if not source_path.exists():
                     raise FileNotFoundError(f"Source file not found: {source_path}")
 
