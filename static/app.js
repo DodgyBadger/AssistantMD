@@ -62,6 +62,28 @@ const configElements = {
     configTab: document.getElementById('configuration-tab')
 };
 
+function showToast(message, tone = 'info') {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.className = 'fixed bottom-4 right-4 px-4 py-2 rounded-md shadow-lg text-sm';
+    const palette = {
+        info: { bg: 'var(--bg-elevated)', border: 'var(--border-primary)', text: 'var(--text-primary)' },
+        success: { bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.35)', text: 'var(--text-primary)' },
+        error: { bg: 'rgba(239,68,68,0.15)', border: 'rgba(239,68,68,0.35)', text: 'var(--text-primary)' },
+    };
+    const colors = palette[tone] || palette.info;
+    toast.style.background = colors.bg;
+    toast.style.border = `1px solid ${colors.border}`;
+    toast.style.color = colors.text;
+    toast.style.zIndex = 50;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 200ms ease';
+        setTimeout(() => toast.remove(), 220);
+    }, 3200);
+}
+
 function isChatNearBottom(element, threshold = 64) {
     if (!element) return true;
     const distance = element.scrollHeight - element.clientHeight - element.scrollTop;
@@ -1415,9 +1437,11 @@ function updateStatus(message) {
                     if (!resp.ok) throw new Error(await resp.text() || 'Repair failed');
                     await fetchSystemStatus();
                     showAlert('Settings repaired. Backup saved to system/settings.bak. Reload the page to see new defaults.', 'info');
+                    showToast('Settings repaired. Reload to see new defaults.', 'success');
                 } catch (err) {
                     console.error('Settings repair failed', err);
                     showAlert('Settings repair failed: ' + err.message, 'error');
+                    showToast('Settings repair failed: ' + err.message, 'error');
                 } finally {
                     repairBtn.disabled = false;
                     repairBtn.textContent = 'Repair settings from template';
