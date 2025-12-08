@@ -2,14 +2,18 @@
 
 ## 2025-12-08
 
-### New Feature
-**Import to markdown pipeline:**
+### Feature: Import to markdown pipeline
 - Import PDF using pymupdf and optional Mistral OCR (with API key)
 - Import Office docs using markitdown
 - Import URLs
 - Ingestion settings and UI controls
 - URL import accessible via LLM tool call
-- Validation scenario for coverage.
+- Validation scenario for coverage
+
+### Feature: Repair settings.yaml
+- Warning in the UI if settings are missing from system/settings.yaml and provide repair tool
+- Existing setting are unchanged
+- Settings.yaml is backed up to system/setting.bak before repair
 
 ### Refactor 
 - Consolidated redundant metadata APIs
