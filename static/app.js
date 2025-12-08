@@ -1397,7 +1397,7 @@ function updateStatus(message) {
         if (repairBtn) {
             repairBtn.addEventListener('click', async () => {
                 const confirmed = window.confirm(
-                    'Repair settings from template?\n\nThis will add missing keys from settings.template.yaml into system/settings.yaml.\nA backup will be written to system/settings.bak. Reload the page after repair to see new defaults.'
+                    'Repair settings from template?\n\nThis will add missing keys from settings.template.yaml into system/settings.yaml. Existing keys will not be changed.\nA backup will be written to system/settings.bak. Reload the page after repair to see new defaults.'
                 );
                 if (!confirmed) return;
 
