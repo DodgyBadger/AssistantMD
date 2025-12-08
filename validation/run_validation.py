@@ -13,8 +13,19 @@ from pathlib import Path
 # Add project root to path FIRST
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from validation.core.runner import ValidationRunner
-from core.logger import UnifiedLogger
+from core.runtime.paths import (
+    resolve_bootstrap_data_root,
+    resolve_bootstrap_system_root,
+    set_bootstrap_roots,
+)
+
+# Prime bootstrap roots for validation CLI before importing path-dependent modules
+_BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
+_BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
+set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
+
+from validation.core.runner import ValidationRunner  # noqa: E402
+from core.logger import UnifiedLogger  # noqa: E402
 
 logger = UnifiedLogger(tag="validation-cli")
 

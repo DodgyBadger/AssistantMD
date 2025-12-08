@@ -74,6 +74,12 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - DOCX/Office: markitdown-based extractor (`markitdown`) is the default for docx/pptx/xlsx; attachment binaries are dropped and listed in warnings. Other formats are not ingested by default (users should export to PDF).
 - Worker: `IngestionWorker` runs in APScheduler, offloading jobs via `asyncio.to_thread`; outputs are written vault-relative under `Imported/` (configurable base), filenames mirror sources (slugged for URLs) and preserve import subfolders; source files are removed after success to keep import folders clean. UI-triggered scans can process immediately with an opt-in to queue.
 
+## Bootstrap & Paths
+
+- Path helpers (`get_data_root` / `get_system_root`) require either an active runtime context or pre-set bootstrap roots. There are no env fallbacks once the app is running.
+- Entrypoints (e.g., `main.py`, validation CLI) set bootstrap roots **before** importing modules that touch settings/paths. Custom scripts must do the same or create a runtime context first.
+- Secrets store now uses a single authoritative path (`SECRETS_PATH` override or `system_root/secrets.yaml`); base/overlay merges are removed.
+
 ## When the Code Changes
 
 - Minor file moves rarely affect these boundaries; if a module is renamed, it will still sit inside the same directory listed above.

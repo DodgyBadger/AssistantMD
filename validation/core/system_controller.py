@@ -20,10 +20,10 @@ from core.logger import UnifiedLogger
 from core.runtime.config import RuntimeConfig
 from core.runtime.bootstrap import bootstrap_runtime
 from core.runtime.state import clear_runtime_context
+from core.runtime.paths import set_bootstrap_roots
 from core.workflow.loader import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
 import workflow_engines.step.workflow as workflow_module
-from core.runtime.paths import get_system_root
 
 
 class SchedulerJobInfo:
@@ -48,10 +48,12 @@ class SystemController:
         # Test data root for scheduler jobs
         self.test_data_root = str(self.run_path / "test_vaults")
         Path(self.test_data_root).mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("VAULTS_ROOT_PATH", self.test_data_root)
 
         self._system_root = self.run_path / "system"
         self._system_root.mkdir(parents=True, exist_ok=True)
+
+        # Make bootstrap roots available before runtime is started
+        set_bootstrap_roots(Path(self.test_data_root), self._system_root)
 
         # Use the real secrets file by default; allow override via env.
         target_secrets = (
@@ -69,8 +71,6 @@ class SystemController:
 
         # Store current date for restoration
         self._current_test_date = None
-        self._original_vaults_root: Optional[str] = None
-
         # Runtime context instead of direct component access
         self._runtime = None
         self._discovered_vaults: List[str] = []
@@ -108,10 +108,6 @@ class SystemController:
         clear_runtime_context()
 
         try:
-            # Override VAULTS_ROOT_PATH so configuration validation passes for test vaults
-            self._original_vaults_root = os.environ.get("VAULTS_ROOT_PATH")
-            os.environ["VAULTS_ROOT_PATH"] = self.test_data_root
-
             # Create runtime configuration for validation
             config = RuntimeConfig.for_validation(
                 run_path=self.run_path,
@@ -178,13 +174,6 @@ class SystemController:
             self._process = None
 
         self.is_running = False
-
-        # Restore VAULTS_ROOT_PATH to original state for subsequent runs
-        if self._original_vaults_root is None:
-            os.environ.pop("VAULTS_ROOT_PATH", None)
-        else:
-            os.environ["VAULTS_ROOT_PATH"] = self._original_vaults_root
-        self._original_vaults_root = None
 
         if self._original_secrets_path is None:
             os.environ.pop("SECRETS_PATH", None)

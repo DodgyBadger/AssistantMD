@@ -5,6 +5,8 @@ Provides single entry point for initializing all runtime services
 with proper configuration, error handling, and lifecycle management.
 """
 
+from pathlib import Path
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.workflow.loader import WorkflowLoader
@@ -18,6 +20,7 @@ from core.ingestion.worker import IngestionWorker
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .state import set_runtime_context, clear_runtime_context
+from .paths import set_bootstrap_roots
 
 
 async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
@@ -43,6 +46,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
     logger.info("Starting runtime bootstrap", metadata={"data_root": str(config.data_root)})
 
     try:
+        # Make bootstrap roots available for helpers that run before context is set
+        set_bootstrap_roots(config.data_root, config.system_root)
+
         # Validate configuration before continuing bootstrap
         config_status = validate_settings()
         if not config_status.is_healthy:

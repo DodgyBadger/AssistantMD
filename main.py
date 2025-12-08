@@ -6,12 +6,22 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 
-from core.logger import UnifiedLogger
-from core.runtime.config import RuntimeConfig
-from core.runtime.bootstrap import bootstrap_runtime
-from core.runtime.paths import get_data_root, get_system_root
-from api.endpoints import router as api_router, register_exception_handlers
-from api.services import set_system_startup_time
+from core.runtime.paths import (
+    resolve_bootstrap_data_root,
+    resolve_bootstrap_system_root,
+    set_bootstrap_roots,
+)
+
+# Prime bootstrap roots before importing modules that touch settings/paths
+_BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
+_BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
+set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
+
+from core.runtime.config import RuntimeConfig  # noqa: E402
+from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
+from core.logger import UnifiedLogger  # noqa: E402
+from api.endpoints import router as api_router, register_exception_handlers  # noqa: E402
+from api.services import set_system_startup_time  # noqa: E402
 
 # Create main logger
 logger = UnifiedLogger(tag="main")
@@ -33,8 +43,8 @@ async def lifespan(app: FastAPI):
 
     # Create runtime configuration for production
     config = RuntimeConfig.for_production(
-        data_root=get_data_root(),
-        system_root=get_system_root()
+        data_root=_BOOTSTRAP_DATA_ROOT,
+        system_root=_BOOTSTRAP_SYSTEM_ROOT
     )
 
     # Bootstrap runtime services

@@ -1,41 +1,88 @@
 """
 Runtime-aware path helpers.
 
-Provides centralized access to data, system, and docs roots, preferring the
-runtime context when available and falling back to container defaults.
+Provides centralized access to data, system, and docs roots with explicit
+bootstrap support. Once a runtime context exists, it becomes the single source
+of truth; otherwise, callers must set bootstrap roots explicitly.
 """
 
 import os
 from pathlib import Path
+from typing import Optional
 
-from core.runtime.state import get_runtime_context, has_runtime_context
+from core.runtime.state import (
+    get_runtime_context,
+    has_runtime_context,
+    RuntimeStateError,
+)
 
-# Default roots (env-driven). Kept here to discourage direct import elsewhere.
-_DEFAULT_DATA_ROOT = "/app/data"
-_DEFAULT_SYSTEM_ROOT = "/app/system"
-_DEFAULT_DOCS_ROOT = os.getenv("DOCS_ROOT", "/app/docs")
+# Default roots for container environments
+DEFAULT_DATA_ROOT = Path("/app/data")
+DEFAULT_SYSTEM_ROOT = Path("/app/system")
+DEFAULT_DOCS_ROOT = Path(os.getenv("DOCS_ROOT", "/app/docs"))
+
+_bootstrap_data_root: Optional[Path] = None
+_bootstrap_system_root: Optional[Path] = None
+
+
+def set_bootstrap_roots(data_root: Path, system_root: Path) -> None:
+    """
+    Set bootstrap roots for code paths that run before runtime context exists.
+
+    Args:
+        data_root: Root path for vault data
+        system_root: Root path for system data
+    """
+    global _bootstrap_data_root, _bootstrap_system_root
+    _bootstrap_data_root = Path(data_root)
+    _bootstrap_system_root = Path(system_root)
+
+
+def clear_bootstrap_roots() -> None:
+    """Clear any previously set bootstrap roots."""
+    global _bootstrap_data_root, _bootstrap_system_root
+    _bootstrap_data_root = None
+    _bootstrap_system_root = None
+
+
+def resolve_bootstrap_data_root() -> Path:
+    """Determine bootstrap data root from environment or defaults."""
+    return Path(os.getenv("CONTAINER_DATA_ROOT", DEFAULT_DATA_ROOT))
+
+
+def resolve_bootstrap_system_root() -> Path:
+    """Determine bootstrap system root from environment or defaults."""
+    return Path(os.getenv("CONTAINER_SYSTEM_ROOT", DEFAULT_SYSTEM_ROOT))
+
+
+def _require_root(name: str, context_root: Optional[Path], bootstrap_root: Optional[Path]) -> Path:
+    """Return a resolved root, preferring runtime context then bootstrap root."""
+    if context_root:
+        return context_root
+    if bootstrap_root:
+        return bootstrap_root
+    raise RuntimeStateError(
+        f"No runtime context available for {name}. "
+        "Set bootstrap roots before accessing path helpers."
+    )
 
 
 def get_data_root() -> Path:
     """Return the active data root (vaults)."""
+    context_root = None
     if has_runtime_context():
-        try:
-            return Path(get_runtime_context().config.data_root)
-        except Exception:
-            pass
-    return Path(os.getenv("CONTAINER_DATA_ROOT", _DEFAULT_DATA_ROOT))
+        context_root = Path(get_runtime_context().config.data_root)
+    return _require_root("data_root", context_root, _bootstrap_data_root)
 
 
 def get_system_root() -> Path:
     """Return the active system root (settings, secrets, logs, DBs)."""
+    context_root = None
     if has_runtime_context():
-        try:
-            return Path(get_runtime_context().config.system_root)
-        except Exception:
-            pass
-    return Path(os.getenv("CONTAINER_SYSTEM_ROOT", _DEFAULT_SYSTEM_ROOT))
+        context_root = Path(get_runtime_context().config.system_root)
+    return _require_root("system_root", context_root, _bootstrap_system_root)
 
 
 def get_docs_root() -> Path:
     """Return the docs root."""
-    return Path(_DEFAULT_DOCS_ROOT)
+    return DEFAULT_DOCS_ROOT
