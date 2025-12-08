@@ -1398,13 +1398,26 @@ function updateStatus(message) {
             repairBtn.addEventListener('click', async () => {
                 repairBtn.disabled = true;
                 repairBtn.textContent = 'Repairing…';
+                let alertEl = document.getElementById('config-repair-alert');
+                if (!alertEl && configElements.statusMessages) {
+                    alertEl = document.createElement('div');
+                    alertEl.id = 'config-repair-alert';
+                    alertEl.className = 'mt-2 text-sm';
+                    configElements.statusMessages.appendChild(alertEl);
+                }
+                const showAlert = (text, tone = 'info') => {
+                    if (!alertEl) return;
+                    alertEl.textContent = text;
+                    alertEl.className = `mt-2 text-sm ${tone === 'error' ? 'state-error' : 'text-txt-secondary'}`;
+                };
                 try {
                     const resp = await fetch('api/system/settings/repair', { method: 'POST' });
                     if (!resp.ok) throw new Error(await resp.text() || 'Repair failed');
                     await fetchSystemStatus();
+                    showAlert('Settings repaired. Backup saved to system/settings.yaml.bak. Reload the page to see new defaults.', 'info');
                 } catch (err) {
                     console.error('Settings repair failed', err);
-                    alert('Settings repair failed: ' + err.message);
+                    showAlert('Settings repair failed: ' + err.message, 'error');
                 } finally {
                     repairBtn.disabled = false;
                     repairBtn.textContent = 'Repair settings from template';
