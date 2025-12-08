@@ -1414,7 +1414,7 @@ function updateStatus(message) {
                     const resp = await fetch('api/system/settings/repair', { method: 'POST' });
                     if (!resp.ok) throw new Error(await resp.text() || 'Repair failed');
                     await fetchSystemStatus();
-                    showAlert('Settings repaired. Backup saved to system/settings.yaml.bak. Reload the page to see new defaults.', 'info');
+                    showAlert('Settings repaired. Backup saved to system/settings.bak. Reload the page to see new defaults.', 'info');
                 } catch (err) {
                     console.error('Settings repair failed', err);
                     showAlert('Settings repair failed: ' + err.message, 'error');
