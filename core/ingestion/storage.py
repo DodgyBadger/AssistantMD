@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
-from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_COLLECTION_DIR
+from core.constants import ASSISTANTMD_ROOT_DIR
 from core.ingestion.models import RenderOptions
 from core.runtime.paths import get_data_root
 
