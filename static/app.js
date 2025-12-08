@@ -1348,6 +1348,7 @@ function updateStatus(message) {
 
     const warnings = getConfigurationWarnings();
     const noticeLines = [];
+    let repairNeeded = false;
 
     if (state.restartRequired) {
         noticeLines.push(RESTART_NOTICE_TEXT);
@@ -1355,6 +1356,9 @@ function updateStatus(message) {
 
     warnings.forEach((issue) => {
         noticeLines.push(issue.message);
+        if (issue.name && issue.name.endsWith(':missing')) {
+            repairNeeded = true;
+        }
     });
 
     // Check for no vaults
@@ -1374,13 +1378,39 @@ function updateStatus(message) {
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
-        configElements.statusMessages.innerHTML = noticeLines.map(line =>
-            `<div>• ${line}</div>`
-        ).join('');
+        let messageHtml = noticeLines.map(line => `<div>• ${line}</div>`).join('');
+        if (repairNeeded) {
+            messageHtml += `
+                <div class="mt-2">
+                    <button id="repair-settings-btn" type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60">
+                        Repair settings from template
+                    </button>
+                </div>
+            `;
+        }
+        configElements.statusMessages.innerHTML = messageHtml;
         configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
         configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
         configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
         configElements.configTab.textContent = 'Configuration ⚠️';
+        const repairBtn = document.getElementById('repair-settings-btn');
+        if (repairBtn) {
+            repairBtn.addEventListener('click', async () => {
+                repairBtn.disabled = true;
+                repairBtn.textContent = 'Repairing…';
+                try {
+                    const resp = await fetch('api/system/settings/repair', { method: 'POST' });
+                    if (!resp.ok) throw new Error(await resp.text() || 'Repair failed');
+                    await fetchSystemStatus();
+                } catch (err) {
+                    console.error('Settings repair failed', err);
+                    alert('Settings repair failed: ' + err.message);
+                } finally {
+                    repairBtn.disabled = false;
+                    repairBtn.textContent = 'Repair settings from template';
+                }
+            });
+        }
     }
 }
 

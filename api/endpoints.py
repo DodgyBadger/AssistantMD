@@ -177,6 +177,15 @@ async def update_system_settings_endpoint(request: UpdateSettingsRequest):
         return create_error_response(e)
 
 
+@router.post("/system/settings/repair", response_model=SystemSettingsResponse)
+async def repair_system_settings():
+    """Merge missing settings from template into active settings (with backup)."""
+    try:
+        return repair_settings_from_template()
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.get("/system/settings/general", response_model=List[SettingInfo])
 async def list_general_settings():
     """List general (non-secret) settings entries."""

@@ -19,6 +19,7 @@ from core.settings.store import (
     get_tools_config,
     get_providers_config,
     get_active_settings_path,
+    SETTINGS_TEMPLATE,
 )
 from core.settings import (
     validate_settings,
@@ -569,6 +570,62 @@ async def update_system_settings(new_content: str) -> SystemSettingsResponse:
     reload_configuration()
 
     return _build_settings_response(path)
+
+
+def repair_settings_from_template() -> SystemSettingsResponse:
+    """
+    Merge missing keys from settings.template.yaml into the active settings file.
+
+    - Creates a .bak backup of system/settings.yaml before writing.
+    - Adds only missing keys; existing values are preserved.
+    """
+    active_path = get_active_settings_path()
+    backup_path = active_path.with_suffix(".bak")
+
+    try:
+        template_raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        raise SystemConfigurationError("Template settings file not found.")
+    except yaml.YAMLError as exc:
+        raise SystemConfigurationError(f"Failed to read template settings: {exc}") from exc
+
+    try:
+        active_raw = yaml.safe_load(active_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise SystemConfigurationError(f"Failed to read active settings: {exc}") from exc
+
+    if not isinstance(active_raw, dict):
+        raise SystemConfigurationError("Active settings file is not a valid mapping.")
+    if not isinstance(template_raw, dict):
+        raise SystemConfigurationError("Template settings file is not a valid mapping.")
+
+    merged = dict(active_raw)
+    for section, template_section in template_raw.items():
+        if not isinstance(template_section, dict):
+            continue
+        active_section = merged.get(section)
+        if active_section is None or not isinstance(active_section, dict):
+            active_section = {}
+        for key, value in template_section.items():
+            if key not in active_section:
+                active_section[key] = value
+        merged[section] = active_section
+
+    try:
+        shutil.copyfile(active_path, backup_path)
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to create settings backup: {exc}") from exc
+
+    try:
+        active_path.write_text(
+            yaml.safe_dump(merged, sort_keys=False, allow_unicode=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to write repaired settings: {exc}") from exc
+
+    reload_configuration()
+    return _build_settings_response(active_path)
 
 
 #######################################################################
