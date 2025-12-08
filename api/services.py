@@ -22,6 +22,7 @@ from core.settings.store import (
     get_active_settings_path,
     SETTINGS_TEMPLATE,
 )
+from core.runtime.paths import set_bootstrap_roots, resolve_bootstrap_data_root, resolve_bootstrap_system_root
 from core.settings import (
     validate_settings,
     SettingsError,
@@ -580,6 +581,8 @@ def repair_settings_from_template() -> SystemSettingsResponse:
     - Creates a .bak backup of system/settings.yaml before writing.
     - Adds only missing keys; existing values are preserved.
     """
+    # Ensure bootstrap roots exist for path resolution
+    set_bootstrap_roots(resolve_bootstrap_data_root(), resolve_bootstrap_system_root())
     active_path = get_active_settings_path()
     backup_path = active_path.with_suffix(".bak")
 
