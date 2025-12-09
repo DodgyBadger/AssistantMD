@@ -28,15 +28,11 @@ settings:
     value: "https://emkc.org/api/v2/piston"
     description: "Piston API base URL (public default; override for self-hosted or proxied endpoints)."
     restart_required: false
-  ingestion_pdf_enable_ocr:
-    value: false
-    description: "Enable PDF OCR ingestion strategy (requires MISTRAL_API_KEY)."
-    restart_required: false
   ingestion_pdf_default_strategies:
     value:
       - pdf_text
       - pdf_ocr
-    description: "Default strategy order for PDF ingestion; set to ['pdf_ocr'] to force OCR."
+    description: "Default strategy order for PDF ingestion; remove pdf_ocr to disable OCR or reorder as needed."
     restart_required: false
   ingestion_pdf_ocr_model:
     value: "mistral-ocr-latest"

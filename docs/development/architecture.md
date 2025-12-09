@@ -70,7 +70,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - `api/services.py` exposes `/api/import/scan` to enqueue files from `AssistantMD/Import/` per vault; jobs persist in `ingestion_jobs.db`.
 - `core/ingestion/` hosts the pipeline: source loaders (`sources/`), extractors (`strategies/`), renderer/storage, and a registry that maps MIME/strategy ids to functions.
 - `IngestionService` resolves strategies per job (defaults from settings, per-job overrides), skips unsupported or missing-secret strategies with warnings, and runs extractors in order until one returns text.
-- PDF: default strategies are PyMuPDF text, then optional Mistral OCR (`ingestion_pdf_enable_ocr`, `ingestion_pdf_ocr_model/endpoint`, requires `MISTRAL_API_KEY`); frontmatter records source_path, strategy, warnings, dropped attachments.
+- PDF: default strategies are PyMuPDF text, then Mistral OCR (`ingestion_pdf_default_strategies` controls order/content; remove `pdf_ocr` to disable). OCR uses `ingestion_pdf_ocr_model/endpoint` and requires `MISTRAL_API_KEY`; frontmatter records source_path, strategy, warnings, dropped attachments.
 - HTML: markdownify-based extractor with script/style stripping for URLs. Office formats are currently unsupported; export to PDF before ingesting.
 - Worker: `IngestionWorker` runs in APScheduler, offloading jobs via `asyncio.to_thread`; outputs are written vault-relative under `Imported/` (configurable base), filenames mirror sources (slugged for URLs) and preserve import subfolders; source files are removed after success to keep import folders clean. UI-triggered scans can process immediately with an opt-in to queue.
 

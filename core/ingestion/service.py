@@ -117,9 +117,8 @@ class IngestionService:
             ingestion_settings = self._get_ingestion_settings()
             suffix = source_path.suffix.lower() if source_path else ""
             strategies = self._get_strategies(job, suffix, ingestion_settings)
-            extractor_opts = {}
-            if job.options and isinstance(job.options, dict):
-                extractor_opts = job.options.get("extractor_options", {})
+            options = job.options if isinstance(job.options, dict) else {}
+            extractor_opts = options.get("extractor_options", {}) if isinstance(options, dict) else {}
             extracted, warnings = self._run_strategies(raw_doc, strategies, ingestion_settings, extractor_opts)
             if extracted is None:
                 msg = f"No extractor succeeded for {raw_doc.mime or 'unknown mime'}"
@@ -197,15 +196,10 @@ class IngestionService:
         Map general settings entries to a simple ingestion settings dict.
         """
         general_settings = get_general_settings()
-        pdf_enable_ocr = False
         pdf_default_strategies: list[str] = []
         pdf_ocr_model = "mistral-ocr-latest"
         pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
         base_output_dir = "Imported/"
-        try:
-            pdf_enable_ocr = bool(general_settings.get("ingestion_pdf_enable_ocr").value)
-        except Exception:
-            pdf_enable_ocr = False
         try:
             pdf_default_strategies = list(general_settings.get("ingestion_pdf_default_strategies").value)
         except Exception:
@@ -225,7 +219,6 @@ class IngestionService:
 
         return {
             "pdf": {
-                "enable_ocr": pdf_enable_ocr,
                 "default_strategies": pdf_default_strategies,
                 "ocr_model": pdf_ocr_model,
                 "ocr_endpoint": pdf_ocr_endpoint,
@@ -270,29 +263,23 @@ class IngestionService:
         pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
         if suffix == ".pdf":
             cfg_strategies = pdf_cfg.get("default_strategies") or []
-            enable_ocr = bool(pdf_cfg.get("enable_ocr"))
             default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["pdf_text", "pdf_ocr"]
-            if not enable_ocr:
-                default_strats = [s for s in default_strats if s != "pdf_ocr"]
             return default_strats
         return []
 
-    def _strategy_enabled(self, strat: str, ingestion_settings: dict) -> bool:
-        if strat == "pdf_ocr":
-            pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
-            return bool(pdf_cfg.get("enable_ocr", False))
-        return True
-
-    def _run_strategies(self, raw_doc, strategies: list[str], ingestion_settings: dict, options: dict | None = None):
+    def _run_strategies(
+        self,
+        raw_doc,
+        strategies: list[str],
+        ingestion_settings: dict,
+        options: dict | None = None,
+    ):
         """
         Try extractors in order; return first non-empty result.
         """
         warnings: list[str] = []
         extractor_options = options or {}
         for strat in strategies:
-            if not self._strategy_enabled(strat, ingestion_settings):
-                warnings.append(f"{strat}:disabled")
-                continue
             secret_name = self._STRATEGY_SECRET_REQUIREMENTS.get(strat)
             if secret_name and not secret_has_value(secret_name):
                 warnings.append(f"{strat}:missing_secret:{secret_name}")

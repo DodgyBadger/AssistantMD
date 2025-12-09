@@ -174,20 +174,6 @@ def validate_settings(
                 severity="warning",
             )
 
-    general_settings = get_general_settings()
-    enable_pdf_ocr = False
-    try:
-        enable_pdf_ocr = bool(general_settings.get("ingestion_pdf_enable_ocr").value)
-    except Exception:
-        enable_pdf_ocr = False
-    if enable_pdf_ocr:
-        if not secret_has_value("MISTRAL_API_KEY"):
-            status.add_issue(
-                name="ingestion:pdf_ocr",
-                message="PDF OCR is enabled but MISTRAL_API_KEY is not set. Configure the key or disable OCR.",
-                severity="warning",
-            )
-
     providers = providers_config or get_providers_config()
     models = models_config or get_models_config()
     for model_name, model_config in models.items():
