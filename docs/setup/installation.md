@@ -44,14 +44,7 @@ _Or alternate text editor if you don't have nano._
 **Verify Installation**
 `docker ps` should show assistantMD running. If you see "restarting", something is wrong. Run `docker logs assistantMD` to check for startup errors.
 
-Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file).
-
-- **Chat Tab**: Interactive chat with your vaults.
-- **Workflow Tab**: View all workflows and execute workflows manually.
-- **Configuration Tab**: Manage models, settings and secrets.
-
-Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required.
-
+Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file). Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required.
 
 ## Optional Setup
 

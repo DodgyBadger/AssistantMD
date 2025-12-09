@@ -61,7 +61,7 @@ from .services import (
     update_secret,
     delete_secret_entry,
     scan_import_folder,
-    ingest_url_direct,
+    import_url_direct,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -237,7 +237,7 @@ async def import_scan(request: ImportScanRequest):
 @router.post("/import/url", response_model=ImportUrlResponse)
 async def import_url(request: ImportUrlRequest):
     try:
-        job = ingest_url_direct(
+        job = import_url_direct(
             vault=request.vault,
             url=request.url,
             clean_html=request.clean_html,

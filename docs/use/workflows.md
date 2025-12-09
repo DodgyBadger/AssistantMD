@@ -1,4 +1,4 @@
-# Workflow Setup Guide
+# Workflow Guide
 
 A workflow is a markdown file stored under each vault's `AssistantMD/Workflows/` folder. Workflows can be organized in subfolders (one level deep). Subfolders beginning with an underscore are ignored.
 
@@ -48,6 +48,6 @@ Read the haiku above and provide your feedback.
 
 Explore detailed documentation for each component:
 
-- **[YAML frontmatter](../core/yaml-frontmatter.md)** - Schedules, workflow engines, and settings
-- **[Core directives](../core/core-directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
-- **[Pattern variables](../core/patterns.md)** - Dynamic file names using {today}, {this-week}, etc.
+- **[YAML frontmatter](frontmatter.md)** - Schedules, workflow engines, and settings
+- **[Directives](directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
+- **[Pattern variables](patterns.md)** - Dynamic file names using {today}, {this-week}, etc.

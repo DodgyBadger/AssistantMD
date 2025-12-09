@@ -189,21 +189,9 @@ tools:
     description: "Edit, delete, move/overwrite (use with caution)"
     requires_secrets: []
     user_editable: false
-  tavily_extract:
-    module: core.tools.tavily_extract
-    description: "Extract content from specific URLs"
-    requires_secrets:
-      - TAVILY_API_KEY
-    user_editable: false
-  tavily_crawl:
-    module: core.tools.tavily_crawl
-    description: "Crawl websites for content"
-    requires_secrets:
-      - TAVILY_API_KEY
-    user_editable: false
-  ingest_url:
-    module: core.tools.ingest_url
-    description: "Ingest a single URL into a vault via the ingestion pipeline"
+  import_url:
+    module: core.tools.import_url
+    description: "Import a single URL into a vault via the ingestion pipeline"
     requires_secrets: []
     user_editable: false
   documentation_access:

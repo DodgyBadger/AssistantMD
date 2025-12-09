@@ -44,12 +44,11 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 
 ## 📚 Documentation
 
-- **[Installation Guide](docs/setup/installation.md)** - Complete setup instructions
-- **[Creating Workflows](docs/setup/workflow-setup.md)** - Build your first workflow
-- **[Directives Reference](docs/core/core-directives.md)** - Control workflow behavior
-- **[Workflow Tips](docs/setup/tips.md)** - Additional tips for creating and managing workflows
-- **[Security Considerations](docs/setup/security.md)** - Important security information
-- **[Upgrading](docs/setup/upgrading.md)** - Upgrading to the latest version
+- **[Installation Guide](docs/setup/installation.md)**
+- **[Basic Usage](docs/use/overview.md)**
+- **[Creating Workflows](docs/use/workflows.md)**
+- **[Security Considerations](docs/setup/security.md)**
+- **[Upgrading](docs/setup/upgrading.md)**
 
 ## 📄 License
 

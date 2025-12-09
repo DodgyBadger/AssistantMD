@@ -1,4 +1,4 @@
-# Core Directives
+# Directives
 
 Directives are special commands that control how workflow steps execute. All directives:
 - Must be placed at the very beginning of a step section

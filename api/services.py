@@ -276,9 +276,9 @@ def scan_import_folder(
     return jobs_created, skipped
 
 
-def ingest_url_direct(vault: str, url: str, clean_html: bool = True):
+def import_url_direct(vault: str, url: str, clean_html: bool = True):
     """
-    Synchronously ingest a single URL and return the job record after processing.
+    Synchronously import a single URL and return the job record after processing.
     """
     runtime = get_runtime_context()
     ingest_service: IngestionService = runtime.ingestion
