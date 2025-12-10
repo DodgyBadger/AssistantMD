@@ -8,6 +8,7 @@
 - Ingestion settings and UI controls
 - URL import accessible via LLM tool call
 - Validation scenario for coverage
+- **Note**: The importer is a work in progress and likely to change.
 
 ### Feature: Repair settings.yaml
 - Warning in the UI if settings are missing from system/settings.yaml and provide repair tool

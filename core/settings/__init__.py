@@ -214,6 +214,46 @@ def validate_settings(
         },
     )
 
+    def _is_user_editable(entry: Any, default: bool) -> bool:
+        """Best-effort user_editable check for typed/dict entries."""
+        if hasattr(entry, "user_editable"):
+            try:
+                return bool(entry.user_editable)
+            except Exception:
+                return default
+        if isinstance(entry, dict):
+            val = entry.get("user_editable")
+            if isinstance(val, bool):
+                return val
+        return default
+
+    # Settings are not user-extensible; flag extras
+    settings_template_keys = template_sections.get("settings", set())
+    settings_extra = set((get_general_settings() or {}).keys()) - settings_template_keys
+    if settings_extra:
+        status.add_issue(
+            name="settings:extra",
+            message=f"Unknown settings present: {', '.join(sorted(settings_extra))}",
+            severity="warning",
+        )
+
+    def _warn_extras(section_name: str, items: Dict[str, Any], default_user_editable: bool):
+        template_keys = template_sections.get(section_name, set())
+        for key, entry in items.items():
+            if key in template_keys:
+                continue
+            if _is_user_editable(entry, default_user_editable):
+                continue
+            status.add_issue(
+                name=f"{section_name}:extra",
+                message=f"Unknown {section_name.rstrip('s')} '{key}' present; run settings repair to clean up.",
+                severity="warning",
+            )
+
+    _warn_extras("tools", tools, default_user_editable=False)
+    _warn_extras("models", models, default_user_editable=True)
+    _warn_extras("providers", providers, default_user_editable=False)
+
     return status
 
 

@@ -585,7 +585,8 @@ def repair_settings_from_template() -> SystemSettingsResponse:
     Merge missing keys from settings.template.yaml into the active settings file.
 
     - Creates a .bak backup of system/settings.yaml before writing.
-    - Adds only missing keys; existing values are preserved.
+    - Adds missing keys; existing values are preserved.
+    - Prunes removed settings and removed non-user-editable models/providers/tools.
     """
     # Ensure bootstrap roots exist for path resolution
     set_bootstrap_roots(resolve_bootstrap_data_root(), resolve_bootstrap_system_root())
@@ -609,7 +610,18 @@ def repair_settings_from_template() -> SystemSettingsResponse:
     if not isinstance(template_raw, dict):
         raise SystemConfigurationError("Template settings file is not a valid mapping.")
 
+    # Seed merged copy and ensure sections exist
     merged = dict(active_raw)
+    for section in ("settings", "models", "providers", "tools"):
+        if merged.get(section) is None or not isinstance(merged.get(section), dict):
+            merged[section] = {}
+
+    template_sections: Dict[str, dict] = {}
+    for section in ("settings", "models", "providers", "tools"):
+        section_val = template_raw.get(section)
+        template_sections[section] = section_val if isinstance(section_val, dict) else {}
+
+    # Add missing keys from template (non-destructive)
     for section, template_section in template_raw.items():
         if not isinstance(template_section, dict):
             continue
@@ -620,6 +632,41 @@ def repair_settings_from_template() -> SystemSettingsResponse:
             if key not in active_section:
                 active_section[key] = value
         merged[section] = active_section
+
+    # Prune removed settings (settings are not user-extensible)
+    settings_template_keys = set(template_sections["settings"].keys())
+    merged["settings"] = {
+        key: val for key, val in merged["settings"].items() if key in settings_template_keys
+    }
+
+    def _is_user_editable(entry: Any, default: bool) -> bool:
+        if isinstance(entry, dict):
+            ue = entry.get("user_editable")
+            if isinstance(ue, bool):
+                return ue
+        return default
+
+    # Prune removed non-editable tools, models, providers while keeping user-editable/custom entries
+    def _prune_section(section_name: str, default_user_editable: bool):
+        template_section = template_sections.get(section_name, {})
+        active_section = merged.get(section_name, {})
+        if not isinstance(active_section, dict):
+            merged[section_name] = {}
+            return
+
+        for key in list(active_section.keys()):
+            if key in template_section:
+                continue
+            entry = active_section.get(key)
+            if _is_user_editable(entry, default_user_editable):
+                continue
+            active_section.pop(key, None)
+
+        merged[section_name] = active_section
+
+    _prune_section("tools", default_user_editable=False)
+    _prune_section("models", default_user_editable=True)
+    _prune_section("providers", default_user_editable=False)
 
     try:
         shutil.copyfile(active_path, backup_path)
