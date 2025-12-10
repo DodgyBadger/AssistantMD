@@ -33,7 +33,9 @@ Workflows allow you to schedule and structure prompts or sequences of prompts. Y
 
 ### Importer
 
-Import PDFs and URLs into your vault as markdown. Drop files into `AssistantMD/Import/` for bulk imports, or point the importer at a URL to convert a page to markdown. Imports land under `Imported/` (configurable in the web UI). Word and other Office docs may be added in the future, but for now you can export them to PDF and import as above.
+Import PDFs and URLs into your vault as markdown. Drop files into `AssistantMD/Import/` for bulk imports, or point the importer at a URL to convert a page to markdown. Imports land under `Imported/` (configurable in the web UI).
+
+**Note**: The importer is a work in progress and likely to change as I test different solutions.
 
 ### Configuration
 
