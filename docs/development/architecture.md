@@ -41,6 +41,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
 | Logging & Activity | Unified logging, Logfire instrumentation | `core/logger.py/`, `system/activity.log` |
 | Validation | Scenario-based end-to-end checks | `validation/` |
+| Ingestion | File import pipeline (PDF text/OCR, markdownify HTML), registry-driven strategies, queued worker | `core/ingestion/`, `api/services.py` |
 
 ## Workflows & Directives
 
@@ -63,6 +64,21 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - `core/settings/` provides typed access to infrastructure configuration via `AppSettings`, aggregates configuration health with `ConfigurationStatus`, and exposes helpers the API uses to gate unavailable tools and models.
 - `core/settings/store.py` loads `system/settings.yaml` (seeded from `core/settings/settings.template.yaml`) as validated Pydantic models for tools, providers, model aliases, and general settings. Secrets are persisted in `system/secrets.yaml` via `core/settings/secrets_store.py`, which offers  atomic read/write helpers for the API and UI.
 - `core/runtime/reload_service.py` centralizes hot reload behaviour: it refreshes settings caches, updates the runtime context’s `last_config_reload` timestamp, and returns configuration status so API endpoints can signal when a restart is still required.
+
+## Ingestion Pipeline
+
+- `api/services.py` exposes `/api/import/scan` to enqueue files from `AssistantMD/Import/` per vault; jobs persist in `ingestion_jobs.db`.
+- `core/ingestion/` hosts the pipeline: source loaders (`sources/`), extractors (`strategies/`), renderer/storage, and a registry that maps MIME/strategy ids to functions.
+- `IngestionService` resolves strategies per job (defaults from settings, per-job overrides), skips unsupported or missing-secret strategies with warnings, and runs extractors in order until one returns text.
+- PDF: default strategies are PyMuPDF text, then Mistral OCR (`ingestion_pdf_default_strategies` controls order/content; remove `pdf_ocr` to disable). OCR uses `ingestion_pdf_ocr_model/endpoint` and requires `MISTRAL_API_KEY`; frontmatter records source_path, strategy, warnings, dropped attachments.
+- HTML: markdownify-based extractor with script/style stripping for URLs. Office formats are currently unsupported; export to PDF before ingesting.
+- Worker: `IngestionWorker` runs in APScheduler, offloading jobs via `asyncio.to_thread`; outputs are written vault-relative under `Imported/` (configurable base), filenames mirror sources (slugged for URLs) and preserve import subfolders; source files are removed after success to keep import folders clean. UI-triggered scans can process immediately with an opt-in to queue.
+
+## Bootstrap & Paths
+
+- Path helpers (`get_data_root` / `get_system_root`) require either an active runtime context or pre-set bootstrap roots. There are no env fallbacks once the app is running.
+- Entrypoints (e.g., `main.py`, validation CLI) set bootstrap roots **before** importing modules that touch settings/paths. Custom scripts must do the same or create a runtime context first.
+- Secrets store now uses a single authoritative path (`SECRETS_PATH` override or `system_root/secrets.yaml`); base/overlay merges are removed.
 
 ## When the Code Changes
 

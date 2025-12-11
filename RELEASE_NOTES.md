@@ -1,5 +1,30 @@
 # Release Notes
 
+## 2025-12-08
+
+### Feature: Import to markdown pipeline
+- Import PDF using pymupdf and optional Mistral OCR (with API key)
+- Import URLs
+- Ingestion settings and UI controls
+- URL import accessible via LLM tool call
+- Validation scenario for coverage
+- **Note**: The importer is a work in progress and likely to change.
+
+### Feature: Repair settings.yaml
+- Warning in the UI if settings are missing from system/settings.yaml and provide repair tool
+- Existing setting are unchanged
+- Settings.yaml is backed up to system/setting.bak before repair
+
+### Refactor 
+- Consolidated redundant metadata APIs
+- Hardened runtime path helpers, now require bootstrap/runtime context (no env fallbacks), entrypoints seed bootstrap roots early, secrets store uses a single authoritative path, and validation harness aligns with the same bootstrap rules.
+- Logger/bootstrap safety: logfire configuration now defers when settings/secrets aren’t available during early imports to avoid startup crashes.
+- Update docs
+
+### Breaking change
+- Custom scripts/entrypoints must call `set_bootstrap_roots` (or start a runtime context) before importing modules that resolve paths/settings; secrets overlay merging was removed in favor of a single `SECRETS_PATH` or `system_root/secrets.yaml`.
+
+
 ## 2025-11-29
 
 - Runtime path resilience: renamed system root env/fields to `CONTAINER_SYSTEM_ROOT`/`system_root`, added `core/runtime/paths.py` helpers, and routed settings/secrets/logger/DB/workflow loaders through runtime-aware path resolution.

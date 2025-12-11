@@ -18,10 +18,16 @@
         isSavingProvider: false,
         isLoadingSecrets: false,
         isSavingSecret: false,
+        isScanningImport: false,
+        isLoadingImportVaults: false,
+        isImportingUrl: false,
         settings: [],
         models: [],
         providers: [],
         secrets: [],
+        importVaults: [],
+        importResults: null,
+        importUrlResult: null,
         settingEditKey: null,
         settingDraftValue: '',
         modelEdit: null,
@@ -76,7 +82,17 @@
         secretValueInput: null,
         secretFormStatus: null,
         secretSubmitBtn: null,
-        secretResetBtn: null
+        secretResetBtn: null,
+
+        importVaultSelect: null,
+        importQueueCheckbox: null,
+        importUseOcrCheckbox: null,
+        importStatus: null,
+        importScanBtn: null,
+        importRefreshVaultsBtn: null,
+        importResults: null,
+        importUrlInput: null,
+        importUrlSubmit: null
     };
 
     const toneClasses = {
@@ -113,6 +129,16 @@
         elements.secretFormStatus = document.getElementById('secret-form-status');
         elements.secretSubmitBtn = document.getElementById('secret-submit');
         elements.secretResetBtn = document.getElementById('secret-reset');
+
+        elements.importVaultSelect = document.getElementById('import-vault-select');
+        elements.importQueueCheckbox = document.getElementById('import-queue');
+        elements.importUseOcrCheckbox = document.getElementById('import-use-ocr');
+        elements.importStatus = document.getElementById('import-status');
+        elements.importScanBtn = document.getElementById('import-scan');
+        elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
+        elements.importResults = document.getElementById('import-results');
+        elements.importUrlInput = document.getElementById('import-url-input');
+        elements.importUrlSubmit = document.getElementById('import-url-submit');
     }
 
     function bindEvents() {
@@ -133,6 +159,10 @@
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
+
+        elements.importScanBtn?.addEventListener('click', handleImportScan);
+        elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
+        elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
     }
 
     const restartNoticeText = 'Restart recommended: restart the container to apply pending changes.';
@@ -1077,6 +1107,7 @@ async function saveModelRow(rowKey) {
             const data = await response.json();
             state.secrets = Array.isArray(data) ? data : [];
             renderSecretsTable();
+            updateImportOcrAvailability();
         } catch (error) {
             elements.secretsList.innerHTML = `
                 <div class="rounded-lg border state-surface-error px-4 py-3 text-sm text-center shadow-sm">
@@ -1140,6 +1171,21 @@ async function saveModelRow(rowKey) {
             }).join('');
 
         elements.secretsList.innerHTML = cards;
+        updateImportOcrAvailability();
+    }
+
+    function updateImportOcrAvailability() {
+        if (!elements.importUseOcrCheckbox) return;
+        const hasMistral = state.secrets.some(
+            (entry) => entry.name === 'MISTRAL_API_KEY' && entry.has_value
+        );
+        elements.importUseOcrCheckbox.disabled = !hasMistral;
+        elements.importUseOcrCheckbox.title = hasMistral
+            ? ''
+            : 'Requires MISTRAL_API_KEY secret';
+        if (!hasMistral) {
+            elements.importUseOcrCheckbox.checked = false;
+        }
     }
 
     async function handleSecretsTableClick(event) {
@@ -1318,6 +1364,7 @@ async function saveModelRow(rowKey) {
         await loadGeneralSettings();
         await loadModels();
         await loadSecrets();
+        await loadImportVaults();
         state.hasLoadedOnce = true;
     }
 
@@ -1340,6 +1387,244 @@ async function saveModelRow(rowKey) {
     function onTabActivated() {
         if (!state.initialized) return;
         refreshAll();
+    }
+
+    function renderImportVaults() {
+        const select = elements.importVaultSelect;
+        if (!select) return;
+        select.innerHTML = '<option value="">Select vault…</option>';
+        if (!state.importVaults || state.importVaults.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No vaults detected';
+            opt.disabled = true;
+            select.appendChild(opt);
+            return;
+        }
+        state.importVaults.forEach((vault) => {
+            const opt = document.createElement('option');
+            opt.value = vault;
+            opt.textContent = vault;
+            select.appendChild(opt);
+        });
+    }
+
+    async function loadImportVaults(force = false) {
+        if (state.isLoadingImportVaults) return;
+        state.isLoadingImportVaults = true;
+        setStatus(elements.importStatus, 'Loading vaults…', 'info');
+
+        // Prefer cached metadata from main app if available
+        const cachedVaults = window.App && window.App.metadata && Array.isArray(window.App.metadata.vaults)
+            ? window.App.metadata.vaults
+            : null;
+        if (cachedVaults && !force) {
+            state.importVaults = cachedVaults;
+            renderImportVaults();
+            setStatus(elements.importStatus, '', 'info');
+        }
+
+        try {
+            // Always refresh from API to stay current
+            const response = await fetch('api/metadata');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            state.importVaults = Array.isArray(data?.vaults) ? data.vaults : [];
+            renderImportVaults();
+            setStatus(elements.importStatus, '', 'info');
+            // Keep cache in sync for other modules
+            window.App = window.App || {};
+            window.App.metadata = data;
+        } catch (error) {
+            if (!cachedVaults) {
+                state.importVaults = [];
+                renderImportVaults();
+            }
+            setStatus(elements.importStatus, `Failed to load vaults: ${error.message}`, 'error');
+        } finally {
+            state.isLoadingImportVaults = false;
+        }
+    }
+
+    async function handleImportVaultRescan() {
+        if (!elements.importRefreshVaultsBtn || state.isLoadingImportVaults) return;
+        const btn = elements.importRefreshVaultsBtn;
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Rescanning…';
+        setStatus(elements.importStatus, 'Rescanning vaults…', 'info');
+        try {
+            const response = await fetch('api/vaults/rescan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            // Refresh global status/metadata if caller provided callbacks
+            if (callbacks.refreshStatus) await callbacks.refreshStatus();
+            if (callbacks.refreshMetadata) await callbacks.refreshMetadata();
+            // Reload vault list for import select
+            await loadImportVaults(true);
+            setStatus(elements.importStatus, 'Vaults refreshed.', 'success');
+        } catch (error) {
+            setStatus(elements.importStatus, `Rescan failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        }
+    }
+
+    function renderImportResults() {
+        if (!elements.importResults) return;
+        const results = state.importResults;
+        const urlResult = state.importUrlResult;
+
+        let sections = [];
+
+        if (results) {
+            const jobs = Array.isArray(results.jobs_created) ? results.jobs_created : [];
+            const skipped = Array.isArray(results.skipped) ? results.skipped : [];
+            let html = '';
+            if (jobs.length > 0) {
+                html += `<div class="space-y-2"><div class="font-medium text-txt-primary">File imports (${jobs.length})</div>`;
+                html += '<ul class="list-disc list-inside space-y-1">';
+                html += jobs
+                    .map((job) => {
+                        const outputs = Array.isArray(job.outputs) && job.outputs.length
+                            ? ` → ${job.outputs.join(', ')}`
+                            : '';
+                        const status = job.status || 'queued';
+                        const source = job.source_uri || 'unknown';
+                        return `<li><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span>${outputs ? ` <span class="subtle">${outputs}</span>` : ''}</li>`;
+                    })
+                    .join('');
+                html += '</ul></div>';
+            }
+            if (skipped.length > 0) {
+                html += `<div class="space-y-2 pt-3 border-t border-border-primary"><div class="font-medium text-txt-primary">Skipped (${skipped.length})</div>`;
+                html += '<ul class="list-disc list-inside space-y-1">';
+                html += skipped.map((name) => `<li>${name}</li>`).join('');
+                html += '</ul></div>';
+            }
+            if (html) sections.push(html);
+        }
+
+        if (urlResult) {
+            const outputs = Array.isArray(urlResult.outputs) ? urlResult.outputs : [];
+            const status = urlResult.status || 'unknown';
+            const error = urlResult.error;
+            const source = urlResult.source_uri || urlResult.url || 'unknown';
+
+            let html = `<div class="space-y-2"><div class="font-medium text-txt-primary">Latest URL import</div>`;
+            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span></div>`;
+            if (outputs.length) {
+                html += '<div class="text-sm">Outputs: ' + outputs.join(', ') + '</div>';
+            }
+            if (error) {
+                html += `<div class="text-sm state-error">Error: ${error}</div>`;
+            }
+            html += '</div>';
+            sections.push(html);
+        }
+
+        elements.importResults.innerHTML = sections.join('<div class="pt-3 border-t border-border-primary"></div>') || 'No imports yet.';
+    }
+
+    async function handleImportScan() {
+        if (!elements.importScanBtn || state.isScanningImport) return;
+
+        const vault = elements.importVaultSelect?.value || '';
+        if (!vault) {
+            setStatus(elements.importStatus, 'Select a vault before scanning.', 'warning');
+            return;
+        }
+
+        const queueOnly = Boolean(elements.importQueueCheckbox?.checked);
+        const useOcr = Boolean(elements.importUseOcrCheckbox?.checked);
+
+        const payload = { vault, queue_only: queueOnly };
+        if (useOcr) {
+            payload.strategies = ["pdf_ocr", "pdf_text"];
+        }
+
+        state.isScanningImport = true;
+        // Reset URL status when starting a file import
+        state.importUrlResult = null;
+        renderImportResults();
+        const btn = elements.importScanBtn;
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = queueOnly ? 'Queueing…' : 'Importing…';
+        setStatus(
+            elements.importStatus,
+            queueOnly ? 'Queueing import jobs…' : 'Scanning import folder and processing…',
+            'info'
+        );
+
+        try {
+            const response = await fetch('api/import/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            state.importResults = data;
+            renderImportResults();
+            setStatus(
+                elements.importStatus,
+                queueOnly ? 'Jobs queued.' : 'Import completed.',
+                'success'
+            );
+            if (callbacks.refreshStatus) callbacks.refreshStatus();
+        } catch (error) {
+            setStatus(elements.importStatus, `Import failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+            state.isScanningImport = false;
+        }
+    }
+
+    async function handleImportUrl() {
+        if (!elements.importUrlSubmit || state.isImportingUrl) return;
+
+        const vault = elements.importVaultSelect?.value || '';
+        const url = (elements.importUrlInput?.value || '').trim();
+        if (!vault || !url) {
+            setStatus(elements.importStatus, 'Select a vault and enter a URL.', 'warning');
+            return;
+        }
+
+        // Reset file status when starting a URL import
+        state.importResults = null;
+        renderImportResults();
+        state.isImportingUrl = true;
+        const btn = elements.importUrlSubmit;
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Ingesting…';
+        setStatus(elements.importStatus, 'Ingesting URL…', 'info');
+
+        try {
+            const response = await fetch('api/import/url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vault, url, clean_html: true })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            state.importUrlResult = data;
+            setStatus(elements.importStatus, 'URL ingested.', data.error ? 'warning' : 'success');
+            if (callbacks.refreshStatus) callbacks.refreshStatus();
+            renderImportResults();
+        } catch (error) {
+            setStatus(elements.importStatus, `Import failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+            state.isImportingUrl = false;
+        }
     }
 
     window.ConfigurationPanel = {

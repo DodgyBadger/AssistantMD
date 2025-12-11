@@ -44,15 +44,17 @@ def refresh_logfire_configuration(force: bool = False) -> None:
     """
     global _logfire_config_state
 
+    enabled = False
+    token = None
+
     try:
         settings = get_general_settings()
         entry = settings.get("logfire")
         enabled = bool(entry and getattr(entry, "value", False))
+        token = get_secret_value("LOGFIRE_TOKEN")
     except Exception as exc:  # pragma: no cover - defensive guard
-        _logger_internal.error("Failed to read logfire setting, defaulting to disabled: %s", exc)
-        enabled = False
+        _logger_internal.warning("Logfire configuration deferred: %s", exc)
 
-    token = get_secret_value("LOGFIRE_TOKEN")
     fingerprint = _token_fingerprint(token)
     desired_state = (enabled, fingerprint)
 

@@ -190,8 +190,8 @@ Summarize the validation run context.
         )
 
         # Chat execution, metadata, history transforms
-        chat_metadata = self.call_api("/api/chat/metadata")
-        self.expect_equals(chat_metadata.status_code, 200, "Chat metadata available")
+        chat_metadata = self.call_api("/api/metadata")
+        self.expect_equals(chat_metadata.status_code, 200, "Metadata endpoint available")
 
         chat_payload = {
             "vault_name": vault.name,

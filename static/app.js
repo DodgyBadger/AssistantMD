@@ -247,10 +247,13 @@ function getConfigurationWarnings() {
 // Fetch metadata from API
 async function fetchMetadata() {
     try {
-        const response = await fetch('api/chat/metadata');
+        const response = await fetch('api/metadata');
         if (!response.ok) throw new Error('Failed to fetch metadata');
 
         state.metadata = await response.json();
+        // Expose for other modules (e.g., configuration import panel) to avoid duplicate fetches.
+        window.App = window.App || {};
+        window.App.metadata = state.metadata;
         populateSelectors();
         updateStatus();
     } catch (error) {
@@ -1267,8 +1270,16 @@ async function rescanVaults() {
             </div>
         `;
 
+        if (data.metadata) {
+            state.metadata = data.metadata;
+            window.App = window.App || {};
+            window.App.metadata = data.metadata;
+            populateSelectors();
+        } else {
+            await fetchMetadata();
+        }
+
         await fetchSystemStatus();
-        await fetchMetadata();
 
     } catch (error) {
         console.error('Error rescanning:', error);
@@ -1337,6 +1348,7 @@ function updateStatus(message) {
 
     const warnings = getConfigurationWarnings();
     const noticeLines = [];
+    let repairNeeded = false;
 
     if (state.restartRequired) {
         noticeLines.push(RESTART_NOTICE_TEXT);
@@ -1344,6 +1356,9 @@ function updateStatus(message) {
 
     warnings.forEach((issue) => {
         noticeLines.push(issue.message);
+        if (issue.name && /^(settings|models|providers|tools):(missing|extra)$/.test(issue.name)) {
+            repairNeeded = true;
+        }
     });
 
     // Check for no vaults
@@ -1363,13 +1378,57 @@ function updateStatus(message) {
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
-        configElements.statusMessages.innerHTML = noticeLines.map(line =>
-            `<div>• ${line}</div>`
-        ).join('');
+        let messageHtml = noticeLines.map(line => `<div>• ${line}</div>`).join('');
+        if (repairNeeded) {
+            messageHtml += `
+                <div class="mt-2">
+                    <button id="repair-settings-btn" type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60">
+                        Repair settings from template
+                    </button>
+                </div>
+            `;
+        }
+        configElements.statusMessages.innerHTML = messageHtml;
         configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
         configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
         configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
         configElements.configTab.textContent = 'Configuration ⚠️';
+        const repairBtn = document.getElementById('repair-settings-btn');
+        if (repairBtn) {
+            repairBtn.addEventListener('click', async () => {
+                const confirmed = window.confirm(
+                    'Repair settings from template?\n\nThis will add missing keys from settings.template.yaml, prune unknown settings, and remove unknown non-user-editable tools/models/providers. Existing values for matching keys will be preserved.\nA backup will be written to system/settings.bak. Reload the page after repair to see changes.'
+                );
+                if (!confirmed) return;
+
+                repairBtn.disabled = true;
+                repairBtn.textContent = 'Repairing…';
+                let alertEl = document.getElementById('config-repair-alert');
+                if (!alertEl && configElements.statusMessages) {
+                    alertEl = document.createElement('div');
+                    alertEl.id = 'config-repair-alert';
+                    alertEl.className = 'mt-2 text-sm';
+                    configElements.statusMessages.appendChild(alertEl);
+                }
+                const showAlert = (text, tone = 'info') => {
+                    if (!alertEl) return;
+                    alertEl.textContent = text;
+                    alertEl.className = `mt-2 text-sm ${tone === 'error' ? 'state-error' : 'text-txt-secondary'}`;
+                };
+                try {
+                    const resp = await fetch('api/system/settings/repair', { method: 'POST' });
+                    if (!resp.ok) throw new Error(await resp.text() || 'Repair failed');
+                    await fetchSystemStatus();
+                    showAlert('Settings repaired. Backup saved to system/settings.bak. Reload the page to see new defaults.', 'info');
+                } catch (err) {
+                    console.error('Settings repair failed', err);
+                    showAlert('Settings repair failed: ' + err.message, 'error');
+                } finally {
+                    repairBtn.disabled = false;
+                    repairBtn.textContent = 'Repair settings from template';
+                }
+            });
+        }
     }
 }
 

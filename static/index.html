@@ -754,7 +754,6 @@
                     <summary class="collapsible-summary">
                         <div class="summary-text">
                             <span class="summary-title">Models</span>
-                            <span class="summary-subtext">Aliases linked to providers</span>
                         </div>
                         <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -784,7 +783,6 @@
                     <summary class="collapsible-summary">
                         <div class="summary-text">
                             <span class="summary-title">Model Providers</span>
-                            <span class="summary-subtext">Configure API keys and endpoints</span>
                         </div>
                         <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -834,7 +832,6 @@
                     <summary class="collapsible-summary">
                         <div class="summary-text">
                             <span class="summary-title">Application Settings</span>
-                            <span class="summary-subtext">General configuration from system/settings.yaml</span>
                         </div>
                         <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -857,7 +854,6 @@
                     <summary class="collapsible-summary">
                         <div class="summary-text">
                             <span class="summary-title">Secrets</span>
-                            <span class="summary-subtext">Hot-reloadable credentials managed by the secrets store</span>
                         </div>
                         <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -904,7 +900,6 @@
                     <summary class="collapsible-summary">
                         <div class="summary-text">
                             <span class="summary-title">System Activity Log</span>
-                            <span class="summary-subtext">View recent runtime events</span>
                         </div>
                         <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -919,8 +914,75 @@
                                 Refresh
                             </button>
                         </div>
-                        <div class="border border-border-primary rounded-md bg-app-elevated">
+                        <div class="border border-border-primary rounded-md">
                             <pre id="activity-log-viewer" class="overflow-y-auto whitespace-pre-wrap p-3 text-sm font-mono text-txt-primary max-h-96">Loading system log...</pre>
+                        </div>
+                    </div>
+                </details>
+
+                <details id="config-import-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Import</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-txt-secondary">
+                            Drop files into AssistantMD/Import/ inside your vault, then click Import Files to import them immediately. Files are removed after successful import.
+                        </p>
+                        <div class="space-y-3 border border-border-primary rounded-md p-4">
+                            <div class="flex flex-col md:flex-row md:items-center gap-3">
+                                <div class="md:flex-1 md:max-w-xl">
+                                    <select id="import-vault-select" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="">Select vault…</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-end">
+                                    <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent h-10">
+                                        Refresh Vaults
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+                                <div class="flex items-center gap-4">
+                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                        <input id="import-use-ocr" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                        <span>Use OCR (PDF)</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                        <input id="import-queue" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                        <span>Large job (queue)</span>
+                                    </label>
+                                </div>
+                                <div class="flex items-end justify-end">
+                                    <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
+                                        Import Files
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col md:flex-row gap-4 items-end">
+                                <div class="md:flex-1">
+                                    <input id="import-url-input" type="text" placeholder="https://example.com/article" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                </div>
+                                <div class="flex items-end justify-end">
+                                    <button id="import-url-submit" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
+                                        Import URL
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="text-sm text-txt-secondary">
+                                <span id="import-status"></span>
+                            </div>
+                        </div>
+
+                        <div id="import-results" class="border border-border-primary rounded-md bg-app-elevated p-4 text-sm text-txt-secondary">
+                            No imports yet.
                         </div>
                     </div>
                 </details>

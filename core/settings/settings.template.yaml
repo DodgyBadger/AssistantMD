@@ -28,6 +28,32 @@ settings:
     value: "https://emkc.org/api/v2/piston"
     description: "Piston API base URL (public default; override for self-hosted or proxied endpoints)."
     restart_required: false
+  ingestion_pdf_default_strategies:
+    value:
+      - pdf_text
+      - pdf_ocr
+    description: "Default strategy order for PDF ingestion; remove pdf_ocr to disable OCR or reorder as needed."
+    restart_required: false
+  ingestion_pdf_ocr_model:
+    value: "mistral-ocr-latest"
+    description: "Model used for OCR extraction."
+    restart_required: false
+  ingestion_pdf_ocr_endpoint:
+    value: "https://api.mistral.ai/v1/ocr"
+    description: "HTTP endpoint for OCR extraction."
+    restart_required: false
+  ingestion_output_path_pattern:
+    value: "Imported/"
+    description: "Vault-relative folder where ingestion artifacts are written."
+    restart_required: false
+  ingestion_worker_interval_seconds:
+    value: 120
+    description: "How often the ingestion worker runs (seconds)."
+    restart_required: true
+  ingestion_worker_batch_size:
+    value: 5
+    description: "Number of ingestion jobs to process per worker run."
+    restart_required: true
 
 models:
   gemini:
@@ -163,17 +189,10 @@ tools:
     description: "Edit, delete, move/overwrite (use with caution)"
     requires_secrets: []
     user_editable: false
-  tavily_extract:
-    module: core.tools.tavily_extract
-    description: "Extract content from specific URLs"
-    requires_secrets:
-      - TAVILY_API_KEY
-    user_editable: false
-  tavily_crawl:
-    module: core.tools.tavily_crawl
-    description: "Crawl websites for content"
-    requires_secrets:
-      - TAVILY_API_KEY
+  import_url:
+    module: core.tools.import_url
+    description: "Import a single URL into a vault via the ingestion pipeline"
+    requires_secrets: []
     user_editable: false
   documentation_access:
     module: core.tools.documentation_access

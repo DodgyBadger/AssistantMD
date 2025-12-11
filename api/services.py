@@ -5,6 +5,7 @@ Handles business logic for status reporting, vault management, etc.
 
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -19,7 +20,9 @@ from core.settings.store import (
     get_tools_config,
     get_providers_config,
     get_active_settings_path,
+    SETTINGS_TEMPLATE,
 )
+from core.runtime.paths import set_bootstrap_roots, resolve_bootstrap_data_root, resolve_bootstrap_system_root
 from core.settings import (
     validate_settings,
     SettingsError,
@@ -58,7 +61,7 @@ from .models import (
     ConfigurationError as APIConfigurationError,
     ModelInfo,
     ToolInfo,
-    ChatMetadataResponse,
+    MetadataResponse,
     ConfigurationStatusInfo,
     ConfigurationIssueInfo,
     ProviderInfo,
@@ -73,6 +76,12 @@ from .models import (
     SystemSettingsResponse,
 )
 from .exceptions import SystemConfigurationError
+from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
+from core.ingestion.models import SourceKind, JobStatus
+import os
+from core.ingestion.service import IngestionService
+from core.ingestion.registry import importer_registry
+from core.ingestion.jobs import find_job_for_source
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -197,6 +206,96 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
             disabled_workflows=0,
             job_details=[]
         )
+
+
+def scan_import_folder(
+    vault: str,
+    queue_only: bool = False,
+    strategies: list[str] | None = None,
+):
+    """
+    Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
+    """
+    runtime = get_runtime_context()
+    import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
+    legacy_import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
+    import_root.mkdir(parents=True, exist_ok=True)
+
+    ingest_service: IngestionService = runtime.ingestion
+
+    jobs_created = []
+    skipped = []
+    # Registry-backed filter for supported types
+    supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
+
+    search_roots = [import_root]
+    if legacy_import_root.exists():
+        search_roots.append(legacy_import_root)
+
+    for root in search_roots:
+        for item in sorted(root.iterdir()):
+            if item.is_dir():
+                continue
+            suffix = item.suffix.lower()
+            if suffix not in supported_exts:
+                skipped.append(str(item.name))
+                continue
+            existing_job = find_job_for_source(
+                source_uri=item.name,
+                vault=vault,
+                statuses=[
+                    JobStatus.QUEUED.value,
+                    JobStatus.PROCESSING.value,
+                ],
+            )
+            if existing_job:
+                skipped.append(str(item.name))
+                continue
+
+            job = ingest_service.enqueue_job(
+                source_uri=item.name,
+                vault=vault,
+                source_type=SourceKind.FILE.value,
+                mime_hint=None,
+                options={"strategies": strategies} if strategies else {},
+            )
+            jobs_created.append(job)
+
+    # If not queuing, process immediately for fast-path UX
+    if not queue_only and jobs_created:
+        refreshed_jobs = []
+        for job in jobs_created:
+            try:
+                ingest_service.process_job(job.id)
+            except Exception:
+                # process_job updates status/error; continue to next job
+                pass
+            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
+        jobs_created = refreshed_jobs
+
+    return jobs_created, skipped
+
+
+def import_url_direct(vault: str, url: str, clean_html: bool = True):
+    """
+    Synchronously import a single URL and return the job record after processing.
+    """
+    runtime = get_runtime_context()
+    ingest_service: IngestionService = runtime.ingestion
+
+    job = ingest_service.enqueue_job(
+        source_uri=url,
+        vault=vault,
+        source_type=SourceKind.URL.value,
+        mime_hint="text/html",
+        options={"extractor_options": {"clean_html": clean_html}},
+    )
+    try:
+        ingest_service.process_job(job.id)
+    except Exception:
+        # process_job records failure status; propagate via job state
+        pass
+    return ingest_service.get_job(job.id)
 
 
 def collect_system_health() -> SystemInfo:
@@ -479,6 +578,111 @@ async def update_system_settings(new_content: str) -> SystemSettingsResponse:
     reload_configuration()
 
     return _build_settings_response(path)
+
+
+def repair_settings_from_template() -> SystemSettingsResponse:
+    """
+    Merge missing keys from settings.template.yaml into the active settings file.
+
+    - Creates a .bak backup of system/settings.yaml before writing.
+    - Adds missing keys; existing values are preserved.
+    - Prunes removed settings and removed non-user-editable models/providers/tools.
+    """
+    # Ensure bootstrap roots exist for path resolution
+    set_bootstrap_roots(resolve_bootstrap_data_root(), resolve_bootstrap_system_root())
+    active_path = get_active_settings_path()
+    backup_path = active_path.with_suffix(".bak")
+
+    try:
+        template_raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        raise SystemConfigurationError("Template settings file not found.")
+    except yaml.YAMLError as exc:
+        raise SystemConfigurationError(f"Failed to read template settings: {exc}") from exc
+
+    try:
+        active_raw = yaml.safe_load(active_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise SystemConfigurationError(f"Failed to read active settings: {exc}") from exc
+
+    if not isinstance(active_raw, dict):
+        raise SystemConfigurationError("Active settings file is not a valid mapping.")
+    if not isinstance(template_raw, dict):
+        raise SystemConfigurationError("Template settings file is not a valid mapping.")
+
+    # Seed merged copy and ensure sections exist
+    merged = dict(active_raw)
+    for section in ("settings", "models", "providers", "tools"):
+        if merged.get(section) is None or not isinstance(merged.get(section), dict):
+            merged[section] = {}
+
+    template_sections: Dict[str, dict] = {}
+    for section in ("settings", "models", "providers", "tools"):
+        section_val = template_raw.get(section)
+        template_sections[section] = section_val if isinstance(section_val, dict) else {}
+
+    # Add missing keys from template (non-destructive)
+    for section, template_section in template_raw.items():
+        if not isinstance(template_section, dict):
+            continue
+        active_section = merged.get(section)
+        if active_section is None or not isinstance(active_section, dict):
+            active_section = {}
+        for key, value in template_section.items():
+            if key not in active_section:
+                active_section[key] = value
+        merged[section] = active_section
+
+    # Prune removed settings (settings are not user-extensible)
+    settings_template_keys = set(template_sections["settings"].keys())
+    merged["settings"] = {
+        key: val for key, val in merged["settings"].items() if key in settings_template_keys
+    }
+
+    def _is_user_editable(entry: Any, default: bool) -> bool:
+        if isinstance(entry, dict):
+            ue = entry.get("user_editable")
+            if isinstance(ue, bool):
+                return ue
+        return default
+
+    # Prune removed non-editable tools, models, providers while keeping user-editable/custom entries
+    def _prune_section(section_name: str, default_user_editable: bool):
+        template_section = template_sections.get(section_name, {})
+        active_section = merged.get(section_name, {})
+        if not isinstance(active_section, dict):
+            merged[section_name] = {}
+            return
+
+        for key in list(active_section.keys()):
+            if key in template_section:
+                continue
+            entry = active_section.get(key)
+            if _is_user_editable(entry, default_user_editable):
+                continue
+            active_section.pop(key, None)
+
+        merged[section_name] = active_section
+
+    _prune_section("tools", default_user_editable=False)
+    _prune_section("models", default_user_editable=True)
+    _prune_section("providers", default_user_editable=False)
+
+    try:
+        shutil.copyfile(active_path, backup_path)
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to create settings backup: {exc}") from exc
+
+    try:
+        active_path.write_text(
+            yaml.safe_dump(merged, sort_keys=False, allow_unicode=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to write repaired settings: {exc}") from exc
+
+    reload_configuration()
+    return _build_settings_response(active_path)
 
 
 #######################################################################
@@ -888,15 +1092,12 @@ async def execute_workflow_manually(global_id: str, step_name: str = None) -> Di
         raise SystemConfigurationError(error_msg) from e
 
 
-async def get_chat_metadata() -> ChatMetadataResponse:
+async def get_metadata() -> MetadataResponse:
     """
-    Get metadata for chat UI configuration.
-
-    Returns available vaults, models, and tools dynamically from
-    runtime context and settings.yaml.
+    Get metadata for UI configuration (vaults, models, tools).
 
     Returns:
-        ChatMetadataResponse with vaults, models, and tools
+        MetadataResponse with vaults, models, and tools
     """
     # Get vaults from runtime context
     vault_data = _get_workflow_loader().get_vault_info()
@@ -964,7 +1165,7 @@ async def get_chat_metadata() -> ChatMetadataResponse:
             )
         )
 
-    return ChatMetadataResponse(
+    return MetadataResponse(
         vaults=vaults,
         models=models,
         tools=tools

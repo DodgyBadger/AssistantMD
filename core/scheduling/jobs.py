@@ -11,6 +11,10 @@ from core.runtime.state import get_runtime_context
 # Create scheduler job management logger
 logger = UnifiedLogger(tag="scheduler-jobs")
 
+RESERVED_JOB_IDS = {
+    # Non-workflow jobs scheduled elsewhere (e.g., ingestion worker) must be preserved
+    "ingestion-worker",
+}
 
 def create_job_args(global_id: str, data_root: str = None):
     """Create picklable job arguments for workflow execution.
@@ -150,7 +154,11 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
 
                 scheduler_jobs_synced += 1
 
-        all_scheduler_job_ids = {job.id for job in scheduler.get_jobs()}
+        all_scheduler_job_ids = {
+            job.id
+            for job in scheduler.get_jobs()
+            if job.id not in RESERVED_JOB_IDS
+        }
         enabled_job_ids = {
             workflow.scheduler_job_id
             for workflow in enabled_workflows

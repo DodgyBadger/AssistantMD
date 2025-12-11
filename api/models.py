@@ -2,6 +2,8 @@
 Pydantic models for API request and response schemas.
 """
 
+from __future__ import annotations
+
 from typing import List, Dict, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -123,6 +125,7 @@ class VaultRescanResponse(BaseModel):
     enabled_workflows: int = Field(..., description="Number of enabled workflows")
     scheduler_jobs_synced: int = Field(..., description="Number of scheduler jobs synchronized")
     message: str = Field(..., description="Human-readable success message")
+    metadata: Optional["MetadataResponse"] = Field(None, description="Updated metadata after rescan")
 
 
 class ExecuteWorkflowResponse(BaseModel):
@@ -187,8 +190,8 @@ class ProviderInfo(BaseModel):
     )
 
 
-class ChatMetadataResponse(BaseModel):
-    """Response model for chat metadata endpoint."""
+class MetadataResponse(BaseModel):
+    """Unified metadata response for vaults, models, and tools."""
     vaults: List[str] = Field(..., description="Available vault names")
     models: List[ModelInfo] = Field(..., description="Available models")
     tools: List[ToolInfo] = Field(..., description="Available tools")

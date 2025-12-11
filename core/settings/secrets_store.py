@@ -21,7 +21,6 @@ from core.runtime.paths import get_system_root
 
 
 SECRETS_PATH_ENV = "SECRETS_PATH"
-SECRETS_BASE_PATH_ENV = "SECRETS_BASE_PATH"
 SECRETS_TEMPLATE = Path(__file__).parent / "secrets.template.yaml"
 
 
@@ -45,31 +44,18 @@ class SecretEntry:
     is_overlay: bool = False
 
 
-def _resolve_system_root() -> Path:
-    """
-    Determine the active system root, preferring runtime context over defaults.
-
-    Falls back to environment/default constants when a runtime context has not
-    been established (e.g. before bootstrap).
-    """
-    return get_system_root()
-
-
 def _resolve_secrets_path() -> Path:
-    """Determine the active secrets file path."""
+    """
+    Determine the active secrets file path.
+
+    Rules:
+    - Explicit SECRETS_PATH env is authoritative.
+    - Otherwise, use runtime/system root (requires bootstrap or runtime context).
+    """
     override = os.environ.get(SECRETS_PATH_ENV)
     if override:
         return Path(override)
-    return _resolve_system_root() / "secrets.yaml"
-
-
-def _resolve_base_secrets_path() -> Optional[Path]:
-    """Optional base secrets path used for read-only fallbacks."""
-    base_override = os.environ.get(SECRETS_BASE_PATH_ENV)
-    if base_override:
-        return Path(base_override)
-    default_base = _resolve_system_root() / "secrets.yaml"
-    return default_base if default_base.exists() else None
+    return get_system_root() / "secrets.yaml"
 
 
 def _ensure_file(path: Path) -> None:
@@ -129,7 +115,7 @@ def _write_raw(path: Path, data: Dict[str, Optional[str]]) -> None:
 
 def load_secrets(include_empty: bool = False) -> Dict[str, str]:
     """
-    Load all secrets from disk, merging overlay and optional base store.
+    Load all secrets from disk.
 
     Args:
         include_empty: When True, include keys that exist with empty values.
@@ -137,57 +123,20 @@ def load_secrets(include_empty: bool = False) -> Dict[str, str]:
     Returns:
         Dictionary mapping secret names to values.
     """
-    overlay_path = _resolve_secrets_path()
-    overlay = _read_raw(overlay_path, include_empty=include_empty)
-
-    base_path = _resolve_base_secrets_path()
-    base = (
-        _read_raw(base_path, include_empty=include_empty)
-        if base_path and base_path.exists() and base_path != overlay_path
-        else OrderedDict()
-    )
-
-    merged: "OrderedDict[str, Optional[str]]" = OrderedDict()
-    merged.update(base)
-    merged.update(overlay)
-
+    path = _resolve_secrets_path()
+    data = _read_raw(path, include_empty=include_empty)
     if include_empty:
-        return dict(merged)
-
-    return {name: value for name, value in merged.items() if value}
+        return dict(data)
+    return {name: value for name, value in data.items() if value}
 
 
 def list_secret_entries() -> List[SecretEntry]:
     """Return metadata for all stored secrets."""
-    overlay_path = _resolve_secrets_path()
-    overlay = _read_raw(overlay_path, include_empty=True)
-
-    base_path = _resolve_base_secrets_path()
-    if base_path and base_path.exists() and base_path != overlay_path:
-        base = _read_raw(base_path, include_empty=True)
-    else:
-        base = OrderedDict()
-
-    names: List[str] = []
-    seen: set[str] = set()
-
-    for name in overlay.keys():
-        names.append(name)
-        seen.add(name)
-
-    for name in base.keys():
-        if name not in seen:
-            names.append(name)
-            seen.add(name)
-
+    path = _resolve_secrets_path()
+    data = _read_raw(path, include_empty=True)
     entries: List[SecretEntry] = []
-    for name in names:
-        if name in overlay:
-            value = overlay.get(name)
-            entries.append(SecretEntry(name=name, has_value=bool(value), is_overlay=True))
-        else:
-            value = base.get(name)
-            entries.append(SecretEntry(name=name, has_value=bool(value), is_overlay=False))
+    for name, value in data.items():
+        entries.append(SecretEntry(name=name, has_value=bool(value), is_overlay=True))
     return entries
 
 
@@ -196,14 +145,9 @@ def get_secret_value(name: str) -> Optional[str]:
     if not name:
         return None
 
-    overlay_path = _resolve_secrets_path()
-    overlay = _read_raw(overlay_path)
-    value = overlay.get(name)
-    if value is None:
-        base_path = _resolve_base_secrets_path()
-        if base_path and base_path.exists():
-            base = _read_raw(base_path)
-            value = base.get(name)
+    path = _resolve_secrets_path()
+    data = _read_raw(path)
+    value = data.get(name)
     if value is None:
         return None
     stripped = value.strip()

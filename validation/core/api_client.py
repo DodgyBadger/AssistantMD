@@ -7,7 +7,6 @@ that the validation runtime bootstraps.
 """
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -31,9 +30,6 @@ class APIClient:
         # Track interactions for artifact logging
         self.api_calls: list[Dict[str, Any]] = []
         self.cli_commands: list[Dict[str, Any]] = []
-
-        # Ensure API sees test vaults by default
-        os.environ.setdefault("VAULTS_ROOT_PATH", str(self.test_data_root))
 
     # === PUBLIC API ===
 

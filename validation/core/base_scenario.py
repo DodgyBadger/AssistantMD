@@ -128,6 +128,18 @@ class BaseScenario(ABC):
         """
         self._log_timeline(f"Creating file: {file_path}")
         self._get_vault_manager().create_file(vault, file_path, content)
+
+    def make_pdf(self, text: str) -> bytes:
+        """Create a minimal PDF and return its bytes."""
+        try:
+            import fitz  # PyMuPDF
+        except ImportError as exc:
+            raise RuntimeError("PyMuPDF (fitz) is required to generate test PDFs") from exc
+
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+        return doc.tobytes()
     
     # === TIME & SYSTEM CONTROL ===
     

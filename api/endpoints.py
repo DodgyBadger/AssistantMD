@@ -20,7 +20,6 @@ from .models import (
     StatusResponse,
     ChatExecuteRequest,
     ChatExecuteResponse,
-    ChatMetadataResponse,
     ChatSessionTransformRequest,
     ChatSessionTransformResponse,
     SystemLogResponse,
@@ -35,6 +34,7 @@ from .models import (
     SecretUpdateRequest,
     SettingInfo,
     SettingUpdateRequest,
+    MetadataResponse,
 )
 from .exceptions import APIException
 from .utils import create_error_response, generate_session_id
@@ -42,12 +42,13 @@ from .services import (
     rescan_vaults_and_update_scheduler,
     get_system_status,
     execute_workflow_manually,
-    get_chat_metadata,
+    get_metadata,
     compact_conversation_history,
     start_workflow_creation,
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
+    repair_settings_from_template,
     get_general_settings_config,
     update_general_setting_value,
     get_configurable_models,
@@ -59,6 +60,15 @@ from .services import (
     list_secrets,
     update_secret,
     delete_secret_entry,
+    scan_import_folder,
+    import_url_direct,
+)
+from api.import_models import (
+    ImportScanRequest,
+    ImportScanResponse,
+    ImportJobInfo,
+    ImportUrlRequest,
+    ImportUrlResponse,
 )
 
 # Create API router
@@ -168,6 +178,15 @@ async def update_system_settings_endpoint(request: UpdateSettingsRequest):
         return create_error_response(e)
 
 
+@router.post("/system/settings/repair", response_model=SystemSettingsResponse)
+async def repair_system_settings():
+    """Merge missing settings from template into active settings (with backup)."""
+    try:
+        return repair_settings_from_template()
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.get("/system/settings/general", response_model=List[SettingInfo])
 async def list_general_settings():
     """List general (non-secret) settings entries."""
@@ -182,6 +201,55 @@ async def update_general_setting(setting_key: str, request: SettingUpdateRequest
     """Update a general setting value."""
     try:
         return update_general_setting_value(setting_key, request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+#######################################################################
+## Import Endpoints
+#######################################################################
+
+
+@router.post("/import/scan", response_model=ImportScanResponse)
+async def import_scan(request: ImportScanRequest):
+    try:
+        jobs, skipped = scan_import_folder(
+            vault=request.vault,
+            queue_only=request.queue_only,
+            strategies=request.strategies,
+        )
+        job_infos = [
+            ImportJobInfo(
+                id=job.id,
+                source_uri=job.source_uri,
+                vault=job.vault or request.vault,
+                status=job.status,
+                error=job.error,
+                outputs=job.outputs,
+            )
+            for job in jobs
+        ]
+        return ImportScanResponse(jobs_created=job_infos, skipped=skipped)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/import/url", response_model=ImportUrlResponse)
+async def import_url(request: ImportUrlRequest):
+    try:
+        job = import_url_direct(
+            vault=request.vault,
+            url=request.url,
+            clean_html=request.clean_html,
+        )
+        return ImportUrlResponse(
+            id=job.id,
+            source_uri=job.source_uri,
+            vault=job.vault or request.vault,
+            status=job.status,
+            error=job.error,
+            outputs=job.outputs,
+        )
     except Exception as e:
         return create_error_response(e)
 
@@ -293,18 +361,17 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
 
         # Perform the rescan operation
         results = await rescan_vaults_and_update_scheduler(scheduler)
-        
-        # Format the response
-        response = VaultRescanResponse(
+        metadata = await get_metadata()
+
+        return VaultRescanResponse(
             success=True,
             vaults_discovered=results['vaults_discovered'],
             workflows_loaded=results['workflows_loaded'],
             enabled_workflows=results['enabled_workflows'],
             scheduler_jobs_synced=results['scheduler_jobs_synced'],
-            message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_workflows']} enabled workflows, {results['scheduler_jobs_synced']} jobs synced"
+            message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_workflows']} enabled workflows, {results['scheduler_jobs_synced']} jobs synced",
+            metadata=metadata,
         )
-        
-        return response
         
     except Exception as e:
         return create_error_response(e)
@@ -405,16 +472,13 @@ async def chat_execute(request: ChatExecuteRequest):
         return create_error_response(e)
 
 
-@router.get("/chat/metadata", response_model=ChatMetadataResponse)
-async def chat_metadata():
+@router.get("/metadata", response_model=MetadataResponse)
+async def metadata():
     """
-    Get metadata for chat UI configuration.
-
-    Returns available vaults, models, and tools dynamically loaded
-    from runtime context and settings.yaml.
+    Get metadata for UI (vaults, models, tools).
     """
     try:
-        return await get_chat_metadata()
+        return await get_metadata()
     except Exception as e:
         return create_error_response(e)
 

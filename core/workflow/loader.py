@@ -13,7 +13,7 @@ from datetime import datetime
 
 from .parser import parse_workflow_file, validate_config
 from .definition import WorkflowDefinition
-from core.constants import VAULT_IGNORE_FILE, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR
+from core.constants import VAULT_IGNORE_FILE, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR, IMPORT_DIR
 from core.runtime.paths import get_data_root
 from core.scheduling.parser import parse_schedule_syntax
 from core.scheduling.triggers import create_schedule_trigger
@@ -66,9 +66,11 @@ def discover_vaults(data_root: str = None) -> List[str]:
 def discover_workflow_files(vault_path: str) -> List[str]:
     """Return list of workflow file paths in AssistantMD/Workflows (one level deep)."""
     workflows_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR)
+    import_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, IMPORT_DIR)
 
     # Ensure the AssistantMD/Workflows directory exists so new vaults are ready for workflow files
     os.makedirs(workflows_dir, exist_ok=True)
+    os.makedirs(import_dir, exist_ok=True)
 
     workflow_files = []
 

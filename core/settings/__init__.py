@@ -7,8 +7,9 @@ helpers to diagnose missing configuration required for runtime features.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +17,7 @@ from core.settings.store import (
     ModelConfig,
     ProviderConfig,
     ToolConfig,
+    SETTINGS_TEMPLATE,
     get_general_settings,
     get_models_config,
     get_providers_config,
@@ -149,6 +151,7 @@ def validate_settings(
     """
     active_settings = settings or get_app_settings()
     status = ConfigurationStatus()
+    template_sections = _load_template_sections()
 
     if not active_settings.has_any_llm_key():
         status.add_issue(
@@ -200,6 +203,57 @@ def validate_settings(
                     severity="warning",
                 )
 
+    _add_missing_template_issues(
+        status,
+        template_sections=template_sections,
+        active_sections={
+            "settings": set((get_general_settings() or {}).keys()),
+            "models": set(models.keys()),
+            "providers": set(providers.keys()),
+            "tools": set(tools.keys()),
+        },
+    )
+
+    def _is_user_editable(entry: Any, default: bool) -> bool:
+        """Best-effort user_editable check for typed/dict entries."""
+        if hasattr(entry, "user_editable"):
+            try:
+                return bool(entry.user_editable)
+            except Exception:
+                return default
+        if isinstance(entry, dict):
+            val = entry.get("user_editable")
+            if isinstance(val, bool):
+                return val
+        return default
+
+    # Settings are not user-extensible; flag extras
+    settings_template_keys = template_sections.get("settings", set())
+    settings_extra = set((get_general_settings() or {}).keys()) - settings_template_keys
+    if settings_extra:
+        status.add_issue(
+            name="settings:extra",
+            message=f"Unknown settings present: {', '.join(sorted(settings_extra))}",
+            severity="warning",
+        )
+
+    def _warn_extras(section_name: str, items: Dict[str, Any], default_user_editable: bool):
+        template_keys = template_sections.get(section_name, set())
+        for key, entry in items.items():
+            if key in template_keys:
+                continue
+            if _is_user_editable(entry, default_user_editable):
+                continue
+            status.add_issue(
+                name=f"{section_name}:extra",
+                message=f"Unknown {section_name.rstrip('s')} '{key}' present; run settings repair to clean up.",
+                severity="warning",
+            )
+
+    _warn_extras("tools", tools, default_user_editable=False)
+    _warn_extras("models", models, default_user_editable=True)
+    _warn_extras("providers", providers, default_user_editable=False)
+
     return status
 
 
@@ -212,6 +266,40 @@ def get_configuration_status() -> ConfigurationStatus:
 def refresh_configuration_status_cache() -> None:
     """Clear cached configuration status."""
     get_configuration_status.cache_clear()  # type: ignore[attr-defined]
+
+
+def _load_template_sections() -> Dict[str, set]:
+    """Load template keys for each section to detect missing entries."""
+    try:
+        raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        return {}
+    sections: Dict[str, set] = {}
+    for section in ("settings", "models", "providers", "tools"):
+        section_data = raw.get(section)
+        if isinstance(section_data, dict):
+            sections[section] = set(section_data.keys())
+    return sections
+
+
+def _add_missing_template_issues(
+    status: ConfigurationStatus,
+    template_sections: Dict[str, set],
+    active_sections: Dict[str, set],
+) -> None:
+    """
+    Add warning issues for keys missing in active settings compared to the template.
+    """
+    for section, template_keys in template_sections.items():
+        if not template_keys:
+            continue
+        missing = template_keys - active_sections.get(section, set())
+        if missing:
+            status.add_issue(
+                name=f"{section}:missing",
+                message=f"Settings missing from template: {', '.join(sorted(missing))}",
+                severity="warning",
+            )
 
 
 def get_default_api_timeout() -> float:

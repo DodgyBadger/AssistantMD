@@ -15,6 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.workflow.loader import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
+from core.ingestion.service import IngestionService
 from .config import RuntimeConfig
 
 
@@ -33,12 +34,14 @@ class RuntimeContext:
         workflow_loader: Workflow configuration loader
         logger: Unified logger for runtime operations
         last_config_reload: Timestamp of most recent configuration reload (if any)
+        ingestion: IngestionService
     """
 
     config: RuntimeConfig
     scheduler: AsyncIOScheduler
     workflow_loader: WorkflowLoader
     logger: UnifiedLogger
+    ingestion: IngestionService
     last_config_reload: Optional[datetime] = None
 
     async def start(self):

@@ -109,3 +109,8 @@ python validation/run_validation.py run --pattern planner
 
 The CLI prints pass/fail summaries, points you to the evidence directory, and
 reminds you to review `validation/issues_log.md` when something breaks.
+
+## Bootstrap Note
+
+- Path helpers require either bootstrap roots or a runtime context. The validation CLI seeds bootstrap roots before importing path-dependent modules so scenarios run in isolation without env hacks.
+- If you write custom validation utilities or ad-hoc scripts, set bootstrap roots early (for example, `set_bootstrap_roots(test_data_root, run_path / "system")`) or start a runtime context before importing modules that resolve settings/paths.
