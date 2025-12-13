@@ -74,6 +74,7 @@ from .models import (
     SettingUpdateRequest,
     SystemLogResponse,
     SystemSettingsResponse,
+    TemplateInfo,
 )
 from .exceptions import SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
@@ -82,6 +83,7 @@ import os
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
+from core.context.templates import list_templates
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -96,10 +98,39 @@ def _get_workflow_loader():
     return runtime.workflow_loader
 
 
+def _get_vault_path(vault_name: str) -> str:
+    """Return vault path from loader cache."""
+    vault_info = _get_workflow_loader().get_vault_info()
+    if vault_name not in vault_info:
+        raise ValueError(f"Vault '{vault_name}' not found")
+    return vault_info[vault_name].get("path")
+
+
 def set_system_startup_time(startup_time: datetime):
     """Set the system startup time for status reporting."""
     global _system_startup_time
     _system_startup_time = startup_time
+
+
+def list_context_templates(vault_name: str) -> List[TemplateInfo]:
+    """List available context templates for a given vault."""
+    vault_path: Optional[str] = None
+    try:
+        vault_path = _get_vault_path(vault_name)
+    except Exception as exc:
+        logger.warning(f"Vault path lookup failed for '{vault_name}', falling back to system templates only: {exc}")
+
+    templates = list_templates(Path(vault_path) if vault_path else None)
+    results: List[TemplateInfo] = []
+    for tmpl in templates:
+        results.append(
+            TemplateInfo(
+                name=tmpl.name,
+                source=tmpl.source,
+                path=str(tmpl.path) if tmpl.path else None,
+            )
+        )
+    return results
 
 
 async def collect_vault_status() -> List[VaultInfo]:

@@ -21,6 +21,7 @@ CHAT_SESSIONS_DIR = "Chat_Sessions"
 WORKFLOW_LOGS_DIR = "Logs"
 IMPORT_DIR = "Import"
 IMPORT_ATTACHMENTS_DIR = "_attachments"
+CONTEXT_TEMPLATE_DIR = "ContextTemplates"
 
 # Assistant timeout validation bounds
 TIMEOUT_MIN = 30        # Minimum timeout in seconds

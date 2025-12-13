@@ -31,7 +31,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Area | Responsibility | Stable modules/directories |
 | --- | --- | --- |
 | API | REST endpoints, exception wiring, web UI hosting | `api/`, `main.py` |
-| Chat UI | Static single-page app that drives chat sessions through API endpoints | `static/`, `api/endpoints.py`, `core/llm/chat_executor.py` |
+| Chat UI | Static single-page app that drives chat sessions through API endpoints | `static/`, `api/endpoints.py`, `core/llm/chat_executor.py`. Simple HTML and vanilla JS. |
 | Runtime | Configuration, bootstrap, global context, scheduler lifecycle, configuration reload service, path helpers | `core/runtime/`, `core/runtime/reload_service.py`, `core/runtime/paths.py`, `core/constants.py` |
 | Workflow Loader | Vault discovery, workflow parsing, trigger preparation | `core/workflow/` |
 | Scheduler | Job syncing, picklable job args, trigger comparison | `core/scheduling/` |

@@ -35,6 +35,7 @@ from .models import (
     SettingInfo,
     SettingUpdateRequest,
     MetadataResponse,
+    TemplateInfo,
 )
 from .exceptions import APIException
 from .utils import create_error_response, generate_session_id
@@ -43,6 +44,7 @@ from .services import (
     get_system_status,
     execute_workflow_manually,
     get_metadata,
+    list_context_templates,
     compact_conversation_history,
     start_workflow_creation,
     get_system_activity_log,
@@ -432,7 +434,8 @@ async def chat_execute(request: ChatExecuteRequest):
                 use_conversation_history=request.use_conversation_history,
                 session_manager=session_manager,
                 instructions=request.instructions,
-                session_type=request.session_type
+                session_type=request.session_type,
+                context_template=request.context_template
             )
 
             return StreamingResponse(
@@ -460,7 +463,8 @@ async def chat_execute(request: ChatExecuteRequest):
                 use_conversation_history=request.use_conversation_history,
                 session_manager=session_manager,
                 instructions=request.instructions,
-                session_type=request.session_type
+                session_type=request.session_type,
+                context_template=request.context_template
             )
 
             return ChatExecuteResponse(
@@ -479,6 +483,17 @@ async def metadata():
     """
     try:
         return await get_metadata()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/context/templates", response_model=List[TemplateInfo])
+async def context_templates(vault_name: str):
+    """
+    List available context templates for a vault (vault + system sources).
+    """
+    try:
+        return list_context_templates(vault_name)
     except Exception as e:
         return create_error_response(e)
 

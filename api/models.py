@@ -38,7 +38,8 @@ class ChatExecuteRequest(BaseModel):
     model: str = Field(..., description="Model name to use")
     use_conversation_history: bool = Field(True, description="Whether to maintain conversation state")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
-    session_type: str = Field("regular", description="Chat mode: 'regular' or 'workflow_creation'")
+    session_type: str = Field("regular", description="Chat mode: 'regular', 'workflow_creation', or 'endless'")
+    context_template: Optional[str] = Field(None, description="Optional context compiler template name")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 
@@ -195,6 +196,13 @@ class MetadataResponse(BaseModel):
     vaults: List[str] = Field(..., description="Available vault names")
     models: List[ModelInfo] = Field(..., description="Available models")
     tools: List[ToolInfo] = Field(..., description="Available tools")
+
+
+class TemplateInfo(BaseModel):
+    """Context template metadata for UI selection."""
+    name: str = Field(..., description="Template filename")
+    source: str = Field(..., description="Template source: vault or system")
+    path: Optional[str] = Field(None, description="Full path to template, if available")
 
 
 class ModelConfigRequest(BaseModel):

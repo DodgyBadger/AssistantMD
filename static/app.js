@@ -37,6 +37,7 @@ const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
     modeSelector: document.getElementById('mode-selector'),
+    templateSelector: document.getElementById('template-selector'),
     toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
@@ -268,6 +269,10 @@ function populateSelectors() {
     chatElements.vaultSelector.innerHTML = '<option value="">Select vault...</option>';
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
     chatElements.toolsCheckboxes.innerHTML = '';
+    if (chatElements.templateSelector) {
+        chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
+        chatElements.templateSelector.disabled = true;
+    }
 
     state.metadata.vaults.forEach(vault => {
         const option = document.createElement('option');
@@ -298,6 +303,11 @@ function populateSelectors() {
         chatElements.modelSelector.value = envDefaultModel;
     } else if (firstAvailableModel) {
         chatElements.modelSelector.value = firstAvailableModel;
+    }
+
+    // Trigger template fetch if a vault is already selected (e.g., persisted UI state in future)
+    if (chatElements.vaultSelector && chatElements.vaultSelector.value) {
+        fetchTemplates(chatElements.vaultSelector.value);
     }
 
     const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
@@ -567,10 +577,56 @@ function setupEventListeners() {
     if (chatElements.modeSelector) {
         chatElements.modeSelector.addEventListener('change', handleModeChange);
     }
+
+    if (chatElements.vaultSelector) {
+        chatElements.vaultSelector.addEventListener('change', handleVaultChange);
+    }
 }
 
 function handleModeChange() {
     applyModeToolPreferences();
+}
+
+function handleVaultChange() {
+    const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
+    populateTemplates([]); // reset while loading
+    if (vault) {
+        fetchTemplates(vault);
+    }
+}
+
+function populateTemplates(templates) {
+    if (!chatElements.templateSelector) return;
+    chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
+    if (!templates || templates.length === 0) {
+        chatElements.templateSelector.disabled = true;
+        return;
+    }
+    templates.forEach((tmpl) => {
+        const option = document.createElement('option');
+        option.value = tmpl.name;
+        option.textContent = `${tmpl.name} (${tmpl.source})`;
+        chatElements.templateSelector.appendChild(option);
+    });
+    chatElements.templateSelector.disabled = false;
+}
+
+async function fetchTemplates(vault) {
+    if (!vault) {
+        populateTemplates([]);
+        return;
+    }
+    try {
+        const response = await fetch(`api/context/templates?vault_name=${encodeURIComponent(vault)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch templates');
+        }
+        const templates = await response.json();
+        populateTemplates(templates);
+    } catch (error) {
+        console.error('Error fetching templates:', error);
+        populateTemplates([]);
+    }
 }
 
 function applyModeToolPreferences() {
@@ -615,6 +671,7 @@ async function sendMessage() {
         model: model,
         use_conversation_history: true,
         session_type: chatElements.modeSelector.value,
+        context_template: chatElements.templateSelector ? chatElements.templateSelector.value || null : null,
         instructions: null,
         stream: true
     };

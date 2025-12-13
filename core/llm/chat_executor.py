@@ -27,6 +27,10 @@ from core.constants import (
 )
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
+from core.context.templates import load_template
+from core.context.compiler import compile_context, CompileInput, COMPILER_SYSTEM_NOTE
+from core.context.store import add_context_summary, upsert_session, get_latest_summary
+from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 
 
@@ -82,6 +86,7 @@ class ChatExecutionResult:
     response: str
     session_id: str
     message_count: int
+    compiled_context_path: Optional[str] = None
     history_file: Optional[str] = None  # Path to saved chat history file
 
 
@@ -109,6 +114,23 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
         f.write(f"**Assistant:**\n {response}\n\n")
 
     return str(history_file)
+
+
+def _get_compiler_settings():
+    """Fetch compiler-related settings with safe fallbacks."""
+    settings = get_general_settings()
+
+    def _get_int(key: str, default: int) -> int:
+        try:
+            return int(settings.get(key).value)
+        except Exception:
+            return default
+
+    return {
+        "recent_turns": _get_int("context_compiler_recent_turns", 3),
+        "recent_tool_results": _get_int("context_compiler_recent_tool_results", 3),
+        "max_tokens": _get_int("context_compiler_max_tokens", 4000),
+    }
 
 
 def _prepare_agent_config(
@@ -168,7 +190,9 @@ async def execute_chat_prompt(
     use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
-    session_type: str = "regular"
+    session_type: str = "regular",
+    context_template: Optional[str] = None,
+    turn_index: Optional[int] = None,
 ) -> ChatExecutionResult:
     """
     Execute chat prompt with user-selected tools and model.
@@ -193,6 +217,75 @@ async def execute_chat_prompt(
         vault_name, vault_path, tools, model, instructions, session_type
     )
 
+    # Endless mode: compile context instead of using full history
+    compiled_summary = None
+    compiled_prompt_text = None
+    input_payload = None
+
+    if session_type == "endless":
+        settings = _get_compiler_settings()
+        template = load_template(context_template, Path(vault_path))
+
+        # Try to reuse prior compiled summary to seed state
+        prior_summary = get_latest_summary(session_id, vault_name)
+
+        history_messages: Optional[List[ModelMessage]] = None
+        if use_conversation_history:
+            history_messages = session_manager.get_history(session_id, vault_name) or []
+        else:
+            history_messages = []
+
+        # Last N turns to pass into compiler (and agent)
+        take_turns = settings["recent_turns"]
+        recent_turns_payload: List[Dict[str, Any]] = []
+        if history_messages:
+            for msg in history_messages[-take_turns:]:
+                speaker = getattr(msg, "role", None) or getattr(msg, "name", None) or "assistant"
+                text = getattr(msg, "content", "") or ""
+                if text:
+                    recent_turns_payload.append({"speaker": speaker, "text": text})
+
+        # Collect recent tool results from history if available
+        recent_tool_results: List[Dict[str, Any]] = []
+        if history_messages:
+            for msg in reversed(history_messages):
+                tool_name = getattr(msg, "tool_name", None)
+                tool_result = getattr(msg, "content", None)
+                if tool_name and tool_result:
+                    recent_tool_results.append({"tool": tool_name, "result": tool_result})
+                    if len(recent_tool_results) >= settings["recent_tool_results"]:
+                        break
+            recent_tool_results.reverse()
+
+        input_payload = {
+            "topic": prior_summary.get("topic") if isinstance(prior_summary, dict) else None,
+            "constraints": prior_summary.get("constraints") if isinstance(prior_summary, dict) else [],
+            "plan": prior_summary.get("plan") if isinstance(prior_summary, dict) else None,
+            "recent_turns": recent_turns_payload,
+            "tool_results": recent_tool_results,
+            "reflections": prior_summary.get("reflections") if isinstance(prior_summary, dict) else [],
+            "latest_input": prompt,
+        }
+
+        compile_input = CompileInput(
+            model_alias=model,
+            template=template,
+            topic=input_payload["topic"],
+            constraints=input_payload["constraints"],
+            plan=input_payload["plan"],
+            recent_turns=input_payload["recent_turns"],
+            tool_results=input_payload["tool_results"],
+            reflections=input_payload["reflections"],
+            latest_input=input_payload["latest_input"],
+        )
+
+        try:
+            compiler_instructions = COMPILER_SYSTEM_NOTE.format(recent_turns=settings["recent_turns"]) + "\n\n" + template.content
+            compiled_summary = await compile_context(compile_input, instructions_override=compiler_instructions)
+            compiled_prompt_text = compiled_summary.raw_output
+        except Exception as exc:
+            logger.warning(f"Context compiler failed for session {session_id}: {exc}")
+
     # Create agent with user-selected configuration
     agent = await create_agent(
         instructions=final_instructions,
@@ -200,26 +293,55 @@ async def execute_chat_prompt(
         tools=tool_functions if tool_functions else None
     )
 
-    # Get message history if conversation mode enabled
+    # Get message history (always tracked now)
     message_history: Optional[List[ModelMessage]] = None
-    if use_conversation_history:
+    if session_type == "endless":
+        history_messages = session_manager.get_history(session_id, vault_name) or []
+        take = _get_compiler_settings()["recent_turns"]
+        message_history = history_messages[-take:] if take > 0 else []
+    else:
         message_history = session_manager.get_history(session_id, vault_name)
 
-    # Run agent with message history
-    result = await agent.run(prompt, message_history=message_history)
+    # Run agent with compiled prompt (endless) or direct prompt
+    effective_prompt = prompt
+    if session_type == "endless" and compiled_prompt_text:
+        effective_prompt = f"Context summary:\n{compiled_prompt_text}\n\nUser input:\n{prompt}"
 
-    # Store new messages in session for next turn if conversation mode enabled
-    if use_conversation_history:
-        session_manager.add_messages(session_id, vault_name, result.new_messages())
+    result = await agent.run(effective_prompt, message_history=message_history)
+
+    # Store new messages in session for next turn
+    session_manager.add_messages(session_id, vault_name, result.new_messages())
 
     # Save chat history to markdown file
     history_file = save_chat_history(vault_path, session_id, prompt, result.output)
+
+    # Persist compiled context summary if used
+    compiled_context_path = None
+    if compiled_summary:
+        upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
+        try:
+            add_context_summary(
+                session_id=session_id,
+                vault_name=vault_name,
+                turn_index=turn_index,
+                template=template if 'template' in locals() else load_template(context_template, Path(vault_path)),
+                model_alias=model,
+                summary_json=compiled_summary.parsed_json,
+                raw_output=compiled_summary.raw_output,
+                budget_used=None,
+                sections_included=None,
+                compiled_prompt=compiled_prompt_text,
+                input_payload=input_payload,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Failed to persist compiled context for session {session_id}: {exc}")
 
     return ChatExecutionResult(
         response=result.output,
         session_id=session_id,
         message_count=len(result.all_messages()),
-        history_file=history_file
+        history_file=history_file,
+        compiled_context_path=compiled_context_path,
     )
 
 
@@ -233,7 +355,9 @@ async def execute_chat_prompt_stream(
     use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
-    session_type: str = "regular"
+    session_type: str = "regular",
+    context_template: Optional[str] = None,
+    turn_index: Optional[int] = None,
 ) -> AsyncIterator[str]:
     """
     Execute chat prompt with streaming response.
@@ -260,6 +384,79 @@ async def execute_chat_prompt_stream(
         vault_name, vault_path, tools, model, instructions, session_type
     )
 
+    # Endless mode: compile context instead of using full history
+    compiled_summary = None
+    compiled_prompt_text = None
+    input_payload = None
+
+    if session_type == "endless":
+        settings = _get_compiler_settings()
+        template = load_template(context_template, Path(vault_path))
+
+        history_messages: Optional[List[ModelMessage]] = None
+        if use_conversation_history:
+            history_messages = session_manager.get_history(session_id, vault_name) or []
+        else:
+            history_messages = []
+
+        take_turns = settings["recent_turns"]
+        recent_turns_payload: List[Dict[str, Any]] = []
+        if history_messages:
+            for msg in history_messages[-take_turns:]:
+                speaker = getattr(msg, "role", None) or getattr(msg, "name", None) or "assistant"
+                text = getattr(msg, "content", "") or ""
+                if text:
+                    recent_turns_payload.append({"speaker": speaker, "text": text})
+
+        prior_summary = get_latest_summary(session_id, vault_name)
+
+        tool_results: List[Dict[str, Any]] = []
+        if isinstance(prior_summary, dict):
+            prior_tools = prior_summary.get("tool_results")
+            if isinstance(prior_tools, list):
+                tool_results.extend(prior_tools)
+
+        if history_messages:
+            for msg in reversed(history_messages):
+                tool_name = getattr(msg, "tool_name", None)
+                tool_result = getattr(msg, "content", None)
+                if tool_name and tool_result:
+                    tool_results.append({"tool": tool_name, "result": tool_result})
+                    if len(tool_results) >= settings["recent_tool_results"]:
+                        break
+            tool_results.reverse()
+        if settings["recent_tool_results"] > 0 and len(tool_results) > settings["recent_tool_results"]:
+            tool_results = tool_results[-settings["recent_tool_results"] :]
+
+        input_payload = {
+            "topic": prior_summary.get("topic") if isinstance(prior_summary, dict) else None,
+            "constraints": prior_summary.get("constraints") if isinstance(prior_summary, dict) else [],
+            "plan": prior_summary.get("plan") if isinstance(prior_summary, dict) else None,
+            "recent_turns": recent_turns_payload,
+            "tool_results": tool_results,
+            "reflections": prior_summary.get("reflections") if isinstance(prior_summary, dict) else [],
+            "latest_input": prompt,
+        }
+
+        compile_input = CompileInput(
+            model_alias=model,
+            template=template,
+            topic=input_payload["topic"],
+            constraints=input_payload["constraints"],
+            plan=input_payload["plan"],
+            recent_turns=input_payload["recent_turns"],
+            tool_results=input_payload["tool_results"],
+            reflections=input_payload["reflections"],
+            latest_input=input_payload["latest_input"],
+        )
+
+        try:
+            compiler_instructions = COMPILER_SYSTEM_NOTE.format(recent_turns=settings["recent_turns"]) + "\n\n" + template.content
+            compiled_summary = await compile_context(compile_input, instructions_override=compiler_instructions)
+            compiled_prompt_text = compiled_summary.raw_output
+        except Exception as exc:
+            logger.warning(f"Context compiler failed for session {session_id}: {exc}")
+
     # Create agent with user-selected configuration
     agent = await create_agent(
         instructions=final_instructions,
@@ -267,9 +464,13 @@ async def execute_chat_prompt_stream(
         tools=tool_functions if tool_functions else None
     )
 
-    # Get message history if conversation mode enabled
+    # Get message history
     message_history: Optional[List[ModelMessage]] = None
-    if use_conversation_history:
+    if session_type == "endless":
+        history_messages = session_manager.get_history(session_id, vault_name) or []
+        take = _get_compiler_settings()["recent_turns"]
+        message_history = history_messages[-take:] if take > 0 else []
+    else:
         message_history = session_manager.get_history(session_id, vault_name)
 
     # Stream response and capture final result for history storage
@@ -280,7 +481,10 @@ async def execute_chat_prompt_stream(
     try:
         # Use run_stream_events() to properly handle tool calls
         # This runs the agent graph to completion and streams all events
-        async for event in agent.run_stream_events(prompt, message_history=message_history):
+        effective_prompt = prompt
+        if session_type == "endless" and compiled_prompt_text:
+            effective_prompt = f"Context summary:\n{compiled_prompt_text}\n\nUser input:\n{prompt}"
+        async for event in agent.run_stream_events(effective_prompt, message_history=message_history):
             if isinstance(event, PartStartEvent):
                 # Initial text part - send as first chunk
                 if hasattr(event.part, 'content') and event.part.content:
@@ -390,10 +594,30 @@ async def execute_chat_prompt_stream(
         yield f"data: {json.dumps(error_chunk)}\n\n"
         raise
 
-    # Store new messages in session if conversation mode enabled
-    if use_conversation_history and final_result:
+    # Store new messages in session
+    if final_result:
         session_manager.add_messages(session_id, vault_name, final_result.new_messages())
 
     # Save chat history to markdown file
     if final_result:
         save_chat_history(vault_path, session_id, prompt, full_response)
+
+    # Persist compiled context summary if used
+    if compiled_summary:
+        upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
+        try:
+            add_context_summary(
+                session_id=session_id,
+                vault_name=vault_name,
+                turn_index=turn_index,
+                template=template if 'template' in locals() else load_template(context_template, Path(vault_path)),
+                model_alias=model,
+                summary_json=compiled_summary.parsed_json,
+                raw_output=compiled_summary.raw_output,
+                budget_used=None,
+                sections_included=None,
+                compiled_prompt=compiled_prompt_text,
+                input_payload=input_payload,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Failed to persist compiled context for session {session_id}: {exc}")

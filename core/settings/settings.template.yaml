@@ -54,6 +54,18 @@ settings:
     value: 5
     description: "Number of ingestion jobs to process per worker run."
     restart_required: true
+  context_compiler_recent_turns:
+    value: 3
+    description: "Number of recent chat turns to feed into the context compiler."
+    restart_required: false
+  context_compiler_recent_tool_results:
+    value: 3
+    description: "Number of recent tool results to feed into the context compiler."
+    restart_required: false
+  context_compiler_max_tokens:
+    value: 4000
+    description: "Target token budget for the compiled working view; beyond this, apply drop/truncation rules."
+    restart_required: false
 
 models:
   gemini:
