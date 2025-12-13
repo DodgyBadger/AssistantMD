@@ -669,7 +669,6 @@ async function sendMessage() {
         prompt: message,
         tools: selectedTools,
         model: model,
-        use_conversation_history: true,
         session_type: chatElements.modeSelector.value,
         context_template: chatElements.templateSelector ? chatElements.templateSelector.value || null : null,
         instructions: null,

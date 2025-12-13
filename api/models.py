@@ -36,7 +36,6 @@ class ChatExecuteRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")
-    use_conversation_history: bool = Field(True, description="Whether to maintain conversation state")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
     session_type: str = Field("regular", description="Chat mode: 'regular', 'workflow_creation', or 'endless'")
     context_template: Optional[str] = Field(None, description="Optional context compiler template name")

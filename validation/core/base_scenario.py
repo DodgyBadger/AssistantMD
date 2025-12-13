@@ -207,13 +207,11 @@ class BaseScenario(ABC):
         session_id: str,
         tools: Optional[Sequence[str]] = None,
         model: str = "test",
-        use_conversation_history: bool = True,
         instructions: Optional[str] = None,
     ) -> "ValidationChatResult":
         """Execute chat prompt via core executor within validation harness."""
-        history_state = "on" if use_conversation_history else "off"
         self._log_timeline(
-            f"Running chat prompt (session={session_id}, history={history_state})"
+            f"Running chat prompt (session={session_id}, history=on)"
         )
 
         chat_service = self._get_chat_service()
@@ -224,7 +222,6 @@ class BaseScenario(ABC):
             session_id=session_id,
             tools=list(tools) if tools else [],
             model=model,
-            use_conversation_history=use_conversation_history,
             instructions=instructions,
         )
 

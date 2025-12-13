@@ -8,7 +8,7 @@ Persists chat history to markdown files for auditability and testing.
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, AsyncIterator, Any
+from typing import List, Optional, AsyncIterator, Any, Dict
 from pathlib import Path
 
 from pydantic_ai.messages import ModelMessage
@@ -187,7 +187,6 @@ async def execute_chat_prompt(
     session_id: str,
     tools: List[str],
     model: str,
-    use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
     session_type: str = "regular",
@@ -204,7 +203,6 @@ async def execute_chat_prompt(
         session_id: Session identifier for conversation tracking
         tools: List of tool names selected by user
         model: Model name selected by user
-        use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults based on session_type)
         session_type: Chat mode ("regular" or "workflow_creation")
@@ -229,39 +227,37 @@ async def execute_chat_prompt(
         # Try to reuse prior compiled summary to seed state
         prior_summary = get_latest_summary(session_id, vault_name)
 
-        history_messages: Optional[List[ModelMessage]] = None
-        if use_conversation_history:
-            history_messages = session_manager.get_history(session_id, vault_name) or []
-        else:
-            history_messages = []
+        history_messages: List[ModelMessage] = session_manager.get_history(session_id, vault_name) or []
 
         # Last N turns to pass into compiler (and agent)
         take_turns = settings["recent_turns"]
-        recent_turns_payload: List[Dict[str, Any]] = []
-        if history_messages:
-            for msg in history_messages[-take_turns:]:
-                speaker = getattr(msg, "role", None) or getattr(msg, "name", None) or "assistant"
-                text = getattr(msg, "content", "") or ""
-                if text:
-                    recent_turns_payload.append({"speaker": speaker, "text": text})
+        recent_history = session_manager.get_recent_matching(
+            session_id,
+            vault_name,
+            take_turns,
+            lambda m: not getattr(m, "tool_name", None),
+        )
 
         # Collect recent tool results from history if available
         recent_tool_results: List[Dict[str, Any]] = []
-        if history_messages:
-            for msg in reversed(history_messages):
-                tool_name = getattr(msg, "tool_name", None)
-                tool_result = getattr(msg, "content", None)
-                if tool_name and tool_result:
-                    recent_tool_results.append({"tool": tool_name, "result": tool_result})
-                    if len(recent_tool_results) >= settings["recent_tool_results"]:
-                        break
-            recent_tool_results.reverse()
+        tool_messages = session_manager.get_recent_matching(
+            session_id,
+            vault_name,
+            settings["recent_tool_results"],
+            lambda m: bool(getattr(m, "tool_name", None)),
+        )
+        for msg in tool_messages:
+            recent_tool_results.append(
+                {
+                    "tool": getattr(msg, "tool_name", None),
+                    "result": getattr(msg, "content", None),
+                }
+            )
 
         input_payload = {
             "topic": prior_summary.get("topic") if isinstance(prior_summary, dict) else None,
             "constraints": prior_summary.get("constraints") if isinstance(prior_summary, dict) else [],
             "plan": prior_summary.get("plan") if isinstance(prior_summary, dict) else None,
-            "recent_turns": recent_turns_payload,
             "tool_results": recent_tool_results,
             "reflections": prior_summary.get("reflections") if isinstance(prior_summary, dict) else [],
             "latest_input": prompt,
@@ -270,17 +266,12 @@ async def execute_chat_prompt(
         compile_input = CompileInput(
             model_alias=model,
             template=template,
-            topic=input_payload["topic"],
-            constraints=input_payload["constraints"],
-            plan=input_payload["plan"],
-            recent_turns=input_payload["recent_turns"],
-            tool_results=input_payload["tool_results"],
-            reflections=input_payload["reflections"],
-            latest_input=input_payload["latest_input"],
+            context_payload=input_payload,
+            message_history=recent_history,
         )
 
         try:
-            compiler_instructions = COMPILER_SYSTEM_NOTE.format(recent_turns=settings["recent_turns"]) + "\n\n" + template.content
+            compiler_instructions = COMPILER_SYSTEM_NOTE + "\n\n" + template.content
             compiled_summary = await compile_context(compile_input, instructions_override=compiler_instructions)
             compiled_prompt_text = compiled_summary.raw_output
         except Exception as exc:
@@ -296,9 +287,13 @@ async def execute_chat_prompt(
     # Get message history (always tracked now)
     message_history: Optional[List[ModelMessage]] = None
     if session_type == "endless":
-        history_messages = session_manager.get_history(session_id, vault_name) or []
         take = _get_compiler_settings()["recent_turns"]
-        message_history = history_messages[-take:] if take > 0 else []
+        message_history = session_manager.get_recent_matching(
+            session_id,
+            vault_name,
+            take,
+            lambda m: not getattr(m, "tool_name", None),
+        )
     else:
         message_history = session_manager.get_history(session_id, vault_name)
 
@@ -352,7 +347,6 @@ async def execute_chat_prompt_stream(
     session_id: str,
     tools: List[str],
     model: str,
-    use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
     session_type: str = "regular",
@@ -371,7 +365,6 @@ async def execute_chat_prompt_stream(
         session_id: Session identifier for conversation tracking
         tools: List of tool names selected by user
         model: Model name selected by user
-        use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults based on session_type)
         session_type: Chat mode ("regular" or "workflow_creation")
@@ -393,20 +386,15 @@ async def execute_chat_prompt_stream(
         settings = _get_compiler_settings()
         template = load_template(context_template, Path(vault_path))
 
-        history_messages: Optional[List[ModelMessage]] = None
-        if use_conversation_history:
-            history_messages = session_manager.get_history(session_id, vault_name) or []
-        else:
-            history_messages = []
+        history_messages: List[ModelMessage] = session_manager.get_history(session_id, vault_name) or []
 
         take_turns = settings["recent_turns"]
-        recent_turns_payload: List[Dict[str, Any]] = []
-        if history_messages:
-            for msg in history_messages[-take_turns:]:
-                speaker = getattr(msg, "role", None) or getattr(msg, "name", None) or "assistant"
-                text = getattr(msg, "content", "") or ""
-                if text:
-                    recent_turns_payload.append({"speaker": speaker, "text": text})
+        recent_history = session_manager.get_recent_matching(
+            session_id,
+            vault_name,
+            take_turns,
+            lambda m: not getattr(m, "tool_name", None),
+        )
 
         prior_summary = get_latest_summary(session_id, vault_name)
 
@@ -416,15 +404,19 @@ async def execute_chat_prompt_stream(
             if isinstance(prior_tools, list):
                 tool_results.extend(prior_tools)
 
-        if history_messages:
-            for msg in reversed(history_messages):
-                tool_name = getattr(msg, "tool_name", None)
-                tool_result = getattr(msg, "content", None)
-                if tool_name and tool_result:
-                    tool_results.append({"tool": tool_name, "result": tool_result})
-                    if len(tool_results) >= settings["recent_tool_results"]:
-                        break
-            tool_results.reverse()
+        tool_messages = session_manager.get_recent_matching(
+            session_id,
+            vault_name,
+            settings["recent_tool_results"],
+            lambda m: bool(getattr(m, "tool_name", None)),
+        )
+        for msg in tool_messages:
+            tool_results.append(
+                {
+                    "tool": getattr(msg, "tool_name", None),
+                    "result": getattr(msg, "content", None),
+                }
+            )
         if settings["recent_tool_results"] > 0 and len(tool_results) > settings["recent_tool_results"]:
             tool_results = tool_results[-settings["recent_tool_results"] :]
 
@@ -432,7 +424,6 @@ async def execute_chat_prompt_stream(
             "topic": prior_summary.get("topic") if isinstance(prior_summary, dict) else None,
             "constraints": prior_summary.get("constraints") if isinstance(prior_summary, dict) else [],
             "plan": prior_summary.get("plan") if isinstance(prior_summary, dict) else None,
-            "recent_turns": recent_turns_payload,
             "tool_results": tool_results,
             "reflections": prior_summary.get("reflections") if isinstance(prior_summary, dict) else [],
             "latest_input": prompt,
@@ -441,17 +432,12 @@ async def execute_chat_prompt_stream(
         compile_input = CompileInput(
             model_alias=model,
             template=template,
-            topic=input_payload["topic"],
-            constraints=input_payload["constraints"],
-            plan=input_payload["plan"],
-            recent_turns=input_payload["recent_turns"],
-            tool_results=input_payload["tool_results"],
-            reflections=input_payload["reflections"],
-            latest_input=input_payload["latest_input"],
+            context_payload=input_payload,
+            message_history=recent_history,
         )
 
         try:
-            compiler_instructions = COMPILER_SYSTEM_NOTE.format(recent_turns=settings["recent_turns"]) + "\n\n" + template.content
+            compiler_instructions = COMPILER_SYSTEM_NOTE + "\n\n" + template.content
             compiled_summary = await compile_context(compile_input, instructions_override=compiler_instructions)
             compiled_prompt_text = compiled_summary.raw_output
         except Exception as exc:
@@ -467,9 +453,13 @@ async def execute_chat_prompt_stream(
     # Get message history
     message_history: Optional[List[ModelMessage]] = None
     if session_type == "endless":
-        history_messages = session_manager.get_history(session_id, vault_name) or []
         take = _get_compiler_settings()["recent_turns"]
-        message_history = history_messages[-take:] if take > 0 else []
+        message_history = session_manager.get_recent_matching(
+            session_id,
+            vault_name,
+            take,
+            lambda m: not getattr(m, "tool_name", None),
+        )
     else:
         message_history = session_manager.get_history(session_id, vault_name)
 
@@ -594,9 +584,25 @@ async def execute_chat_prompt_stream(
         yield f"data: {json.dumps(error_chunk)}\n\n"
         raise
 
-    # Store new messages in session
+    # Store new messages in session (including tool results captured during stream)
     if final_result:
         session_manager.add_messages(session_id, vault_name, final_result.new_messages())
+        # Add synthetic tool result messages so the compiler can see recent tool activity
+        if tool_activity:
+            synthetic_tool_messages: List[ModelMessage] = []
+            for tool_id, meta in tool_activity.items():
+                tool_name = meta.get("tool_name")
+                result_preview = meta.get("result") or meta.get("arguments")
+                if not tool_name or result_preview is None:
+                    continue
+                try:
+                    msg = ModelMessage(role="tool", content=str(result_preview))
+                    setattr(msg, "tool_name", tool_name)
+                    synthetic_tool_messages.append(msg)
+                except Exception:
+                    continue
+            if synthetic_tool_messages:
+                session_manager.add_messages(session_id, vault_name, synthetic_tool_messages)
 
     # Save chat history to markdown file
     if final_result:

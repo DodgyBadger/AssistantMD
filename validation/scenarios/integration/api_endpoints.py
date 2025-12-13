@@ -198,7 +198,6 @@ Summarize the validation run context.
             "prompt": "Say hello from integration test.",
             "tools": [],
             "model": "gpt-mini",
-            "use_conversation_history": True,
         }
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
         self.expect_equals(chat_first.status_code, 200, "Chat execution succeeds")

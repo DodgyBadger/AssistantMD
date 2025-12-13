@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
+import json
 from typing import Any, Dict, List, Optional
 
 from core.directives.model import ModelDirective
@@ -12,22 +12,25 @@ from pydantic_ai.messages import ModelMessage
 
 logger = UnifiedLogger(tag="context-compiler")
 
-# Shared instruction prefix for the context compiler (templated with recent_turns)
+# Shared instruction prefix for the context compiler
 COMPILER_SYSTEM_NOTE = """
-You are the first step in the chat flow. Your job is to condense and summarize the discussion
-so the primary chat agent stays focused, avoids context rot, and feels like it has an endless
-context window. Output a concise, structured context summary.
+You are part of a chat flow but you are NOT interacting directly with the user.
+Your job is to condense and summarize the discussion so the primary chat agent 
+stays focused on the main topic or goalgoal, avoids context rot, 
+and feels like it has an endless context window.
 
 You are provided with:
-- The last {recent_turns} turns of the conversation (via message history)
+- Recent conversation history (message history)
 - The latest context summary
-- A template of what to focus your summary on and how to structure the output
+- An extraction template describing what to extract and how to structure it
 
-Requirements:
-- Prefer succinct bullet points over long prose
-- Do not invent goals or constraints
-- Preserve any non-negotiable constraints, decisions, and safety boundaries
-- Do NOT restate the last {recent_turns} turns; they are already in message history
+The instructions and fields referred to in the extraction template 
+always relate to the conversation history. E.g. if the extraction template includes 
+a field called "rules", that means rules relating to the chat topic or plan, if present.
+
+- Respond ONLY with JSON matching the template’s structure. Do not add commentary, chatty text, or Markdown.
+- Do not invent content. Everything you output must be sourced from the history provided.
+- If a field or instruction in the extraction template is not relevant, simply output "N/A"
 """
 
 
@@ -37,13 +40,8 @@ class CompileInput:
 
     model_alias: str
     template: TemplateRecord
-    topic: Optional[str] = None
-    constraints: Optional[List[str]] = None
-    plan: Optional[str] = None
-    recent_turns: Optional[List[Dict[str, str]]] = None
-    tool_results: Optional[List[Dict[str, str]]] = None
-    reflections: Optional[List[Dict[str, str]]] = None
-    latest_input: Optional[str] = None
+    context_payload: Dict[str, Any]
+    message_history: Optional[List[ModelMessage]] = None
 
 
 @dataclass
@@ -86,46 +84,23 @@ async def compile_context(input_data: CompileInput, instructions_override: Optio
 
     # Prepare agent with template instructions
     base_instructions = instructions_override or input_data.template.content.strip()
-    instructions = f"""{base_instructions}
+    instructions = base_instructions
 
-Return JSON. If you cannot satisfy the schema, return the closest well-formed JSON you can."""
+    prompt = "Context data:\n" + json.dumps(input_data.context_payload, ensure_ascii=False, indent=2)
 
-    # Build context payload for the model
-    payload = {
-        "topic": input_data.topic,
-        "constraints": input_data.constraints or [],
-        "plan": input_data.plan,
-        "recent_turns": input_data.recent_turns or [],
-        "tool_results": input_data.tool_results or [],
-        "reflections": input_data.reflections or [],
-        "latest_input": input_data.latest_input,
-    }
+    agent = await create_agent(
+        instructions=instructions,
+        model=model_instance,
+        output_type=Dict[str, Any],
+    )
+    result = await agent.run(prompt, message_history=input_data.message_history)
+    result_output = getattr(result, "output", None)
 
-    prompt = "Context data:\n" + json.dumps(payload, ensure_ascii=False, indent=2)
-
-    agent = await create_agent(instructions=instructions, model=model_instance)
-    message_history: Optional[List[ModelMessage]] = None
-    if input_data.recent_turns:
-        message_history = []
-        for turn in input_data.recent_turns:
-            speaker = turn.get("speaker") or "assistant"
-            text = turn.get("text") or ""
-            if not text:
-                continue
-            role = speaker.lower()
-            if role not in ("user", "assistant", "system"):
-                role = "assistant"
-            message_history.append(ModelMessage(role=role, content=text))
-
-    result = await agent.run(prompt, message_history=message_history)
-    raw_output = result.output if hasattr(result, "output") else str(result)
-
-    parsed = None
-    cleaned = _strip_code_fences(raw_output)
+    parsed = result_output if isinstance(result_output, dict) else None
     try:
-        parsed = json.loads(cleaned)
+        raw_output = json.dumps(result_output, ensure_ascii=False) if not isinstance(result_output, str) else result_output
     except Exception:
-        logger.warning("Context compiler returned non-JSON; storing raw output", metadata={"output_preview": raw_output[:200]})
+        raw_output = str(result_output)
 
     return CompileResult(
         raw_output=raw_output,

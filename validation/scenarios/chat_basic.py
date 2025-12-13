@@ -25,7 +25,6 @@ class TestChatBasicScenario(BaseScenario):
             session_id=session_id,
             tools=[],
             model="sonnet",
-            use_conversation_history=False,
         )
 
         self.expect_equals(result.session_id, session_id, "Session ID should round-trip")

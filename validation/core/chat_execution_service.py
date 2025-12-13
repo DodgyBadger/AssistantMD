@@ -38,7 +38,6 @@ class ChatExecutionService:
         session_id: str,
         tools: Sequence[str],
         model: str,
-        use_conversation_history: bool,
         instructions: Optional[str] = None,
     ) -> ValidationChatResult:
         """Execute chat prompt using the core chat executor."""
@@ -54,7 +53,6 @@ class ChatExecutionService:
             session=session_id,
             tools=list(tools),
             model=model,
-            use_history=use_conversation_history,
         )
 
         result = await execute_chat_prompt(
@@ -64,7 +62,6 @@ class ChatExecutionService:
             session_id=session_id,
             tools=list(tools),
             model=model,
-            use_conversation_history=use_conversation_history,
             session_manager=self._session_manager,
             instructions=instructions,
         )

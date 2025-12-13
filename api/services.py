@@ -1265,7 +1265,6 @@ async def compact_conversation_history(
         session_id=session_id,  # Same session, not temp
         tools=[],  # No tools needed for summarization
         model=model,
-        use_conversation_history=True,
         session_manager=session_manager,
         instructions=summarize_instructions
     )
@@ -1346,7 +1345,6 @@ async def start_workflow_creation(
             session_id=session_id,
             tools=[],
             model=model,
-            use_conversation_history=True,
             session_manager=session_manager,
             instructions="Summarize focusing on automation opportunities and workflow design."
         )

@@ -62,10 +62,6 @@ settings:
     value: 3
     description: "Number of recent tool results to feed into the context compiler."
     restart_required: false
-  context_compiler_max_tokens:
-    value: 4000
-    description: "Target token budget for the compiled working view; beyond this, apply drop/truncation rules."
-    restart_required: false
 
 models:
   gemini:

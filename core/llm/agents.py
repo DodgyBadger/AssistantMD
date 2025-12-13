@@ -1,4 +1,4 @@
-from typing import AsyncIterator, Optional, List
+from typing import AsyncIterator, Optional, List, Any
 import json
 from datetime import datetime
 
@@ -14,7 +14,13 @@ logger = UnifiedLogger(tag="agents")
 
 
 @logger.trace("create_agent")
-async def create_agent(instructions: str, model=None, tools: Optional[List] = None, retries: Optional[int] = None) -> Agent:
+async def create_agent(
+    instructions: str,
+    model=None,
+    tools: Optional[List] = None,
+    retries: Optional[int] = None,
+    output_type: Optional[Any] = None,
+) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
     Pure composition function that assembles pre-configured model and tools into a Pydantic AI Agent.
@@ -24,6 +30,7 @@ async def create_agent(instructions: str, model=None, tools: Optional[List] = No
         model: Pre-configured Pydantic AI model instance, or None to use default model
         tools: Optional list of tool functions (extracted from BaseTool classes by directives)
         retries: Number of retries for tool validation errors (defaults to DEFAULT_TOOL_RETRIES)
+        output_type: Optional structured output specification for the agent
 
     Returns:
         Configured Pydantic AI Agent ready for use
@@ -54,6 +61,8 @@ async def create_agent(instructions: str, model=None, tools: Optional[List] = No
 
     if tools:
         agent_kwargs['tools'] = tools
+    if output_type is not None:
+        agent_kwargs['output_type'] = output_type
 
     agent = Agent(**agent_kwargs)
 
