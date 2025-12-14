@@ -6,7 +6,11 @@ Handles @model directive for per-step model selection using user-friendly model 
 
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
-from pydantic_ai.models.openai import OpenAIModel, OpenAIResponsesModelSettings
+from pydantic_ai.models.openai import (
+    OpenAIModel,
+    OpenAIResponsesModel,
+    OpenAIResponsesModelSettings,
+)
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -135,10 +139,10 @@ class ModelDirective(DirectiveProcessor):
             #     settings_kwargs["openai_reasoning_effort"] = "high"
             #     settings_kwargs["openai_reasoning_summary"] = "auto"
             api_key = get_secret_value('OPENAI_API_KEY')
-            return OpenAIModel(
+            return OpenAIResponsesModel(
                 model_string,
                 provider=OpenAIProvider(api_key=api_key),
-                settings=OpenAIResponsesModelSettings(**settings_kwargs)
+                settings=OpenAIResponsesModelSettings(**settings_kwargs),
             )
 
         elif provider == 'grok':

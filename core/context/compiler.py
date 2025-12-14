@@ -8,30 +8,10 @@ from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
 from core.context.templates import TemplateRecord
 from core.logger import UnifiedLogger
+from core.constants import CONTEXT_COMPILER_SYSTEM_NOTE
 from pydantic_ai.messages import ModelMessage
 
 logger = UnifiedLogger(tag="context-compiler")
-
-# Shared instruction prefix for the context compiler
-COMPILER_SYSTEM_NOTE = """
-You are part of a chat flow but you are NOT interacting directly with the user.
-Your job is to condense and summarize the discussion so the primary chat agent 
-stays focused on the main topic or goalgoal, avoids context rot, 
-and feels like it has an endless context window.
-
-You are provided with:
-- Recent conversation history (message history)
-- The latest context summary
-- An extraction template describing what to extract and how to structure it
-
-The instructions and fields referred to in the extraction template 
-always relate to the conversation history. E.g. if the extraction template includes 
-a field called "rules", that means rules relating to the chat topic or plan, if present.
-
-- Respond ONLY with JSON matching the template’s structure. Do not add commentary, chatty text, or Markdown.
-- Do not invent content. Everything you output must be sourced from the history provided.
-- If a field or instruction in the extraction template is not relevant, simply output "N/A"
-"""
 
 
 @dataclass
@@ -69,7 +49,11 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-async def compile_context(input_data: CompileInput, instructions_override: Optional[str] = None) -> CompileResult:
+async def compile_context(
+    input_data: CompileInput,
+    instructions_override: Optional[str] = None,
+    tools: Optional[List[Any]] = None,
+) -> CompileResult:
     """
     Compile a concise working context using the provided template and model.
 
@@ -82,21 +66,33 @@ async def compile_context(input_data: CompileInput, instructions_override: Optio
     model_directive = ModelDirective()
     model_instance = model_directive.process_value(input_data.model_alias, "context-compiler")
 
-    # Prepare agent with template instructions
-    base_instructions = instructions_override or input_data.template.content.strip()
-    instructions = base_instructions
+    # Prepare agent system prompt: compiler note + template; user prompt = latest user input (if provided)
+    system_prompt = instructions_override if instructions_override is not None else "\n\n".join(
+        part for part in [
+            CONTEXT_COMPILER_SYSTEM_NOTE,
+            "Extraction template:",
+            (input_data.template.content or "").strip(),
+        ] if part
+    )
 
-    prompt = "Context data:\n" + json.dumps(input_data.context_payload, ensure_ascii=False, indent=2)
+    latest_input = input_data.context_payload.get("latest_input") if isinstance(input_data.context_payload, dict) else None
+    prompt = latest_input or "No user input provided."
 
     agent = await create_agent(
-        instructions=instructions,
+        instructions=system_prompt,
         model=model_instance,
-        output_type=Dict[str, Any],
+        tools=tools,
     )
     result = await agent.run(prompt, message_history=input_data.message_history)
     result_output = getattr(result, "output", None)
 
     parsed = result_output if isinstance(result_output, dict) else None
+    if parsed is None and isinstance(result_output, str):
+        # Try a best-effort JSON parse for models that return stringified JSON
+        try:
+            parsed = json.loads(_strip_code_fences(result_output))
+        except Exception:
+            parsed = None
     try:
         raw_output = json.dumps(result_output, ensure_ascii=False) if not isinstance(result_output, str) else result_output
     except Exception:

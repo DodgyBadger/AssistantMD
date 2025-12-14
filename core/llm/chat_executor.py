@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Dict
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai import (
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
     TextPartDelta, FunctionToolCallEvent, FunctionToolResultEvent
@@ -24,17 +24,85 @@ from core.constants import (
     REGULAR_CHAT_INSTRUCTIONS,
     ASSISTANTMD_ROOT_DIR,
     CHAT_SESSIONS_DIR,
+    CONTEXT_COMPILER_SYSTEM_NOTE,
 )
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
-from core.context.templates import load_template
-from core.context.compiler import compile_context, CompileInput, COMPILER_SYSTEM_NOTE
-from core.context.store import add_context_summary, upsert_session, get_latest_summary
+from core.context.templates import load_template, TemplateRecord
+from core.context.compiler import compile_context, CompileInput, CompileResult
+from core.constants import CONTEXT_COMPILER_SYSTEM_NOTE
+from core.context.store import (
+    add_context_summary,
+    add_micro_log_entry,
+    upsert_session,
+    get_latest_summary,
+)
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
+from core.tools.context_history import ContextHistoryTool
 
 
 logger = UnifiedLogger(tag="chat-executor")
+
+
+async def _run_context_compiler(
+    *,
+    vault_name: str,
+    vault_path: str,
+    prompt: str,
+    session_id: str,
+    model: str,
+    context_template: str,
+    session_manager: SessionManager,
+) -> tuple[Optional[CompileResult], Optional[str], Optional[TemplateRecord], list[ModelMessage], dict]:
+    """Run the context compiler for endless mode and return results."""
+    settings = _get_compiler_settings()
+    template = load_template(context_template, Path(vault_path))
+
+    prior_summary = get_latest_summary(session_id, vault_name)
+
+    recent_history = session_manager.get_recent_matching(
+        session_id,
+        vault_name,
+        settings["recent_turns"],
+        lambda m: not getattr(m, "tool_name", None),
+    )
+    # Include the current user turn as the latest message for the compiler
+    from pydantic_ai.messages import ModelMessage
+    compiler_history = list(recent_history) if recent_history else []
+    compiler_history.append(ModelRequest(parts=[UserPromptPart(prompt)]))
+
+    compiler_tools = None
+    if prior_summary or (recent_history and len(recent_history) >= settings["recent_turns"]):
+        compiler_tools = [
+            ContextHistoryTool.get_tool(
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+        ]
+
+    input_payload = {}
+
+    compile_input = CompileInput(
+        model_alias=model,
+        template=template,
+        context_payload=input_payload,
+        message_history=compiler_history,
+    )
+
+    compiled_summary: Optional[CompileResult] = None
+    compiled_prompt_text: Optional[str] = None
+    try:
+        compiled_summary = await compile_context(
+            compile_input,
+            instructions_override=None,
+            tools=compiler_tools,
+        )
+        compiled_prompt_text = compiled_summary.raw_output
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"Context compiler failed for session {session_id}: {exc}")
+
+    return compiled_summary, compiled_prompt_text, template, recent_history, settings
 
 
 def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
@@ -168,10 +236,13 @@ def _prepare_agent_config(
         )
 
     # Compose instructions using Pydantic AI's list support for clean composition
-    if tool_functions and tool_instructions:
-        final_instructions = [base_instructions, tool_instructions]
+    final_instructions: list[str] = []
+    if isinstance(base_instructions, list):
+        final_instructions.extend(base_instructions)
     else:
-        final_instructions = base_instructions
+        final_instructions.append(base_instructions)
+    if tool_functions and tool_instructions:
+        final_instructions.append(tool_instructions)
 
     # Process model directive to get Pydantic AI model instance
     model_directive = ModelDirective()
@@ -215,67 +286,33 @@ async def execute_chat_prompt(
         vault_name, vault_path, tools, model, instructions, session_type
     )
 
-    # Endless mode: compile context instead of using full history
-    compiled_summary = None
-    compiled_prompt_text = None
-    input_payload = None
+    compiled_summary: Optional[CompileResult] = None
+    compiled_prompt_text: Optional[str] = None
+    compiler_template: Optional[TemplateRecord] = None
+    compiler_history: List[ModelMessage] = []
 
     if session_type == "endless":
-        settings = _get_compiler_settings()
-        template = load_template(context_template, Path(vault_path))
-
-        # Try to reuse prior compiled summary to seed state
-        prior_summary = get_latest_summary(session_id, vault_name)
-
-        history_messages: List[ModelMessage] = session_manager.get_history(session_id, vault_name) or []
-
-        # Last N turns to pass into compiler (and agent)
-        take_turns = settings["recent_turns"]
-        recent_history = session_manager.get_recent_matching(
-            session_id,
-            vault_name,
-            take_turns,
-            lambda m: not getattr(m, "tool_name", None),
+        compiled_summary, compiled_prompt_text, compiler_template, compiler_history, _ = await _run_context_compiler(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            prompt=prompt,
+            session_id=session_id,
+            model=model,
+            context_template=context_template,
+            session_manager=session_manager,
         )
 
-        # Collect recent tool results from history if available
-        recent_tool_results: List[Dict[str, Any]] = []
-        tool_messages = session_manager.get_recent_matching(
-            session_id,
-            vault_name,
-            settings["recent_tool_results"],
-            lambda m: bool(getattr(m, "tool_name", None)),
-        )
-        for msg in tool_messages:
-            recent_tool_results.append(
-                {
-                    "tool": getattr(msg, "tool_name", None),
-                    "result": getattr(msg, "content", None),
-                }
-            )
+        if compiled_prompt_text:
+            if isinstance(final_instructions, list):
+                final_instructions = final_instructions + [f"Context summary (compiled):\n{compiled_prompt_text}"]
+            else:
+                final_instructions = [final_instructions, f"Context summary (compiled):\n{compiled_prompt_text}"]
 
-        input_payload = {
-            "topic": prior_summary.get("topic") if isinstance(prior_summary, dict) else None,
-            "constraints": prior_summary.get("constraints") if isinstance(prior_summary, dict) else [],
-            "plan": prior_summary.get("plan") if isinstance(prior_summary, dict) else None,
-            "tool_results": recent_tool_results,
-            "reflections": prior_summary.get("reflections") if isinstance(prior_summary, dict) else [],
-            "latest_input": prompt,
-        }
-
-        compile_input = CompileInput(
-            model_alias=model,
-            template=template,
-            context_payload=input_payload,
-            message_history=recent_history,
-        )
-
-        try:
-            compiler_instructions = COMPILER_SYSTEM_NOTE + "\n\n" + template.content
-            compiled_summary = await compile_context(compile_input, instructions_override=compiler_instructions)
-            compiled_prompt_text = compiled_summary.raw_output
-        except Exception as exc:
-            logger.warning(f"Context compiler failed for session {session_id}: {exc}")
+        if compiled_prompt_text:
+            if isinstance(final_instructions, list):
+                final_instructions = final_instructions + [f"Context summary (compiled):\n{compiled_prompt_text}"]
+            else:
+                final_instructions = [final_instructions, f"Context summary (compiled):\n{compiled_prompt_text}"]
 
     # Create agent with user-selected configuration
     agent = await create_agent(
@@ -287,22 +324,12 @@ async def execute_chat_prompt(
     # Get message history (always tracked now)
     message_history: Optional[List[ModelMessage]] = None
     if session_type == "endless":
-        take = _get_compiler_settings()["recent_turns"]
-        message_history = session_manager.get_recent_matching(
-            session_id,
-            vault_name,
-            take,
-            lambda m: not getattr(m, "tool_name", None),
-        )
+        message_history = compiler_history
     else:
         message_history = session_manager.get_history(session_id, vault_name)
 
-    # Run agent with compiled prompt (endless) or direct prompt
-    effective_prompt = prompt
-    if session_type == "endless" and compiled_prompt_text:
-        effective_prompt = f"Context summary:\n{compiled_prompt_text}\n\nUser input:\n{prompt}"
-
-    result = await agent.run(effective_prompt, message_history=message_history)
+    # Run agent
+    result = await agent.run(prompt, message_history=message_history)
 
     # Store new messages in session for next turn
     session_manager.add_messages(session_id, vault_name, result.new_messages())
@@ -315,18 +342,27 @@ async def execute_chat_prompt(
     if compiled_summary:
         upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
         try:
-            add_context_summary(
+            summary_id = add_context_summary(
                 session_id=session_id,
                 vault_name=vault_name,
                 turn_index=turn_index,
-                template=template if 'template' in locals() else load_template(context_template, Path(vault_path)),
+                template=compiler_template if compiler_template else load_template(context_template, Path(vault_path)),
                 model_alias=model,
                 summary_json=compiled_summary.parsed_json,
                 raw_output=compiled_summary.raw_output,
                 budget_used=None,
                 sections_included=None,
                 compiled_prompt=compiled_prompt_text,
-                input_payload=input_payload,
+                input_payload={"latest_input": prompt},
+            )
+            add_micro_log_entry(
+                session_id=session_id,
+                vault_name=vault_name,
+                turn_index=turn_index,
+                summary_id=summary_id,
+                user_input_snippet=prompt,
+                canonical_topic=None,
+                embedding=embedding,
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(f"Failed to persist compiled context for session {session_id}: {exc}")
@@ -377,71 +413,21 @@ async def execute_chat_prompt_stream(
         vault_name, vault_path, tools, model, instructions, session_type
     )
 
-    # Endless mode: compile context instead of using full history
-    compiled_summary = None
-    compiled_prompt_text = None
-    input_payload = None
+    compiled_summary: Optional[CompileResult] = None
+    compiled_prompt_text: Optional[str] = None
+    compiler_template: Optional[TemplateRecord] = None
+    compiler_history: List[ModelMessage] = []
 
     if session_type == "endless":
-        settings = _get_compiler_settings()
-        template = load_template(context_template, Path(vault_path))
-
-        history_messages: List[ModelMessage] = session_manager.get_history(session_id, vault_name) or []
-
-        take_turns = settings["recent_turns"]
-        recent_history = session_manager.get_recent_matching(
-            session_id,
-            vault_name,
-            take_turns,
-            lambda m: not getattr(m, "tool_name", None),
+        compiled_summary, compiled_prompt_text, compiler_template, compiler_history, _ = await _run_context_compiler(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            prompt=prompt,
+            session_id=session_id,
+            model=model,
+            context_template=context_template,
+            session_manager=session_manager,
         )
-
-        prior_summary = get_latest_summary(session_id, vault_name)
-
-        tool_results: List[Dict[str, Any]] = []
-        if isinstance(prior_summary, dict):
-            prior_tools = prior_summary.get("tool_results")
-            if isinstance(prior_tools, list):
-                tool_results.extend(prior_tools)
-
-        tool_messages = session_manager.get_recent_matching(
-            session_id,
-            vault_name,
-            settings["recent_tool_results"],
-            lambda m: bool(getattr(m, "tool_name", None)),
-        )
-        for msg in tool_messages:
-            tool_results.append(
-                {
-                    "tool": getattr(msg, "tool_name", None),
-                    "result": getattr(msg, "content", None),
-                }
-            )
-        if settings["recent_tool_results"] > 0 and len(tool_results) > settings["recent_tool_results"]:
-            tool_results = tool_results[-settings["recent_tool_results"] :]
-
-        input_payload = {
-            "topic": prior_summary.get("topic") if isinstance(prior_summary, dict) else None,
-            "constraints": prior_summary.get("constraints") if isinstance(prior_summary, dict) else [],
-            "plan": prior_summary.get("plan") if isinstance(prior_summary, dict) else None,
-            "tool_results": tool_results,
-            "reflections": prior_summary.get("reflections") if isinstance(prior_summary, dict) else [],
-            "latest_input": prompt,
-        }
-
-        compile_input = CompileInput(
-            model_alias=model,
-            template=template,
-            context_payload=input_payload,
-            message_history=recent_history,
-        )
-
-        try:
-            compiler_instructions = COMPILER_SYSTEM_NOTE + "\n\n" + template.content
-            compiled_summary = await compile_context(compile_input, instructions_override=compiler_instructions)
-            compiled_prompt_text = compiled_summary.raw_output
-        except Exception as exc:
-            logger.warning(f"Context compiler failed for session {session_id}: {exc}")
 
     # Create agent with user-selected configuration
     agent = await create_agent(
@@ -453,13 +439,7 @@ async def execute_chat_prompt_stream(
     # Get message history
     message_history: Optional[List[ModelMessage]] = None
     if session_type == "endless":
-        take = _get_compiler_settings()["recent_turns"]
-        message_history = session_manager.get_recent_matching(
-            session_id,
-            vault_name,
-            take,
-            lambda m: not getattr(m, "tool_name", None),
-        )
+        message_history = compiler_history
     else:
         message_history = session_manager.get_history(session_id, vault_name)
 
@@ -471,10 +451,7 @@ async def execute_chat_prompt_stream(
     try:
         # Use run_stream_events() to properly handle tool calls
         # This runs the agent graph to completion and streams all events
-        effective_prompt = prompt
-        if session_type == "endless" and compiled_prompt_text:
-            effective_prompt = f"Context summary:\n{compiled_prompt_text}\n\nUser input:\n{prompt}"
-        async for event in agent.run_stream_events(effective_prompt, message_history=message_history):
+        async for event in agent.run_stream_events(prompt, message_history=message_history):
             if isinstance(event, PartStartEvent):
                 # Initial text part - send as first chunk
                 if hasattr(event.part, 'content') and event.part.content:
@@ -612,7 +589,7 @@ async def execute_chat_prompt_stream(
     if compiled_summary:
         upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
         try:
-            add_context_summary(
+            summary_id = add_context_summary(
                 session_id=session_id,
                 vault_name=vault_name,
                 turn_index=turn_index,
@@ -622,8 +599,17 @@ async def execute_chat_prompt_stream(
                 raw_output=compiled_summary.raw_output,
                 budget_used=None,
                 sections_included=None,
-                compiled_prompt=compiled_prompt_text,
-                input_payload=input_payload,
+            compiled_prompt=compiled_prompt_text,
+            input_payload={"latest_input": prompt},
+        )
+            add_micro_log_entry(
+                session_id=session_id,
+                vault_name=vault_name,
+                turn_index=turn_index,
+                summary_id=summary_id,
+                user_input_snippet=prompt,
+                canonical_topic=None,
+                embedding=embedding,
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(f"Failed to persist compiled context for session {session_id}: {exc}")

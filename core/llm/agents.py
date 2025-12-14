@@ -20,6 +20,7 @@ async def create_agent(
     tools: Optional[List] = None,
     retries: Optional[int] = None,
     output_type: Optional[Any] = None,
+    system_prompt: Optional[str] = None,
 ) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
@@ -58,6 +59,8 @@ async def create_agent(
         'instructions': instructions,
         'retries': retries if retries is not None else DEFAULT_TOOL_RETRIES
     }
+    if system_prompt:
+        agent_kwargs['system_prompt'] = system_prompt
 
     if tools:
         agent_kwargs['tools'] = tools

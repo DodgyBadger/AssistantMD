@@ -62,6 +62,14 @@ settings:
     value: 3
     description: "Number of recent tool results to feed into the context compiler."
     restart_required: false
+  context_micro_log_interval_seconds:
+    value: 180
+    description: "How often the context micro-log worker runs (seconds)."
+    restart_required: true
+  context_micro_log_model:
+    value: null
+    description: "Model alias for context micro-log topic extraction. If null, falls back to default_model; if none available, micro-logging is disabled."
+    restart_required: false
 
 models:
   gemini:
@@ -210,5 +218,10 @@ tools:
   code_execution:
     module: core.tools.code_execution_piston
     description: "Multi-language code execution via Piston API"
+    requires_secrets: []
+    user_editable: false
+  context_history:
+    module: core.tools.context_history
+    description: "Compiler-only: fetch recent compiled context snapshots for self-correction"
     requires_secrets: []
     user_editable: false
