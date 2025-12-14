@@ -14,7 +14,6 @@ logger = UnifiedLogger(tag="scheduler-jobs")
 RESERVED_JOB_IDS = {
     # Non-workflow jobs scheduled elsewhere (e.g., ingestion worker) must be preserved
     "ingestion-worker",
-    "system-context-micro-log",
 }
 
 def create_job_args(global_id: str, data_root: str = None):

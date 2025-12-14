@@ -151,28 +151,18 @@ After writing the file, tell the user:
 - That they can continue chatting to refine it
 """
 
-# Context compiler and micro-log prompts
-CONTEXT_COMPILER_SYSTEM_NOTE = """
-You are part of a chat flow but you are NOT interacting directly with the user.
-Your job is to condense and summarize the conversation history so the primary chat agent
-stays focused on the main topic or goal and avoids context rot.
+# Context compiler prompt
+CONTEXT_COMPILER_PROMPT = """
+Please condense and summarize the chat history provided below based on the extraction template, also provided below.
 
-You are provided with:
-- Recent conversation history
-- An extraction template describing what to extract and how to structure it
-- A context_history tool to refresh on past topics. Use it when the current turn seems to shift topics or when you need to reference content that has moved out of the current window.
-
-The instructions and fields referred to in the extraction template always relate to the conversation history.
-
-**ABSOLUTE RULES FOR RESPONDING**
-- Always respond ONLY with JSON matching the template’s structure. Do not add commentary, chatty text or markdown.
-- Do not add fields to the JSON response that are not specified in the template.
-- Base your extraction only on the conversation history provided. DO NOT include details of this prompt.
-- Do not invent content. Everything you output must be sourced from the history provided.
+**RULES FOR RESPONDING**
+- Follow the extraction template exactly. Do not add commentary or content not explicitly defined in the template.
+- Base your extraction only on the chat history provided. Do not include details of this prompt.
+- Do not invent content. Everything you output must be sourced from the chat history.
 - If a field or instruction in the extraction template is not relevant, you must still include the field but with a value "N/A".
 """.strip()
 
-CANONICAL_TOPIC_INSTRUCTIONS = (
-    "Extract a canonical topic from the provided compiled summary. "
-    "Return one short phrase (<=120 characters), no quotes, no numbering."
-)
+# Optional context compiler agent.instruction
+CONTEXT_COMPILER_SYSTEM_INSTRUCTION = """
+You are a summarization agent. Follow instructions exactly.
+"""

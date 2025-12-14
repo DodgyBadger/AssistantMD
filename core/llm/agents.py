@@ -15,19 +15,17 @@ logger = UnifiedLogger(tag="agents")
 
 @logger.trace("create_agent")
 async def create_agent(
-    instructions: str,
     model=None,
     tools: Optional[List] = None,
     retries: Optional[int] = None,
     output_type: Optional[Any] = None,
-    system_prompt: Optional[str] = None,
+    history_processors: Optional[List] = None,
 ) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
     Pure composition function that assembles pre-configured model and tools into a Pydantic AI Agent.
 
     Args:
-        instructions: System instructions for the agent
         model: Pre-configured Pydantic AI model instance, or None to use default model
         tools: Optional list of tool functions (extracted from BaseTool classes by directives)
         retries: Number of retries for tool validation errors (defaults to DEFAULT_TOOL_RETRIES)
@@ -56,12 +54,10 @@ async def create_agent(
     # Pure composition - assemble the pre-configured pieces
     agent_kwargs = {
         'model': model,
-        'instructions': instructions,
         'retries': retries if retries is not None else DEFAULT_TOOL_RETRIES
     }
-    if system_prompt:
-        agent_kwargs['system_prompt'] = system_prompt
-
+    if history_processors:
+        agent_kwargs['history_processors'] = history_processors
     if tools:
         agent_kwargs['tools'] = tools
     if output_type is not None:
@@ -69,9 +65,7 @@ async def create_agent(
 
     agent = Agent(**agent_kwargs)
 
-    @agent.instructions
-    def get_date() -> str:
-        return f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}."
+    agent.instructions(lambda _: f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}.")
 
     return agent
 

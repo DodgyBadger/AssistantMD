@@ -349,11 +349,15 @@ async def create_step_agent(processed_step, workflow_instructions: str, services
 
     # Compose instructions using Pydantic AI's list support for clean composition
     if tool_instructions:
-        final_instructions = [workflow_instructions, tool_instructions]
+        instructions_stack = [workflow_instructions, tool_instructions]
     else:
-        final_instructions = workflow_instructions
+        instructions_stack = [workflow_instructions]
 
-    return await services.create_agent(final_instructions, model_instance, tool_functions)
+    agent = await services.create_agent(model_instance, tool_functions)
+    for inst in instructions_stack:
+        if inst:
+            agent.instructions(lambda _ctx, text=inst: text)
+    return agent
 
 
 def initialize_workflow_context(services: CoreServices):

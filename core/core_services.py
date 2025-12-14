@@ -141,25 +141,24 @@ class CoreServices:
             state_manager=self._state_manager
         )
     
-    async def create_agent(self, instructions: str, model=None, tools=None):
+    async def create_agent(self, model=None, tools=None, history_processors=None):
         """
-        Create a Pydantic AI agent with instructions, model, and tools.
-        
+        Create a Pydantic AI agent with model and tools.
+
         Convenience method that wraps the core create_agent function with
         proper parameter handling for workflow development.
-        
+
         Args:
-            instructions: System instructions for the agent
             model: Optional model instance (from @model directive processing)
             tools: Optional list of tool functions (from @tools directive processing)
-            
+
         Returns:
             Configured Pydantic AI agent instance
-            
+
         Raises:
             Exception: If agent creation fails
         """
-        return await create_agent(instructions, model, tools)
+        return await create_agent(model=model, tools=tools, history_processors=history_processors)
     
     async def generate_response(self, agent, prompt: str, message_history=None) -> str:
         """

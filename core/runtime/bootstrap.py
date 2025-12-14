@@ -17,7 +17,6 @@ from core.settings.store import get_general_settings
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.context.templates import seed_system_templates
-from core.context.worker import ContextMicroLogWorker
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
@@ -110,29 +109,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             process_job_fn=ingestion_service.process_job,
             max_concurrent=ingestion_max_concurrent,
         )
-        micro_log_interval = 180
-        micro_log_model = None
-        try:
-            micro_log_interval = int(
-                general_settings.get("context_micro_log_interval_seconds").value
-            )
-        except Exception:
-            pass
-        try:
-            micro_log_model = general_settings.get("context_micro_log_model").value
-        except Exception:
-            micro_log_model = None
-        if not micro_log_model:
-            try:
-                default_model_entry = general_settings.get("default_model")
-                micro_log_model = default_model_entry.value if default_model_entry else None
-            except Exception:
-                micro_log_model = None
-
-        context_micro_log_worker = ContextMicroLogWorker(
-            model_alias=micro_log_model,
-        )
-
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
 
@@ -174,17 +150,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 max_instances=1,
                 replace_existing=True,
             )
-            # System job for context micro-log backfill (only if a model is available)
-            if micro_log_model:
-                scheduler.add_job(
-                    context_micro_log_worker.run_once,
-                    "interval",
-                    seconds=micro_log_interval,
-                    id="system-context-micro-log",
-                    name="System: context micro-log",
-                    max_instances=1,
-                    replace_existing=True,
-                )
 
             # Resume scheduler after successful synchronization
             scheduler.resume()
