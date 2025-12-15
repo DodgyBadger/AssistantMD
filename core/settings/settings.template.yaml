@@ -55,12 +55,20 @@ settings:
     description: "Number of ingestion jobs to process per worker run."
     restart_required: true
   context_compiler_recent_turns:
-    value: 3
-    description: "Number of recent chat turns to feed into the context compiler."
+    value: 0
+    description: "Number of recent chat turns to feed into the context compiler. Blank or 0 disables and feeds all messages."
     restart_required: false
   context_compiler_recent_tool_results:
     value: 3
     description: "Number of recent tool results to feed into the context compiler."
+    restart_required: false
+  context_compiler_token_threshold:
+    value: 4000
+    description: "If total tokens in the candidate history slice are below this value, skip the context compiler and run normal chat. Set 0 to disable."
+    restart_required: false
+  context_compiler_model:
+    value: ""
+    description: "Optional model alias to use for context compilation. Leave blank to use the chat model."
     restart_required: false
 
 models:

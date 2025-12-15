@@ -20,7 +20,10 @@ from pydantic_ai.messages import (
     TextPart,
     ToolReturnPart,
 )
+from core.tools.utils import estimate_token_count
+from core.settings.store import get_general_settings
 from core.context.store import add_context_summary, upsert_session
+from core.settings.store import get_general_settings
 
 logger = UnifiedLogger(tag="context-compiler")
 
@@ -47,6 +50,7 @@ async def compile_context(
     input_data: CompileInput,
     instructions_override: Optional[str] = None,
     tools: Optional[List[Any]] = None,
+    model_override: Optional[str] = None,
 ) -> CompileResult:
     """
     Compile a concise working context using the provided template and model.
@@ -59,7 +63,8 @@ async def compile_context(
     """
     # Resolve model instance
     model_directive = ModelDirective()
-    model_instance = model_directive.process_value(input_data.model_alias, "context-compiler")
+    model_to_use = model_override or input_data.model_alias
+    model_instance = model_directive.process_value(model_to_use, "context-compiler")
 
     compiler_instruction = instructions_override if instructions_override is not None else CONTEXT_COMPILER_SYSTEM_INSTRUCTION
     latest_input = input_data.context_payload.get("latest_input") if isinstance(input_data.context_payload, dict) else None
@@ -172,6 +177,42 @@ def build_compiling_history_processor(
                 latest_input = text
 
         rendered_history = "\n".join(rendered_lines)
+
+        # Estimate token count of the candidate slice (rendered history + latest input); if below threshold, skip compilation.
+        try:
+            threshold_entry = get_general_settings().get("context_compiler_token_threshold")
+            threshold = int(threshold_entry.value) if threshold_entry and threshold_entry.value is not None else 0
+        except Exception:
+            threshold = 0
+
+        if threshold > 0:
+            # Use rendered text plus tool return content to estimate size of the slice
+            estimate_parts: List[str] = []
+            if rendered_history:
+                estimate_parts.append(rendered_history)
+            if latest_input:
+                estimate_parts.append(latest_input)
+            for m in recent_slice:
+                parts = getattr(m, "parts", None)
+                if parts:
+                    for part in parts:
+                        if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+                            part_content = getattr(part, "content", None)
+                            if isinstance(part_content, str):
+                                estimate_parts.append(part_content)
+            estimate_basis = "\n".join(estimate_parts)
+            token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
+            logger.debug(
+                "Context compiler threshold check",
+                metadata={
+                    "run_id": run_context.run_id,
+                    "token_estimate": token_estimate,
+                    "threshold": threshold,
+                    "recent_turns": recent_turns,
+                },
+            )
+            if token_estimate < threshold:
+                return messages
         cache_store = getattr(run_context.deps, "context_compiler_cache", None)
         if cache_store is None:
             cache_store = {}
@@ -188,6 +229,14 @@ def build_compiling_history_processor(
             compiled_output: Optional[str] = cache_entry.get("raw_output")
 
             if compiled_output is None:
+                # Pick compiler model override if available and valid
+                compiler_model_alias = None
+                try:
+                    compiler_model_entry = get_general_settings().get("context_compiler_model")
+                    compiler_model_alias = compiler_model_entry.value if compiler_model_entry else None
+                except Exception:
+                    compiler_model_alias = None
+
                 compile_input = CompileInput(
                     model_alias=model_alias,
                     template=template,
@@ -200,6 +249,7 @@ def build_compiling_history_processor(
                     compile_input,
                     instructions_override=None,
                     tools=None,
+                    model_override=compiler_model_alias if compiler_model_alias else None,
                 )
                 compiled_output = compiled_obj.raw_output
                 cache_entry = {
