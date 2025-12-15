@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from pydantic_ai import RunContext
 from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
 from core.context.templates import TemplateRecord
@@ -108,7 +109,7 @@ def build_compiling_history_processor(
 
     template = load_template(template_name, Path(vault_path))
 
-    async def processor(messages: List[ModelMessage]) -> List[ModelMessage]:
+    async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:
             return []
 
@@ -171,45 +172,64 @@ def build_compiling_history_processor(
                 latest_input = text
 
         rendered_history = "\n".join(rendered_lines)
-
-        compile_input = CompileInput(
-            model_alias=model_alias,
-            template=template,
-            context_payload={
-                "latest_input": latest_input,
-                "rendered_history": rendered_history,
-            },
-        )
+        cache_store = getattr(run_context.deps, "context_compiler_cache", None)
+        if cache_store is None:
+            cache_store = {}
+            try:
+                setattr(run_context.deps, "context_compiler_cache", cache_store)
+            except Exception:
+                cache_store = {}
+        run_scope_key = run_context.run_id or "default_run"
+        cache_entry = cache_store.get(run_scope_key, {})
 
         summary_message: Optional[ModelMessage] = None
 
         try:
-            compiled = await compile_context(
-                compile_input,
-                instructions_override=None,
-                tools=None,
-            )
+            compiled_output: Optional[str] = cache_entry.get("raw_output")
+
+            if compiled_output is None:
+                compile_input = CompileInput(
+                    model_alias=model_alias,
+                    template=template,
+                    context_payload={
+                        "latest_input": latest_input,
+                        "rendered_history": rendered_history,
+                    },
+                )
+                compiled_obj = await compile_context(
+                    compile_input,
+                    instructions_override=None,
+                    tools=None,
+                )
+                compiled_output = compiled_obj.raw_output
+                cache_entry = {
+                    "raw_output": compiled_output,
+                    "persisted": False,
+                }
+                cache_store[run_scope_key] = cache_entry
 
             # Persist the compiled view for observability.
-            try:
-                upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
-                add_context_summary(
-                    session_id=session_id,
-                    vault_name=vault_name,
-                    turn_index=None,
-                    template=template,
-                    model_alias=model_alias,
-                    summary_json=None,
-                    raw_output=compiled.raw_output,
-                    budget_used=None,
-                    sections_included=None,
-                    compiled_prompt=None,
-                    input_payload={"latest_input": latest_input},
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to persist compiled context summary", metadata={"error": str(exc)})
+            if cache_entry and not cache_entry.get("persisted"):
+                try:
+                    upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
+                    add_context_summary(
+                        session_id=session_id,
+                        vault_name=vault_name,
+                        turn_index=None,
+                        template=template,
+                        model_alias=model_alias,
+                        summary_json=None,
+                        raw_output=compiled_output,
+                        budget_used=None,
+                        sections_included=None,
+                        compiled_prompt=None,
+                        input_payload={"latest_input": latest_input},
+                    )
+                    cache_entry["persisted"] = True
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("Failed to persist compiled context summary", metadata={"error": str(exc)})
 
-            summary_text = compiled.raw_output or "N/A"
+            summary_text = compiled_output or "N/A"
             summary_message = ModelRequest(parts=[SystemPromptPart(content=f"Context summary (compiled):\n{summary_text}")])
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Context compilation failed in history processor", metadata={"error": str(exc)})

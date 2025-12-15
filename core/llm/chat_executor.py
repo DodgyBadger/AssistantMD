@@ -6,7 +6,7 @@ Persists chat history to markdown files for auditability and testing.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any
 from pathlib import Path
@@ -86,6 +86,12 @@ class ChatExecutionResult:
     message_count: int
     compiled_context_path: Optional[str] = None
     history_file: Optional[str] = None  # Path to saved chat history file
+
+
+@dataclass
+class ChatRunDeps:
+    """Per-run dependencies/caches for chat agents."""
+    context_compiler_cache: dict[str, Any] = field(default_factory=dict)
 
 
 def save_chat_history(vault_path: str, session_id: str, prompt: str, response: str):
@@ -228,9 +234,11 @@ async def execute_chat_prompt(
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
     # Run agent
+    run_deps = ChatRunDeps()
     result = await agent.run(
         prompt,
         message_history=message_history,
+        deps=run_deps,
     )
 
     # Store new messages in session for next turn
@@ -313,6 +321,7 @@ async def execute_chat_prompt_stream(
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
+    run_deps = ChatRunDeps()
 
     try:
         # Use run_stream_events() to properly handle tool calls
@@ -320,6 +329,7 @@ async def execute_chat_prompt_stream(
         async for event in agent.run_stream_events(
             prompt,
             message_history=message_history,
+            deps=run_deps,
         ):
             if isinstance(event, PartStartEvent):
                 # Initial text part - send as first chunk
