@@ -10,7 +10,15 @@ from core.context.templates import TemplateRecord
 from core.context.templates import load_template
 from core.logger import UnifiedLogger
 from core.constants import CONTEXT_COMPILER_PROMPT, CONTEXT_COMPILER_SYSTEM_INSTRUCTION
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, SystemPromptPart
+from pydantic_ai.messages import (
+    BuiltinToolReturnPart,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    ToolReturnPart,
+)
 from core.context.store import add_context_summary, upsert_session
 
 logger = UnifiedLogger(tag="context-compiler")
@@ -104,9 +112,26 @@ def build_compiling_history_processor(
         if not messages:
             return []
 
-        # Trim to the last N non-tool turns to keep payload lean.
-        non_tool_messages = [m for m in messages if not getattr(m, "tool_name", None)]
-        recent_slice = non_tool_messages[-recent_turns:] if recent_turns > 0 else non_tool_messages
+        # Trim based on non-tool turns, but preserve any tool messages between them
+        if recent_turns > 0:
+            non_tool_indices = [idx for idx, m in enumerate(messages) if not getattr(m, "tool_name", None)]
+            if not non_tool_indices:
+                start_idx = max(len(messages) - recent_turns, 0)
+            else:
+                start_idx = non_tool_indices[-recent_turns] if len(non_tool_indices) >= recent_turns else 0
+
+            # Ensure tool return parts keep their preceding tool call message
+            for idx in range(start_idx, len(messages)):
+                msg = messages[idx]
+                parts = getattr(msg, "parts", None)
+                if parts and any(isinstance(p, (ToolReturnPart, BuiltinToolReturnPart)) for p in parts):
+                    if idx > 0 and start_idx > idx - 1:
+                        start_idx = idx - 1
+                    break
+
+            recent_slice = messages[start_idx:]
+        else:
+            recent_slice = messages
 
         # Render the recent slice into a simple text transcript.
         def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
@@ -126,6 +151,9 @@ def build_compiling_history_processor(
             if parts:
                 texts = []
                 for part in parts:
+                    if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+                        # Skip tool return parts so they are not mis-rendered as user text
+                        continue
                     part_content = getattr(part, "content", None)
                     if isinstance(part_content, str):
                         texts.append(part_content)

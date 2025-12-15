@@ -28,6 +28,7 @@ from core.constants import (
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
 from core.context.compiler import build_compiling_history_processor
+from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 
 
@@ -154,6 +155,18 @@ def _prepare_agent_config(
     return base_instructions, tool_instructions, model_instance, tool_functions
 
 
+def _context_compiler_recent_turns(default: int = 3) -> int:
+    """
+    Read the configured recent turn count for the context compiler with a safe fallback.
+    """
+    try:
+        entry = get_general_settings().get("context_compiler_recent_turns")
+        value = entry.value if entry is not None else default
+        return int(value)
+    except Exception:
+        return default
+
+
 async def execute_chat_prompt(
     vault_name: str,
     vault_path: str,
@@ -197,6 +210,7 @@ async def execute_chat_prompt(
                 vault_path=vault_path,
                 model_alias=model,
                 template_name=context_template or "chat_compiler.md",
+                recent_turns=_context_compiler_recent_turns(),
             )
         ]
 
@@ -278,6 +292,7 @@ async def execute_chat_prompt_stream(
                 vault_path=vault_path,
                 model_alias=model,
                 template_name=context_template or "chat_compiler.md",
+                recent_turns=_context_compiler_recent_turns(),
             )
         ]
 
