@@ -39,17 +39,9 @@
 - Add `@context-helper <template>` directive to workflow steps reusing the compiler; respect fail-open semantics.
 
 ### Additional Implementation Notes
-- Start simple: use template instructions directly; optional YAML/JSON schema in the template is advisory only (no dynamic Pydantic model/validation). Compiler now enforces JSON-only via `output_type=Dict[str, Any]` but still stores raw output for observability.
-- Drop-order/token budgeting is deferred; templates can self-limit (e.g., “3-4 sentences”). Add truncation rules later if needed.
-- Reflections: data lives in compiler state; template exposes it via a placeholder/key. Decide generation triggers (e.g., every N turns or on tool failures).
 - Progress so far:
   - UI: “Endless” mode and template dropdown added; templates listed via `/api/context/templates` (vault + system).
   - Settings:
     - `context_compiler_recent_runs`: runs fed to the compiler; blank/0 disables the compiler (falls back to raw history).
     - `context_compiler_passthrough_runs`: runs passed verbatim to the chat model with the summary; blank/0 disables passthrough (summary-only when compiling).
-    - `context_compiler_token_threshold`: measured against full `message_history`; below threshold skips compilation for that turn (no summary injection). Blank/0 disables the gate (compile every turn unless the compiler itself is disabled).
-- Compiler: stateless; template + rendered recent turns + latest input form the prompt; minimal compiler instruction in agent.instructions; output is natural language (no JSON parse). Persistence happens in the history processor.
-- History handling: history_processor injects compiled summary (system message) + recent non-tool turns. Tool calls/results are currently dropped; if we need tool context, we must include paired tool messages or render tool summaries to avoid the “tool call/return pairing” warning.
-- Chat integration: chat executor just sets instructions, attaches the history processor in endless mode, and runs the chat agent; no inline compilation or persistence.
-- Storage: `context_compiler.db` with sessions/context_summaries; observability includes raw output and input payload.
-- Gaps: tool history gap (see above), provider placement/rules still to be validated, integration tests pending.
+    - `context_compiler_token_threshold`: measured against full `message_history`; below threshold skips compilation for that turn (no summary injection). Blank/0
