@@ -18,10 +18,11 @@ from pydantic_ai.messages import (
     ModelResponse,
     SystemPromptPart,
     TextPart,
+    UserPromptPart,
+    ToolCallPart,
     ToolReturnPart,
 )
 from core.tools.utils import estimate_token_count
-from core.settings.store import get_general_settings
 from core.context.store import add_context_summary, upsert_session
 from core.settings.store import get_general_settings
 
@@ -93,7 +94,7 @@ async def compile_context(
     return CompileResult(
         raw_output=raw_output,
         template=input_data.template,
-        model_alias=input_data.model_alias,
+        model_alias=model_to_use,
     )
 
 
@@ -104,7 +105,8 @@ def build_compiling_history_processor(
     vault_path: str,
     model_alias: str,
     template_name: str,
-    recent_turns: int = 3,
+    compiler_runs: int = 0,
+    passthrough_runs: int = 0,
 )-> list[ModelMessage]:
     """
     Factory for a history processor that compiles a curated view and injects it
@@ -118,26 +120,45 @@ def build_compiling_history_processor(
         if not messages:
             return []
 
-        # Trim based on non-tool turns, but preserve any tool messages between them
-        if recent_turns > 0:
-            non_tool_indices = [idx for idx, m in enumerate(messages) if not getattr(m, "tool_name", None)]
-            if not non_tool_indices:
-                start_idx = max(len(messages) - recent_turns, 0)
-            else:
-                start_idx = non_tool_indices[-recent_turns] if len(non_tool_indices) >= recent_turns else 0
-
-            # Ensure tool return parts keep their preceding tool call message
-            for idx in range(start_idx, len(messages)):
-                msg = messages[idx]
-                parts = getattr(msg, "parts", None)
-                if parts and any(isinstance(p, (ToolReturnPart, BuiltinToolReturnPart)) for p in parts):
-                    if idx > 0 and start_idx > idx - 1:
-                        start_idx = idx - 1
+        def _run_slice(msgs: List[ModelMessage], runs_to_take: int) -> List[ModelMessage]:
+            run_ids: List[str] = []
+            for m in msgs:
+                rid = getattr(m, "run_id", None)
+                if rid:
+                    if not run_ids or run_ids[-1] != rid:
+                        run_ids.append(rid)
+            if run_ids:
+                if runs_to_take == 0:
+                    return []  # Explicit disable
+                take_runs = runs_to_take if runs_to_take > 0 else len(run_ids)
+                selected_run_ids = set(run_ids[-take_runs:])
+                start_idx = 0
+                for idx, m in enumerate(msgs):
+                    if getattr(m, "run_id", None) in selected_run_ids:
+                        start_idx = idx
+                        break
+                return msgs[start_idx:]
+            # Fallback: slice from last user message to end (user→assistant→tools)
+            last_user_idx = None
+            for idx in range(len(msgs) - 1, -1, -1):
+                m = msgs[idx]
+                role = getattr(m, "role", None)
+                if role and role.lower() == "user":
+                    last_user_idx = idx
                     break
+                if isinstance(m, ModelRequest):
+                    last_user_idx = idx
+                    break
+            if last_user_idx is not None:
+                return msgs[last_user_idx:]
+            return msgs
 
-            recent_slice = messages[start_idx:]
-        else:
-            recent_slice = messages
+        compiler_slice = _run_slice(messages, compiler_runs)
+        passthrough_slice = _run_slice(messages, passthrough_runs)
+
+        # If both compiler and passthrough are explicitly disabled, fall back to raw history (regular chat).
+        if compiler_runs == 0 and passthrough_runs == 0:
+            return list(messages)
 
         # Render the recent slice into a simple text transcript.
         def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
@@ -148,28 +169,40 @@ def build_compiling_history_processor(
                 role = "assistant"
             else:
                 role = getattr(msg, "role", None) or msg.__class__.__name__.lower()
-            # Try direct content first
+
+            parts = getattr(msg, "parts", None)
+            if parts:
+                rendered_parts: List[str] = []
+                for part in parts:
+                    if isinstance(part, (UserPromptPart, TextPart)):
+                        part_content = getattr(part, "content", None)
+                        if isinstance(part_content, str):
+                            rendered_parts.append(part_content)
+                    elif isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+                        tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
+                        part_content = getattr(part, "content", None)
+                        if isinstance(part_content, str):
+                            rendered_parts.append(f"[{tool_name}] {part_content}")
+                    elif isinstance(part, ToolCallPart):
+                        tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
+                        rendered_parts.append(f"[{tool_name}] (tool call)")
+                    else:
+                        part_content = getattr(part, "content", None)
+                        if isinstance(part_content, str):
+                            rendered_parts.append(part_content)
+                if rendered_parts:
+                    return role, "\n".join(rendered_parts)
+
+            # Try direct content if no parts were rendered
             content = getattr(msg, "content", None)
             if isinstance(content, str) and content:
                 return role, content
-            # Fall back to parts if present (e.g., ModelRequest)
-            parts = getattr(msg, "parts", None)
-            if parts:
-                texts = []
-                for part in parts:
-                    if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
-                        # Skip tool return parts so they are not mis-rendered as user text
-                        continue
-                    part_content = getattr(part, "content", None)
-                    if isinstance(part_content, str):
-                        texts.append(part_content)
-                if texts:
-                    return role, "\n".join(texts)
+
             return role, ""
 
         rendered_lines: List[str] = []
         latest_input = ""
-        for m in recent_slice:
+        for m in compiler_slice:
             role, text = _extract_role_and_text(m)
             if text:
                 rendered_lines.append(f"{role.capitalize()}: {text}")
@@ -186,20 +219,12 @@ def build_compiling_history_processor(
             threshold = 0
 
         if threshold > 0:
-            # Use rendered text plus tool return content to estimate size of the slice
+            # Estimate size of the full raw history (SessionManager messages) to decide whether to compile.
             estimate_parts: List[str] = []
-            if rendered_history:
-                estimate_parts.append(rendered_history)
-            if latest_input:
-                estimate_parts.append(latest_input)
-            for m in recent_slice:
-                parts = getattr(m, "parts", None)
-                if parts:
-                    for part in parts:
-                        if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
-                            part_content = getattr(part, "content", None)
-                            if isinstance(part_content, str):
-                                estimate_parts.append(part_content)
+            for m in messages:
+                role, text = _extract_role_and_text(m)
+                if text:
+                    estimate_parts.append(f"{role}: {text}")
             estimate_basis = "\n".join(estimate_parts)
             token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
             logger.debug(
@@ -208,11 +233,13 @@ def build_compiling_history_processor(
                     "run_id": run_context.run_id,
                     "token_estimate": token_estimate,
                     "threshold": threshold,
-                    "recent_turns": recent_turns,
+                    "compiler_runs": compiler_runs,
+                    "passthrough_runs": passthrough_runs,
                 },
             )
             if token_estimate < threshold:
-                return messages
+                # Skip compilation entirely for this turn; no summary injection, just passthrough slice (or raw history).
+                return passthrough_slice or list(messages)
         cache_store = getattr(run_context.deps, "context_compiler_cache", None)
         if cache_store is None:
             cache_store = {}
@@ -227,6 +254,7 @@ def build_compiling_history_processor(
 
         try:
             compiled_output: Optional[str] = cache_entry.get("raw_output")
+            compiled_model_alias: str = cache_entry.get("model_alias", model_alias)
 
             if compiled_output is None:
                 # Pick compiler model override if available and valid
@@ -252,8 +280,10 @@ def build_compiling_history_processor(
                     model_override=compiler_model_alias if compiler_model_alias else None,
                 )
                 compiled_output = compiled_obj.raw_output
+                compiled_model_alias = compiled_obj.model_alias
                 cache_entry = {
                     "raw_output": compiled_output,
+                    "model_alias": compiled_model_alias,
                     "persisted": False,
                 }
                 cache_store[run_scope_key] = cache_entry
@@ -267,7 +297,7 @@ def build_compiling_history_processor(
                         vault_name=vault_name,
                         turn_index=None,
                         template=template,
-                        model_alias=model_alias,
+                        model_alias=compiled_model_alias,
                         summary_json=None,
                         raw_output=compiled_output,
                         budget_used=None,
@@ -288,7 +318,7 @@ def build_compiling_history_processor(
         curated_history: List[ModelMessage] = []
         if summary_message:
             curated_history.append(summary_message)
-        curated_history.extend(recent_slice)
+        curated_history.extend(passthrough_slice)
         return curated_history
 
     return processor

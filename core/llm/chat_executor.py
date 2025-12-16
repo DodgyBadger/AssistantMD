@@ -161,13 +161,29 @@ def _prepare_agent_config(
     return base_instructions, tool_instructions, model_instance, tool_functions
 
 
-def _context_compiler_recent_turns(default: int = 3) -> int:
+def _context_compiler_recent_runs(default: int = 0) -> int:
     """
-    Read the configured recent turn count for the context compiler with a safe fallback.
+    Read the configured recent run count for the context compiler with a safe fallback.
     """
     try:
-        entry = get_general_settings().get("context_compiler_recent_turns")
+        entry = get_general_settings().get("context_compiler_recent_runs")
         value = entry.value if entry is not None else default
+        if value == "" or value is None:
+            return 0
+        return int(value)
+    except Exception:
+        return default
+
+
+def _context_compiler_passthrough_runs(default: int = 0) -> int:
+    """
+    Read the configured passthrough run count for the context compiler with a safe fallback.
+    """
+    try:
+        entry = get_general_settings().get("context_compiler_passthrough_runs")
+        value = entry.value if entry is not None else default
+        if value == "" or value is None:
+            return 0
         return int(value)
     except Exception:
         return default
@@ -216,7 +232,8 @@ async def execute_chat_prompt(
                 vault_path=vault_path,
                 model_alias=model,
                 template_name=context_template or "chat_compiler.md",
-                recent_turns=_context_compiler_recent_turns(),
+                compiler_runs=_context_compiler_recent_runs(),
+                passthrough_runs=_context_compiler_passthrough_runs(),
             )
         ]
 
@@ -300,7 +317,8 @@ async def execute_chat_prompt_stream(
                 vault_path=vault_path,
                 model_alias=model,
                 template_name=context_template or "chat_compiler.md",
-                recent_turns=_context_compiler_recent_turns(),
+                compiler_runs=_context_compiler_recent_runs(),
+                passthrough_runs=_context_compiler_passthrough_runs(),
             )
         ]
 
@@ -443,22 +461,6 @@ async def execute_chat_prompt_stream(
     # Store new messages in session (including tool results captured during stream)
     if final_result:
         session_manager.add_messages(session_id, vault_name, final_result.new_messages())
-        # Add synthetic tool result messages so the compiler can see recent tool activity
-        if tool_activity:
-            synthetic_tool_messages: List[ModelMessage] = []
-            for tool_id, meta in tool_activity.items():
-                tool_name = meta.get("tool_name")
-                result_preview = meta.get("result") or meta.get("arguments")
-                if not tool_name or result_preview is None:
-                    continue
-                try:
-                    msg = ModelMessage(role="tool", content=str(result_preview))
-                    setattr(msg, "tool_name", tool_name)
-                    synthetic_tool_messages.append(msg)
-                except Exception:
-                    continue
-            if synthetic_tool_messages:
-                session_manager.add_messages(session_id, vault_name, synthetic_tool_messages)
 
     # Save chat history to markdown file
     if final_result:
