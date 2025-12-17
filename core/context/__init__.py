@@ -1,1 +1,1 @@
-# Context compiler package initialization.
+# Context manager package initialization.

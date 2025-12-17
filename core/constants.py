@@ -151,8 +151,8 @@ After writing the file, tell the user:
 - That they can continue chatting to refine it
 """
 
-# Context compiler prompt
-CONTEXT_COMPILER_PROMPT = """
+# Context manager prompt
+CONTEXT_MANAGER_PROMPT = """
 Please condense and summarize the chat history provided below based on the extraction template, also provided below.
 
 **RULES FOR RESPONDING**
@@ -162,7 +162,7 @@ Please condense and summarize the chat history provided below based on the extra
 - If a field or instruction in the extraction template is not relevant, you must still include the field but with a value "N/A".
 """.strip()
 
-# Optional context compiler agent.instruction
-CONTEXT_COMPILER_SYSTEM_INSTRUCTION = """
+# Optional context manager agent.instruction
+CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
 You are a summarization agent. Follow instructions exactly.
 """

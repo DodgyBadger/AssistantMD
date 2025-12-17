@@ -12,7 +12,7 @@ from core.logger import UnifiedLogger
 logger = UnifiedLogger(tag="context-store")
 
 
-DB_NAME = "context_compiler"
+DB_NAME = "context_manager"
 
 
 def _get_db_path(system_root: Optional[Path] = None) -> str:

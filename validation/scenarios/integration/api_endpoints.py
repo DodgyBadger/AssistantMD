@@ -216,6 +216,41 @@ Summarize the validation run context.
             chat_second.status_code, 200, "Follow-up chat execution succeeds"
         )
 
+        # Managed context chat mode with a scenario-scoped template
+        self.create_file(
+            vault,
+            "AssistantMD/ContextTemplates/validation_template.md",
+            MANAGED_CONTEXT_TEMPLATE,
+        )
+        managed_payload = {
+            "vault_name": vault.name,
+            "prompt": "Hello. Write a haiku about context managers.",
+            "tools": [],
+            "model": "gpt-mini",
+            "session_type": "managed_context",
+            "context_template": "validation_template.md",
+        }
+        managed_first = self.call_api("/api/chat/execute", method="POST", data=managed_payload)
+        self.expect_equals(managed_first.status_code, 200, "Managed-context chat execution succeeds")
+        managed_session = managed_first.json()["session_id"]
+        self.expect_equals(bool(managed_session), True, "Managed-context session id returned")
+
+        managed_second = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                **managed_payload,
+                "session_id": managed_session,
+                "prompt": "Second turn for managed context.",
+            },
+        )
+        self.expect_equals(managed_second.status_code, 200, "Managed-context follow-up succeeds")
+        self.expect_equals(
+            bool(managed_second.json().get("response")),
+            True,
+            "Managed-context response should not be empty",
+        )
+
         compact_response = self.call_api(
             "/api/chat/compact",
             method="POST",
@@ -249,3 +284,17 @@ Summarize the validation run context.
 
         await self.stop_system()
         self.teardown_scenario()
+
+
+# === TEMPLATES ===
+
+MANAGED_CONTEXT_TEMPLATE = """
+# Validation Context Manager Template
+- **topic**: A short description of what this conversation is about (theme, problem, artifact).
+- **constraints**: Non-negotiable rules or guardrails (safety, scoping, format).
+- **plan**: The current subtask or next step in plain language (short).
+- **recent_turns**: The last few turns of the conversation (user and assistant), as provided to you.
+- **tool_results**: Condensed outputs from recent tool calls that are still relevant.
+- **reflections** (optional): Brief observations and adjustments from recent steps or errors (if any).
+- **latest_input**: The most recent user message, restated succinctly.
+"""

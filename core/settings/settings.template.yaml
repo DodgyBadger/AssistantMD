@@ -54,21 +54,21 @@ settings:
     value: 5
     description: "Number of ingestion jobs to process per worker run."
     restart_required: true
-  context_compiler_recent_runs:
+  context_manager_recent_runs:
     value: 3
-    description: "Number of recent chat runs to feed into the context compiler. Blank / 0 disables the compiler and passes all message history."
+    description: "Number of recent chat runs to feed into the context manager. Blank / 0 disables the manager and passes all message history."
     restart_required: false
-  context_compiler_passthrough_runs:
+  context_manager_passthrough_runs:
     value: 1
-    description: "Number of recent chat runs to pass verbatim to the chat model alongside the compiled summary. Blank / 0 passes summary only."
+    description: "Number of recent chat runs to pass verbatim to the chat model alongside the managed summary. Blank / 0 passes summary only."
     restart_required: false
-  context_compiler_token_threshold:
+  context_manager_token_threshold:
     value: 4000
-    description: "If total tokens in the candidate history slice are below this value, skip the context compiler and run normal chat. Blank / 0 to disable and compile every run."
+    description: "If total tokens in the chat history are below this value, skip the context manager and run normal chat. Blank / 0 to disable and manage every run."
     restart_required: false
-  context_compiler_model:
+  context_manager_model:
     value: ""
-    description: "Optional model alias to use for context compilation. Leave blank to use the chat model."
+    description: "Optional model alias to use for context management. Leave blank to use the chat model."
     restart_required: false
 
 models:

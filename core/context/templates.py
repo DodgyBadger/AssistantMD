@@ -15,7 +15,6 @@ from core.logger import UnifiedLogger
 logger = UnifiedLogger(tag="context-templates")
 
 
-DEFAULT_TEMPLATE_NAME = "chat_compiler.md"
 VAULT_TEMPLATE_SUBDIR = CONTEXT_TEMPLATE_DIR
 SYSTEM_TEMPLATE_SUBDIR = CONTEXT_TEMPLATE_DIR
 SEED_TEMPLATE_DIR = Path(__file__).parent / "template_seed"
@@ -75,32 +74,6 @@ def _extract_schema_block(content: str) -> Optional[str]:
     return "\n".join(block_lines).strip()
 
 
-def _builtin_default_template(requested_name: str) -> TemplateRecord:
-    """Fallback template if no on-disk template is found."""
-    content = """# Chat Context Compiler
-
-You compile a concise working context for the next model call.
-
-Return JSON with exactly these keys:
-{
-  "constraints": ["string"],
-  "plan": "string",
-  "recent_turns": [{"speaker": "string", "text": "string"}],
-  "tool_results": [{"tool": "string", "result": "string"}],
-  "reflections": [{"observation": "string", "adjustment": "string"}],
-  "latest_input": "string"
-}
-"""
-    return TemplateRecord(
-        name=requested_name,
-        content=content,
-        source="builtin",
-        path=None,
-        sha256=_hash_content(content),
-        schema_block=_extract_schema_block(content),
-    )
-
-
 def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
     content = path.read_text(encoding="utf-8")
     return TemplateRecord(
@@ -122,14 +95,17 @@ def load_template(
     Resolve a template by name with vault → system → builtin priority.
 
     Args:
-        name: Template filename or None to use default
+        name: Template filename (required)
         vault_path: Path to the active vault (root). If None, vault lookup is skipped.
         system_root: Optional system root override (defaults to runtime system root).
 
     Returns:
         TemplateRecord describing the resolved template.
     """
-    normalized = _ensure_md_suffix(name or DEFAULT_TEMPLATE_NAME)
+    if not name:
+        raise ValueError("Template name is required for load_template")
+
+    normalized = _ensure_md_suffix(name)
 
     # Try vault-scoped template
     if vault_path:
@@ -158,9 +134,7 @@ def load_template(
             logger.info(f"Using system template: {system_template}")
             return _read_template(system_template, normalized, source="system")
 
-    # Fall back to builtin default
-    logger.info(f"Falling back to builtin template: {normalized}")
-    return _builtin_default_template(normalized)
+    raise FileNotFoundError(f"Template '{normalized}' not found in vault or system templates")
 
 
 def list_templates(
@@ -206,8 +180,8 @@ def seed_system_templates(system_root: Optional[Path] = None) -> None:
     """
     Ensure system templates directory exists with seeded defaults.
 
-    Seeds the default chat compiler template into system ContextTemplates
-    if no file exists for that name.
+    Copies all files from core/context/template_seed into system ContextTemplates
+    if they are not already present. Does not overwrite existing templates.
     """
     try:
         sys_root = system_root or get_system_root()
@@ -218,18 +192,18 @@ def seed_system_templates(system_root: Optional[Path] = None) -> None:
     target_dir = Path(sys_root) / SYSTEM_TEMPLATE_SUBDIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    target_path = target_dir / DEFAULT_TEMPLATE_NAME
-    if target_path.exists():
+    if not SEED_TEMPLATE_DIR.exists():
+        logger.warning(f"Seed template directory missing: {SEED_TEMPLATE_DIR}")
         return
 
-    seed_path = SEED_TEMPLATE_DIR / DEFAULT_TEMPLATE_NAME
-    try:
-        if seed_path.exists():
+    for seed_path in SEED_TEMPLATE_DIR.iterdir():
+        if not seed_path.is_file():
+            continue
+        target_path = target_dir / seed_path.name
+        if target_path.exists():
+            continue  # Preserve existing templates
+        try:
             shutil.copyfile(seed_path, target_path)
-            logger.info(f"Seeded default context template to {target_path}")
-        else:
-            # Fallback to builtin content if seed file is missing
-            target_path.write_text(_builtin_default_template(DEFAULT_TEMPLATE_NAME).content, encoding="utf-8")
-            logger.warning(f"Seed template missing; wrote builtin default to {target_path}")
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error(f"Failed to seed system template {target_path}: {exc}")
+            logger.info(f"Seeded context template to {target_path}")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(f"Failed to seed system template {target_path}: {exc}")

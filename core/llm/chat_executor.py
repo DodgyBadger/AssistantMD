@@ -27,7 +27,7 @@ from core.constants import (
 )
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
-from core.context.compiler import build_compiling_history_processor
+from core.context.manager import build_context_manager_history_processor
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 
@@ -91,7 +91,7 @@ class ChatExecutionResult:
 @dataclass
 class ChatRunDeps:
     """Per-run dependencies/caches for chat agents."""
-    context_compiler_cache: dict[str, Any] = field(default_factory=dict)
+    context_manager_cache: dict[str, Any] = field(default_factory=dict)
 
 
 def save_chat_history(vault_path: str, session_id: str, prompt: str, response: str):
@@ -161,12 +161,12 @@ def _prepare_agent_config(
     return base_instructions, tool_instructions, model_instance, tool_functions
 
 
-def _context_compiler_recent_runs(default: int = 0) -> int:
+def _context_manager_recent_runs(default: int = 0) -> int:
     """
-    Read the configured recent run count for the context compiler with a safe fallback.
+    Read the configured recent run count for the context manager with a safe fallback.
     """
     try:
-        entry = get_general_settings().get("context_compiler_recent_runs")
+        entry = get_general_settings().get("context_manager_recent_runs")
         value = entry.value if entry is not None else default
         if value == "" or value is None:
             return 0
@@ -175,12 +175,12 @@ def _context_compiler_recent_runs(default: int = 0) -> int:
         return default
 
 
-def _context_compiler_passthrough_runs(default: int = 0) -> int:
+def _context_manager_passthrough_runs(default: int = 0) -> int:
     """
-    Read the configured passthrough run count for the context compiler with a safe fallback.
+    Read the configured passthrough run count for the context manager with a safe fallback.
     """
     try:
-        entry = get_general_settings().get("context_compiler_passthrough_runs")
+        entry = get_general_settings().get("context_manager_passthrough_runs")
         value = entry.value if entry is not None else default
         if value == "" or value is None:
             return 0
@@ -213,7 +213,7 @@ async def execute_chat_prompt(
         model: Model name selected by user
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular" or "workflow_creation")
+        session_type: Chat mode ("regular", "workflow_creation", or "managed_context")
 
     Returns:
         ChatExecutionResult with response and session metadata
@@ -224,16 +224,16 @@ async def execute_chat_prompt(
     )
 
     history_processors = None
-    if session_type == "endless":
+    if session_type == "managed_context":
         history_processors = [
-            build_compiling_history_processor(
+            build_context_manager_history_processor(
                 session_id=session_id,
                 vault_name=vault_name,
                 vault_path=vault_path,
                 model_alias=model,
-                template_name=context_template or "chat_compiler.md",
-                compiler_runs=_context_compiler_recent_runs(),
-                passthrough_runs=_context_compiler_passthrough_runs(),
+                template_name=context_template or "goal_oriented.md",
+                manager_runs=_context_manager_recent_runs(),
+                passthrough_runs=_context_manager_passthrough_runs(),
             )
         ]
 
@@ -298,7 +298,7 @@ async def execute_chat_prompt_stream(
         model: Model name selected by user
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular" or "workflow_creation")
+        session_type: Chat mode ("regular", "workflow_creation", or "managed_context")
 
     Yields:
         SSE-formatted chunks in OpenAI-compatible format
@@ -309,16 +309,16 @@ async def execute_chat_prompt_stream(
     )
 
     history_processors = None
-    if session_type == "endless":
+    if session_type == "managed_context":
         history_processors = [
-            build_compiling_history_processor(
+            build_context_manager_history_processor(
                 session_id=session_id,
                 vault_name=vault_name,
                 vault_path=vault_path,
                 model_alias=model,
-                template_name=context_template or "chat_compiler.md",
-                compiler_runs=_context_compiler_recent_runs(),
-                passthrough_runs=_context_compiler_passthrough_runs(),
+                template_name=context_template or "goal_oriented.md",
+                manager_runs=_context_manager_recent_runs(),
+                passthrough_runs=_context_manager_passthrough_runs(),
             )
         ]
 

@@ -10,7 +10,7 @@ from core.llm.agents import create_agent
 from core.context.templates import TemplateRecord
 from core.context.templates import load_template
 from core.logger import UnifiedLogger
-from core.constants import CONTEXT_COMPILER_PROMPT, CONTEXT_COMPILER_SYSTEM_INSTRUCTION
+from core.constants import CONTEXT_MANAGER_PROMPT, CONTEXT_MANAGER_SYSTEM_INSTRUCTION
 from pydantic_ai.messages import (
     BuiltinToolReturnPart,
     ModelMessage,
@@ -26,12 +26,12 @@ from core.tools.utils import estimate_token_count
 from core.context.store import add_context_summary, upsert_session
 from core.settings.store import get_general_settings
 
-logger = UnifiedLogger(tag="context-compiler")
+logger = UnifiedLogger(tag="context-manager")
 
 
 @dataclass
-class CompileInput:
-    """Minimal inputs needed to compile a working context."""
+class ContextManagerInput:
+    """Minimal inputs needed to manage/curate a working context."""
 
     model_alias: str
     template: TemplateRecord
@@ -39,42 +39,45 @@ class CompileInput:
 
 
 @dataclass
-class CompileResult:
-    """Result of a compilation run."""
+class ContextManagerResult:
+    """Result of a context management run."""
 
     raw_output: str
     template: TemplateRecord
     model_alias: str
 
 
-async def compile_context(
-    input_data: CompileInput,
+async def manage_context(
+    input_data: ContextManagerInput,
     instructions_override: Optional[str] = None,
     tools: Optional[List[Any]] = None,
     model_override: Optional[str] = None,
-) -> CompileResult:
+) -> ContextManagerResult:
     """
-    Compile a concise working context using the provided template and model.
+    Manage a concise working context using the provided template and model.
 
     Patterns:
-    - Minimal compiler instruction added via agent.instructions (no system_prompt)
-    - Compiler prompt + template content + rendered history + latest input become the user prompt
-    - No message_history passed to the compiler agent (stateless per call)
+    - Minimal manager instruction added via agent.instructions (no system_prompt)
+    - Manager prompt + template content + rendered history + latest input become the user prompt
+    - No message_history passed to the manager agent (stateless per call)
     - Returns natural language output
     """
     # Resolve model instance
     model_directive = ModelDirective()
     model_to_use = model_override or input_data.model_alias
-    model_instance = model_directive.process_value(model_to_use, "context-compiler")
+    model_instance = model_directive.process_value(model_to_use, "context-manager")
 
-    compiler_instruction = instructions_override if instructions_override is not None else CONTEXT_COMPILER_SYSTEM_INSTRUCTION
+    manager_instruction = instructions_override if instructions_override is not None else CONTEXT_MANAGER_SYSTEM_INSTRUCTION
     latest_input = input_data.context_payload.get("latest_input") if isinstance(input_data.context_payload, dict) else None
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
+    previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
     prompt_parts: List[str] = []
-    prompt_parts.append(f"## Compiler task\n{CONTEXT_COMPILER_PROMPT}")
+    prompt_parts.append(f"## Context manager task\n{CONTEXT_MANAGER_PROMPT}")
     base_template = (input_data.template.content or "").strip()
     if base_template:
         prompt_parts.append(f"## Extraction template\n{base_template}")
+    if previous_summary:
+        prompt_parts.append(f"## Prior summary (persisted)\n{previous_summary}")
     if rendered_history:
         prompt_parts.append(f"## Recent conversation\n{rendered_history}")
     if latest_input:
@@ -85,32 +88,32 @@ async def compile_context(
         model=model_instance,
         tools=tools,
     )
-    agent.instructions(lambda _ctx, text=compiler_instruction: text)
+    agent.instructions(lambda _ctx, text=manager_instruction: text)
     result = await agent.run(prompt)
     result_output = getattr(result, "output", None)
 
     raw_output = str(result_output)
 
-    return CompileResult(
+    return ContextManagerResult(
         raw_output=raw_output,
         template=input_data.template,
         model_alias=model_to_use,
     )
 
 
-def build_compiling_history_processor(
+def build_context_manager_history_processor(
     *,
     session_id: str,
     vault_name: str,
     vault_path: str,
     model_alias: str,
     template_name: str,
-    compiler_runs: int = 0,
+    manager_runs: int = 0,
     passthrough_runs: int = 0,
 )-> list[ModelMessage]:
     """
-    Factory for a history processor that compiles a curated view and injects it
-    as a system message ahead of the recent turns. If compilation fails, the
+    Factory for a history processor that manages a curated view and injects it
+    as a system message ahead of the recent turns. If management fails, the
     original history is returned unchanged.
     """
 
@@ -153,11 +156,11 @@ def build_compiling_history_processor(
                 return msgs[last_user_idx:]
             return msgs
 
-        compiler_slice = _run_slice(messages, compiler_runs)
+        manager_slice = _run_slice(messages, manager_runs)
         passthrough_slice = _run_slice(messages, passthrough_runs)
 
-        # If both compiler and passthrough are explicitly disabled, fall back to raw history (regular chat).
-        if compiler_runs == 0 and passthrough_runs == 0:
+        # If both manager and passthrough are explicitly disabled, fall back to raw history (regular chat).
+        if manager_runs == 0 and passthrough_runs == 0:
             return list(messages)
 
         # Render the recent slice into a simple text transcript.
@@ -202,7 +205,7 @@ def build_compiling_history_processor(
 
         rendered_lines: List[str] = []
         latest_input = ""
-        for m in compiler_slice:
+        for m in manager_slice:
             role, text = _extract_role_and_text(m)
             if text:
                 rendered_lines.append(f"{role.capitalize()}: {text}")
@@ -211,15 +214,15 @@ def build_compiling_history_processor(
 
         rendered_history = "\n".join(rendered_lines)
 
-        # Estimate token count of the candidate slice (rendered history + latest input); if below threshold, skip compilation.
+        # Estimate token count of the candidate slice (rendered history + latest input); if below threshold, skip management.
         try:
-            threshold_entry = get_general_settings().get("context_compiler_token_threshold")
+            threshold_entry = get_general_settings().get("context_manager_token_threshold")
             threshold = int(threshold_entry.value) if threshold_entry and threshold_entry.value is not None else 0
         except Exception:
             threshold = 0
 
         if threshold > 0:
-            # Estimate size of the full raw history (SessionManager messages) to decide whether to compile.
+            # Estimate size of the full raw history (SessionManager messages) to decide whether to manage.
             estimate_parts: List[str] = []
             for m in messages:
                 role, text = _extract_role_and_text(m)
@@ -228,23 +231,23 @@ def build_compiling_history_processor(
             estimate_basis = "\n".join(estimate_parts)
             token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
             logger.debug(
-                "Context compiler threshold check",
+                "Context manager threshold check",
                 metadata={
                     "run_id": run_context.run_id,
                     "token_estimate": token_estimate,
                     "threshold": threshold,
-                    "compiler_runs": compiler_runs,
+                    "manager_runs": manager_runs,
                     "passthrough_runs": passthrough_runs,
                 },
             )
             if token_estimate < threshold:
-                # Skip compilation entirely for this turn; no summary injection, just passthrough slice (or raw history).
+                # Skip management entirely for this turn; no summary injection, just passthrough slice (or raw history).
                 return passthrough_slice or list(messages)
-        cache_store = getattr(run_context.deps, "context_compiler_cache", None)
+        cache_store = getattr(run_context.deps, "context_manager_cache", None)
         if cache_store is None:
             cache_store = {}
             try:
-                setattr(run_context.deps, "context_compiler_cache", cache_store)
+                setattr(run_context.deps, "context_manager_cache", cache_store)
             except Exception:
                 cache_store = {}
         run_scope_key = run_context.run_id or "default_run"
@@ -253,42 +256,56 @@ def build_compiling_history_processor(
         summary_message: Optional[ModelMessage] = None
 
         try:
-            compiled_output: Optional[str] = cache_entry.get("raw_output")
-            compiled_model_alias: str = cache_entry.get("model_alias", model_alias)
+            managed_output: Optional[str] = cache_entry.get("raw_output")
+            managed_model_alias: str = cache_entry.get("model_alias", model_alias)
 
-            if compiled_output is None:
-                # Pick compiler model override if available and valid
-                compiler_model_alias = None
+            if managed_output is None:
+                # Pick manager model override if available and valid
+                manager_model_alias = None
                 try:
-                    compiler_model_entry = get_general_settings().get("context_compiler_model")
-                    compiler_model_alias = compiler_model_entry.value if compiler_model_entry else None
+                    manager_model_entry = get_general_settings().get("context_manager_model")
+                    manager_model_alias = manager_model_entry.value if manager_model_entry else None
                 except Exception:
-                    compiler_model_alias = None
+                    manager_model_alias = None
 
-                compile_input = CompileInput(
+                previous_summary_text = None
+                try:
+                    recent_summaries = get_recent_summaries(
+                        session_id=session_id,
+                        vault_name=vault_name,
+                        limit=1,
+                    )
+                    if recent_summaries:
+                        prior = recent_summaries[0]
+                        previous_summary_text = prior.get("raw_output") or prior.get("summary") or None
+                except Exception:
+                    previous_summary_text = None
+
+                manager_input = ContextManagerInput(
                     model_alias=model_alias,
                     template=template,
                     context_payload={
                         "latest_input": latest_input,
                         "rendered_history": rendered_history,
+                        "previous_summary": previous_summary_text,
                     },
                 )
-                compiled_obj = await compile_context(
-                    compile_input,
+                managed_obj = await manage_context(
+                    manager_input,
                     instructions_override=None,
                     tools=None,
-                    model_override=compiler_model_alias if compiler_model_alias else None,
+                    model_override=manager_model_alias if manager_model_alias else None,
                 )
-                compiled_output = compiled_obj.raw_output
-                compiled_model_alias = compiled_obj.model_alias
+                managed_output = managed_obj.raw_output
+                managed_model_alias = managed_obj.model_alias
                 cache_entry = {
-                    "raw_output": compiled_output,
-                    "model_alias": compiled_model_alias,
+                    "raw_output": managed_output,
+                    "model_alias": managed_model_alias,
                     "persisted": False,
                 }
                 cache_store[run_scope_key] = cache_entry
 
-            # Persist the compiled view for observability.
+            # Persist the managed view for observability.
             if cache_entry and not cache_entry.get("persisted"):
                 try:
                     upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
@@ -297,9 +314,9 @@ def build_compiling_history_processor(
                         vault_name=vault_name,
                         turn_index=None,
                         template=template,
-                        model_alias=compiled_model_alias,
+                        model_alias=managed_model_alias,
                         summary_json=None,
-                        raw_output=compiled_output,
+                        raw_output=managed_output,
                         budget_used=None,
                         sections_included=None,
                         compiled_prompt=None,
@@ -307,12 +324,12 @@ def build_compiling_history_processor(
                     )
                     cache_entry["persisted"] = True
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning("Failed to persist compiled context summary", metadata={"error": str(exc)})
+                    logger.warning("Failed to persist managed context summary", metadata={"error": str(exc)})
 
-            summary_text = compiled_output or "N/A"
-            summary_message = ModelRequest(parts=[SystemPromptPart(content=f"Context summary (compiled):\n{summary_text}")])
+            summary_text = managed_output or "N/A"
+            summary_message = ModelRequest(parts=[SystemPromptPart(content=f"Context summary (managed):\n{summary_text}")])
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Context compilation failed in history processor", metadata={"error": str(exc)})
+            logger.warning("Context management failed in history processor", metadata={"error": str(exc)})
             return list(messages)
 
         curated_history: List[ModelMessage] = []
