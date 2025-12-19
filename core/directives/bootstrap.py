@@ -20,6 +20,12 @@ from .registry import get_global_registry
 from .run_on import RunOnDirective
 from .tools import ToolsDirective
 from .write_mode import WriteModeDirective
+from .context_manager import (
+    PassthroughRunsDirective,
+    RecentRunsDirective,
+    RecentSummariesDirective,
+    TokenThresholdDirective,
+)
 
 logger = UnifiedLogger(tag="directive-bootstrap")
 
@@ -31,6 +37,10 @@ _BUILTIN_DIRECTIVES: tuple[Type[DirectiveProcessor], ...] = (
     WriteModeDirective,
     ToolsDirective,
     HeaderDirective,
+    RecentRunsDirective,
+    PassthroughRunsDirective,
+    TokenThresholdDirective,
+    RecentSummariesDirective,
 )
 
 _builtins_registered: bool = False

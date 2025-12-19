@@ -66,9 +66,9 @@ settings:
     value: 4000
     description: "If total tokens in the chat history are below this value, skip the context manager and run normal chat. Blank / 0 to disable and manage every run."
     restart_required: false
-  context_manager_model:
-    value: ""
-    description: "Optional model alias to use for context management. Leave blank to use the chat model."
+  context_manager_recent_summaries:
+    value: 1
+    description: "Number of recent managed summaries to pass into the context manager prompt. Blank / 0 to disable."
     restart_required: false
 
 models:

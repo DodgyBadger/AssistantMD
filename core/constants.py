@@ -164,5 +164,5 @@ Please condense and summarize the chat history provided below based on the extra
 
 # Optional context manager agent.instruction
 CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
-You are a summarization agent. Follow instructions exactly.
+Follow the instructions provided carefully.
 """

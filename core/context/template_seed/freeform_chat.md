@@ -1,4 +1,8 @@
-# Freeform Chat Context Manager
+---
+description: Simply tracks the current topic. Allows meandering conversation.
+---
+
+## TEMPLATE
 
 Keep the view concise and helpful without locking onto a mission. Summarize what matters for the next reply, but allow topic changes naturally.
 

@@ -289,12 +289,21 @@ Summarize the validation run context.
 # === TEMPLATES ===
 
 MANAGED_CONTEXT_TEMPLATE = """
-# Validation Context Manager Template
-- **topic**: A short description of what this conversation is about (theme, problem, artifact).
-- **constraints**: Non-negotiable rules or guardrails (safety, scoping, format).
-- **plan**: The current subtask or next step in plain language (short).
-- **recent_turns**: The last few turns of the conversation (user and assistant), as provided to you.
-- **tool_results**: Condensed outputs from recent tool calls that are still relevant.
-- **reflections** (optional): Brief observations and adjustments from recent steps or errors (if any).
-- **latest_input**: The most recent user message, restated succinctly.
+---
+description: Simply tracks the current topic. Allows meandering conversation.
+---
+
+## TEMPLATE
+
+Keep the view concise and helpful without locking onto a mission. Summarize what matters for the next reply, but allow topic changes naturally.
+
+What to include:
+- **topic**: brief description of the current conversation focus.
+- **constraints**: any explicit rules or formats mentioned recently.
+- **key_points**: 3-5 bullets capturing important details or asks.
+- **recent_turns**: succinct snippets from the latest exchange.
+- **latest_input**: the most recent user message, concisely restated.
+
+Keep it short and avoid unnecessary repetition.
+
 """

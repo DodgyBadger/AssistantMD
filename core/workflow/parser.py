@@ -181,7 +181,11 @@ def parse_markdown_sections(content: str, delimiter: str = "##") -> Dict[str, st
     return sections
 
 
-def parse_workflow_file(file_path: str, context_id: str = None) -> Dict[str, str]:
+def parse_workflow_file(
+    file_path: str,
+    context_id: str = None,
+    require_frontmatter: bool = True,
+) -> Dict[str, str]:
     """Parse workflow definition file with YAML frontmatter format.
     
     Reads workflow file with frontmatter configuration and markdown sections.
@@ -204,7 +208,14 @@ def parse_workflow_file(file_path: str, context_id: str = None) -> Dict[str, str
             content = file.read()
         
         # Extract frontmatter configuration and remaining content
-        frontmatter_config, remaining_content = parse_frontmatter(content)
+        if require_frontmatter:
+            frontmatter_config, remaining_content = parse_frontmatter(content)
+        else:
+            if content.strip().startswith('---'):
+                frontmatter_config, remaining_content = parse_frontmatter(content)
+            else:
+                frontmatter_config = {}
+                remaining_content = content
         
         # Parse remaining content into sections
         sections = parse_markdown_sections(remaining_content, "##")

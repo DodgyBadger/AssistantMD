@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import shutil
 from hashlib import sha256
 from pathlib import Path
-from typing import Optional, List
-
-import yaml
+from typing import Optional, List, Dict, Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, CONTEXT_TEMPLATE_DIR
+from core.directives.parser import ParsedDirectives, parse_directives
 from core.runtime.paths import get_system_root
 from core.logger import UnifiedLogger
+from core.workflow.parser import parse_frontmatter, parse_markdown_sections
 
 logger = UnifiedLogger(tag="context-templates")
 
@@ -30,6 +30,11 @@ class TemplateRecord:
     path: Optional[Path]
     sha256: str
     schema_block: Optional[str] = None  # raw YAML/JSON block if present
+    frontmatter: Dict[str, Any] = field(default_factory=dict)
+    instructions: Optional[str] = None
+    template_section: Optional[str] = None
+    template_body: Optional[str] = None
+    directives: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def _ensure_md_suffix(name: str) -> str:
@@ -74,8 +79,52 @@ def _extract_schema_block(content: str) -> Optional[str]:
     return "\n".join(block_lines).strip()
 
 
+def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str]]:
+    """Parse optional frontmatter and markdown sections for templates."""
+    stripped = content.lstrip()
+    if stripped.startswith("---"):
+        frontmatter, remaining = parse_frontmatter(content)
+    else:
+        frontmatter = {}
+        remaining = content
+
+    sections = parse_markdown_sections(remaining, "##")
+    return frontmatter, sections
+
+
+def _select_instruction_and_template(
+    sections: Dict[str, str],
+) -> tuple[Optional[str], Optional[str], Optional[str], ParsedDirectives]:
+    """Pick instructions and template section content per template rules."""
+    if not sections:
+        return None, None, None, ParsedDirectives(directives={}, cleaned_content="")
+
+    section_items = list(sections.items())
+    instructions_idx = None
+    for idx, (section_name, _) in enumerate(section_items):
+        if section_name.strip().lower() == "instructions":
+            instructions_idx = idx
+            break
+
+    instructions = None
+    template_section = None
+    template_content = None
+
+    if instructions_idx is not None:
+        instructions = section_items[instructions_idx][1].strip() or None
+        if instructions_idx + 1 < len(section_items):
+            template_section, template_content = section_items[instructions_idx + 1]
+    else:
+        template_section, template_content = section_items[0]
+
+    parsed = parse_directives(template_content or "")
+    return instructions, template_section, parsed.cleaned_content, parsed
+
+
 def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
     content = path.read_text(encoding="utf-8")
+    frontmatter, sections = _parse_template_content(content)
+    instructions, template_section, template_body, parsed = _select_instruction_and_template(sections)
     return TemplateRecord(
         name=name,
         content=content,
@@ -83,6 +132,11 @@ def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
         path=path,
         sha256=_hash_content(content),
         schema_block=_extract_schema_block(content),
+        frontmatter=frontmatter,
+        instructions=instructions,
+        template_section=template_section,
+        template_body=template_body,
+        directives=parsed.directives,
     )
 
 

@@ -11,6 +11,9 @@ from core.context.templates import TemplateRecord
 from core.context.templates import load_template
 from core.logger import UnifiedLogger
 from core.constants import CONTEXT_MANAGER_PROMPT, CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+from core.directives.bootstrap import ensure_builtin_directives_registered
+from core.directives.registry import get_global_registry
+from core.directives.tools import ToolsDirective
 from pydantic_ai.messages import (
     BuiltinToolReturnPart,
     ModelMessage,
@@ -23,7 +26,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 from core.tools.utils import estimate_token_count
-from core.context.store import add_context_summary, upsert_session
+from core.context.store import add_context_summary, upsert_session, get_recent_summaries
 from core.settings.store import get_general_settings
 
 logger = UnifiedLogger(tag="context-manager")
@@ -72,8 +75,9 @@ async def manage_context(
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
     prompt_parts: List[str] = []
-    prompt_parts.append(f"## Context manager task\n{CONTEXT_MANAGER_PROMPT}")
-    base_template = (input_data.template.content or "").strip()
+    manager_task = input_data.template.instructions or CONTEXT_MANAGER_PROMPT
+    prompt_parts.append(f"## Context manager task\n{manager_task}")
+    base_template = (input_data.template.template_body or input_data.template.content or "").strip()
     if base_template:
         prompt_parts.append(f"## Extraction template\n{base_template}")
     if previous_summary:
@@ -117,7 +121,59 @@ def build_context_manager_history_processor(
     original history is returned unchanged.
     """
 
+    ensure_builtin_directives_registered()
+    registry = get_global_registry()
     template = load_template(template_name, Path(vault_path))
+    template_directives = template.directives or {}
+
+    def _get_latest_directive_value(name: str) -> Optional[str]:
+        values = template_directives.get(name, [])
+        return values[-1] if values else None
+
+    def _resolve_int_setting(setting_key: str, directive_key: str, default: int = 0) -> int:
+        directive_value = _get_latest_directive_value(directive_key)
+        if directive_value is not None:
+            try:
+                result = registry.process_directive(directive_key, directive_value, vault_path)
+                return int(result.processed_value)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to process context manager directive; falling back to settings",
+                    metadata={"directive": directive_key, "error": str(exc)},
+                )
+
+        try:
+            entry = get_general_settings().get(setting_key)
+            value = entry.value if entry is not None else default
+            if value == "" or value is None:
+                return 0
+            return int(value)
+        except Exception:
+            return default
+
+    manager_runs = _resolve_int_setting(
+        "context_manager_recent_runs",
+        "recent-runs",
+        manager_runs,
+    )
+    passthrough_runs = _resolve_int_setting(
+        "context_manager_passthrough_runs",
+        "passthrough-runs",
+        passthrough_runs,
+    )
+    token_threshold = _resolve_int_setting(
+        "context_manager_token_threshold",
+        "token-threshold",
+        0,
+    )
+    recent_summaries = _resolve_int_setting(
+        "context_manager_recent_summaries",
+        "recent-summaries",
+        1,
+    )
+
+    tools_directive_value = _get_latest_directive_value("tools")
+    model_directive_value = _get_latest_directive_value("model")
 
     async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:
@@ -215,13 +271,7 @@ def build_context_manager_history_processor(
         rendered_history = "\n".join(rendered_lines)
 
         # Estimate token count of the candidate slice (rendered history + latest input); if below threshold, skip management.
-        try:
-            threshold_entry = get_general_settings().get("context_manager_token_threshold")
-            threshold = int(threshold_entry.value) if threshold_entry and threshold_entry.value is not None else 0
-        except Exception:
-            threshold = 0
-
-        if threshold > 0:
+        if token_threshold > 0:
             # Estimate size of the full raw history (SessionManager messages) to decide whether to manage.
             estimate_parts: List[str] = []
             for m in messages:
@@ -235,12 +285,12 @@ def build_context_manager_history_processor(
                 metadata={
                     "run_id": run_context.run_id,
                     "token_estimate": token_estimate,
-                    "threshold": threshold,
+                    "threshold": token_threshold,
                     "manager_runs": manager_runs,
                     "passthrough_runs": passthrough_runs,
                 },
             )
-            if token_estimate < threshold:
+            if token_estimate < token_threshold:
                 # Skip management entirely for this turn; no summary injection, just passthrough slice (or raw history).
                 return passthrough_slice or list(messages)
         cache_store = getattr(run_context.deps, "context_manager_cache", None)
@@ -260,26 +310,40 @@ def build_context_manager_history_processor(
             managed_model_alias: str = cache_entry.get("model_alias", model_alias)
 
             if managed_output is None:
-                # Pick manager model override if available and valid
-                manager_model_alias = None
-                try:
-                    manager_model_entry = get_general_settings().get("context_manager_model")
-                    manager_model_alias = manager_model_entry.value if manager_model_entry else None
-                except Exception:
-                    manager_model_alias = None
-
                 previous_summary_text = None
-                try:
-                    recent_summaries = get_recent_summaries(
-                        session_id=session_id,
-                        vault_name=vault_name,
-                        limit=1,
-                    )
-                    if recent_summaries:
-                        prior = recent_summaries[0]
-                        previous_summary_text = prior.get("raw_output") or prior.get("summary") or None
-                except Exception:
-                    previous_summary_text = None
+                if recent_summaries > 0:
+                    try:
+                        recent_summaries_rows = get_recent_summaries(
+                            session_id=session_id,
+                            vault_name=vault_name,
+                            limit=recent_summaries,
+                        )
+                        if recent_summaries_rows:
+                            previous_summary_text = "\n\n".join(
+                                [
+                                    row.get("raw_output") or row.get("summary") or ""
+                                    for row in reversed(recent_summaries_rows)
+                                    if row.get("raw_output") or row.get("summary")
+                                ]
+                            ).strip() or None
+                    except Exception:
+                        previous_summary_text = None
+
+                tools_for_manager = None
+                tool_instructions = ""
+                if tools_directive_value:
+                    try:
+                        tools_directive = ToolsDirective()
+                        tools_for_manager, tool_instructions = tools_directive.process_value(
+                            tools_directive_value, vault_path=vault_path
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to process context manager tools directive",
+                            metadata={"error": str(exc)},
+                        )
+                        tools_for_manager = None
+                        tool_instructions = ""
 
                 manager_input = ContextManagerInput(
                     model_alias=model_alias,
@@ -290,11 +354,14 @@ def build_context_manager_history_processor(
                         "previous_summary": previous_summary_text,
                     },
                 )
+                manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+                if tool_instructions:
+                    manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"
                 managed_obj = await manage_context(
                     manager_input,
-                    instructions_override=None,
-                    tools=None,
-                    model_override=manager_model_alias if manager_model_alias else None,
+                    instructions_override=manager_instruction,
+                    tools=tools_for_manager,
+                    model_override=model_directive_value,
                 )
                 managed_output = managed_obj.raw_output
                 managed_model_alias = managed_obj.model_alias
