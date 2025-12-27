@@ -274,23 +274,23 @@ def build_final_prompt(processed_step) -> str:
                 path_only_entries.append(label)
             elif file_data['found'] and file_data['content']:
                 formatted_content.append(
-                    f"# File: {file_data['filepath']}\n\n{file_data['content']}"
+                    f"--- FILE: {file_data['filepath']} ---\n{file_data['content']}"
                 )
             elif not file_data['found']:
                 formatted_content.append(
-                    f"# File: {file_data['filepath']}\n\n[File not found: {file_data['error']}]"
+                    f"--- FILE: {file_data['filepath']} ---\n[FILE NOT FOUND: {file_data['error']}]"
                 )
         
-        prompt_sections = []
-        if path_only_entries:
-            prompt_sections.append(
-                "File paths (content not inlined):\n" + "\n".join(path_only_entries)
-            )
-        if formatted_content:
-            prompt_sections.append("\n\n".join(formatted_content))
-
-        if prompt_sections:
-            final_prompt += "\n\n---\n\n" + "\n\n---\n\n".join(prompt_sections)
+        if path_only_entries or formatted_content:
+            sections = []
+            sections.append("=== BEGIN INPUT_FILES ===")
+            if path_only_entries:
+                sections.append("--- FILE PATHS (CONTENT NOT INLINED) ---")
+                sections.append("\n".join(path_only_entries))
+            if formatted_content:
+                sections.append("\n\n".join(formatted_content))
+            sections.append("=== END INPUT_FILES ===")
+            final_prompt += "\n\n" + "\n".join(sections)
     
     return final_prompt
 

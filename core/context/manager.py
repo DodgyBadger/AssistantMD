@@ -61,9 +61,12 @@ def _normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any
     return []
 
 
-def _format_input_files_for_prompt(input_file_data: Any) -> Optional[str]:
+def _format_input_files_for_prompt(
+    input_file_data: Any,
+    has_empty_directive: bool = False,
+) -> Optional[str]:
     file_lists = _normalize_input_file_lists(input_file_data)
-    if not file_lists:
+    if not file_lists and not has_empty_directive:
         return None
 
     flattened_files: List[Dict[str, Any]] = []
@@ -83,24 +86,47 @@ def _format_input_files_for_prompt(input_file_data: Any) -> Optional[str]:
             path_only_entries.append(label)
         elif file_data.get("found") and file_data.get("content"):
             formatted_content.append(
-                f"# File: {file_data.get('filepath', 'unknown')}\n\n{file_data.get('content', '')}"
+                f"--- FILE: {file_data.get('filepath', 'unknown')} ---\n{file_data.get('content', '')}"
             )
         elif file_data.get("found") is False:
             formatted_content.append(
-                f"# File: {file_data.get('filepath', 'unknown')}\n\n[File not found: {file_data.get('error')}]"
+                f"--- FILE: {file_data.get('filepath', 'unknown')} ---\n[FILE NOT FOUND: {file_data.get('error')}]"
             )
 
-    prompt_sections: List[str] = []
-    if path_only_entries:
-        prompt_sections.append(
-            "File paths (content not inlined):\n" + "\n".join(path_only_entries)
-        )
-    if formatted_content:
-        prompt_sections.append("\n\n".join(formatted_content))
-
-    if not prompt_sections:
+    if not path_only_entries and not formatted_content:
+        if has_empty_directive:
+            return "\n".join(
+                [
+                    "=== BEGIN INPUT_FILES ===",
+                    "--- FILE PATHS (CONTENT NOT INLINED) ---",
+                    "[NO INPUT FILES SPECIFIED IN TEMPLATE]",
+                    "=== END INPUT_FILES ===",
+                ]
+            )
         return None
-    return "\n\n---\n\n".join(prompt_sections)
+
+    sections: List[str] = []
+    sections.append("=== BEGIN INPUT_FILES ===")
+    if path_only_entries:
+        sections.append("--- FILE PATHS (CONTENT NOT INLINED) ---")
+        sections.append("\n".join(path_only_entries))
+    if formatted_content:
+        sections.append("\n\n".join(formatted_content))
+    sections.append("=== END INPUT_FILES ===")
+
+    return "\n".join(sections)
+
+
+def _has_empty_input_file_directive(content: str) -> bool:
+    if not content:
+        return False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.lower().startswith("@input-file"):
+            return stripped in ("@input-file", "@input-file:")
+    return False
 
 
 async def manage_context(
@@ -130,18 +156,58 @@ async def manage_context(
     input_files = input_data.context_payload.get("input_files") if isinstance(input_data.context_payload, dict) else None
     prompt_parts: List[str] = []
     manager_task = input_data.template.instructions or CONTEXT_MANAGER_PROMPT
-    prompt_parts.append(f"## Context manager task\n{manager_task}")
+    prompt_parts.append(
+        "\n".join(
+            [
+                "=== BEGIN CONTEXT_MANAGER_TASK ===",
+                manager_task,
+                "=== END CONTEXT_MANAGER_TASK ===",
+            ]
+        )
+    )
     base_template = (input_data.template.template_body or input_data.template.content or "").strip()
     if base_template:
-        prompt_parts.append(f"## Extraction template\n{base_template}")
-    if previous_summary:
-        prompt_parts.append(f"## Prior summary (persisted)\n{previous_summary}")
+        prompt_parts.append(
+            "\n".join(
+                [
+                    "=== BEGIN EXTRACTION_TEMPLATE ===",
+                    base_template,
+                    "=== END EXTRACTION_TEMPLATE ===",
+                ]
+            )
+        )
     if input_files:
-        prompt_parts.append(f"## Input files\n{input_files}")
+        prompt_parts.append(input_files)
+    if previous_summary:
+        prompt_parts.append(
+            "\n".join(
+                [
+                    "=== BEGIN PRIOR_SUMMARY ===",
+                    previous_summary,
+                    "=== END PRIOR_SUMMARY ===",
+                ]
+            )
+        )
     if rendered_history:
-        prompt_parts.append(f"## Recent conversation\n{rendered_history}")
+        prompt_parts.append(
+            "\n".join(
+                [
+                    "=== BEGIN RECENT_CONVERSATION ===",
+                    rendered_history,
+                    "=== END RECENT_CONVERSATION ===",
+                ]
+            )
+        )
     if latest_input:
-        prompt_parts.append(f"## Latest user input\n{latest_input}")
+        prompt_parts.append(
+            "\n".join(
+                [
+                    "=== BEGIN LATEST_USER_INPUT ===",
+                    latest_input,
+                    "=== END LATEST_USER_INPUT ===",
+                ]
+            )
+        )
     prompt = "\n\n".join(prompt_parts).strip() or "No content provided."
 
     agent = await create_agent(
@@ -231,6 +297,9 @@ def build_context_manager_history_processor(
     tools_directive_value = _get_latest_directive_value("tools")
     model_directive_value = _get_latest_directive_value("model")
     input_file_values = template_directives.get("input-file", [])
+    empty_input_file_directive = _has_empty_input_file_directive(
+        template.template_body or template.content or ""
+    )
 
     async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:
@@ -438,9 +507,12 @@ def build_context_manager_history_processor(
                         "latest_input": latest_input,
                         "rendered_history": rendered_history,
                         "previous_summary": previous_summary_text,
-                        "input_files": _format_input_files_for_prompt(input_file_data),
-                    },
-                )
+                    "input_files": _format_input_files_for_prompt(
+                        input_file_data,
+                        has_empty_directive=empty_input_file_directive and not input_file_data,
+                    ),
+                },
+            )
                 manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
                 if tool_instructions:
                     manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"

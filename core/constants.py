@@ -153,13 +153,20 @@ After writing the file, tell the user:
 
 # Context manager prompt
 CONTEXT_MANAGER_PROMPT = """
-Please condense and summarize the chat history provided below based on the extraction template, also provided below.
+Your job is to manage the context window (i.e. working memory) for the primary chat agent so that the conversation remains focused.
+You are provided with some or all of the following content sections:
+
+EXTRACTION_TEMPLATE: Defines what your output should look like. Follow this exactly.
+INPUT_FILES: Additional content to establish the topic or provide supporting documentation. Treat this as framing content, not as conversation history.
+PRIOR_SUMMARY: The last N context summaries produced by you in prior runs.
+RECENT_CONVERSATION: The last N verbatim turns of the conversation.
+LATEST_USER_INPUT: The last user input. This is what the primary chat agent should respond directly to.
 
 **RULES FOR RESPONDING**
 - Follow the extraction template exactly. Do not add commentary or content not explicitly defined in the template.
-- Base your extraction only on the chat history provided. Do not include details of this prompt.
-- Do not invent content. Everything you output must be sourced from the chat history.
-- If a field or instruction in the extraction template is not relevant, you must still include the field but with a value "N/A".
+- Base your extraction only on the sections provided. Do not include details of this prompt.
+- Do not invent content. Everything you output must be sourced from the sections.
+- If a field or instruction in the extraction template is not relevant, include the field with a value "N/A".
 """.strip()
 
 # Optional context manager agent.instruction
