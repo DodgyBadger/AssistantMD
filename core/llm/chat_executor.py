@@ -6,6 +6,7 @@ Persists chat history to markdown files for auditability and testing.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any
@@ -46,6 +47,19 @@ def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
     if len(value) <= limit:
         return value
     return value[: limit - 1] + "…"
+
+
+def _sanitize_session_id(session_id: str) -> str:
+    """
+    Constrain session ids to a safe filename segment.
+
+    Replaces disallowed characters (including path separators) with underscores.
+    """
+    if not session_id:
+        return "session"
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", session_id)
+    safe = safe.strip("._-")
+    return safe or "session"
 
 
 def _normalize_tool_args(args: Any) -> Optional[str]:
@@ -103,7 +117,12 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
     sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
-    history_file = sessions_dir / f"{session_id}.md"
+    safe_session_id = _sanitize_session_id(session_id)
+    history_file = sessions_dir / f"{safe_session_id}.md"
+    resolved_history = history_file.resolve()
+    resolved_sessions = sessions_dir.resolve()
+    if resolved_sessions not in resolved_history.parents:
+        raise ValueError("Resolved chat history path is outside the chat sessions directory.")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Create file with header if it doesn't exist

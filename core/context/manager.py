@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from pydantic_ai import RunContext
 from core.directives.model import ModelDirective
@@ -50,6 +51,58 @@ class ContextManagerResult:
     model_alias: str
 
 
+def _normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any]]]:
+    if not input_file_data:
+        return []
+    if isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
+        return [input_file_data]
+    if isinstance(input_file_data, list):
+        return input_file_data
+    return []
+
+
+def _format_input_files_for_prompt(input_file_data: Any) -> Optional[str]:
+    file_lists = _normalize_input_file_lists(input_file_data)
+    if not file_lists:
+        return None
+
+    flattened_files: List[Dict[str, Any]] = []
+    for file_list in file_lists:
+        flattened_files.extend(file_list)
+
+    formatted_content: List[str] = []
+    path_only_entries: List[str] = []
+    for file_data in flattened_files:
+        if not isinstance(file_data, dict):
+            continue
+        if file_data.get("paths_only"):
+            label = f"- {file_data.get('filepath', 'unknown')}"
+            if not file_data.get("found", True):
+                error_msg = file_data.get("error", "File not found")
+                label += f" (missing: {error_msg})"
+            path_only_entries.append(label)
+        elif file_data.get("found") and file_data.get("content"):
+            formatted_content.append(
+                f"# File: {file_data.get('filepath', 'unknown')}\n\n{file_data.get('content', '')}"
+            )
+        elif file_data.get("found") is False:
+            formatted_content.append(
+                f"# File: {file_data.get('filepath', 'unknown')}\n\n[File not found: {file_data.get('error')}]"
+            )
+
+    prompt_sections: List[str] = []
+    if path_only_entries:
+        prompt_sections.append(
+            "File paths (content not inlined):\n" + "\n".join(path_only_entries)
+        )
+    if formatted_content:
+        prompt_sections.append("\n\n".join(formatted_content))
+
+    if not prompt_sections:
+        return None
+    return "\n\n---\n\n".join(prompt_sections)
+
+
 async def manage_context(
     input_data: ContextManagerInput,
     instructions_override: Optional[str] = None,
@@ -74,6 +127,7 @@ async def manage_context(
     latest_input = input_data.context_payload.get("latest_input") if isinstance(input_data.context_payload, dict) else None
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
+    input_files = input_data.context_payload.get("input_files") if isinstance(input_data.context_payload, dict) else None
     prompt_parts: List[str] = []
     manager_task = input_data.template.instructions or CONTEXT_MANAGER_PROMPT
     prompt_parts.append(f"## Context manager task\n{manager_task}")
@@ -82,6 +136,8 @@ async def manage_context(
         prompt_parts.append(f"## Extraction template\n{base_template}")
     if previous_summary:
         prompt_parts.append(f"## Prior summary (persisted)\n{previous_summary}")
+    if input_files:
+        prompt_parts.append(f"## Input files\n{input_files}")
     if rendered_history:
         prompt_parts.append(f"## Recent conversation\n{rendered_history}")
     if latest_input:
@@ -114,7 +170,7 @@ def build_context_manager_history_processor(
     template_name: str,
     manager_runs: int = 0,
     passthrough_runs: int = 0,
-)-> list[ModelMessage]:
+)-> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
     """
     Factory for a history processor that manages a curated view and injects it
     as a system message ahead of the recent turns. If management fails, the
@@ -174,6 +230,7 @@ def build_context_manager_history_processor(
 
     tools_directive_value = _get_latest_directive_value("tools")
     model_directive_value = _get_latest_directive_value("model")
+    input_file_values = template_directives.get("input-file", [])
 
     async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:
@@ -310,6 +367,35 @@ def build_context_manager_history_processor(
             managed_model_alias: str = cache_entry.get("model_alias", model_alias)
 
             if managed_output is None:
+                input_file_data = None
+                if input_file_values:
+                    processed_values: List[Any] = []
+                    for value in input_file_values:
+                        try:
+                            result = registry.process_directive(
+                                "input-file",
+                                value,
+                                vault_path,
+                                reference_date=datetime.now(),
+                                week_start_day=0,
+                                state_manager=None,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to process context manager input-file directive",
+                                metadata={"error": str(exc)},
+                            )
+                            continue
+                        if not result.success:
+                            logger.warning(
+                                "Context manager input-file directive returned an error",
+                                metadata={"error": result.error_message},
+                            )
+                            continue
+                        processed_values.append(result.processed_value)
+                    if processed_values:
+                        input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
+
                 previous_summary_text = None
                 if recent_summaries > 0:
                     try:
@@ -321,9 +407,9 @@ def build_context_manager_history_processor(
                         if recent_summaries_rows:
                             previous_summary_text = "\n\n".join(
                                 [
-                                    row.get("raw_output") or row.get("summary") or ""
+                                    row.get("raw_output") or ""
                                     for row in reversed(recent_summaries_rows)
-                                    if row.get("raw_output") or row.get("summary")
+                                    if row.get("raw_output")
                                 ]
                             ).strip() or None
                     except Exception:
@@ -352,6 +438,7 @@ def build_context_manager_history_processor(
                         "latest_input": latest_input,
                         "rendered_history": rendered_history,
                         "previous_summary": previous_summary_text,
+                        "input_files": _format_input_files_for_prompt(input_file_data),
                     },
                 )
                 manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
@@ -382,7 +469,6 @@ def build_context_manager_history_processor(
                         turn_index=None,
                         template=template,
                         model_alias=managed_model_alias,
-                        summary_json=None,
                         raw_output=managed_output,
                         budget_used=None,
                         sections_included=None,

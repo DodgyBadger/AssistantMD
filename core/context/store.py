@@ -47,7 +47,6 @@ def _ensure_db(system_root: Optional[Path] = None) -> str:
                 template_source TEXT,
                 template_hash TEXT,
                 model_alias TEXT,
-                summary_json TEXT,
                 raw_output TEXT,
                 budget_used INTEGER,
                 sections_included TEXT,
@@ -98,7 +97,6 @@ def add_context_summary(
     turn_index: Optional[int],
     template: TemplateRecord,
     model_alias: str,
-    summary_json: Optional[Dict[str, Any]],
     raw_output: Optional[str],
     budget_used: Optional[int] = None,
     sections_included: Optional[Dict[str, Any]] = None,
@@ -108,7 +106,6 @@ def add_context_summary(
 ) -> int:
     """Persist a compiled context summary and return its row id."""
     db_path = _ensure_db(system_root)
-    summary_str = json.dumps(summary_json, ensure_ascii=False) if summary_json is not None else None
     sections_str = json.dumps(sections_included, ensure_ascii=False) if sections_included is not None else None
     payload_str = json.dumps(input_payload, ensure_ascii=False) if input_payload is not None else None
 
@@ -124,13 +121,12 @@ def add_context_summary(
                 template_source,
                 template_hash,
                 model_alias,
-                summary_json,
                 raw_output,
                 budget_used,
                 sections_included,
                 compiled_prompt,
                 input_payload
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -140,7 +136,6 @@ def add_context_summary(
                 template.source,
                 template.sha256,
                 model_alias,
-                summary_str,
                 raw_output,
                 budget_used,
                 sections_str,
@@ -153,35 +148,6 @@ def add_context_summary(
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(f"Failed to insert context summary for session {session_id}: {exc}")
         raise
-    finally:
-        conn.close()
-
-
-def get_latest_summary(
-    session_id: str,
-    vault_name: str,
-    system_root: Optional[Path] = None,
-) -> Optional[Dict[str, Any]]:
-    """Fetch the most recent parsed summary JSON for a session/vault."""
-    db_path = _ensure_db(system_root)
-    conn = sqlite3.connect(db_path)
-    try:
-        row = conn.execute(
-            """
-            SELECT summary_json
-            FROM context_summaries
-            WHERE session_id = ? AND vault_name = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (session_id, vault_name),
-        ).fetchone()
-        if not row or not row[0]:
-            return None
-        return json.loads(row[0])
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to fetch latest context summary for session {session_id}: {exc}")
-        return None
     finally:
         conn.close()
 
@@ -208,7 +174,6 @@ def get_recent_summaries(
                 template_name,
                 template_hash,
                 model_alias,
-                summary_json,
                 raw_output,
                 compiled_prompt,
                 input_payload,
@@ -228,14 +193,9 @@ def get_recent_summaries(
 
     snapshots: list[Dict[str, Any]] = []
     for row in rows:
-        summary_json = None
         input_payload = None
         try:
-            summary_json = json.loads(row[4]) if row[4] else None
-        except Exception:
-            summary_json = None
-        try:
-            input_payload = json.loads(row[7]) if row[7] else None
+            input_payload = json.loads(row[6]) if row[6] else None
         except Exception:
             input_payload = None
 
@@ -245,52 +205,12 @@ def get_recent_summaries(
                 "template_name": row[1],
                 "template_hash": row[2],
                 "model_alias": row[3],
-                "summary": summary_json,
-                "raw_output": row[5],
-                "compiled_prompt": row[6],
+                "raw_output": row[4],
+                "compiled_prompt": row[5],
                 "input_payload": input_payload,
-                "created_at": row[8],
+                "created_at": row[7],
             }
         )
 
     return snapshots
 
-
-def get_summary_by_id(
-    summary_id: int,
-    system_root: Optional[Path] = None,
-) -> Optional[Dict[str, Any]]:
-    """Fetch a compiled summary row by id."""
-    db_path = _ensure_db(system_root)
-    conn = sqlite3.connect(db_path)
-    try:
-        row = conn.execute(
-            """
-            SELECT summary_json, raw_output, compiled_prompt, input_payload
-            FROM context_summaries
-            WHERE id = ?
-            LIMIT 1
-            """,
-            (summary_id,),
-        ).fetchone()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to fetch summary {summary_id}: {exc}")
-        return None
-    finally:
-        conn.close()
-
-    if not row:
-        return None
-
-    def _maybe_load(value: Optional[str]):
-        try:
-            return json.loads(value) if value else None
-        except Exception:
-            return value
-
-    return {
-        "summary": _maybe_load(row[0]),
-        "raw_output": row[1],
-        "compiled_prompt": row[2],
-        "input_payload": _maybe_load(row[3]),
-    }
