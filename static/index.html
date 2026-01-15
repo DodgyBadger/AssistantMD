@@ -239,10 +239,16 @@
         .message-bubble pre {
             position: relative;
             padding: 1rem 1rem 2.5rem;
+            max-width: 100%;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
         .message-bubble pre code {
             display: block;
             overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
         .message-bubble pre .copy-button {
             position: absolute;
@@ -463,6 +469,7 @@
             white-space: pre-wrap;
             word-break: break-word;
             max-height: 16rem;
+            max-width: 100%;
             overflow: auto;
             color: rgb(var(--text-primary));
         }
