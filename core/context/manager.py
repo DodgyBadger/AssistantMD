@@ -507,12 +507,12 @@ def build_context_manager_history_processor(
                         "latest_input": latest_input,
                         "rendered_history": rendered_history,
                         "previous_summary": previous_summary_text,
-                    "input_files": _format_input_files_for_prompt(
-                        input_file_data,
-                        has_empty_directive=empty_input_file_directive and not input_file_data,
-                    ),
-                },
-            )
+                        "input_files": _format_input_files_for_prompt(
+                            input_file_data,
+                            has_empty_directive=empty_input_file_directive and not input_file_data,
+                        ),
+                    },
+                )
                 manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
                 if tool_instructions:
                     manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"

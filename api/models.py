@@ -37,7 +37,6 @@ class ChatExecuteRequest(BaseModel):
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
-    session_type: str = Field("regular", description="Chat mode: 'regular', 'workflow_creation', or 'managed_context'")
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 

@@ -216,7 +216,7 @@ Summarize the validation run context.
             chat_second.status_code, 200, "Follow-up chat execution succeeds"
         )
 
-        # Managed context chat mode with a scenario-scoped template
+        # Context-template chat with a scenario-scoped template
         self.create_file(
             vault,
             "AssistantMD/ContextTemplates/validation_template.md",
@@ -227,7 +227,6 @@ Summarize the validation run context.
             "prompt": "Hello. Write a haiku about context managers.",
             "tools": [],
             "model": "gpt-mini",
-            "session_type": "managed_context",
             "context_template": "validation_template.md",
         }
         managed_first = self.call_api("/api/chat/execute", method="POST", data=managed_payload)

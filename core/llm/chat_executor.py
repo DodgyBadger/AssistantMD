@@ -21,7 +21,6 @@ from pydantic_ai import (
 from core.llm.agents import create_agent
 from core.llm.session_manager import SessionManager
 from core.constants import (
-    WORKFLOW_CREATION_INSTRUCTIONS,
     REGULAR_CHAT_INSTRUCTIONS,
     ASSISTANTMD_ROOT_DIR,
     CHAT_SESSIONS_DIR,
@@ -144,8 +143,7 @@ def _prepare_agent_config(
     vault_path: str,
     tools: List[str],
     model: str,
-    instructions: Optional[str],
-    session_type: str
+    instructions: Optional[str]
 ) -> tuple:
     """
     Prepare agent configuration (shared between streaming and non-streaming).
@@ -153,10 +151,8 @@ def _prepare_agent_config(
     Returns:
         Tuple of (base_instructions, tool_instructions, model_instance, tool_functions)
     """
-    # Select base instructions by session type
-    if session_type == "workflow_creation":
-        base_instructions = WORKFLOW_CREATION_INSTRUCTIONS
-    elif instructions:
+    # Select base instructions
+    if instructions:
         base_instructions = instructions  # Custom instructions override
     else:
         base_instructions = REGULAR_CHAT_INSTRUCTIONS
@@ -217,7 +213,6 @@ async def execute_chat_prompt(
     model: str,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
-    session_type: str = "regular",
     context_template: Optional[str] = None,    
 ) -> ChatExecutionResult:
     """
@@ -231,30 +226,27 @@ async def execute_chat_prompt(
         tools: List of tool names selected by user
         model: Model name selected by user
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular", "workflow_creation", or "managed_context")
+        instructions: Optional system instructions (defaults to regular chat)
 
     Returns:
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, instructions, session_type
+        vault_name, vault_path, tools, model, instructions
     )
 
-    history_processors = None
-    if session_type == "managed_context":
-        history_processors = [
-            build_context_manager_history_processor(
-                session_id=session_id,
-                vault_name=vault_name,
-                vault_path=vault_path,
-                model_alias=model,
-                template_name=context_template or "goal_oriented.md",
-                manager_runs=_context_manager_recent_runs(),
-                passthrough_runs=_context_manager_passthrough_runs(),
-            )
-        ]
+    history_processors = [
+        build_context_manager_history_processor(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            model_alias=model,
+            template_name=context_template or "unmanaged_chat.md",
+            manager_runs=_context_manager_recent_runs(),
+            passthrough_runs=_context_manager_passthrough_runs(),
+        )
+    ]
 
     # Create agent with user-selected configuration
     agent = await create_agent(
@@ -300,7 +292,6 @@ async def execute_chat_prompt_stream(
     model: str,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
-    session_type: str = "regular",
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
@@ -316,30 +307,27 @@ async def execute_chat_prompt_stream(
         tools: List of tool names selected by user
         model: Model name selected by user
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular", "workflow_creation", or "managed_context")
+        instructions: Optional system instructions (defaults to regular chat)
 
     Yields:
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, instructions, session_type
+        vault_name, vault_path, tools, model, instructions
     )
 
-    history_processors = None
-    if session_type == "managed_context":
-        history_processors = [
-            build_context_manager_history_processor(
-                session_id=session_id,
-                vault_name=vault_name,
-                vault_path=vault_path,
-                model_alias=model,
-                template_name=context_template or "goal_oriented.md",
-                manager_runs=_context_manager_recent_runs(),
-                passthrough_runs=_context_manager_passthrough_runs(),
-            )
-        ]
+    history_processors = [
+        build_context_manager_history_processor(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            model_alias=model,
+            template_name=context_template or "unmanaged_chat.md",
+            manager_runs=_context_manager_recent_runs(),
+            passthrough_runs=_context_manager_passthrough_runs(),
+        )
+    ]
 
     # Create agent with user-selected configuration
     agent = await create_agent(

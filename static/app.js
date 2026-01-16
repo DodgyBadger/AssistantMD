@@ -36,7 +36,6 @@ const state = {
 const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
-    modeSelector: document.getElementById('mode-selector'),
     templateSelector: document.getElementById('template-selector'),
     toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
@@ -574,17 +573,9 @@ function setupEventListeners() {
         chatElements.chatMessages.addEventListener('scroll', handleChatScroll, { passive: true });
     }
 
-    if (chatElements.modeSelector) {
-        chatElements.modeSelector.addEventListener('change', handleModeChange);
-    }
-
     if (chatElements.vaultSelector) {
         chatElements.vaultSelector.addEventListener('change', handleVaultChange);
     }
-}
-
-function handleModeChange() {
-    applyModeToolPreferences();
 }
 
 function handleVaultChange() {
@@ -608,6 +599,11 @@ function populateTemplates(templates) {
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
+    const defaultTemplate = Array.from(chatElements.templateSelector.options)
+        .find((option) => option.value === 'unmanaged_chat.md');
+    if (defaultTemplate) {
+        chatElements.templateSelector.value = defaultTemplate.value;
+    }
     chatElements.templateSelector.disabled = false;
 }
 
@@ -627,15 +623,6 @@ async function fetchTemplates(vault) {
         console.error('Error fetching templates:', error);
         populateTemplates([]);
     }
-}
-
-function applyModeToolPreferences() {
-    const mode = chatElements.modeSelector ? chatElements.modeSelector.value : 'regular';
-    const docCheckbox = document.getElementById('tool-documentation_access');
-    if (!docCheckbox || docCheckbox.disabled) {
-        return;
-    }
-    docCheckbox.checked = mode === 'workflow_creation';
 }
 
 // Send message handler with streaming response support
@@ -669,7 +656,6 @@ async function sendMessage() {
         prompt: message,
         tools: selectedTools,
         model: model,
-        session_type: chatElements.modeSelector.value,
         context_template: chatElements.templateSelector ? chatElements.templateSelector.value || null : null,
         instructions: null,
         stream: true

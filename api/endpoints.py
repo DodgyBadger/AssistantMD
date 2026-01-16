@@ -433,7 +433,6 @@ async def chat_execute(request: ChatExecuteRequest):
                 model=request.model,
                 session_manager=session_manager,
                 instructions=request.instructions,
-                session_type=request.session_type,
                 context_template=request.context_template
             )
 
@@ -461,7 +460,6 @@ async def chat_execute(request: ChatExecuteRequest):
                 model=request.model,
                 session_manager=session_manager,
                 instructions=request.instructions,
-                session_type=request.session_type,
                 context_template=request.context_template
             )
 
