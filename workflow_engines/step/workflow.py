@@ -439,21 +439,24 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
     """Load workflow file and validate configuration."""
     workflow_sections = services.get_workflow_sections()
     
-    # Extract INSTRUCTIONS (case-insensitive) from workflow_sections, then filter it out from steps
-    instructions_key = next(
-        (section_name for section_name in workflow_sections.keys()
-         if section_name.strip().lower() == 'instructions'),
-        None,
+    # Extract any section containing "instructions" (case-insensitive), then filter them out from steps.
+    instruction_keys = [
+        section_name for section_name in workflow_sections.keys()
+        if "instructions" in section_name.strip().lower()
+    ]
+    workflow_instructions = "\n\n".join(
+        [
+            workflow_sections.get(section_name, "").strip()
+            for section_name in instruction_keys
+            if workflow_sections.get(section_name, "").strip()
+        ]
     )
-    workflow_instructions = ""
-    if instructions_key:
-        workflow_instructions = workflow_sections.get(instructions_key, "")
     if not workflow_instructions or not workflow_instructions.strip():
         workflow_instructions = "You are a helpful assistant."
-    
-    # Filter INSTRUCTIONS from workflow steps (it's not an executable step)
-    if instructions_key:
-        workflow_steps = [k for k in workflow_sections.keys() if k != instructions_key]
+
+    # Filter instruction sections from workflow steps (they are not executable steps)
+    if instruction_keys:
+        workflow_steps = [k for k in workflow_sections.keys() if k not in instruction_keys]
     else:
         workflow_steps = list(workflow_sections.keys())
     

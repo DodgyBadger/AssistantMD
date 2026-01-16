@@ -599,10 +599,17 @@ function populateTemplates(templates) {
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
+    const preferredTemplate = state.metadata?.default_context_template || 'default.md';
     const defaultTemplate = Array.from(chatElements.templateSelector.options)
-        .find((option) => option.value === 'unmanaged_chat.md');
+        .find((option) => option.value === preferredTemplate);
     if (defaultTemplate) {
         chatElements.templateSelector.value = defaultTemplate.value;
+    } else {
+        const fallbackTemplate = Array.from(chatElements.templateSelector.options)
+            .find((option) => option.value === 'default.md');
+        if (fallbackTemplate) {
+            chatElements.templateSelector.value = fallbackTemplate.value;
+        }
     }
     chatElements.templateSelector.disabled = false;
 }

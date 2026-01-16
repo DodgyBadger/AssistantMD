@@ -28,6 +28,7 @@ from core.constants import (
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
 from core.context.manager import build_context_manager_history_processor
+from core.context.templates import load_template
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 
@@ -89,6 +90,40 @@ def _normalize_tool_result(result: Any) -> Optional[str]:
         return _truncate_preview(serialized, limit=240)
     except (TypeError, ValueError):
         return _truncate_preview(str(result), limit=240)
+
+
+def _get_default_context_template() -> Optional[str]:
+    """
+    Return the configured default context template name, if set.
+    """
+    try:
+        entry = get_general_settings().get("default_context_template")
+        if entry and entry.value:
+            return str(entry.value).strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_context_template_name(vault_path: str, context_template: Optional[str]) -> str:
+    """
+    Resolve a context template name with vault overrides and fallback to unmanaged chat.
+    """
+    fallback = "default.md"
+    candidate = context_template or _get_default_context_template() or fallback
+    try:
+        load_template(candidate, Path(vault_path))
+        return candidate
+    except FileNotFoundError:
+        if candidate != fallback:
+            try:
+                load_template(fallback, Path(vault_path))
+            except Exception:
+                return fallback
+            return fallback
+        return fallback
+    except Exception:
+        return fallback
 
 
 @dataclass
@@ -176,34 +211,6 @@ def _prepare_agent_config(
     return base_instructions, tool_instructions, model_instance, tool_functions
 
 
-def _context_manager_recent_runs(default: int = 0) -> int:
-    """
-    Read the configured recent run count for the context manager with a safe fallback.
-    """
-    try:
-        entry = get_general_settings().get("context_manager_recent_runs")
-        value = entry.value if entry is not None else default
-        if value == "" or value is None:
-            return 0
-        return int(value)
-    except Exception:
-        return default
-
-
-def _context_manager_passthrough_runs(default: int = 0) -> int:
-    """
-    Read the configured passthrough run count for the context manager with a safe fallback.
-    """
-    try:
-        entry = get_general_settings().get("context_manager_passthrough_runs")
-        value = entry.value if entry is not None else default
-        if value == "" or value is None:
-            return 0
-        return int(value)
-    except Exception:
-        return default
-
-
 async def execute_chat_prompt(
     vault_name: str,
     vault_path: str,
@@ -236,15 +243,14 @@ async def execute_chat_prompt(
         vault_name, vault_path, tools, model, instructions
     )
 
+    resolved_template = _resolve_context_template_name(vault_path, context_template)
     history_processors = [
         build_context_manager_history_processor(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
             model_alias=model,
-            template_name=context_template or "unmanaged_chat.md",
-            manager_runs=_context_manager_recent_runs(),
-            passthrough_runs=_context_manager_passthrough_runs(),
+            template_name=resolved_template,
         )
     ]
 
@@ -317,15 +323,14 @@ async def execute_chat_prompt_stream(
         vault_name, vault_path, tools, model, instructions
     )
 
+    resolved_template = _resolve_context_template_name(vault_path, context_template)
     history_processors = [
         build_context_manager_history_processor(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
             model_alias=model,
-            template_name=context_template or "unmanaged_chat.md",
-            manager_runs=_context_manager_recent_runs(),
-            passthrough_runs=_context_manager_passthrough_runs(),
+            template_name=resolved_template,
         )
     ]
 

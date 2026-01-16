@@ -21,6 +21,7 @@ from core.settings.store import (
     get_providers_config,
     get_active_settings_path,
     SETTINGS_TEMPLATE,
+    get_general_settings,
 )
 from core.runtime.paths import set_bootstrap_roots, resolve_bootstrap_data_root, resolve_bootstrap_system_root
 from core.settings import (
@@ -1196,10 +1197,19 @@ async def get_metadata() -> MetadataResponse:
             )
         )
 
+    default_context_template = None
+    try:
+        default_entry = get_general_settings().get("default_context_template")
+        if default_entry and default_entry.value:
+            default_context_template = str(default_entry.value).strip() or None
+    except Exception:
+        default_context_template = None
+
     return MetadataResponse(
         vaults=vaults,
         models=models,
-        tools=tools
+        tools=tools,
+        default_context_template=default_context_template,
     )
 
 

@@ -32,6 +32,7 @@ class TemplateRecord:
     schema_block: Optional[str] = None  # raw YAML/JSON block if present
     frontmatter: Dict[str, Any] = field(default_factory=dict)
     instructions: Optional[str] = None
+    chat_instructions: Optional[str] = None
     template_section: Optional[str] = None
     template_body: Optional[str] = None
     directives: Dict[str, List[str]] = field(default_factory=dict)
@@ -94,37 +95,59 @@ def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str
 
 def _select_instruction_and_template(
     sections: Dict[str, str],
-) -> tuple[Optional[str], Optional[str], Optional[str], ParsedDirectives]:
-    """Pick instructions and template section content per template rules."""
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], ParsedDirectives]:
+    """Pick context instructions, chat instructions, and template section content."""
     if not sections:
-        return None, None, None, ParsedDirectives(directives={}, cleaned_content="")
+        return None, None, None, None, ParsedDirectives(directives={}, cleaned_content="")
 
     section_items = list(sections.items())
-    instructions_idx = None
-    for idx, (section_name, _) in enumerate(section_items):
-        if section_name.strip().lower() == "instructions":
-            instructions_idx = idx
+    context_instructions: Optional[str] = None
+    chat_instructions: Optional[str] = None
+    context_sections: List[str] = []
+    instruction_section_names: List[str] = []
+    template_section: Optional[str] = None
+    template_content: Optional[str] = None
+
+    for section_name, _ in section_items:
+        lowered = section_name.strip().lower()
+        if "instructions" in lowered:
+            instruction_section_names.append(section_name)
+        if lowered == "chat instructions":
+            chat_instructions = sections.get(section_name, "").strip() or None
+        if lowered == "context instructions":
+            context_sections.append(section_name)
+
+    if context_sections:
+        context_instructions = "\n\n".join(
+            [
+                sections.get(section_name, "").strip()
+                for section_name in context_sections
+                if sections.get(section_name, "").strip()
+            ]
+        ).strip() or None
+
+    for section_name, section_content in section_items:
+        if section_name.strip().lower() == "template":
+            template_section = section_name
+            template_content = section_content
             break
 
-    instructions = None
-    template_section = None
-    template_content = None
-
-    if instructions_idx is not None:
-        instructions = section_items[instructions_idx][1].strip() or None
-        if instructions_idx + 1 < len(section_items):
-            template_section, template_content = section_items[instructions_idx + 1]
-    else:
-        template_section, template_content = section_items[0]
+    if template_section is None:
+        for section_name, section_content in section_items:
+            if section_name in instruction_section_names:
+                continue
+            template_section = section_name
+            template_content = section_content
+            break
 
     parsed = parse_directives(template_content or "")
-    return instructions, template_section, parsed.cleaned_content, parsed
+    return context_instructions, chat_instructions, template_section, parsed.cleaned_content, parsed
 
 
 def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
     content = path.read_text(encoding="utf-8")
     frontmatter, sections = _parse_template_content(content)
-    instructions, template_section, template_body, parsed = _select_instruction_and_template(sections)
+    instructions, chat_instructions, template_section, template_body, parsed = _select_instruction_and_template(sections)
     return TemplateRecord(
         name=name,
         content=content,
@@ -134,6 +157,7 @@ def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
         schema_block=_extract_schema_block(content),
         frontmatter=frontmatter,
         instructions=instructions,
+        chat_instructions=chat_instructions,
         template_section=template_section,
         template_body=template_body,
         directives=parsed.directives,

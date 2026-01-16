@@ -24,7 +24,7 @@ class DocumentationAccessTool(BaseTool):
             ctx: RunContext,
             path: str | None = Field(
                 default=None,
-                description="Documentation path (e.g., 'setup/workflow-setup', 'core/patterns'). Leave empty to get a summary of the docs layout."
+                description="Documentation path (e.g., 'use/workflows'). Leave empty to get a summary of the docs layout."
             )
         ) -> str:
             """
@@ -45,15 +45,8 @@ class DocumentationAccessTool(BaseTool):
     def get_instructions(cls) -> str:
         """Return instructions for using the documentation access tool."""
         instructions = """
-Use this tool to read AssistantMD documentation. Call it with no arguments to receive a quick guide describing what lives under /docs.
+Use this tool to read AssistantMD documentation. Call it with no arguments to receive a quick guide describing what lives under /docs and explore as needed.
 
-When creating assistants:
-- `documentation_access(path="setup/workflow-setup")` → full workflow template and walkthrough
-- `documentation_access(path="core/yaml-frontmatter")` → frontmatter options
-- `documentation_access(path="core/core-directives")` → @directive reference
-- `documentation_access(path="core/patterns")` → pattern variables
-
-Ask for other paths (security, architecture, validation) only if specifically needed.
         """.strip()
         return instructions.strip()
     

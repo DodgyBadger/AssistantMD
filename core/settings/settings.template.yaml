@@ -8,6 +8,10 @@ settings:
     value: sonnet
     description: "Fallback model alias when @model is omitted."
     restart_required: false
+  default_context_template:
+    value: "default.md"
+    description: "Default context template name for chat sessions (vault templates override system templates by name)."
+    restart_required: false
   default_api_timeout:
     value: 120
     description: "Default timeout (seconds) for external API calls."
@@ -54,23 +58,6 @@ settings:
     value: 5
     description: "Number of ingestion jobs to process per worker run."
     restart_required: true
-  context_manager_recent_runs:
-    value: 3
-    description: "Number of recent chat runs to feed into the context manager. Blank / 0 disables the manager and passes all message history."
-    restart_required: false
-  context_manager_passthrough_runs:
-    value: 1
-    description: "Number of recent chat runs to pass verbatim to the chat model alongside the managed summary. Blank / 0 passes summary only."
-    restart_required: false
-  context_manager_token_threshold:
-    value: 4000
-    description: "If total tokens in the chat history are below this value, skip the context manager and run normal chat. Blank / 0 to disable and manage every run."
-    restart_required: false
-  context_manager_recent_summaries:
-    value: 1
-    description: "Number of recent managed summaries to pass into the context manager prompt. Blank / 0 to disable."
-    restart_required: false
-
 models:
   gemini:
     provider: google

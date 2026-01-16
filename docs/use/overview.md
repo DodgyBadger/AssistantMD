@@ -20,6 +20,14 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 
 **Security note**: The app has no built-in auth or TLS. Keep it on a trusted network or add your own security layers.
 
+### Context Manager
+
+**⚠️ This is an experimental feature and may change significantly in the future!!**
+
+Context templates let you add custom system instructions to chat sessions and optionally enable history curation. Templates live under `AssistantMD/ContextTemplates/` (vault-specific) or `system/ContextTemplates/` (global). You select a template per chat session in the UI.
+
+Learn more in [Context Manager](context_manager.md).
+
 ### Workflows
 
 Workflows allow you to schedule and structure prompts or sequences of prompts. You define a workflow by creating a markdown file inside `AssistantMD/Workflows/`. Some workflow examples include:
@@ -55,5 +63,4 @@ Use the **Configuration** tab in the web UI to configure providers (e.g. OpenAI,
 🔶 If using Obsidian, set up a base (Obsidian v1.9 or later) to view and manage all your workflow files and frontmatter properties in one place, making it easy to enable/disable or update schedules.
 
 🔶 If using Obsidian, enabled `Use [[Wikilinks]]` and set `New link format` to `Absolute path in vault` in `Settings > Files & Links`. This will allow you to drag-and-drop from the Obsidian file explorer into input-file and output-file directives. AssistantMD will simply ignore the square brackets (`[[filename]]`).
-
 

@@ -194,6 +194,10 @@ class MetadataResponse(BaseModel):
     vaults: List[str] = Field(..., description="Available vault names")
     models: List[ModelInfo] = Field(..., description="Available models")
     tools: List[ToolInfo] = Field(..., description="Available tools")
+    default_context_template: Optional[str] = Field(
+        None,
+        description="Default context template name for chat sessions.",
+    )
 
 
 class TemplateInfo(BaseModel):

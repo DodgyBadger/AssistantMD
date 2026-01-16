@@ -37,6 +37,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Scheduler | Job syncing, picklable job args, trigger comparison | `core/scheduling/` |
 | Workflow Layer | Step orchestration, directive processing, file writes | `workflows/`, `core/core_services.py` |
 | Directive System | Parse/process `@directives`, pattern resolution, file state | `core/directives/`, `core/workflow/parser.py` |
+| Context Manager | Curated chat context, template loading, history processing, summary persistence | `core/context/`, `core/llm/chat_executor.py` |
 | LLM Interface | Model resolution, agent creation, response generation | `core/llm/`, `core/settings/store.py` |
 | Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
 | Logging & Activity | Unified logging, Logfire instrumentation | `core/logger.py/`, `system/activity.log` |
@@ -53,6 +54,19 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 
 - Model aliases and provider requirements live in `core/settings/settings.template.yaml` (seeded to `system/settings.yaml`) and are loaded through `core/settings/store.py`. `core/llm/` handles API key  checks, agent creation, and response generation.
 - Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions.
+
+## Context Manager (Chat)
+
+- Chat requests create a history processor via `core/context/manager.py`, which can summarize recent conversation history and inject a managed summary ahead of the passthrough slice. The processor is attached in `core/llm/chat_executor.py`.
+- Context templates live under `AssistantMD/ContextTemplates/` in a vault or `system/ContextTemplates/` globally. They are resolved with vault → system priority by `core/context/templates.py`.
+- Templates may define `## Chat Instructions` (passed through as a system instruction to the chat agent) and `## Context Instructions` (used only by the context-manager LLM). `## Template` supplies the extraction template and directives.
+- Context manager directives control its window and behavior:
+  - `@recent-runs`: How many recent chat runs the manager reads (0 disables the manager).
+  - `@passthrough-runs`: How many runs the chat agent receives verbatim (`all` keeps full history, 0 yields summary-only when the manager is enabled).
+  - `@token-threshold`: Skip the manager if total history is under this token estimate.
+  - `@recent-summaries`: How many prior managed summaries to feed into the manager prompt.
+  - `@tools`: Tools the manager can call while generating the summary.
+  - `@model`: Model alias to use for the manager.
 
 ## Observability & Validation
 

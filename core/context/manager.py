@@ -28,7 +28,6 @@ from pydantic_ai.messages import (
 )
 from core.tools.utils import estimate_token_count
 from core.context.store import add_context_summary, upsert_session, get_recent_summaries
-from core.settings.store import get_general_settings
 
 logger = UnifiedLogger(tag="context-manager")
 
@@ -235,7 +234,7 @@ def build_context_manager_history_processor(
     model_alias: str,
     template_name: str,
     manager_runs: int = 0,
-    passthrough_runs: int = 0,
+    passthrough_runs: int = -1,
 )-> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
     """
     Factory for a history processor that manages a curated view and injects it
@@ -247,12 +246,18 @@ def build_context_manager_history_processor(
     registry = get_global_registry()
     template = load_template(template_name, Path(vault_path))
     template_directives = template.directives or {}
+    chat_instructions = (template.chat_instructions or "").strip() or None
+    chat_instruction_message: Optional[ModelMessage] = None
+    if chat_instructions:
+        chat_instruction_message = ModelRequest(
+            parts=[SystemPromptPart(content=chat_instructions)]
+        )
 
     def _get_latest_directive_value(name: str) -> Optional[str]:
         values = template_directives.get(name, [])
         return values[-1] if values else None
 
-    def _resolve_int_setting(setting_key: str, directive_key: str, default: int = 0) -> int:
+    def _resolve_int_directive(directive_key: str, default: int = 0) -> int:
         directive_value = _get_latest_directive_value(directive_key)
         if directive_value is not None:
             try:
@@ -260,36 +265,24 @@ def build_context_manager_history_processor(
                 return int(result.processed_value)
             except Exception as exc:
                 logger.warning(
-                    "Failed to process context manager directive; falling back to settings",
+                    "Failed to process context manager directive; falling back to defaults",
                     metadata={"directive": directive_key, "error": str(exc)},
                 )
+        return default
 
-        try:
-            entry = get_general_settings().get(setting_key)
-            value = entry.value if entry is not None else default
-            if value == "" or value is None:
-                return 0
-            return int(value)
-        except Exception:
-            return default
-
-    manager_runs = _resolve_int_setting(
-        "context_manager_recent_runs",
+    manager_runs = _resolve_int_directive(
         "recent-runs",
         manager_runs,
     )
-    passthrough_runs = _resolve_int_setting(
-        "context_manager_passthrough_runs",
+    passthrough_runs = _resolve_int_directive(
         "passthrough-runs",
         passthrough_runs,
     )
-    token_threshold = _resolve_int_setting(
-        "context_manager_token_threshold",
+    token_threshold = _resolve_int_directive(
         "token-threshold",
         0,
     )
-    recent_summaries = _resolve_int_setting(
-        "context_manager_recent_summaries",
+    recent_summaries = _resolve_int_directive(
         "recent-summaries",
         1,
     )
@@ -341,9 +334,13 @@ def build_context_manager_history_processor(
         manager_slice = _run_slice(messages, manager_runs)
         passthrough_slice = _run_slice(messages, passthrough_runs)
 
-        # If both manager and passthrough are explicitly disabled, fall back to raw history (regular chat).
-        if manager_runs == 0 and passthrough_runs == 0:
-            return list(messages)
+        # If manager runs are disabled, skip all context management and return passthrough slice (can be empty).
+        if manager_runs == 0:
+            curated_history: List[ModelMessage] = []
+            if chat_instruction_message:
+                curated_history.append(chat_instruction_message)
+            curated_history.extend(passthrough_slice)
+            return curated_history
 
         # Render the recent slice into a simple text transcript.
         def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
@@ -417,8 +414,12 @@ def build_context_manager_history_processor(
                 },
             )
             if token_estimate < token_threshold:
-                # Skip management entirely for this turn; no summary injection, just passthrough slice (or raw history).
-                return passthrough_slice or list(messages)
+                # Skip management entirely for this turn; no summary injection, just passthrough slice.
+                curated_history: List[ModelMessage] = []
+                if chat_instruction_message:
+                    curated_history.append(chat_instruction_message)
+                curated_history.extend(passthrough_slice)
+                return curated_history
         cache_store = getattr(run_context.deps, "context_manager_cache", None)
         if cache_store is None:
             cache_store = {}
@@ -558,6 +559,8 @@ def build_context_manager_history_processor(
             return list(messages)
 
         curated_history: List[ModelMessage] = []
+        if chat_instruction_message:
+            curated_history.append(chat_instruction_message)
         if summary_message:
             curated_history.append(summary_message)
         curated_history.extend(passthrough_slice)
