@@ -23,15 +23,17 @@ class FileOpsSafe(BaseTool):
             vault_path: Path to vault for file operations scope
         """
         
-        def file_operations(operation: str, path: str = "", content: str = "", destination: str = "", pattern: str = "") -> str:
+        def file_operations(operation: str, target: str = "", content: str = "", destination: str = "", include_all: bool = False, recursive: bool = False, scope: str = "") -> str:
             """Perform file operations within vault boundaries.
 
             Args:
                 operation: Operation to perform (read, write, move, list, mkdir, search)
-                path: File or directory path relative to vault (or search pattern for 'search')
+                target: File, directory, or glob pattern relative to vault (search term for 'search')
                 content: Content for write operations
                 destination: Destination path for move operations
-                pattern: File pattern for list/search operations (e.g., '*.md', '*.py')
+                include_all: When True, include non-markdown and hidden files in listings
+                recursive: When True, recurse through subdirectories for listings
+                scope: Optional folder or glob to limit search (applies to 'search' only)
 
             Returns:
                 Operation result message
@@ -42,19 +44,19 @@ class FileOpsSafe(BaseTool):
 
                 # Route to appropriate helper method
                 if operation == "read":
-                    return cls._read_file(path, vault_path)
+                    return cls._read_file(target, vault_path)
                 elif operation == "write":
-                    return cls._write_file(path, content, vault_path)
+                    return cls._write_file(target, content, vault_path)
                 elif operation == "append":
-                    return cls._append_file(path, content, vault_path)
+                    return cls._append_file(target, content, vault_path)
                 elif operation == "move":
-                    return cls._move_file(path, destination, vault_path)
+                    return cls._move_file(target, destination, vault_path)
                 elif operation == "list":
-                    return cls._list_files(path, pattern, vault_path)
+                    return cls._list_files(target, vault_path, include_all=include_all, recursive=recursive)
                 elif operation == "mkdir":
-                    return cls._make_directory(path, vault_path)
+                    return cls._make_directory(target, vault_path)
                 elif operation == "search":
-                    return cls._search_files(path, pattern, vault_path)
+                    return cls._search_files(target, scope, vault_path)
                 else:
                     return f"Unknown operation '{operation}'. Available: read, write, append, move, list, mkdir, search"
 
@@ -69,15 +71,17 @@ class FileOpsSafe(BaseTool):
         return """SAFE file operations within vault boundaries - MARKDOWN FILES ONLY:
 
 DISCOVERY - Start narrow, expand as needed:
-- file_operations('list', pattern='*'): List top-level files and directories (START HERE to explore vault structure)
-- file_operations('list', pattern='FolderName/*'): List contents of a specific folder (one level)
-- file_operations('list', pattern='FolderName/**/*.md'): List all .md files in a folder recursively (use sparingly - can return many files)
+- file_operations('list'): List top-level directories and .md files (START HERE)
+- file_operations('list', target='FolderName'): List .md files inside a folder (non-recursive)
+- file_operations('list', target='FolderName', recursive=True): Recursive listing (use sparingly - capped at 200 results)
+- file_operations('list', target='FolderName/*', include_all=True): Include non-md/hidden files
+- file_operations('list', target='notes/**/*.md', recursive=True): Explicit glob pattern for recursive match
 
 SEARCH - Find content within files:
-- file_operations('search', path='search-term'): Search for text in all files
-- file_operations('search', path='search-term', pattern='*.md'): Search only in markdown files
-- file_operations('search', path='TODO', pattern='*.md'): Find all TODO comments in markdown files
-- file_operations('search', path='regex-pattern'): Use regex patterns for advanced search
+- file_operations('search', target='search-term'): Search for text in all markdown files
+- file_operations('search', target='TODO', scope='projects'): Limit search to a folder (folder path adds an implicit '*.md')
+- file_operations('search', target='regex-pattern'): Use regex patterns for advanced search
+- file_operations('search', target='TODO', scope='notes/*.md'): Scope using a glob
 - Results show: filename:line_number:matching_line_content
 - Limit: 100 results max to avoid context overflow
 
@@ -92,7 +96,7 @@ READING & WRITING:
 - file_operations('mkdir', 'path/to/directory'): Create directories
 
 BEST PRACTICES:
-1. Start exploration with 'list *' to see vault structure
+1. Start exploration with file_operations('list') to see vault structure
 2. Use 'search' to find content across files efficiently
 3. Navigate into relevant directories before doing recursive searches
 4. Read only files relevant to the user's request
@@ -108,10 +112,10 @@ BEST PRACTICES:
         full_path = validate_and_resolve_path(path, vault_path)
 
         if os.path.isdir(full_path):
-            return f"Cannot read '{path}' - this is a directory, not a file. Use file_operations('list', pattern='{path}/*.md') to see files in this directory."
+            return f"Cannot read '{path}' - this is a directory, not a file. Use file_operations('list', target='{path}') to see files in this directory."
 
         if not os.path.exists(full_path):
-            return f"Cannot read '{path}' - file does not exist. Use file_operations('list', pattern='*.md') to see available files."
+            return f"Cannot read '{path}' - file does not exist. Use file_operations('list') to see available files."
 
         with open(full_path, 'r', encoding='utf-8') as file:
             file_content = file.read()
@@ -159,34 +163,75 @@ BEST PRACTICES:
         return f"Successfully moved '{path}' to '{destination}'"
 
     @classmethod
-    def _list_files(cls, path: str, pattern: str, vault_path: str) -> str:
-        """List files and directories matching pattern."""
-        search_pattern = pattern if pattern else path
-        if '..' in search_pattern or search_pattern.startswith('/'):
-            raise ValueError("Pattern cannot contain '..' or start with '/'")
+    def _list_files(cls, target: str, vault_path: str, include_all: bool, recursive: bool, max_results: int = 200) -> str:
+        """List files and directories matching a target path or glob."""
+        # Default to top-level view
+        target = target.strip()
+        if not target or target == ".":
+            target = "*"
 
-        full_pattern = os.path.join(vault_path, search_pattern)
-        matches = glob.glob(full_pattern, recursive=True)
+        if '..' in target or target.startswith('/'):
+            raise ValueError("Target cannot contain '..' or start with '/'")
+
+        # If target points to a directory (no glob), list its immediate contents
+        is_glob = any(ch in target for ch in "*?[")
+        if not is_glob:
+            abs_target = os.path.join(vault_path, target)
+            if os.path.isdir(abs_target):
+                target = os.path.join(target, "**/*" if recursive else "*")
+            else:
+                target = target
+
+        full_pattern = os.path.join(vault_path, target)
+        matches = glob.glob(full_pattern, recursive=recursive or "**" in target)
 
         files = []
         directories = []
 
         for match in matches:
-            if match.startswith(vault_path + '/'):
-                relative_path = match[len(vault_path) + 1:]
-                if os.path.isdir(match):
+            if not match.startswith(vault_path + os.sep) and match != vault_path:
+                continue
+
+            relative_path = match[len(vault_path) + 1:] if match != vault_path else ""
+
+            # Skip hidden paths unless include_all
+            parts = relative_path.split(os.sep) if relative_path else []
+            if not include_all and any(part.startswith('.') for part in parts if part):
+                continue
+
+            if os.path.isdir(match):
+                if relative_path:
                     directories.append(relative_path)
-                else:
-                    files.append(relative_path)
+                continue
+
+            if not include_all and not relative_path.endswith(".md"):
+                continue
+
+            if relative_path:
+                files.append(relative_path)
 
         if not files and not directories:
-            return f"No files or directories found matching pattern '{search_pattern}'"
+            return f"No files or directories found for target '{target}'"
+
+        # Cap results to avoid overwhelming context
+        truncated = False
+        if len(files) + len(directories) > max_results:
+            truncated = True
+            remaining = max_results
+            directories = sorted(directories)[:remaining]
+            remaining -= len(directories)
+            files = sorted(files)[:max(0, remaining)]
+        else:
+            directories = sorted(directories)
+            files = sorted(files)
 
         result_parts = []
         if directories:
-            result_parts.append(f"Directories ({len(directories)}):\n" + '\n'.join(f"  📁 {d}/" for d in sorted(directories)))
+            result_parts.append(f"Directories ({len(directories)}):\n" + '\n'.join(f"  📁 {d}/" for d in directories))
         if files:
-            result_parts.append(f"Files ({len(files)}):\n" + '\n'.join(f"  📄 {f}" for f in sorted(files)))
+            result_parts.append(f"Files ({len(files)}):\n" + '\n'.join(f"  📄 {f}" for f in files))
+        if truncated:
+            result_parts.append(f"... truncated to {max_results} results. Narrow your target or disable recursion.")
 
         return '\n\n'.join(result_parts)
 
@@ -198,23 +243,44 @@ BEST PRACTICES:
         return f"Successfully created directory '{path}'"
 
     @classmethod
-    def _search_files(cls, path: str, pattern: str, vault_path: str) -> str:
-        """Search for text within files using ripgrep."""
-        if not path:
-            return "Search requires a search pattern in 'path' parameter"
+    def _search_files(cls, query: str, scope: str, vault_path: str) -> str:
+        """Search for text within markdown files using ripgrep."""
+        if not query:
+            return "Search requires a search pattern in 'target' parameter"
 
         # Build ripgrep command
-        rg_cmd = ['rg', '--no-heading', '--line-number', '--color', 'never']
+        rg_cmd = [
+            'rg',
+            '--no-heading',
+            '--line-number',
+            '--color',
+            'never',
+        ]
 
-        # Add file pattern filter if specified
-        if pattern:
-            rg_cmd.extend(['--glob', pattern])
+        glob_pattern = "*.md"
+        search_root = vault_path
+
+        scope = scope.strip()
+        if scope:
+            if '..' in scope or scope.startswith('/'):
+                return "Scope cannot contain '..' or start with '/'"
+
+            # If scope is a directory, search within it with markdown filter
+            abs_scope = os.path.join(vault_path, scope)
+            if os.path.isdir(abs_scope):
+                search_root = abs_scope
+                glob_pattern = "*.md"
+            else:
+                # Treat scope as a glob relative to vault
+                glob_pattern = scope
+
+        rg_cmd.extend(['--glob', glob_pattern])
 
         # Add search pattern
-        rg_cmd.append(path)
+        rg_cmd.append(query)
 
-        # Search in vault directory
-        rg_cmd.append(vault_path)
+        # Search in directory
+        rg_cmd.append(search_root)
 
         try:
             result = subprocess.run(
@@ -232,14 +298,13 @@ BEST PRACTICES:
                 return f"Found {len(lines)} matches:\n\n{result.stdout}"
             elif result.returncode == 1:
                 # No matches found
-                pattern_info = f" in files matching '{pattern}'" if pattern else ""
-                return f"No matches found for '{path}'{pattern_info}"
+                return f"No matches found for '{query}' in markdown files"
             else:
                 # Error occurred
                 return f"Search error: {result.stderr or 'Unknown error'}"
         except FileNotFoundError:
             return "Error: ripgrep (rg) not found. Please install ripgrep to use search functionality."
         except subprocess.TimeoutExpired:
-            return "Search timed out (>10 seconds). Try narrowing your search with a file pattern."
+            return "Search timed out (>10 seconds). Try narrowing your search."
         except Exception as e:
             return f"Search error: {str(e)}"
