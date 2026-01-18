@@ -164,12 +164,12 @@ class InputFileDirective(DirectiveProcessor):
             file_path = file_path[2:-2]
 
         # Check for different pattern types and resolve files
-        if '*' in file_path:
-            # Glob pattern (*.md, folder/*.md, prefix*.md)
-            result_files = self._resolve_glob_pattern(file_path, vault_path)
-        elif '{' in file_path:
+        if '{' in file_path:
             # Time-based or stateful pattern ({latest:3}, {pending:5})
             result_files = self._resolve_brace_pattern(file_path, vault_path, **context)
+        elif '*' in file_path:
+            # Glob pattern (*.md, folder/*.md, prefix*.md)
+            result_files = self._resolve_glob_pattern(file_path, vault_path)
         else:
             # Direct file reference
             result_files = [load_file_with_metadata(file_path, vault_path)]
@@ -403,5 +403,8 @@ class InputFileDirective(DirectiveProcessor):
         pattern = brace_patterns[0]
         resolved_date = self.pattern_utils.resolve_date_pattern(pattern, reference_date, week_start_day)
         resolved_path = value.replace(f'{{{pattern}}}', resolved_date)
-        
+
+        if '*' in resolved_path:
+            return self._resolve_glob_pattern(resolved_path, vault_path)
+
         return [load_file_with_metadata(resolved_path, vault_path)]
