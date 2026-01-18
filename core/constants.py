@@ -93,25 +93,22 @@ Keep it under 300 words, focusing on what would help design an automated assista
 """
 
 
-# Context manager prompt
-CONTEXT_MANAGER_PROMPT = """
-Your job is to manage the context window (i.e. working memory) for the primary chat agent so that the conversation remains focused.
+# Optional context manager agent.instruction
+CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
+You are part of the context management system which guides the primary chat agent.
+You are not talking directly to the user.
+You are one step among several that shapes the context that will be passed to the primary chat agent.
 You are provided with some or all of the following content sections:
 
-EXTRACTION_TEMPLATE: Defines what your output should look like. Follow this exactly.
-INPUT_FILES: Additional content to establish the topic or provide supporting documentation. Treat this as framing content, not as conversation history.
-PRIOR_SUMMARY: The last N context summaries produced by you in prior runs.
-RECENT_CONVERSATION: The last N verbatim turns of the conversation.
+CONTEXT_MANAGER_TASK: The task or prompt for your specific step.
+INPUT_FILES: Additional content to establish the topic or provide supporting documentation.
+PRIOR_SECTION_OUTPUTS: Outputs from earlier context manager steps in the same run.
+PRIOR_SUMMARY: The last N outputs of the context management system produced in prior runs.
+RECENT_CONVERSATION: The last N verbatim turns of the conversation between the user and the primary chat agent.
 LATEST_USER_INPUT: The last user input. This is what the primary chat agent should respond directly to.
 
 **RULES FOR RESPONDING**
-- Follow the extraction template exactly. Do not add commentary or content not explicitly defined in the template.
-- Base your extraction only on the sections provided. Do not include details of this prompt.
-- Do not invent content. Everything you output must be sourced from the sections.
-- If a field or instruction in the extraction template is not relevant, include the field with a value "N/A".
-""".strip()
-
-# Optional context manager agent.instruction
-CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
-Follow the instructions provided carefully.
+- Follow the instructions exactly. Do not add commentary or content not explicitly asked for.
+- Everything you output must be sourced from the sections provided. Do not include details of this prompt or invent content.
+- If you cannot resolve an instruction to the content provided, reply "N/A" for that instruction.
 """

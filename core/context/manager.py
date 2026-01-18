@@ -11,7 +11,6 @@ from core.llm.agents import create_agent
 from core.context.templates import TemplateRecord, TemplateSection, load_template
 from core.logger import UnifiedLogger
 from core.constants import (
-    CONTEXT_MANAGER_PROMPT,
     CONTEXT_MANAGER_SYSTEM_INSTRUCTION,
     VALID_WEEK_DAYS,
 )
@@ -210,6 +209,7 @@ async def manage_context(
     model_instance = model_directive.process_value(model_to_use, "context-manager")
 
     manager_instruction = instructions_override if instructions_override is not None else CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+    context_instructions = input_data.template.instructions
     latest_input = input_data.context_payload.get("latest_input") if isinstance(input_data.context_payload, dict) else None
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
@@ -220,42 +220,23 @@ async def manage_context(
         else None
     )
     prompt_parts: List[str] = []
-    manager_task = input_data.template.instructions or CONTEXT_MANAGER_PROMPT
-    prompt_parts.append(
-        "\n".join(
-            [
-                "=== BEGIN CONTEXT_MANAGER_TASK ===",
-                manager_task,
-                "=== END CONTEXT_MANAGER_TASK ===",
-            ]
-        )
-    )
+    manager_task = ""
     section_body = None
     if input_data.template_section is not None:
         section_body = input_data.template_section.cleaned_content
-    base_template = (section_body or input_data.template.template_body or input_data.template.content or "").strip()
-    if base_template:
+    manager_task = (section_body or input_data.template.template_body or input_data.template.content or "").strip()
+    if manager_task:
         prompt_parts.append(
             "\n".join(
                 [
-                    "=== BEGIN EXTRACTION_TEMPLATE ===",
-                    base_template,
-                    "=== END EXTRACTION_TEMPLATE ===",
+                    "=== BEGIN CONTEXT_MANAGER_TASK ===",
+                    manager_task,
+                    "=== END CONTEXT_MANAGER_TASK ===",
                 ]
             )
         )
     if input_files:
         prompt_parts.append(input_files)
-    if previous_summary:
-        prompt_parts.append(
-            "\n".join(
-                [
-                    "=== BEGIN PRIOR_SUMMARY ===",
-                    previous_summary,
-                    "=== END PRIOR_SUMMARY ===",
-                ]
-            )
-        )
     if prior_outputs:
         prompt_parts.append(
             "\n".join(
@@ -263,6 +244,16 @@ async def manage_context(
                     "=== BEGIN PRIOR_SECTION_OUTPUTS ===",
                     prior_outputs,
                     "=== END PRIOR_SECTION_OUTPUTS ===",
+                ]
+            )
+        )
+    if previous_summary:
+        prompt_parts.append(
+            "\n".join(
+                [
+                    "=== BEGIN PRIOR_SUMMARY ===",
+                    previous_summary,
+                    "=== END PRIOR_SUMMARY ===",
                 ]
             )
         )
@@ -293,6 +284,8 @@ async def manage_context(
         tools=tools,
     )
     agent.instructions(lambda _ctx, text=manager_instruction: text)
+    if context_instructions:
+        agent.instructions(lambda _ctx, text=context_instructions: text)
     result = await agent.run(prompt)
     result_output = getattr(result, "output", None)
 

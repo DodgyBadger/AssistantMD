@@ -25,8 +25,8 @@ AssistantMD supports pattern variables for dynamic file paths and headers. Patte
 ## File Collection Patterns (@input-file only)
 
 **Latest File Patterns**
-- `{latest}` - Most recent file by date
-- `{latest:N}` - N most recent files by date
+- `{latest}` - Most recent file or folder by date found in the file or folder name
+- `{latest:N}` - N most recent files by date found in the filename. Not supported if used in a folder position (e.g. myfiles/{latest:3}/*.md raises an error)
 
 **Stateful Processing Patterns**
 - `{pending}` - Unprocessed files (oldest first, default limit 10)

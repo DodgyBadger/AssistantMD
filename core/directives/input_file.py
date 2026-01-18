@@ -232,6 +232,12 @@ class InputFileDirective(DirectiveProcessor):
         
         # Extract directory path from parameter value
         pattern_start = value.find(f"{{{pattern}}}")
+        pattern_end = pattern_start + len(pattern) + 2
+        is_dir_mode = (
+            base_pattern == 'latest'
+            and pattern_end < len(value)
+            and value[pattern_end] == '/'
+        )
         if pattern_start > 0:
             # Path prefix exists (e.g., "journal/{latest:3}")
             path_prefix = value[:pattern_start]
@@ -245,12 +251,79 @@ class InputFileDirective(DirectiveProcessor):
             return self._resolve_pending_pattern(value, search_directory, vault_path, count, context.get('state_manager'))
         
         # Handle time-based patterns
-        elif count is not None:
-            # Multi-file patterns like {latest:3}
-            return self._resolve_time_based_multi_pattern(base_pattern, count, search_directory, vault_path, value, pattern)
+        elif base_pattern == 'latest' and is_dir_mode:
+            return self._resolve_latest_directory_pattern(
+                value,
+                vault_path,
+                path_prefix if pattern_start > 0 else "",
+                pattern_end,
+                count,
+            )
+        elif count is not None or base_pattern == 'latest':
+            # Multi-file patterns like {latest:3} (or {latest} -> {latest:1})
+            resolved_count = count if count is not None else 1
+            return self._resolve_time_based_multi_pattern(
+                base_pattern,
+                resolved_count,
+                search_directory,
+                vault_path,
+                value,
+                pattern,
+            )
         else:
             # Single file patterns like {today}
             return self._resolve_single_time_pattern(value, vault_path, **context)
+
+    def _resolve_latest_directory_pattern(
+        self,
+        original_value: str,
+        vault_path: str,
+        path_prefix: str,
+        pattern_end: int,
+        count: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        """Resolve {latest} when used as a directory segment (e.g., logs/{latest}/file.md)."""
+        if count not in (None, 1):
+            raise ValueError("'{latest:N}' not supported for directory resolution in @input-file")
+
+        search_directory = os.path.join(vault_path, path_prefix)
+        latest_dir = self._find_latest_dated_subdir(search_directory)
+        if not latest_dir:
+            return []
+
+        # Suffix after the required trailing slash
+        suffix = original_value[pattern_end + 1:]
+        resolved_prefix = os.path.join(path_prefix, latest_dir)
+        if not suffix:
+            # Default to glob all files in the latest directory
+            resolved_path = os.path.join(resolved_prefix, "*")
+        else:
+            resolved_path = os.path.join(resolved_prefix, suffix)
+
+        if "*" in resolved_path:
+            return self._resolve_glob_pattern(resolved_path, vault_path)
+
+        return [load_file_with_metadata(resolved_path, vault_path)]
+
+    def _find_latest_dated_subdir(self, directory: str) -> Optional[str]:
+        """Return the latest subdirectory name based on a date in the name."""
+        if not os.path.exists(directory):
+            return None
+
+        dated_dirs = []
+        for name in os.listdir(directory):
+            full_path = os.path.join(directory, name)
+            if not os.path.isdir(full_path):
+                continue
+            dir_date = self.pattern_utils.extract_date_from_filename(name)
+            if dir_date:
+                dated_dirs.append((dir_date, name))
+
+        if not dated_dirs:
+            return None
+
+        dated_dirs.sort(key=lambda x: x[0], reverse=True)
+        return dated_dirs[0][1]
     
     def _resolve_pending_pattern(self, original_value: str, search_dir: str,
                                vault_path: str, count: Optional[int],
