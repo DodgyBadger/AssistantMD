@@ -36,6 +36,11 @@ Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locall
 - Recurring schedules using cron expressions or one-time execution
 - Dynamic file patterns: `{today}`, `{this-week}`, `{latest}`, etc.
 
+**🥼 NEW / EXPERIMENTAL: Context Manager**
+- Create markdown files in `AssistantMD/ContextTemplates` to steer your chat sessions
+- Custom system instructions
+- Curate chat history before passing to the primary chat agent
+
 **🔐 Privacy & Control**
 - Self-hosted - your files stay on your infrastructure
 - Docker-based deployment

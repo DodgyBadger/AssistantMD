@@ -23,6 +23,17 @@ def _parse_non_negative_int(value: str) -> int:
     return parsed
 
 
+def _parse_non_negative_int_or_all(value: str) -> int:
+    if DirectiveValueParser.is_empty(value):
+        raise ValueError("Value cannot be empty")
+
+    normalized = value.strip().lower()
+    if normalized == "all":
+        return -1
+
+    return _parse_non_negative_int(normalized)
+
+
 def _parse_passthrough_runs(value: str) -> int:
     if DirectiveValueParser.is_empty(value):
         raise ValueError("Value cannot be empty")
@@ -50,13 +61,13 @@ class RecentRunsDirective(DirectiveProcessor):
 
     def validate_value(self, value: str) -> bool:
         try:
-            _parse_non_negative_int(value)
+            _parse_non_negative_int_or_all(value)
             return True
         except ValueError:
             return False
 
     def process_value(self, value: str, vault_path: str, **context) -> int:
-        return _parse_non_negative_int(value)
+        return _parse_non_negative_int_or_all(value)
 
 
 class PassthroughRunsDirective(DirectiveProcessor):
@@ -101,10 +112,10 @@ class RecentSummariesDirective(DirectiveProcessor):
 
     def validate_value(self, value: str) -> bool:
         try:
-            _parse_non_negative_int(value)
+            _parse_non_negative_int_or_all(value)
             return True
         except ValueError:
             return False
 
     def process_value(self, value: str, vault_path: str, **context) -> int:
-        return _parse_non_negative_int(value)
+        return _parse_non_negative_int_or_all(value)

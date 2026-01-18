@@ -155,7 +155,7 @@ def add_context_summary(
 def get_recent_summaries(
     session_id: str,
     vault_name: str,
-    limit: int = 5,
+    limit: Optional[int] = 5,
     system_root: Optional[Path] = None,
 ) -> list[Dict[str, Any]]:
     """
@@ -167,24 +167,43 @@ def get_recent_summaries(
     db_path = _ensure_db(system_root)
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            """
-            SELECT
-                turn_index,
-                template_name,
-                template_hash,
-                model_alias,
-                raw_output,
-                compiled_prompt,
-                input_payload,
-                created_at
-            FROM context_summaries
-            WHERE session_id = ? AND vault_name = ?
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (session_id, vault_name, limit),
-        ).fetchall()
+        if limit is None:
+            rows = conn.execute(
+                """
+                SELECT
+                    turn_index,
+                    template_name,
+                    template_hash,
+                    model_alias,
+                    raw_output,
+                    compiled_prompt,
+                    input_payload,
+                    created_at
+                FROM context_summaries
+                WHERE session_id = ? AND vault_name = ?
+                ORDER BY id DESC
+                """,
+                (session_id, vault_name),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                    turn_index,
+                    template_name,
+                    template_hash,
+                    model_alias,
+                    raw_output,
+                    compiled_prompt,
+                    input_payload,
+                    created_at
+                FROM context_summaries
+                WHERE session_id = ? AND vault_name = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (session_id, vault_name, limit),
+            ).fetchall()
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Failed to fetch recent context summaries for session {session_id}: {exc}")
         return []
@@ -213,4 +232,3 @@ def get_recent_summaries(
         )
 
     return snapshots
-

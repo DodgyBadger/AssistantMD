@@ -2,7 +2,7 @@
 
 A workflow is a markdown file stored under each vault's `AssistantMD/Workflows/` folder. Workflows can be organized in subfolders (one level deep). Subfolders beginning with an underscore are ignored.
 
-**Basic Structure**  
+## Structure
 - YAML frontmatter between `---` delimiters (required). These appear as properties if using Obsidian.
 Sets the run schedule and the workflow engine to run. Currently there is only one workflow engine called step.
 - Optional `## Instructions` section with a prompt that is included as a system instruction before every step prompt.

@@ -36,6 +36,17 @@ class TemplateRecord:
     template_section: Optional[str] = None
     template_body: Optional[str] = None
     directives: Dict[str, List[str]] = field(default_factory=dict)
+    template_sections: List["TemplateSection"] = field(default_factory=list)
+
+
+@dataclass
+class TemplateSection:
+    """Individual context template section (one per ## heading)."""
+
+    name: str
+    content: str
+    cleaned_content: str
+    directives: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def _ensure_md_suffix(name: str) -> str:
@@ -80,7 +91,7 @@ def _extract_schema_block(content: str) -> Optional[str]:
     return "\n".join(block_lines).strip()
 
 
-def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str]]:
+def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str], str]:
     """Parse optional frontmatter and markdown sections for templates."""
     stripped = content.lstrip()
     if stripped.startswith("---"):
@@ -90,24 +101,31 @@ def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str
         remaining = content
 
     sections = parse_markdown_sections(remaining, "##")
-    return frontmatter, sections
+    return frontmatter, sections, remaining
 
 
-def _select_instruction_and_template(
+def _select_instruction_and_template_sections(
     sections: Dict[str, str],
-) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], ParsedDirectives]:
-    """Pick context instructions, chat instructions, and template section content."""
+    remaining: str,
+) -> tuple[Optional[str], Optional[str], List[TemplateSection]]:
+    """Pick context instructions, chat instructions, and template sections."""
     if not sections:
-        return None, None, None, None, ParsedDirectives(directives={}, cleaned_content="")
+        fallback_parsed = parse_directives(remaining or "")
+        if fallback_parsed.cleaned_content.strip():
+            fallback_section = TemplateSection(
+                name="Template",
+                content=remaining or "",
+                cleaned_content=fallback_parsed.cleaned_content,
+                directives=fallback_parsed.directives,
+            )
+            return None, None, [fallback_section]
+        return None, None, []
 
     section_items = list(sections.items())
     context_instructions: Optional[str] = None
     chat_instructions: Optional[str] = None
     context_sections: List[str] = []
     instruction_section_names: List[str] = []
-    template_section: Optional[str] = None
-    template_content: Optional[str] = None
-
     for section_name, _ in section_items:
         lowered = section_name.strip().lower()
         if "instructions" in lowered:
@@ -126,28 +144,31 @@ def _select_instruction_and_template(
             ]
         ).strip() or None
 
+    template_sections: List[TemplateSection] = []
     for section_name, section_content in section_items:
-        if section_name.strip().lower() == "template":
-            template_section = section_name
-            template_content = section_content
-            break
+        if section_name in instruction_section_names:
+            continue
+        parsed = parse_directives(section_content or "")
+        template_sections.append(
+            TemplateSection(
+                name=section_name,
+                content=section_content,
+                cleaned_content=parsed.cleaned_content,
+                directives=parsed.directives,
+            )
+        )
 
-    if template_section is None:
-        for section_name, section_content in section_items:
-            if section_name in instruction_section_names:
-                continue
-            template_section = section_name
-            template_content = section_content
-            break
-
-    parsed = parse_directives(template_content or "")
-    return context_instructions, chat_instructions, template_section, parsed.cleaned_content, parsed
+    return context_instructions, chat_instructions, template_sections
 
 
 def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
     content = path.read_text(encoding="utf-8")
-    frontmatter, sections = _parse_template_content(content)
-    instructions, chat_instructions, template_section, template_body, parsed = _select_instruction_and_template(sections)
+    frontmatter, sections, remaining = _parse_template_content(content)
+    instructions, chat_instructions, template_sections = _select_instruction_and_template_sections(
+        sections,
+        remaining,
+    )
+    first_section = template_sections[0] if template_sections else None
     return TemplateRecord(
         name=name,
         content=content,
@@ -158,9 +179,10 @@ def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
         frontmatter=frontmatter,
         instructions=instructions,
         chat_instructions=chat_instructions,
-        template_section=template_section,
-        template_body=template_body,
-        directives=parsed.directives,
+        template_section=first_section.name if first_section else None,
+        template_body=first_section.cleaned_content if first_section else None,
+        directives=first_section.directives if first_section else {},
+        template_sections=template_sections,
     )
 
 

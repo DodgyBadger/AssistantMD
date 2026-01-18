@@ -8,11 +8,15 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from pydantic_ai import RunContext
 from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
-from core.context.templates import TemplateRecord
-from core.context.templates import load_template
+from core.context.templates import TemplateRecord, TemplateSection, load_template
 from core.logger import UnifiedLogger
-from core.constants import CONTEXT_MANAGER_PROMPT, CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+from core.constants import (
+    CONTEXT_MANAGER_PROMPT,
+    CONTEXT_MANAGER_SYSTEM_INSTRUCTION,
+    VALID_WEEK_DAYS,
+)
 from core.directives.bootstrap import ensure_builtin_directives_registered
+from core.directives.context_manager import _parse_passthrough_runs
 from core.directives.registry import get_global_registry
 from core.directives.tools import ToolsDirective
 from pydantic_ai.messages import (
@@ -38,6 +42,7 @@ class ContextManagerInput:
 
     model_alias: str
     template: TemplateRecord
+    template_section: Optional[TemplateSection]
     context_payload: Dict[str, Any]
 
 
@@ -128,6 +133,62 @@ def _has_empty_input_file_directive(content: str) -> bool:
     return False
 
 
+def _resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
+    """
+    Resolve week_start_day from template frontmatter.
+
+    Returns 0=Monday .. 6=Sunday, defaulting to Monday on missing/invalid values.
+    """
+    if not frontmatter:
+        return 0
+    raw_value = frontmatter.get("week_start_day")
+    if raw_value is None:
+        return 0
+    if isinstance(raw_value, int) and 0 <= raw_value <= 6:
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in VALID_WEEK_DAYS:
+            return VALID_WEEK_DAYS.index(normalized)
+    logger.warning(
+        "Invalid week_start_day in context template; defaulting to monday",
+        metadata={"value": raw_value},
+    )
+    return 0
+
+
+def _resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
+    if not frontmatter:
+        return default
+    raw_value = frontmatter.get("passthrough_runs")
+    if raw_value is None:
+        raw_value = frontmatter.get("passthrough-runs")
+    if raw_value is None:
+        return default
+    if isinstance(raw_value, int):
+        if raw_value < -1:
+            logger.warning(
+                "Invalid passthrough_runs in context template; defaulting",
+                metadata={"value": raw_value},
+            )
+            return default
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return _parse_passthrough_runs(raw_value)
+        except Exception:
+            logger.warning(
+                "Invalid passthrough_runs in context template; defaulting",
+                metadata={"value": raw_value},
+            )
+            return default
+    logger.warning(
+        "Invalid passthrough_runs in context template; defaulting",
+        metadata={"value": raw_value},
+    )
+    return default
+
+
 async def manage_context(
     input_data: ContextManagerInput,
     instructions_override: Optional[str] = None,
@@ -153,6 +214,11 @@ async def manage_context(
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
     input_files = input_data.context_payload.get("input_files") if isinstance(input_data.context_payload, dict) else None
+    prior_outputs = (
+        input_data.context_payload.get("prior_outputs")
+        if isinstance(input_data.context_payload, dict)
+        else None
+    )
     prompt_parts: List[str] = []
     manager_task = input_data.template.instructions or CONTEXT_MANAGER_PROMPT
     prompt_parts.append(
@@ -164,7 +230,10 @@ async def manage_context(
             ]
         )
     )
-    base_template = (input_data.template.template_body or input_data.template.content or "").strip()
+    section_body = None
+    if input_data.template_section is not None:
+        section_body = input_data.template_section.cleaned_content
+    base_template = (section_body or input_data.template.template_body or input_data.template.content or "").strip()
     if base_template:
         prompt_parts.append(
             "\n".join(
@@ -184,6 +253,16 @@ async def manage_context(
                     "=== BEGIN PRIOR_SUMMARY ===",
                     previous_summary,
                     "=== END PRIOR_SUMMARY ===",
+                ]
+            )
+        )
+    if prior_outputs:
+        prompt_parts.append(
+            "\n".join(
+                [
+                    "=== BEGIN PRIOR_SECTION_OUTPUTS ===",
+                    prior_outputs,
+                    "=== END PRIOR_SECTION_OUTPUTS ===",
                 ]
             )
         )
@@ -246,53 +325,31 @@ def build_context_manager_history_processor(
     registry = get_global_registry()
     template = load_template(template_name, Path(vault_path))
     template_directives = template.directives or {}
+    template_sections = template.template_sections or []
+    week_start_day = _resolve_week_start_day(template.frontmatter)
     chat_instructions = (template.chat_instructions or "").strip() or None
+    passthrough_runs = _resolve_passthrough_runs(template.frontmatter, passthrough_runs)
     chat_instruction_message: Optional[ModelMessage] = None
     if chat_instructions:
         chat_instruction_message = ModelRequest(
             parts=[SystemPromptPart(content=chat_instructions)]
         )
 
-    def _get_latest_directive_value(name: str) -> Optional[str]:
-        values = template_directives.get(name, [])
-        return values[-1] if values else None
-
-    def _resolve_int_directive(directive_key: str, default: int = 0) -> int:
-        directive_value = _get_latest_directive_value(directive_key)
-        if directive_value is not None:
-            try:
-                result = registry.process_directive(directive_key, directive_value, vault_path)
-                return int(result.processed_value)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to process context manager directive; falling back to defaults",
-                    metadata={"directive": directive_key, "error": str(exc)},
-                )
-        return default
-
-    manager_runs = _resolve_int_directive(
-        "recent-runs",
-        manager_runs,
-    )
-    passthrough_runs = _resolve_int_directive(
-        "passthrough-runs",
-        passthrough_runs,
-    )
-    token_threshold = _resolve_int_directive(
-        "token-threshold",
-        0,
-    )
-    recent_summaries = _resolve_int_directive(
-        "recent-summaries",
-        1,
-    )
-
-    tools_directive_value = _get_latest_directive_value("tools")
-    model_directive_value = _get_latest_directive_value("model")
-    input_file_values = template_directives.get("input-file", [])
-    empty_input_file_directive = _has_empty_input_file_directive(
-        template.template_body or template.content or ""
-    )
+    token_threshold = 0
+    recent_summaries = 1
+    if template_sections:
+        default_sections = template_sections
+    elif template.template_body or template.content:
+        default_sections = [
+            TemplateSection(
+                name=template.template_section or "Template",
+                content=template.template_body or template.content or "",
+                cleaned_content=template.template_body or template.content or "",
+                directives=template_directives,
+            )
+        ]
+    else:
+        default_sections = []
 
     async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:
@@ -307,7 +364,7 @@ def build_context_manager_history_processor(
                         run_ids.append(rid)
             if run_ids:
                 if runs_to_take == 0:
-                    return []  # Explicit disable
+                    return []
                 take_runs = runs_to_take if runs_to_take > 0 else len(run_ids)
                 selected_run_ids = set(run_ids[-take_runs:])
                 start_idx = 0
@@ -331,11 +388,9 @@ def build_context_manager_history_processor(
                 return msgs[last_user_idx:]
             return msgs
 
-        manager_slice = _run_slice(messages, manager_runs)
         passthrough_slice = _run_slice(messages, passthrough_runs)
 
-        # If manager runs are disabled, skip all context management and return passthrough slice (can be empty).
-        if manager_runs == 0:
+        if not default_sections:
             curated_history: List[ModelMessage] = []
             if chat_instruction_message:
                 curated_history.append(chat_instruction_message)
@@ -382,44 +437,7 @@ def build_context_manager_history_processor(
 
             return role, ""
 
-        rendered_lines: List[str] = []
-        latest_input = ""
-        for m in manager_slice:
-            role, text = _extract_role_and_text(m)
-            if text:
-                rendered_lines.append(f"{role.capitalize()}: {text}")
-            if role.lower() == "user" and text:
-                latest_input = text
-
-        rendered_history = "\n".join(rendered_lines)
-
-        # Estimate token count of the candidate slice (rendered history + latest input); if below threshold, skip management.
-        if token_threshold > 0:
-            # Estimate size of the full raw history (SessionManager messages) to decide whether to manage.
-            estimate_parts: List[str] = []
-            for m in messages:
-                role, text = _extract_role_and_text(m)
-                if text:
-                    estimate_parts.append(f"{role}: {text}")
-            estimate_basis = "\n".join(estimate_parts)
-            token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
-            logger.debug(
-                "Context manager threshold check",
-                metadata={
-                    "run_id": run_context.run_id,
-                    "token_estimate": token_estimate,
-                    "threshold": token_threshold,
-                    "manager_runs": manager_runs,
-                    "passthrough_runs": passthrough_runs,
-                },
-            )
-            if token_estimate < token_threshold:
-                # Skip management entirely for this turn; no summary injection, just passthrough slice.
-                curated_history: List[ModelMessage] = []
-                if chat_instruction_message:
-                    curated_history.append(chat_instruction_message)
-                curated_history.extend(passthrough_slice)
-                return curated_history
+        token_estimate = None
         cache_store = getattr(run_context.deps, "context_manager_cache", None)
         if cache_store is None:
             cache_store = {}
@@ -429,140 +447,250 @@ def build_context_manager_history_processor(
                 cache_store = {}
         run_scope_key = run_context.run_id or "default_run"
         cache_entry = cache_store.get(run_scope_key, {})
+        section_cache = cache_entry.get("sections", {})
 
-        summary_message: Optional[ModelMessage] = None
+        summary_messages: List[ModelMessage] = []
+        prior_outputs: List[str] = []
+        persisted_sections: List[Dict[str, Any]] = []
 
-        try:
-            managed_output: Optional[str] = cache_entry.get("raw_output")
-            managed_model_alias: str = cache_entry.get("model_alias", model_alias)
+        for idx, section in enumerate(default_sections):
+            section_key = f"{idx}:{section.name}"
+            section_directives = section.directives or {}
 
-            if managed_output is None:
-                input_file_data = None
-                if input_file_values:
-                    processed_values: List[Any] = []
-                    for value in input_file_values:
+            def _resolve_section_int(directive_key: str, default: int = 0) -> int:
+                values = section_directives.get(directive_key, [])
+                if values:
+                    try:
+                        result = registry.process_directive(
+                            directive_key,
+                            values[-1],
+                            vault_path,
+                        )
+                        return int(result.processed_value)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to process context manager directive; falling back to defaults",
+                            metadata={"directive": directive_key, "error": str(exc)},
+                        )
+                return default
+
+            section_recent_runs = _resolve_section_int("recent-runs", manager_runs)
+            section_token_threshold = _resolve_section_int("token-threshold", token_threshold)
+            section_recent_summaries = _resolve_section_int("recent-summaries", recent_summaries)
+            summaries_limit = None if section_recent_summaries < 0 else section_recent_summaries
+
+            if section_token_threshold > 0:
+                if token_estimate is None:
+                    estimate_parts: List[str] = []
+                    for m in messages:
+                        role, text = _extract_role_and_text(m)
+                        if text:
+                            estimate_parts.append(f"{role}: {text}")
+                    estimate_basis = "\n".join(estimate_parts)
+                    token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
+                    logger.debug(
+                        "Context manager threshold check",
+                        metadata={
+                            "run_id": run_context.run_id,
+                            "token_estimate": token_estimate,
+                            "threshold": section_token_threshold,
+                        },
+                    )
+                if token_estimate < section_token_threshold:
+                    continue
+
+            manager_slice = _run_slice(messages, section_recent_runs)
+            rendered_lines: List[str] = []
+            latest_input = ""
+            for m in manager_slice:
+                role, text = _extract_role_and_text(m)
+                if text:
+                    rendered_lines.append(f"{role.capitalize()}: {text}")
+                if role.lower() == "user" and text:
+                    latest_input = text
+
+            rendered_history = "\n".join(rendered_lines)
+
+            try:
+                managed_output: Optional[str] = None
+                managed_model_alias: str = model_alias
+                section_cache_entry = section_cache.get(section_key, {})
+                managed_output = section_cache_entry.get("raw_output")
+                managed_model_alias = section_cache_entry.get("model_alias", model_alias)
+
+                if managed_output is None:
+                    input_file_values = section_directives.get("input-file", [])
+                    empty_input_file_directive = _has_empty_input_file_directive(section.content)
+                    input_file_data = None
+                    if input_file_values:
+                        processed_values: List[Any] = []
+                        for value in input_file_values:
+                            try:
+                                result = registry.process_directive(
+                                    "input-file",
+                                    value,
+                                    vault_path,
+                                    reference_date=datetime.now(),
+                                    week_start_day=week_start_day,
+                                    state_manager=None,
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "Failed to process context manager input-file directive",
+                                    metadata={"error": str(exc)},
+                                )
+                                continue
+                            if not result.success:
+                                logger.warning(
+                                    "Context manager input-file directive returned an error",
+                                    metadata={"error": result.error_message},
+                                )
+                                continue
+                            if isinstance(result.processed_value, list):
+                                if any(
+                                    item.get("_workflow_signal") == "skip_step"
+                                    for item in result.processed_value
+                                    if isinstance(item, dict)
+                                ):
+                                    processed_values = []
+                                    input_file_data = None
+                                    logger.info(
+                                        "Skipping context section due to required input-file directive",
+                                        metadata={"section": section.name},
+                                    )
+                                    break
+                            processed_values.append(result.processed_value)
+                        if processed_values:
+                            input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
+                        elif input_file_data is None and processed_values == []:
+                            continue
+
+                    previous_summary_text = None
+                    if summaries_limit is None or summaries_limit > 0:
                         try:
-                            result = registry.process_directive(
-                                "input-file",
-                                value,
-                                vault_path,
-                                reference_date=datetime.now(),
-                                week_start_day=0,
-                                state_manager=None,
+                            recent_summaries_rows = get_recent_summaries(
+                                session_id=session_id,
+                                vault_name=vault_name,
+                                limit=summaries_limit,
+                            )
+                            if recent_summaries_rows:
+                                previous_summary_text = "\n\n".join(
+                                    [
+                                        row.get("raw_output") or ""
+                                        for row in reversed(recent_summaries_rows)
+                                        if row.get("raw_output")
+                                    ]
+                                ).strip() or None
+                        except Exception:
+                            previous_summary_text = None
+
+                    tools_for_manager = None
+                    tool_instructions = ""
+                    tools_directive_value = None
+                    model_directive_value = None
+                    tools_values = section_directives.get("tools", [])
+                    if tools_values:
+                        tools_directive_value = tools_values[-1]
+                    model_values = section_directives.get("model", [])
+                    if model_values:
+                        model_directive_value = model_values[-1]
+                    if tools_directive_value:
+                        try:
+                            tools_directive = ToolsDirective()
+                            tools_for_manager, tool_instructions = tools_directive.process_value(
+                                tools_directive_value, vault_path=vault_path
                             )
                         except Exception as exc:
                             logger.warning(
-                                "Failed to process context manager input-file directive",
+                                "Failed to process context manager tools directive",
                                 metadata={"error": str(exc)},
                             )
-                            continue
-                        if not result.success:
-                            logger.warning(
-                                "Context manager input-file directive returned an error",
-                                metadata={"error": result.error_message},
-                            )
-                            continue
-                        processed_values.append(result.processed_value)
-                    if processed_values:
-                        input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
+                            tools_for_manager = None
+                            tool_instructions = ""
 
-                previous_summary_text = None
-                if recent_summaries > 0:
-                    try:
-                        recent_summaries_rows = get_recent_summaries(
-                            session_id=session_id,
-                            vault_name=vault_name,
-                            limit=recent_summaries,
-                        )
-                        if recent_summaries_rows:
-                            previous_summary_text = "\n\n".join(
-                                [
-                                    row.get("raw_output") or ""
-                                    for row in reversed(recent_summaries_rows)
-                                    if row.get("raw_output")
-                                ]
-                            ).strip() or None
-                    except Exception:
-                        previous_summary_text = None
+                    manager_input = ContextManagerInput(
+                        model_alias=model_alias,
+                        template=template,
+                        template_section=section,
+                        context_payload={
+                            "latest_input": latest_input,
+                            "rendered_history": rendered_history,
+                            "previous_summary": previous_summary_text,
+                            "prior_outputs": "\n\n".join(prior_outputs) if prior_outputs else None,
+                            "input_files": _format_input_files_for_prompt(
+                                input_file_data,
+                                has_empty_directive=empty_input_file_directive and not input_file_data,
+                            ),
+                        },
+                    )
+                    manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+                    if tool_instructions:
+                        manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"
+                    managed_obj = await manage_context(
+                        manager_input,
+                        instructions_override=manager_instruction,
+                        tools=tools_for_manager,
+                        model_override=model_directive_value,
+                    )
+                    managed_output = managed_obj.raw_output
+                    managed_model_alias = managed_obj.model_alias
+                    section_cache_entry = {
+                        "raw_output": managed_output,
+                        "model_alias": managed_model_alias,
+                    }
+                    section_cache[section_key] = section_cache_entry
+                    cache_entry["sections"] = section_cache
+                    cache_store[run_scope_key] = cache_entry
 
-                tools_for_manager = None
-                tool_instructions = ""
-                if tools_directive_value:
-                    try:
-                        tools_directive = ToolsDirective()
-                        tools_for_manager, tool_instructions = tools_directive.process_value(
-                            tools_directive_value, vault_path=vault_path
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to process context manager tools directive",
-                            metadata={"error": str(exc)},
-                        )
-                        tools_for_manager = None
-                        tool_instructions = ""
+                summary_text = managed_output or "N/A"
+                section_name = section.name or "Template"
+                summary_title = f"Context summary (managed: {section_name})"
+                summary_messages.append(
+                    ModelRequest(parts=[SystemPromptPart(content=f"{summary_title}:\n{summary_text}")])
+                )
+                prior_outputs.append(summary_text)
+                persisted_sections.append(
+                    {
+                        "name": section_name,
+                        "output": summary_text,
+                    }
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Context management failed in history processor", metadata={"error": str(exc)})
+                return list(messages)
 
-                manager_input = ContextManagerInput(
-                    model_alias=model_alias,
+        if persisted_sections and not cache_entry.get("persisted"):
+            try:
+                upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
+                combined_output = "\n\n".join(
+                    [
+                        f"## {section['name']}\n{section['output']}"
+                        for section in persisted_sections
+                    ]
+                )
+                add_context_summary(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    turn_index=None,
                     template=template,
-                    context_payload={
-                        "latest_input": latest_input,
-                        "rendered_history": rendered_history,
-                        "previous_summary": previous_summary_text,
-                        "input_files": _format_input_files_for_prompt(
-                            input_file_data,
-                            has_empty_directive=empty_input_file_directive and not input_file_data,
-                        ),
+                    model_alias=model_alias,
+                    raw_output=combined_output,
+                    budget_used=None,
+                    sections_included=None,
+                    compiled_prompt=None,
+                    input_payload={
+                        "sections": [section["name"] for section in persisted_sections],
                     },
                 )
-                manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
-                if tool_instructions:
-                    manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"
-                managed_obj = await manage_context(
-                    manager_input,
-                    instructions_override=manager_instruction,
-                    tools=tools_for_manager,
-                    model_override=model_directive_value,
-                )
-                managed_output = managed_obj.raw_output
-                managed_model_alias = managed_obj.model_alias
-                cache_entry = {
-                    "raw_output": managed_output,
-                    "model_alias": managed_model_alias,
-                    "persisted": False,
-                }
+                cache_entry["persisted"] = True
                 cache_store[run_scope_key] = cache_entry
-
-            # Persist the managed view for observability.
-            if cache_entry and not cache_entry.get("persisted"):
-                try:
-                    upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
-                    add_context_summary(
-                        session_id=session_id,
-                        vault_name=vault_name,
-                        turn_index=None,
-                        template=template,
-                        model_alias=managed_model_alias,
-                        raw_output=managed_output,
-                        budget_used=None,
-                        sections_included=None,
-                        compiled_prompt=None,
-                        input_payload={"latest_input": latest_input},
-                    )
-                    cache_entry["persisted"] = True
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning("Failed to persist managed context summary", metadata={"error": str(exc)})
-
-            summary_text = managed_output or "N/A"
-            summary_message = ModelRequest(parts=[SystemPromptPart(content=f"Context summary (managed):\n{summary_text}")])
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Context management failed in history processor", metadata={"error": str(exc)})
-            return list(messages)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to persist managed context summary", metadata={"error": str(exc)})
 
         curated_history: List[ModelMessage] = []
         if chat_instruction_message:
             curated_history.append(chat_instruction_message)
-        if summary_message:
-            curated_history.append(summary_message)
+        curated_history.extend(summary_messages)
         curated_history.extend(passthrough_slice)
         return curated_history
 
