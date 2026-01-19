@@ -26,6 +26,7 @@ from .context_manager import (
     RecentSummariesDirective,
     TokenThresholdDirective,
 )
+from .cache import CacheDirective
 
 logger = UnifiedLogger(tag="directive-bootstrap")
 
@@ -37,6 +38,7 @@ _BUILTIN_DIRECTIVES: tuple[Type[DirectiveProcessor], ...] = (
     WriteModeDirective,
     ToolsDirective,
     HeaderDirective,
+    CacheDirective,
     RecentRunsDirective,
     PassthroughRunsDirective,
     TokenThresholdDirective,

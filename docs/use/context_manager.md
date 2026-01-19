@@ -23,7 +23,7 @@ The chat agent receives system instructions from the context manager in the foll
 **passthrough_runs**
 - How many runs are passed through to the chat agent. Can be any value >=0, or `all` for full history.
 
-**description** (string, optional)
+**description**
 - Human-readable description of what this template does
 - For user documentation only. Has no functional impact on the template.
 
@@ -49,6 +49,15 @@ The chat agent receives system instructions from the context manager in the foll
 - Specifies which AI model to use for this step. If omitted, defaults to the chat model.
 - Same syntax and options as [workflow directives](directives.md)
 
+**@cache**
+- Caches the output of a step for reuse to avoid another LLM call when it is not needed
+- Possible values:
+  - session: cache only for the current chat session
+  - daily: cache until the start of the next day (12:00am)
+  - weekly: cache until the start of the next week (12:00am Monday, unless redefined by week_start_day)
+  - duration in s, m, h, d (e.g. 30s, 10m, 2h, 1d)
+- Regardless of the value, cache will expire if the template is edited
+- Any directives which gate whether the step runs will override the cache, meaning you won't get a cached output when you don't expect any output.
 
 ## Example: Custom system instructions only
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import shutil
-from hashlib import sha256
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -11,6 +10,7 @@ from core.directives.parser import ParsedDirectives, parse_directives
 from core.runtime.paths import get_system_root
 from core.logger import UnifiedLogger
 from core.workflow.parser import parse_frontmatter, parse_markdown_sections
+from core.utils.hash import hash_file_content
 
 logger = UnifiedLogger(tag="context-templates")
 
@@ -57,7 +57,7 @@ def _ensure_md_suffix(name: str) -> str:
 
 
 def _hash_content(content: str) -> str:
-    return sha256(content.encode("utf-8")).hexdigest()
+    return hash_file_content(content, length=None)
 
 
 def _extract_schema_block(content: str) -> Optional[str]:

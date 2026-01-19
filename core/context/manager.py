@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -30,7 +30,13 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 from core.tools.utils import estimate_token_count
-from core.context.store import add_context_summary, upsert_session, get_recent_summaries
+from core.context.store import (
+    add_context_summary,
+    get_cached_step_output,
+    get_recent_summaries,
+    upsert_cached_step_output,
+    upsert_session,
+)
 
 logger = UnifiedLogger(tag="context-manager")
 
@@ -154,6 +160,52 @@ def _resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
         metadata={"value": raw_value},
     )
     return 0
+
+
+def _parse_db_timestamp(raw_value: Optional[str]) -> Optional[datetime]:
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value)
+    except ValueError:
+        try:
+            return datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+
+
+def _start_of_week(value: datetime, week_start_day: int) -> datetime:
+    delta_days = (value.weekday() - week_start_day) % 7
+    return (value - timedelta(days=delta_days)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+
+def _cache_entry_is_valid(
+    *,
+    created_at: Optional[str],
+    cache_mode: str,
+    ttl_seconds: Optional[int],
+    now: datetime,
+    week_start_day: int,
+) -> bool:
+    created_dt = _parse_db_timestamp(created_at)
+    if created_dt is None:
+        return False
+    if cache_mode == "duration":
+        if ttl_seconds is None:
+            return False
+        return now - created_dt < timedelta(seconds=ttl_seconds)
+    if cache_mode == "daily":
+        return created_dt.date() == now.date()
+    if cache_mode == "weekly":
+        return _start_of_week(created_dt, week_start_day) == _start_of_week(now, week_start_day)
+    if cache_mode == "session":
+        return True
+    return False
 
 
 def _resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
@@ -511,53 +563,99 @@ def build_context_manager_history_processor(
                 managed_output = section_cache_entry.get("raw_output")
                 managed_model_alias = section_cache_entry.get("model_alias", model_alias)
 
-                if managed_output is None:
-                    input_file_values = section_directives.get("input-file", [])
-                    empty_input_file_directive = _has_empty_input_file_directive(section.content)
-                    input_file_data = None
-                    if input_file_values:
-                        processed_values: List[Any] = []
-                        for value in input_file_values:
-                            try:
-                                result = registry.process_directive(
-                                    "input-file",
-                                    value,
-                                    vault_path,
-                                    reference_date=datetime.now(),
-                                    week_start_day=week_start_day,
-                                    state_manager=None,
-                                )
-                            except Exception as exc:
-                                logger.warning(
-                                    "Failed to process context manager input-file directive",
-                                    metadata={"error": str(exc)},
-                                )
-                                continue
-                            if not result.success:
-                                logger.warning(
-                                    "Context manager input-file directive returned an error",
-                                    metadata={"error": result.error_message},
-                                )
-                                continue
-                            if isinstance(result.processed_value, list):
-                                if any(
-                                    item.get("_workflow_signal") == "skip_step"
-                                    for item in result.processed_value
-                                    if isinstance(item, dict)
-                                ):
-                                    processed_values = []
-                                    input_file_data = None
-                                    logger.info(
-                                        "Skipping context section due to required input-file directive",
-                                        metadata={"section": section.name},
-                                    )
-                                    break
-                            processed_values.append(result.processed_value)
-                        if processed_values:
-                            input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
-                        elif input_file_data is None and processed_values == []:
+                input_file_values = section_directives.get("input-file", [])
+                empty_input_file_directive = _has_empty_input_file_directive(section.content)
+                input_file_data = None
+                if input_file_values:
+                    processed_values: List[Any] = []
+                    for value in input_file_values:
+                        try:
+                            result = registry.process_directive(
+                                "input-file",
+                                value,
+                                vault_path,
+                                reference_date=datetime.now(),
+                                week_start_day=week_start_day,
+                                state_manager=None,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to process context manager input-file directive",
+                                metadata={"error": str(exc)},
+                            )
                             continue
+                        if not result.success:
+                            logger.warning(
+                                "Context manager input-file directive returned an error",
+                                metadata={"error": result.error_message},
+                            )
+                            continue
+                        if isinstance(result.processed_value, list):
+                            if any(
+                                item.get("_workflow_signal") == "skip_step"
+                                for item in result.processed_value
+                                if isinstance(item, dict)
+                            ):
+                                processed_values = []
+                                input_file_data = None
+                                logger.info(
+                                    "Skipping context section due to required input-file directive",
+                                    metadata={"section": section.name},
+                                )
+                                break
+                        processed_values.append(result.processed_value)
+                    if processed_values:
+                        input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
+                    elif input_file_data is None and processed_values == []:
+                        continue
 
+                cache_config: Optional[Dict[str, Any]] = None
+                cache_values = section_directives.get("cache", [])
+                if cache_values:
+                    try:
+                        result = registry.process_directive(
+                            "cache",
+                            cache_values[-1],
+                            vault_path,
+                        )
+                        cache_config = result.processed_value
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to process context manager cache directive",
+                            metadata={"error": str(exc)},
+                        )
+
+                if managed_output is None and cache_config:
+                    cache_mode = cache_config.get("mode")
+                    ttl_seconds = cache_config.get("ttl_seconds")
+                    if cache_mode:
+                        cached_entry = get_cached_step_output(
+                            session_id=session_id,
+                            vault_name=vault_name,
+                            template_name=template.name,
+                            section_key=section_key,
+                            cache_mode=cache_mode,
+                        )
+                        if cached_entry and cached_entry.get("template_hash") == template.sha256:
+                            now = datetime.now()
+                            if _cache_entry_is_valid(
+                                created_at=cached_entry.get("created_at"),
+                                cache_mode=cache_mode,
+                                ttl_seconds=ttl_seconds,
+                                now=now,
+                                week_start_day=week_start_day,
+                            ):
+                                managed_output = cached_entry.get("raw_output")
+                                managed_model_alias = model_alias
+                                section_cache_entry = {
+                                    "raw_output": managed_output,
+                                    "model_alias": managed_model_alias,
+                                }
+                                section_cache[section_key] = section_cache_entry
+                                cache_entry["sections"] = section_cache
+                                cache_store[run_scope_key] = cache_entry
+
+                if managed_output is None:
                     previous_summary_text = None
                     if summaries_limit is None or summaries_limit > 0:
                         try:
@@ -634,6 +732,21 @@ def build_context_manager_history_processor(
                     section_cache[section_key] = section_cache_entry
                     cache_entry["sections"] = section_cache
                     cache_store[run_scope_key] = cache_entry
+                    if cache_config:
+                        cache_mode = cache_config.get("mode")
+                        ttl_seconds = cache_config.get("ttl_seconds")
+                        if cache_mode:
+                            upsert_cached_step_output(
+                                run_id=run_scope_key,
+                                session_id=session_id,
+                                vault_name=vault_name,
+                                template_name=template.name,
+                                template_hash=template.sha256,
+                                section_key=section_key,
+                                cache_mode=cache_mode,
+                                ttl_seconds=ttl_seconds,
+                                raw_output=managed_output or "",
+                            )
 
                 summary_text = managed_output or "N/A"
                 section_name = section.name or "Template"

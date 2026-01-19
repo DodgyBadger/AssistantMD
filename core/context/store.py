@@ -12,7 +12,7 @@ from core.logger import UnifiedLogger
 logger = UnifiedLogger(tag="context-store")
 
 
-DB_NAME = "context_manager"
+DB_NAME = "cache"
 
 
 def _get_db_path(system_root: Optional[Path] = None) -> str:
@@ -24,6 +24,41 @@ def _ensure_db(system_root: Optional[Path] = None) -> str:
     db_path = _get_db_path(system_root)
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS context_step_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                vault_name TEXT NOT NULL,
+                template_name TEXT NOT NULL,
+                template_hash TEXT NOT NULL,
+                section_key TEXT NOT NULL,
+                cache_mode TEXT NOT NULL,
+                ttl_seconds INTEGER,
+                raw_output TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_context_step_cache_lookup
+            ON context_step_cache(vault_name, template_name, section_key)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_context_step_cache_run
+            ON context_step_cache(run_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_context_step_cache_session
+            ON context_step_cache(session_id)
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -63,6 +98,156 @@ def _ensure_db(system_root: Optional[Path] = None) -> str:
     finally:
         conn.close()
     return db_path
+
+
+def upsert_cached_step_output(
+    *,
+    run_id: str,
+    session_id: str,
+    vault_name: str,
+    template_name: str,
+    template_hash: str,
+    section_key: str,
+    cache_mode: str,
+    ttl_seconds: Optional[int],
+    raw_output: str,
+    system_root: Optional[Path] = None,
+) -> None:
+    """Insert or update a cached step output."""
+    db_path = _ensure_db(system_root)
+    conn = sqlite3.connect(db_path)
+    try:
+        if cache_mode == "session":
+            conn.execute(
+                """
+                DELETE FROM context_step_cache
+                WHERE vault_name = ? AND template_name = ? AND section_key = ?
+                  AND cache_mode = ? AND session_id = ?
+                """,
+                (vault_name, template_name, section_key, cache_mode, session_id),
+            )
+        else:
+            conn.execute(
+                """
+                DELETE FROM context_step_cache
+                WHERE vault_name = ? AND template_name = ? AND section_key = ?
+                  AND cache_mode = ?
+                """,
+                (vault_name, template_name, section_key, cache_mode),
+            )
+        conn.execute(
+            """
+            INSERT INTO context_step_cache (
+                run_id,
+                session_id,
+                vault_name,
+                template_name,
+                template_hash,
+                section_key,
+                cache_mode,
+                ttl_seconds,
+                raw_output
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                session_id,
+                vault_name,
+                template_name,
+                template_hash,
+                section_key,
+                cache_mode,
+                ttl_seconds,
+                raw_output,
+            ),
+        )
+        conn.commit()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"Failed to upsert cached step output for {section_key}: {exc}")
+        raise
+    finally:
+        conn.close()
+
+
+def get_cached_step_output(
+    *,
+    session_id: str,
+    vault_name: str,
+    template_name: str,
+    section_key: str,
+    cache_mode: str,
+    system_root: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Fetch the most recent cached step output for a key."""
+    db_path = _ensure_db(system_root)
+    conn = sqlite3.connect(db_path)
+    try:
+        if cache_mode == "session":
+            rows = conn.execute(
+                """
+                SELECT
+                    run_id,
+                    session_id,
+                    vault_name,
+                    template_name,
+                    template_hash,
+                    section_key,
+                    cache_mode,
+                    ttl_seconds,
+                    raw_output,
+                    created_at
+                FROM context_step_cache
+                WHERE vault_name = ? AND template_name = ? AND section_key = ?
+                  AND cache_mode = ? AND session_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (vault_name, template_name, section_key, cache_mode, session_id),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                    run_id,
+                    session_id,
+                    vault_name,
+                    template_name,
+                    template_hash,
+                    section_key,
+                    cache_mode,
+                    ttl_seconds,
+                    raw_output,
+                    created_at
+                FROM context_step_cache
+                WHERE vault_name = ? AND template_name = ? AND section_key = ?
+                  AND cache_mode = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (vault_name, template_name, section_key, cache_mode),
+            ).fetchall()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"Failed to fetch cached step output for {section_key}: {exc}")
+        return None
+    finally:
+        conn.close()
+
+    if not rows:
+        return None
+
+    row = rows[0]
+    return {
+        "run_id": row[0],
+        "session_id": row[1],
+        "vault_name": row[2],
+        "template_name": row[3],
+        "template_hash": row[4],
+        "section_key": row[5],
+        "cache_mode": row[6],
+        "ttl_seconds": row[7],
+        "raw_output": row[8],
+        "created_at": row[9],
+    }
 
 
 def upsert_session(

@@ -4,7 +4,6 @@ File processing state management for {pending} patterns.
 Tracks which files have been processed by workflows to support incremental processing.
 """
 
-import hashlib
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
@@ -13,25 +12,10 @@ from sqlalchemy import Column, String, DateTime
 from core.database import Base, create_engine_from_system_db, create_session_factory
 from core.runtime.paths import get_data_root
 from core.logger import UnifiedLogger
+from core.utils.hash import hash_file_content
 
 logger = UnifiedLogger(tag="file-state")
 
-
-def hash_file_content(content: str) -> str:
-    """Create a hash of file content for unique identification.
-
-    Uses SHA256 hash of file content. This approach:
-    - Is path-independent (files can be moved/renamed)
-    - Detects content changes (will re-process if file is edited)
-    - Avoids path format issues (relative vs absolute, with/without extensions)
-
-    Args:
-        content: File content to hash
-
-    Returns:
-        First 16 characters of SHA256 hash (sufficient for uniqueness)
-    """
-    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
 
 
 class ProcessedFile(Base):
