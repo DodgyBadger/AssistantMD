@@ -8,7 +8,9 @@ Define context templates using markdown in `AssistantMD/ContextTemplates/` (vaul
 - YAML frontmatter between `---` delimiters. Settings that apply to the whole template.
 - `## Chat Instructions`: Custom system instructions passed through, unmodified, to the chat agent.
 - `## Context Instructions`: System instructions for the context manager LLM when it runs.
-- `## Step`: All other ## headings are treated as context manager steps. The output of each step is passed to the chat agent as a system instruction. This section can include directives (see below) followed by a prompt for the context manager LLM.
+- `## Step`: Any other `##` heading that does not include the word "instructions" is treated as a context manager step. The output of each step is passed to the chat agent as a system instruction. This section can include directives (see below) followed by a prompt for the context manager LLM.
+
+Only `## Chat Instructions` and `## Context Instructions` are supported. Other headings containing "instructions" are ignored and will not run as steps.
 
 The chat agent receives system instructions from the context manager in the following order:
 - Hardcoded system instructions (date, tool descriptions, etc.)
@@ -21,7 +23,8 @@ The chat agent receives system instructions from the context manager in the foll
 - same behaviour as [workflow frontmatter](frontmatter.md)
 
 **passthrough_runs**
-- How many runs are passed through to the chat agent. Can be any value >=0, or `all` for full history.
+- How many runs (before the latest user message) are passed through to the chat agent. Can be any value >=0, or `all` for full history.
+- The latest user message is always passed to the chat agent verbatim.
 
 **description**
 - Human-readable description of what this template does

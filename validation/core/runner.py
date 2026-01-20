@@ -196,6 +196,14 @@ class ValidationRunner:
         """Classify errors using V1 logic."""
         exception_type = type(exception).__name__
         
+        if exception_type in ["AssertionError"]:
+            return {
+                "type": "SCENARIO FAILURE",
+                "status": "failed",
+                "severity": "low",
+                "recommendation": "Review scenario assertions and expected outputs",
+                "emoji": "❌"
+            }
         if exception_type in ["FileNotFoundError", "PermissionError", "OSError"]:
             return {
                 "type": "FRAMEWORK ERROR",

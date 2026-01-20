@@ -381,7 +381,7 @@ def build_context_manager_history_processor(
         )
 
     token_threshold = 0
-    recent_summaries = 1
+    recent_summaries = 0
     if template_sections:
         default_sections = template_sections
     elif template.template_body or template.content:
@@ -433,13 +433,28 @@ def build_context_manager_history_processor(
                 return msgs[last_user_idx:]
             return msgs
 
-        passthrough_slice = _run_slice(messages, passthrough_runs)
+        def _find_last_user_idx(msgs: List[ModelMessage]) -> Optional[int]:
+            for idx in range(len(msgs) - 1, -1, -1):
+                m = msgs[idx]
+                role = getattr(m, "role", None)
+                if role and role.lower() == "user":
+                    return idx
+                if isinstance(m, ModelRequest):
+                    return idx
+            return None
+
+        last_user_idx = _find_last_user_idx(messages)
+        latest_user_message = messages[last_user_idx] if last_user_idx is not None else None
+        history_before_latest = messages[:last_user_idx] if last_user_idx is not None else messages
+        passthrough_slice = _run_slice(history_before_latest, passthrough_runs)
 
         if not default_sections:
             curated_history: List[ModelMessage] = []
             if chat_instruction_message:
                 curated_history.append(chat_instruction_message)
             curated_history.extend(passthrough_slice)
+            if latest_user_message is not None:
+                curated_history.append(latest_user_message)
             return curated_history
 
         # Render the recent slice into a simple text transcript.
@@ -454,9 +469,15 @@ def build_context_manager_history_processor(
 
             parts = getattr(msg, "parts", None)
             if parts:
+                has_system_part = False
                 rendered_parts: List[str] = []
                 for part in parts:
                     if isinstance(part, (UserPromptPart, TextPart)):
+                        part_content = getattr(part, "content", None)
+                        if isinstance(part_content, str):
+                            rendered_parts.append(part_content)
+                    elif isinstance(part, SystemPromptPart):
+                        has_system_part = True
                         part_content = getattr(part, "content", None)
                         if isinstance(part_content, str):
                             rendered_parts.append(part_content)
@@ -473,6 +494,8 @@ def build_context_manager_history_processor(
                         if isinstance(part_content, str):
                             rendered_parts.append(part_content)
                 if rendered_parts:
+                    if has_system_part and role == "user":
+                        return "system", "\n".join(rendered_parts)
                     return role, "\n".join(rendered_parts)
 
             # Try direct content if no parts were rendered
@@ -637,7 +660,7 @@ def build_context_manager_history_processor(
                             cache_mode=cache_mode,
                         )
                         if cached_entry and cached_entry.get("template_hash") == template.sha256:
-                            now = datetime.now()
+                            now = datetime.utcnow()
                             if _cache_entry_is_valid(
                                 created_at=cached_entry.get("created_at"),
                                 cache_mode=cache_mode,
@@ -798,6 +821,8 @@ def build_context_manager_history_processor(
             curated_history.append(chat_instruction_message)
         curated_history.extend(summary_messages)
         curated_history.extend(passthrough_slice)
+        if latest_user_message is not None:
+            curated_history.append(latest_user_message)
         return curated_history
 
     return processor

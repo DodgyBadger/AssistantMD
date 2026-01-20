@@ -112,6 +112,14 @@ def run_scenarios(args):
         
         if result.error_message:
             print(f"   Error: {result.error_message}")
+        if getattr(result, "error_classification", None):
+            classification = result.error_classification
+            error_type = classification.get("type")
+            recommendation = classification.get("recommendation")
+            if error_type:
+                print(f"   Classification: {error_type}")
+            if recommendation:
+                print(f"   Recommendation: {recommendation}")
         
         # scenarios manage their own evidence in runs directory
         print("   Evidence: Check /app/validation/runs/ for scenario artifacts")
