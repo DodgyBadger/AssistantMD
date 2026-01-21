@@ -57,16 +57,31 @@ class TestSystemStartupValidationScenario(BaseScenario):
         restored_trigger = self.get_job_trigger(vault, "quick_job")
         restored_name = self.get_job_name(vault, "quick_job")
 
-        self.expect_equals(original_next_run, restored_next_run, "Next run time preserved across restart")
-        self.expect_equals(original_trigger, restored_trigger, "Trigger preserved across restart")
-        self.expect_equals(original_name, restored_name, "Job name preserved across restart")
+        self.expect_true(
+            original_next_run == restored_next_run,
+            "Next run time preserved across restart",
+        )
+        self.expect_true(
+            str(original_trigger) == str(restored_trigger),
+            "Trigger preserved across restart",
+        )
+        self.expect_true(
+            original_name == restored_name,
+            "Job name preserved across restart",
+        )
 
         # Validate subfolder job also persists
         restored_subfolder_next_run = self.get_next_run_time(vault, "planning/quick_job_2")
         restored_subfolder_trigger = self.get_job_trigger(vault, "planning/quick_job_2")
 
-        self.expect_equals(original_subfolder_next_run, restored_subfolder_next_run, "Subfolder job next run time preserved")
-        self.expect_equals(original_subfolder_trigger, restored_subfolder_trigger, "Subfolder job trigger preserved")
+        self.expect_true(
+            original_subfolder_next_run == restored_subfolder_next_run,
+            "Subfolder job next run time preserved",
+        )
+        self.expect_true(
+            str(original_subfolder_trigger) == str(restored_subfolder_trigger),
+            "Subfolder job trigger preserved",
+        )
 
         # Test 3: Schedule Change Detection
         # Overwrite the original file with updated schedule (every 1m → every 2m)
@@ -76,13 +91,16 @@ class TestSystemStartupValidationScenario(BaseScenario):
         updated_next_run = self.get_next_run_time(vault, "quick_job")
         updated_trigger = self.get_job_trigger(vault, "quick_job")
 
-        self.expect_not_equals(original_trigger, updated_trigger, "Trigger changed after schedule update")
-        assert updated_next_run is not None, "Updated job should have next run time"
+        self.expect_true(
+            str(original_trigger) != str(updated_trigger),
+            "Trigger changed after schedule update",
+        )
+        self.expect_true(updated_next_run is not None, "Updated job should have next run time")
 
         # Test 4: Real-Time Scheduled Execution
         # Job runs every 2m (120s), so wait 150s to account for schedule + execution time
         execution_success = await self.wait_for_real_execution(vault, "quick_job", timeout=150)
-        assert execution_success, "Job should execute in real time via APScheduler"
+        self.expect_true(execution_success, "Job should execute in real time via APScheduler")
 
         today_file = f"results/{datetime.now().strftime('%Y-%m-%d')}.md"
         self.expect_file_created(vault, today_file)
@@ -92,7 +110,7 @@ class TestSystemStartupValidationScenario(BaseScenario):
         await self.restart_system()
 
         final_next_run = self.get_next_run_time(vault, "quick_job")
-        assert final_next_run is not None, "Job should survive multiple restarts"
+        self.expect_true(final_next_run is not None, "Job should survive multiple restarts")
 
         # Test 6: Malformed Workflow Resilience
         # Add a malformed workflow file with invalid schedule syntax

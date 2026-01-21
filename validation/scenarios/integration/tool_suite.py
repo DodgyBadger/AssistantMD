@@ -31,7 +31,10 @@ class ToolSuiteScenario(BaseScenario):
         self.set_date("2025-01-06")  # Monday
 
         result = await self.run_workflow(vault, "tool_suite")
-        self.expect_equals(result.status, "completed", "Tool suite workflow should finish successfully")
+        self.expect_true(
+            result.status == "completed",
+            "Tool suite workflow should finish successfully",
+        )
 
         expected_outputs = [
             "tool-outputs/documentation-access.md",

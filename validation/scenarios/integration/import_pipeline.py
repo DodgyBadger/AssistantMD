@@ -33,21 +33,20 @@ class ImportPipelineScenario(BaseScenario):
             method="POST",
             data={"vault": vault.name, "queue_only": False},
         )
-        self.expect_equals(response.status_code, 200, "Import scan should succeed")
+        self.expect_true(response.status_code == 200, "Import scan should succeed")
         payload = response.json()
         jobs = payload.get("jobs_created") or []
-        self.expect_equals(len(jobs), 1, "One job should be created for the PDF")
+        self.expect_true(len(jobs) == 1, "One job should be created for the PDF")
         job = jobs[0]
-        self.expect_equals(job.get("status"), "completed", "Job should complete inline")
+        self.expect_true(job.get("status") == "completed", "Job should complete inline")
         outputs = job.get("outputs") or []
-        self.expect_equals(
+        self.expect_true(
             any(out.endswith("Imported/sample.md") for out in outputs),
-            True,
             "Output path should include Imported/sample.md",
         )
 
         # Source file should be removed after successful import
-        self.expect_equals(import_path.exists(), False, "Source file should be cleaned up")
+        self.expect_false(import_path.exists(), "Source file should be cleaned up")
 
         # Validate the rendered markdown exists and contains the extracted text
         self.expect_file_created(vault, "Imported/sample.md")
@@ -60,15 +59,15 @@ class ImportPipelineScenario(BaseScenario):
             method="POST",
             data={"vault": vault.name, "url": "https://example.com", "clean_html": True},
         )
-        self.expect_equals(url_response.status_code, 200, "URL ingest should return 200")
+        self.expect_true(url_response.status_code == 200, "URL ingest should return 200")
         url_payload = url_response.json()
-        self.expect_equals(
-            url_payload.get("status"), "completed", "URL ingest job should complete"
+        self.expect_true(
+            url_payload.get("status") == "completed",
+            "URL ingest job should complete",
         )
         url_outputs = url_payload.get("outputs") or []
-        self.expect_equals(
+        self.expect_true(
             len(url_outputs) > 0,
-            True,
             "URL ingest should return at least one output path",
         )
         # Verify the rendered file exists and contains expected markers

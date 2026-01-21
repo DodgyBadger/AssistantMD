@@ -37,9 +37,8 @@ Summarize the validation run context.
 
         # Health prior to runtime bootstrap should indicate startup state
         pre_health = self.call_api("/api/health")
-        self.expect_equals(
-            pre_health.status_code,
-            503,
+        self.expect_true(
+            pre_health.status_code == 503,
             "Health reports starting state before runtime boots",
         )
 
@@ -47,29 +46,29 @@ Summarize the validation run context.
 
         # Core system endpoints
         health = self.call_api("/api/health")
-        self.expect_equals(health.status_code, 200, "Health endpoint reports healthy")
+        self.expect_true(health.status_code == 200, "Health endpoint reports healthy")
 
         status_response = self.call_api("/api/status")
-        self.expect_equals(status_response.status_code, 200, "Status endpoint succeeds")
+        self.expect_true(status_response.status_code == 200, "Status endpoint succeeds")
         status_payload = status_response.json()
-        self.expect_equals(status_payload.get("total_vaults"), 1, "One vault discovered")
-        self.expect_equals(status_payload.get("total_workflows"), 1, "Seeded workflow counted")
+        self.expect_true(status_payload.get("total_vaults") == 1, "One vault discovered")
+        self.expect_true(status_payload.get("total_workflows") == 1, "Seeded workflow counted")
 
         activity = self.call_api("/api/system/activity-log")
-        self.expect_equals(activity.status_code, 200, "Activity log fetch succeeds")
+        self.expect_true(activity.status_code == 200, "Activity log fetch succeeds")
 
         settings = self.call_api("/api/system/settings")
-        self.expect_equals(settings.status_code, 200, "Settings fetch succeeds")
+        self.expect_true(settings.status_code == 200, "Settings fetch succeeds")
         settings_payload = settings.json()
         update_settings = self.call_api(
             "/api/system/settings",
             method="PUT",
             data={"content": settings_payload["content"]},
         )
-        self.expect_equals(update_settings.status_code, 200, "Settings update round-trips")
+        self.expect_true(update_settings.status_code == 200, "Settings update round-trips")
 
         general_settings = self.call_api("/api/system/settings/general")
-        self.expect_equals(general_settings.status_code, 200, "General settings load")
+        self.expect_true(general_settings.status_code == 200, "General settings load")
         general_payload = general_settings.json()
         if general_payload:
             first_setting = general_payload[0]
@@ -78,15 +77,14 @@ Summarize the validation run context.
                 method="PUT",
                 data={"value": first_setting["value"]},
             )
-            self.expect_equals(
-                update_setting.status_code,
-                200,
+            self.expect_true(
+                update_setting.status_code == 200,
                 "General setting update acknowledged",
             )
 
         # Model configuration lifecycle (create + delete)
         models_resp = self.call_api("/api/system/models")
-        self.expect_equals(models_resp.status_code, 200, "Model listing succeeds")
+        self.expect_true(models_resp.status_code == 200, "Model listing succeeds")
         models_payload = models_resp.json()
         base_model = models_payload[0]
         model_alias = "validation-test-model"
@@ -99,15 +97,15 @@ Summarize the validation run context.
                 "description": "Validation alias for API coverage",
             },
         )
-        self.expect_equals(created_model.status_code, 200, "Model alias creation works")
+        self.expect_true(created_model.status_code == 200, "Model alias creation works")
         removed_model = self.call_api(
             f"/api/system/models/{model_alias}", method="DELETE"
         )
-        self.expect_equals(removed_model.status_code, 200, "Model alias deletion works")
+        self.expect_true(removed_model.status_code == 200, "Model alias deletion works")
 
         # Provider configuration lifecycle (create + delete)
         providers_resp = self.call_api("/api/system/providers")
-        self.expect_equals(providers_resp.status_code, 200, "Provider listing succeeds")
+        self.expect_true(providers_resp.status_code == 200, "Provider listing succeeds")
         provider_alias = "validation-provider"
         created_provider = self.call_api(
             f"/api/system/providers/{provider_alias}",
@@ -117,23 +115,22 @@ Summarize the validation run context.
                 "base_url": "VALIDATION_PROVIDER_BASE_URL",
             },
         )
-        self.expect_equals(
-            created_provider.status_code, 200, "Provider creation acknowledged"
+        self.expect_true(
+            created_provider.status_code == 200, "Provider creation acknowledged"
         )
         removed_provider = self.call_api(
             f"/api/system/providers/{provider_alias}", method="DELETE"
         )
-        self.expect_equals(
-            removed_provider.status_code, 200, "Provider deletion acknowledged"
+        self.expect_true(
+            removed_provider.status_code == 200, "Provider deletion acknowledged"
         )
 
         # Secrets endpoint lifecycle: list, set, clear (scenario-local overlay)
         secrets_list = self.call_api("/api/system/secrets")
-        self.expect_equals(secrets_list.status_code, 200, "Secrets listing succeeds")
+        self.expect_true(secrets_list.status_code == 200, "Secrets listing succeeds")
         secrets_payload = secrets_list.json()
-        self.expect_equals(
+        self.expect_true(
             isinstance(secrets_payload, list),
-            True,
             "Secrets list is returned",
         )
 
@@ -142,16 +139,15 @@ Summarize the validation run context.
             method="PUT",
             data={"name": "VALIDATION_TEMP_SECRET", "value": "123"},
         )
-        self.expect_equals(secret_update.status_code, 200, "Secret update succeeds")
+        self.expect_true(secret_update.status_code == 200, "Secret update succeeds")
 
         updated_secrets = self.call_api("/api/system/secrets")
-        self.expect_equals(updated_secrets.status_code, 200, "Secrets refresh succeeds")
-        self.expect_equals(
+        self.expect_true(updated_secrets.status_code == 200, "Secrets refresh succeeds")
+        self.expect_true(
             any(
                 entry["name"] == "VALIDATION_TEMP_SECRET" and entry["has_value"]
                 for entry in updated_secrets.json()
             ),
-            True,
             "Updated secret reported with value",
         )
 
@@ -160,21 +156,20 @@ Summarize the validation run context.
             method="PUT",
             data={"name": "VALIDATION_TEMP_SECRET", "value": ""},
         )
-        self.expect_equals(secret_clear.status_code, 200, "Secret cleared successfully")
+        self.expect_true(secret_clear.status_code == 200, "Secret cleared successfully")
 
         cleared_secrets = self.call_api("/api/system/secrets")
-        self.expect_equals(
+        self.expect_false(
             any(
                 entry["name"] == "VALIDATION_TEMP_SECRET" and entry["has_value"]
                 for entry in cleared_secrets.json()
             ),
-            False,
             "Secret list no longer reports a stored value",
         )
 
         # Vault rescan should keep workflow counts stable
         rescan_response = self.call_api("/api/vaults/rescan", method="POST")
-        self.expect_equals(rescan_response.status_code, 200, "Vault rescan succeeds")
+        self.expect_true(rescan_response.status_code == 200, "Vault rescan succeeds")
 
         # Manual workflow execution
         execute_response = self.call_api(
@@ -182,16 +177,16 @@ Summarize the validation run context.
             method="POST",
             data={"global_id": f"{vault.name}/status_probe"},
         )
-        self.expect_equals(
-            execute_response.status_code, 200, "Manual workflow execution succeeds"
+        self.expect_true(
+            execute_response.status_code == 200, "Manual workflow execution succeeds"
         )
-        self.expect_equals(
-            execute_response.json().get("success"), True, "Workflow reports success"
+        self.expect_true(
+            execute_response.json().get("success") is True, "Workflow reports success"
         )
 
         # Chat execution, metadata, history transforms
         chat_metadata = self.call_api("/api/metadata")
-        self.expect_equals(chat_metadata.status_code, 200, "Metadata endpoint available")
+        self.expect_true(chat_metadata.status_code == 200, "Metadata endpoint available")
 
         chat_payload = {
             "vault_name": vault.name,
@@ -201,7 +196,7 @@ Summarize the validation run context.
             "use_conversation_history": True,
         }
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
-        self.expect_equals(chat_first.status_code, 200, "Chat execution succeeds")
+        self.expect_true(chat_first.status_code == 200, "Chat execution succeeds")
         session_id = chat_first.json()["session_id"]
 
         chat_second = self.call_api(
@@ -213,8 +208,8 @@ Summarize the validation run context.
                 "prompt": "Add another thought for history depth.",
             },
         )
-        self.expect_equals(
-            chat_second.status_code, 200, "Follow-up chat execution succeeds"
+        self.expect_true(
+            chat_second.status_code == 200, "Follow-up chat execution succeeds"
         )
 
         compact_response = self.call_api(
@@ -227,8 +222,8 @@ Summarize the validation run context.
                 "user_instructions": "Keep it brief.",
             },
         )
-        self.expect_equals(
-            compact_response.status_code, 200, "Chat compact endpoint succeeds"
+        self.expect_true(
+            compact_response.status_code == 200, "Chat compact endpoint succeeds"
         )
         new_session_id = compact_response.json()["new_session_id"]
 
@@ -242,9 +237,8 @@ Summarize the validation run context.
                 "user_instructions": "Outline a simple workflow.",
             },
         )
-        self.expect_equals(
-            create_workflow_response.status_code,
-            200,
+        self.expect_true(
+            create_workflow_response.status_code == 200,
             "Workflow creation flow initializes",
         )
 

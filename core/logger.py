@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -14,15 +15,19 @@ from threading import Lock
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import logfire
+import yaml
 from core import constants as core_constants
 from core.settings.secrets_store import get_secret_value
 from core.settings.store import get_general_settings
 from core.runtime.paths import get_data_root, get_system_root
+from core.runtime import state as runtime_state
 
 
 _activity_logger: Optional[logging.Logger] = None
 _activity_log_path: Optional[Path] = None
 _activity_logger_lock = Lock()
+_validation_log_lock = Lock()
+_validation_event_counter = 0
 _logfire_config_state: Optional[Tuple[bool, Optional[str]]] = None
 _logfire_instrumented = False
 _logger_internal = logging.getLogger(__name__)
@@ -71,7 +76,7 @@ def refresh_logfire_configuration(force: bool = False) -> None:
 
     logfire.configure(
         send_to_logfire=send_option,
-        scrubbing=False,
+        scrubbing=logfire.ScrubbingOptions(),
     )
 
     _logfire_config_state = desired_state
@@ -129,6 +134,93 @@ def _resolve_activity_log_path() -> Path:
     except Exception:
         # Last-resort fallback if path resolution fails unexpectedly
         return Path("/app/system") / "activity.log"
+
+
+def _validation_features() -> Dict[str, Any]:
+    """Return validation feature flags from the runtime context, if available."""
+    if not runtime_state.has_runtime_context():
+        return {}
+    try:
+        runtime = runtime_state.get_runtime_context()
+    except Exception:
+        return {}
+    return runtime.config.features or {}
+
+
+def _validation_enabled() -> bool:
+    """Return True when the runtime is in validation mode."""
+    return bool(_validation_features().get("validation"))
+
+
+def _resolve_validation_artifact_dir() -> Optional[Path]:
+    """Resolve the validation artifact directory for validation-only logging."""
+    if not _validation_enabled():
+        return None
+
+    features = _validation_features()
+    artifacts_dir = features.get("validation_artifacts_dir")
+    if artifacts_dir:
+        try:
+            path = Path(artifacts_dir)
+        except (TypeError, ValueError):
+            path = None
+        else:
+            return path / "validation_events"
+
+    try:
+        return get_system_root().parent / "artifacts" / "validation_events"
+    except Exception:
+        return None
+
+
+def _write_validation_record(record: Dict[str, Any]) -> None:
+    """Write a validation artifact record to a YAML file."""
+    directory = _resolve_validation_artifact_dir()
+    if directory is None:
+        return
+
+    with _validation_log_lock:
+        global _validation_event_counter
+        _validation_event_counter += 1
+        event_id = _validation_event_counter
+
+        directory.mkdir(parents=True, exist_ok=True)
+        tag = _sanitize_validation_name(record.get("tag", "event"))
+        name = _sanitize_validation_name(record.get("name", "event"))
+        filename = f"{event_id:04d}_{tag}_{name}.yaml"
+        path = directory / filename
+
+        payload = yaml.safe_dump(record, allow_unicode=False, sort_keys=False)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+
+
+def _sanitize_validation_name(value: str) -> str:
+    """Normalize names for validation artifact filenames."""
+    normalized = "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in value)
+    normalized = normalized.strip("_")
+    return normalized or "event"
+
+
+def _get_validation_caller() -> Dict[str, Any]:
+    """Capture caller metadata for validation events."""
+    frame = inspect.currentframe()
+    if frame is None:
+        return {}
+    caller = frame.f_back
+    while caller is not None:
+        module_name = caller.f_globals.get("__name__", "")
+        if module_name != __name__:
+            break
+        caller = caller.f_back
+    if caller is None:
+        return {}
+    return {
+        "source_file": caller.f_code.co_filename,
+        "source_line": caller.f_lineno,
+        "source_function": caller.f_code.co_name,
+        "source_module": caller.f_globals.get("__name__", ""),
+    }
 
 
 class UnifiedLogger:
@@ -286,6 +378,26 @@ class UnifiedLogger:
             log_method(message, tag=self.tag, vault=resolved_vault, metadata=metadata, **context)
         else:
             self._logfire.info(message, tag=self.tag, vault=resolved_vault, metadata=metadata, level=level, **context)
+
+    # Validation Artifacts
+
+    def validation_event(self, name: str, **data: Any) -> None:
+        """Record a validation-only artifact event (no-op outside validation runs)."""
+        if not _validation_enabled():
+            return
+
+        record = {
+            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+            "type": "validation_event",
+            "tag": self.tag,
+            "name": name,
+            "data": data,
+        }
+        caller = _get_validation_caller()
+        if caller:
+            record.update(caller)
+
+        _write_validation_record(record)
     
     # Instrumentation Setup
     
@@ -371,7 +483,10 @@ def _detect_from_path(path_value: str, *, prefer_workflow: bool = False) -> Opti
     except (TypeError, ValueError):
         return None
 
-    data_root = get_data_root()
+    try:
+        data_root = get_data_root()
+    except Exception:
+        return None
 
     if not path.exists():
         # Allow non-existent targets; rely on path semantics

@@ -28,7 +28,10 @@ class TestChatBasicScenario(BaseScenario):
             use_conversation_history=False,
         )
 
-        self.expect_equals(result.session_id, session_id, "Session ID should round-trip")
+        self.expect_true(
+            result.session_id == session_id,
+            "Session ID should round-trip",
+        )
         self.expect_chat_history_exists(vault, session_id)
         self.expect_chat_history_contains(
             vault,

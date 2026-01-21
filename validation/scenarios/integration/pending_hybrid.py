@@ -55,7 +55,7 @@ class PendingHybridScenario(BaseScenario):
 
         # Run 1: process both files
         result = await self.run_workflow(vault, "pending_hybrid")
-        self.expect_equals(result.status, "completed", "Initial run should succeed")
+        self.expect_true(result.status == "completed", "Initial run should succeed")
         self.expect_pending_count(state_manager, tasks_dir, pattern, expected=0)
 
         # Simulate workflow self-edit: change a file but keep mtime before processed_at
@@ -64,9 +64,8 @@ class PendingHybridScenario(BaseScenario):
         os.utime(task1, times=(original_mtimes[str(task1)], original_mtimes[str(task1)]))
 
         result = await self.run_workflow(vault, "pending_hybrid")
-        self.expect_equals(
-            result.status,
-            "completed",
+        self.expect_true(
+            result.status == "completed",
             "Second run should succeed without re-queuing self-edited file",
         )
         self.expect_pending_count(state_manager, tasks_dir, pattern, expected=0)
@@ -76,10 +75,10 @@ class PendingHybridScenario(BaseScenario):
         os.utime(task1, None)  # bump mtime to now
 
         pending_before = self.get_pending(state_manager, tasks_dir, pattern)
-        self.expect_equals(len(pending_before), 1, "User edit should re-queue file")
+        self.expect_true(len(pending_before) == 1, "User edit should re-queue file")
 
         result = await self.run_workflow(vault, "pending_hybrid")
-        self.expect_equals(result.status, "completed", "Third run should succeed")
+        self.expect_true(result.status == "completed", "Third run should succeed")
         self.expect_pending_count(state_manager, tasks_dir, pattern, expected=0)
 
         await self.stop_system()
@@ -102,7 +101,7 @@ class PendingHybridScenario(BaseScenario):
         expected: int,
     ):
         pending = self.get_pending(state_manager, tasks_dir, pattern)
-        self.expect_equals(len(pending), expected, f"Expected {expected} pending files")
+        self.expect_true(len(pending) == expected, f"Expected {expected} pending files")
 
 
 # === WORKFLOW TEMPLATE ===

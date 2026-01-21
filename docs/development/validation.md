@@ -45,7 +45,7 @@ Scenarios can call `await self.start_system()` multiple times, interact with the
 | Time & pattern control | `set_date`, `advance_time`, `trigger_job`, `wait_for_real_execution` |
 | System lifecycle | `start_system`, `stop_system`, `restart_system`, `trigger_vault_rescan` |
 | Workflow execution | `run_workflow`, `expect_scheduled_execution_success`, `get_job_executions` |
-| Assertions | `expect_file_created`, `expect_file_contains`, `expect_vault_discovered`, `expect_workflow_loaded`, `expect_scheduler_job_created`, etc. |
+| Assertions | `expect_file_created`, `expect_file_contains`, `expect_vault_discovered`, `expect_workflow_loaded`, `expect_scheduler_job_created`, `expect_true`, `expect_false`, etc. |
 | Chat and API | `run_chat_prompt`, `clear_chat_session`, `call_api`, `launcher_command` |
 | Evidence & teardown | `timeline_file`, `system_interactions_file`, `critical_errors_file`, `teardown_scenario()` |
 
@@ -73,9 +73,71 @@ control flow decisions stay inside production code.
   - `artifacts/timeline.md` – chronological log of everything the scenario did.
   - `artifacts/system_interactions.log` – API/chat payloads and responses.
   - `artifacts/critical_errors.md` – high-priority failures for follow-up.
+  - `artifacts/validation_events/` – structured YAML artifacts emitted from production code.
   - `test_vaults/` – the actual vault contents after the run.
 - `validation/issues_log.md` automatically tracks failing scenarios and system
   errors so the team has a single backlog of problems to investigate.
+
+## Validation Events (Intermediate Artifacts)
+
+Use validation events when you need to assert on intermediate state that is
+not visible in final outputs (for example, prompt composition or step-level
+decisions). This complements the existing end-to-end checks without introducing
+mock-heavy tests.
+
+### How to Emit Events
+
+Production code can emit a validation-only artifact using `UnifiedLogger`.
+These events are no-ops outside validation runs.
+
+```python
+logger = UnifiedLogger(tag="step-workflow")
+
+logger.validation_event(
+    "workflow_step_prompt",
+    step_name=step_name,
+    output_file=output_file_path,
+    prompt=final_prompt,
+)
+```
+
+Each call writes a single YAML file under:
+`validation/runs/<timestamp>_<scenario>/artifacts/validation_events/`.
+The YAML includes `name`, `tag`, `timestamp`, and `data`, plus source location
+(`source_file`, `source_line`, `source_function`, `source_module`).
+
+### How to Assert in Scenarios
+
+Load the YAML files and assert on structured fields.
+
+```python
+import yaml
+
+events = []
+events_dir = self.run_path / "artifacts" / "validation_events"
+for path in sorted(events_dir.glob("*.yaml")):
+    events.append(yaml.safe_load(path.read_text()) or {})
+
+prompt_events = [
+    event for event in events
+    if event.get("name") == "workflow_step_prompt"
+    and event.get("data", {}).get("step_name") == "PATHS_ONLY"
+]
+self.expect_true(
+    len(prompt_events) > 0,
+    "Expected workflow_step_prompt event for PATHS_ONLY",
+)
+self.expect_true(
+    "INLINE_CONTENT" in prompt_events[0]["data"]["prompt"],
+    "Inline content should be present in the prompt",
+)
+```
+
+### When to Use
+
+- You need to validate internal decisions (skip reasons, prompt composition,
+  state transitions) that are not reflected in final files.
+- You want approval-style snapshots of internal artifacts without mocking.
 
 ## Tips for Fast Iteration
 

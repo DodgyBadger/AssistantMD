@@ -382,10 +382,10 @@ async def process_workflow_step(
 ):
     """Process a single workflow step with all directives and AI generation."""
     today = context['today']
-    
+
     # Process all directives with current context (single parse operation)
     processed_step = services.process_step(raw_step_content, reference_date=today)
-    
+
     # Get output file path from processed step (optional)
     output_file_path = processed_step.get_directive_value('output_file')
     output_file = None
@@ -399,9 +399,14 @@ async def process_workflow_step(
 
         # Ensure output directory exists
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    
+
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
+        logger.validation_event(
+            "workflow_step_skipped",
+            step_name=step_name,
+            reason="run_on",
+        )
         return  # Skip this step
 
     # Check for workflow skip signals from directives (e.g., required input files missing)
@@ -412,11 +417,22 @@ async def process_workflow_step(
             vault=services.workflow_id,
             metadata={"step_name": step_name}
         )
+        logger.validation_event(
+            "workflow_step_skipped",
+            step_name=step_name,
+            reason=skip_reason,
+        )
         return  # Skip this step
 
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
-    
+    logger.validation_event(
+        "workflow_step_prompt",
+        step_name=step_name,
+        output_file=output_file_path,
+        prompt=final_prompt,
+    )
+
     # Generate AI content
     chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
     step_content = await services.generate_response(chat_agent, final_prompt)

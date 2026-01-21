@@ -307,17 +307,18 @@ class BaseScenario(ABC):
     
     # === HIGH-LEVEL ASSERTIONS (with pytest integration) ===
     
-    def expect_file_created(self, vault: VaultPath, file_path: str):
-        """Assert file was created in vault and contains content."""
-        full_path = vault / file_path
-        self._log_timeline(f"Checking file created: {file_path}")
+    def expect_file_created(self, vault: VaultPath, file_path: str, root: Optional[Path] = None):
+        """Assert file was created in vault (or root) and contains content."""
+        base_label = str(root) if root is not None else f"vault {vault.name}"
+        full_path = self._resolve_expected_path(vault, file_path, root=root)
+        self._log_timeline(f"Checking file created: {full_path}")
         
         try:
-            assert full_path.exists(), f"Expected file {file_path} was not created in vault {vault.name}"
+            assert full_path.exists(), f"Expected file {file_path} was not created in {base_label}"
             
             # Check file has content (not empty)
             file_size = full_path.stat().st_size
-            assert file_size > 0, f"File {file_path} exists but is empty (0 bytes)"
+            assert file_size > 0, f"File {file_path} exists in {base_label} but is empty (0 bytes)"
             
             # Show file details in timeline
             self._log_timeline(f"✅ File exists with content: {file_path} ({file_size} bytes)")
@@ -328,17 +329,24 @@ class BaseScenario(ABC):
             self._capture_critical_error(e, f"file_existence_check: {file_path}")
             raise
     
-    def expect_file_contains(self, vault: VaultPath, file_path: str, keywords: List[str]):
+    def expect_file_contains(
+        self,
+        vault: VaultPath,
+        file_path: str,
+        keywords: List[str],
+        root: Optional[Path] = None,
+    ):
         """Assert file contains expected content."""
-        full_path = vault / file_path
-        self._log_timeline(f"Checking file content: {file_path}")
+        base_label = str(root) if root is not None else f"vault {vault.name}"
+        full_path = self._resolve_expected_path(vault, file_path, root=root)
+        self._log_timeline(f"Checking file content: {full_path}")
         
         try:
-            assert full_path.exists(), f"File {file_path} does not exist"
+            assert full_path.exists(), f"File {file_path} does not exist in {base_label}"
             content = full_path.read_text()
             
             for keyword in keywords:
-                assert keyword in content, f"File {file_path} missing keyword: {keyword}"
+                assert keyword in content, f"File {file_path} missing keyword in {base_label}: {keyword}"
             
             # Show what was found
             content_preview = content[:100].replace('\n', ' ') + ("..." if len(content) > 100 else "")
@@ -351,13 +359,14 @@ class BaseScenario(ABC):
             self._capture_critical_error(e, f"file_content_check: {file_path}")
             raise
     
-    def expect_file_not_created(self, vault: VaultPath, file_path: str):
+    def expect_file_not_created(self, vault: VaultPath, file_path: str, root: Optional[Path] = None):
         """Assert file was NOT created (for @run-on testing)."""
-        full_path = vault / file_path
-        self._log_timeline(f"Checking file NOT created: {file_path}")
+        base_label = str(root) if root is not None else f"vault {vault.name}"
+        full_path = self._resolve_expected_path(vault, file_path, root=root)
+        self._log_timeline(f"Checking file NOT created: {full_path}")
         
         try:
-            assert not full_path.exists(), f"File {file_path} should not have been created"
+            assert not full_path.exists(), f"File {file_path} should not have been created in {base_label}"
             self._log_timeline(f"✅ File correctly not created: {file_path}")
         except AssertionError:
             self._log_timeline(f"❌ Unexpected file created: {file_path}")
@@ -620,65 +629,37 @@ class BaseScenario(ABC):
 
     # === GENERIC ASSERTIONS ===
 
-    def expect_equals(self, actual, expected, message: str = None):
-        """Generic equality assertion with type-aware comparison."""
-        self._log_timeline(f"Checking equality: {type(actual).__name__} == {type(expected).__name__}")
+
+    def expect_true(self, condition: bool, message: str = None):
+        """Assert condition is True."""
+        self._log_timeline("Checking condition is True")
 
         try:
-            # Handle function comparison
-            if callable(expected):
-                assert actual.__name__ == expected.__name__, f"Function names differ: {actual.__name__} != {expected.__name__}"
-
-            # Handle trigger comparison (string representation)
-            elif hasattr(expected, '__str__') and 'trigger' in str(type(expected)).lower():
-                assert str(actual) == str(expected), f"Trigger strings differ: {str(actual)} != {str(expected)}"
-
-            # Standard equality (including datetime)
-            else:
-                assert actual == expected, f"Values differ: {actual} != {expected}"
-
-            if message:
-                self._log_timeline(f"✅ {message}")
-            else:
-                self._log_timeline("✅ Values are equal")
-
+            assert condition, message or "Expected condition to be True"
+            self._log_timeline(f"✅ {message}" if message else "✅ Condition is True")
         except AssertionError as e:
-            error_msg = message or f"Equality check failed: {str(e)}"
+            error_msg = message or f"Expected True but got {condition}"
             self._log_timeline(f"❌ {error_msg}")
-            raise
+            raise AssertionError(error_msg) from e
         except Exception as e:
-            self._capture_critical_error(e, "expect_equals")
+            self._capture_critical_error(e, "expect_true")
             raise
 
-    def expect_not_equals(self, actual, expected, message: str = None):
-        """Generic inequality assertion with type-aware comparison."""
-        self._log_timeline(f"Checking inequality: {type(actual).__name__} != {type(expected).__name__}")
+    def expect_false(self, condition: bool, message: str = None):
+        """Assert condition is False."""
+        self._log_timeline("Checking condition is False")
 
         try:
-            # Handle function comparison
-            if callable(expected):
-                assert actual.__name__ != expected.__name__, f"Function names should differ but are the same: {actual.__name__}"
-
-            # Handle trigger comparison (string representation)
-            elif hasattr(expected, '__str__') and 'trigger' in str(type(expected)).lower():
-                assert str(actual) != str(expected), f"Trigger strings should differ but are the same: {str(actual)}"
-
-            # Standard inequality (including datetime)
-            else:
-                assert actual != expected, f"Values should differ but are the same: {actual}"
-
-            if message:
-                self._log_timeline(f"✅ {message}")
-            else:
-                self._log_timeline("✅ Values are not equal")
-
+            assert not condition, message or "Expected condition to be False"
+            self._log_timeline(f"✅ {message}" if message else "✅ Condition is False")
         except AssertionError as e:
-            error_msg = message or f"Inequality check failed: {str(e)}"
+            error_msg = message or f"Expected False but got {condition}"
             self._log_timeline(f"❌ {error_msg}")
-            raise
+            raise AssertionError(error_msg) from e
         except Exception as e:
-            self._capture_critical_error(e, "expect_not_equals")
+            self._capture_critical_error(e, "expect_false")
             raise
+
 
     # === REAL-TIME EXECUTION ===
 
@@ -736,6 +717,17 @@ class BaseScenario(ABC):
         with open(self.timeline_file, 'w') as f:
             f.write(f"# {self.scenario_name} Execution Timeline\n\n")
             f.write(f"**Started**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+
+    def _resolve_expected_path(
+        self,
+        vault: VaultPath,
+        file_path: str,
+        *,
+        root: Optional[Path] = None,
+    ) -> Path:
+        """Resolve a file path relative to the provided root (defaults to vault)."""
+        base = root if root is not None else vault
+        return Path(base) / file_path
     
     def _log_timeline(self, message: str):
         """Log action to timeline."""
