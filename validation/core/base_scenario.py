@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.logger import UnifiedLogger
+import yaml
 from .vault_manager import VaultManager
 from .system_controller import SystemController
 from .time_controller import TimeController
@@ -750,6 +751,11 @@ class BaseScenario(ABC):
         """Save system interaction logs."""
         if self._api_client:
             self._api_client.save_interaction_log(self.system_interactions_file)
+
+    def load_yaml(self, path: Path):
+        """Load YAML content from a file."""
+        with open(path, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle)
     
     # === LAZY LOADING OF CONTROL SYSTEMS ===
     

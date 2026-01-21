@@ -12,8 +12,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import yaml
-
 from validation.core.base_scenario import BaseScenario
 
 
@@ -85,8 +83,7 @@ class InputFileParamsScenario(BaseScenario):
             return events
 
         for path in sorted(events_dir.glob("*.yaml")):
-            with open(path, "r", encoding="utf-8") as handle:
-                events.append(yaml.safe_load(handle) or {})
+            events.append(self.load_yaml(path) or {})
 
         return events
 

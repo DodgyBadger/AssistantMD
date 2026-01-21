@@ -1,94 +1,57 @@
-# Validation Framework (Quick Guide)
+# Validation Framework
 
-End-to-end scenarios prove the AssistantMD works the way a real user
-expects. Each scenario orchestrates the full system—vault setup, scheduler,
-LLM execution, and artifact capture—using the high-level API in
-`validation/core/base_scenario.py`.
+Run scenarios that exercise features and use cases. Assert functionality by checking expected outputs (both intermediate and end-user). Each scenario spins up a complete sandboxed runtime.
 
-## Philosophy
+Scenarios can be narrow (e.g. verifying a single prompt composition rule) or broad (snapshotting an entire workflow run).
 
-- Validate complete user journeys, not isolated functions.
-- Operate on real vault layouts and workflow markdown.
-- Keep scenario code readable so product stakeholders can follow the story.
-- Collect evidence automatically so failures are easy to diagnose.
+**Core principles:**
+- Validate use cases, features and internal decision points, not isolated functions.
+- Reduce maintenance burden by loosely coupling scenarios to production code through system and end-user outputs.
+- Scenarios should be readable and high-level. Avoid dense code.
+- Use the helpers provided by BaseScenario and avoid mocking.
+- Collect evidence automatically so failures are easy to diagnose and review.
 
-## How a Run Works
+## Framework anatomy
 
-```
-python validation/run_validation.py run
-        ↓
-ValidationRunner (validation/core/runner.py)
-        ↓ discovers BaseScenario subclasses in validation/scenarios/
-Scenario instance
-        ↓ async test_scenario()
-BaseScenario helpers manage vaults, time, API calls, LLM runs, evidence
-        ↓
-Artifacts saved under validation/runs/<timestamp>_<scenario>
-```
+**Scenario**: A Python class that tests some aspect of the system. It sets up one or more sandbox vaults and the files needed for the test, launches the runtime, uses `BaseScenario` helpers to trigger code paths and then asserts on artifacts.  
 
-## Scenario Anatomy
+**Run**: One execution of a scenario. Each run gets a dedicated folder under `validation/runs/` containing the scenario vault(s), system folder and artifacts.  
 
-1. Create a Python file in `validation/scenarios/` (e.g. `weekly_planning.py`).
-2. Place any supporting markdown templates in `validation/templates/`.
-3. Import `BaseScenario` from `validation.core.base_scenario`.
-4. Implement `async def test_scenario(self)` using high-level helpers.
+**Artifacts**: Evidence emitted during a run such as run and system logs, outputs of the feature being exercised (e.g. chat response, workflow output) and internal events emitted via `UnifiedLogger.validation_event`.  
+
+**Assertions**: Checks against artifacts that validate expected functionality. The collection of assertions in a scenario is what passes or fails the run.
+
+
+## Framework flow
+
+**Define** a scenario class in `validation/scenarios/`
+- use helpers provided by `BaseScenario` (inspect the class for the full interface)
+- prefer bundling fixtures directly in the scenario; use `validation/templates/` only for shared assets
+- related scenarios can be grouped into subfolders and run as a group
+
+**Run** it via `validation/run_validation.py`
+- the runner discovers the class, boots a sandboxed runtime, and executes `test_scenario`
+- validation framework prunes to 10 most recent runs
+
+**Review** artifacts under `validation/runs/`
+- timeline, logs, validation events, vault outputs
 
 See `validation/scenarios/integration/basic_haiku.py` for a minimal example.
 
-Scenarios can call `await self.start_system()` multiple times, interact with the chat UI (`start_chat_session`, `send_chat_message`), or exercise REST/CLI surfaces via `call_api` and `launcher_command`.
 
-## BaseScenario Surface
+## Working with secrets during validation
 
-| Capability | Key helpers |
-| --- | --- |
-| Vault setup | `create_vault`, `copy_files`, `create_file` |
-| Time & pattern control | `set_date`, `advance_time`, `trigger_job`, `wait_for_real_execution` |
-| System lifecycle | `start_system`, `stop_system`, `restart_system`, `trigger_vault_rescan` |
-| Workflow execution | `run_workflow`, `expect_scheduled_execution_success`, `get_job_executions` |
-| Assertions | `expect_file_created`, `expect_file_contains`, `expect_vault_discovered`, `expect_workflow_loaded`, `expect_scheduler_job_created`, `expect_true`, `expect_false`, etc. |
-| Chat and API | `run_chat_prompt`, `clear_chat_session`, `call_api`, `launcher_command` |
-| Evidence & teardown | `timeline_file`, `system_interactions_file`, `critical_errors_file`, `teardown_scenario()` |
+- By default, validation runs use the configured secrets file (`SECRETS_PATH` if set, otherwise
+  `system/secrets.yaml`). API calls that update secrets write to that same file.
+- To isolate secrets for a specific run, set `SECRETS_PATH` before starting the system and point it
+  at a run-local file (for example, `validation/runs/<timestamp>_<scenario>/system/secrets.yaml`).
+  This keeps scenario updates scoped to the run folder.
+  You can set this inside the scenario file itself (before calling `start_system()`), for example
+  by assigning `os.environ["SECRETS_PATH"]` at the top of `test_scenario`.
 
-## Working With Secrets During Validation
+## Validation events
 
-- Place developer API keys in `system/secrets.yaml` (gitignored). The validation harness copies this
-  file into each run’s local sandbox before starting so scenarios can read real credentials without
-  touching your working copy.
-- Each scenario run creates a temporary overlay secrets file under
-  `validation/runs/<timestamp>_<scenario>/system/secrets.yaml`. Endpoint calls that update secrets
-  write to this overlay and the file is removed when the run completes.
-- To override or add secrets for a specific scenario, call the `/api/system/secrets` endpoint within
-  the scenario. Changes affect only the run-local overlay and won’t leak into the shared base file.
-
-Each helper logs to the scenario timeline while delegating to services in
-`validation/core/` (vault manager, system controller, time controller, workflow
-execution, chat execution).
-
-Directive and workflow semantics remain untouched: scenarios observe outcomes;
-control flow decisions stay inside production code.
-
-## Evidence & Issues
-
-- Every scenario run writes to `validation/runs/<timestamp>_<scenario>/`.
-  - `artifacts/timeline.md` – chronological log of everything the scenario did.
-  - `artifacts/system_interactions.log` – API/chat payloads and responses.
-  - `artifacts/critical_errors.md` – high-priority failures for follow-up.
-  - `artifacts/validation_events/` – structured YAML artifacts emitted from production code.
-  - `test_vaults/` – the actual vault contents after the run.
-- `validation/issues_log.md` automatically tracks failing scenarios and system
-  errors so the team has a single backlog of problems to investigate.
-
-## Validation Events (Intermediate Artifacts)
-
-Use validation events when you need to assert on intermediate state that is
-not visible in final outputs (for example, prompt composition or step-level
-decisions). This complements the existing end-to-end checks without introducing
-mock-heavy tests.
-
-### How to Emit Events
-
-Production code can emit a validation-only artifact using `UnifiedLogger`.
-These events are no-ops outside validation runs.
+Use validation events when you need to assert on intermediate state that is not visible in final outputs (for example, prompt composition or step-level decisions). This is accomplished using `UnifiedLogger.validation_event` in the code where you want to emit the event. These only fire when the app is run through the validation framework - they will not fire when running in production. `validation_event` accepts any key/value pairs you want to capture; the example below is illustrative.
 
 ```python
 logger = UnifiedLogger(tag="step-workflow")
@@ -103,54 +66,20 @@ logger.validation_event(
 
 Each call writes a single YAML file under:
 `validation/runs/<timestamp>_<scenario>/artifacts/validation_events/`.
-The YAML includes `name`, `tag`, `timestamp`, and `data`, plus source location
-(`source_file`, `source_line`, `source_function`, `source_module`).
+
+The YAML includes `name`, `tag`, `timestamp`, trace information and the `data` captured in the call.
 
 ### How to Assert in Scenarios
 
-Load the YAML files and assert on structured fields.
+Load a YAML event file (via `BaseScenario.load_yaml`) and assert on structured fields.
 
 ```python
-import yaml
+event_path = self.run_path / "artifacts" / "validation_events" / "0001_step-workflow_workflow_step_prompt.yaml"
+event = self.load_yaml(event_path) or {}
 
-events = []
-events_dir = self.run_path / "artifacts" / "validation_events"
-for path in sorted(events_dir.glob("*.yaml")):
-    events.append(yaml.safe_load(path.read_text()) or {})
-
-prompt_events = [
-    event for event in events
-    if event.get("name") == "workflow_step_prompt"
-    and event.get("data", {}).get("step_name") == "PATHS_ONLY"
-]
-self.expect_true(
-    len(prompt_events) > 0,
-    "Expected workflow_step_prompt event for PATHS_ONLY",
-)
-self.expect_true(
-    "INLINE_CONTENT" in prompt_events[0]["data"]["prompt"],
-    "Inline content should be present in the prompt",
-)
+self.expect_true(event.get("data", {}).get("step_name") == "PATHS_ONLY")
+self.expect_true("INLINE_CONTENT" in event.get("data", {}).get("prompt", ""))
 ```
-
-### When to Use
-
-- You need to validate internal decisions (skip reasons, prompt composition,
-  state transitions) that are not reflected in final files.
-- You want approval-style snapshots of internal artifacts without mocking.
-
-## Tips for Fast Iteration
-
-- Use the `@model test` directive to avoid external LLM calls when you only need
-  to confirm workflow wiring.
-- `set_date()` (and `advance_time()`) only change how patterns such as `{today}`
-  resolve; they do **not** advance APScheduler’s clock. To execute a scheduled
-  workflow immediately, call `trigger_job` or `wait_for_real_execution`.
-- `validation/templates/AssistantMD/Workflows/` and `validation/templates/files/` provide
-  reusable fixtures so scenarios stay concise.
-- `call_api("/api/...")` uses FastAPI's `TestClient` under the hood, letting you
-  exercise REST endpoints without running uvicorn; requests reuse the same
-  validation vault paths configured for the scenario.
 
 ## Running Scenarios
 
@@ -169,10 +98,13 @@ python validation/run_validation.py run integration
 python validation/run_validation.py run --pattern planner
 ```
 
-The CLI prints pass/fail summaries, points you to the evidence directory, and
-reminds you to review `validation/issues_log.md` when something breaks.
+## Tips for fast iteration
 
-## Bootstrap Note
+- Use the `@model test` directive to avoid external LLM calls when you only need   to confirm workflow wiring.
+- `set_date()` (and `advance_time()`) only change how patterns such as `{today}` resolve; they do **not** advance APScheduler’s clock. To execute a scheduled workflow immediately, call `trigger_job` or `wait_for_real_execution`.
+- `call_api("/api/...")` uses FastAPI's `TestClient` under the hood, letting you exercise REST endpoints without running uvicorn; requests reuse the same validation vault paths configured for the scenario.
+
+## Bootstrap note
 
 - Path helpers require either bootstrap roots or a runtime context. The validation CLI seeds bootstrap roots before importing path-dependent modules so scenarios run in isolation without env hacks.
 - If you write custom validation utilities or ad-hoc scripts, set bootstrap roots early (for example, `set_bootstrap_roots(test_data_root, run_path / "system")`) or start a runtime context before importing modules that resolve settings/paths.
