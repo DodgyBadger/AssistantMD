@@ -34,26 +34,37 @@ class DocumentationBuilderScenario(BaseScenario):
         )
 
         await self.start_system()
-        self.expect_vault_discovered("DocumentationBuilderVault")
-        self.expect_workflow_loaded(
-            "DocumentationBuilderVault", "documentation_builder"
+        assert "DocumentationBuilderVault" in self.get_discovered_vaults(), (
+            "Vault not discovered"
         )
-        self.expect_scheduler_job_created(
-            "DocumentationBuilderVault/documentation_builder"
-        )
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "DocumentationBuilderVault/documentation_builder"
+            for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "DocumentationBuilderVault__documentation_builder"
+            for job in jobs
+        ), "Scheduler job not created"
 
         self.set_date("2025-01-15")
         await self.trigger_job(vault, "documentation_builder")
 
-        self.expect_scheduled_execution_success(
-            vault, "documentation_builder"
+        assert len(self.get_job_executions(vault, "documentation_builder")) > 0, (
+            "No executions recorded for DocumentationBuilderVault/documentation_builder"
         )
 
         # Verify expected artifacts
-        self.expect_file_created(vault, "analysis/research.md")
-        self.expect_file_created(vault, "outputs/generated_workflow.md")
-        self.expect_file_created(vault, "outputs/fixed_workflow.md")
-        self.expect_file_created(vault, "reports/user_summary.md")
+        for rel_path in [
+            "analysis/research.md",
+            "outputs/generated_workflow.md",
+            "outputs/fixed_workflow.md",
+            "reports/user_summary.md",
+        ]:
+            output_path = vault / rel_path
+            assert output_path.exists(), f"Expected {rel_path} to be created"
+            assert output_path.stat().st_size > 0, f"{rel_path} is empty"
 
         await self.stop_system()
         self.teardown_scenario()

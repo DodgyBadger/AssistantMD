@@ -95,4 +95,25 @@ class ContextManagerArtifacts(BaseScenario):
 ## Notes
 - The artifacts are explicit and controlled: only data intentionally emitted via `validation_event` is captured.
 - YAML keeps auditability high while remaining simple to parse.
+
+## Next Step: Shift Observability to Validation Events
+
+If we want scenarios to rely less on helper introspection (e.g., reading scheduler state),
+add validation events at system boundaries so both humans and tests can inspect the same artifacts.
+This keeps scenarios loosely coupled while improving observability.
+
+Suggested pilot:
+- Emit events from workflow discovery and scheduler sync (e.g., `workflow_discovered`, `job_synced`).
+- Emit events on job execution (`job_executed`, `job_failed`).
+- Update one scenario to assert on these YAML artifacts instead of using helper methods.
+
+This provides DB-level confidence when events are emitted at the DB/scheduler touchpoints,
+and offers human-readable evidence alongside scenario pass/fail.
+
+## Next Step: Logging & Instrumentation Cleanup
+
+Plan a pass over core workflows to:
+- Add more intentional `logger.activity` calls for human-readable, high-signal logs.
+- Audit Logfire instrumentation to reduce noisy spans or duplicate traces.
+- Prefer explicit logging around critical boundaries (workflow load, job sync, execution) over generic auto-instrumentation.
 - This approach avoids relying on stdout or external Logfire backends.

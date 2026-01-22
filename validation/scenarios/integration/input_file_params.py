@@ -45,22 +45,18 @@ class InputFileParamsScenario(BaseScenario):
             if event.get("name") == "workflow_step_prompt"
             and event.get("data", {}).get("step_name") == "PATHS_ONLY"
         ]
-        self.expect_true(
-            len(prompt_events) > 0,
-            "Expected workflow_step_prompt event for PATHS_ONLY step",
+        assert len(prompt_events) > 0, (
+            "Expected workflow_step_prompt event for PATHS_ONLY step"
         )
         prompt = prompt_events[0].get("data", {}).get("prompt", "")
-        self.expect_true(
-            "INLINE_CONTENT" in prompt,
-            "Inline file content should be present in prompt",
+        assert "INLINE_CONTENT" in prompt, (
+            "Inline file content should be present in prompt"
         )
-        self.expect_true(
-            "- notes/with (parens)" in prompt,
-            "Path-only file should be listed in prompt",
+        assert "- notes/with (parens)" in prompt, (
+            "Path-only file should be listed in prompt"
         )
-        self.expect_false(
-            "PARENS_CONTENT" in prompt,
-            "Path-only file content should not be inlined",
+        assert "PARENS_CONTENT" not in prompt, (
+            "Path-only file content should not be inlined"
         )
 
         skip_events = [
@@ -68,9 +64,8 @@ class InputFileParamsScenario(BaseScenario):
             if event.get("name") == "workflow_step_skipped"
             and event.get("data", {}).get("step_name") == "REQUIRED_SKIP"
         ]
-        self.expect_true(
-            len(skip_events) > 0,
-            "Expected workflow_step_skipped event for REQUIRED_SKIP step",
+        assert len(skip_events) > 0, (
+            "Expected workflow_step_skipped event for REQUIRED_SKIP step"
         )
 
         await self.stop_system()

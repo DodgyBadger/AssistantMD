@@ -33,13 +33,23 @@ class TestSystemStartupValidationScenario(BaseScenario):
         # Test 1: System Discovery and Job Creation
         await self.start_system()
 
-        self.expect_vault_discovered("SystemTest")
-        self.expect_workflow_loaded("SystemTest", "quick_job")
-        self.expect_scheduler_job_created("SystemTest/quick_job")
+        assert "SystemTest" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "SystemTest/quick_job" for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "SystemTest__quick_job" for job in jobs
+        ), "Scheduler job not created"
 
         # Validate subfolder workflow was discovered and loaded
-        self.expect_workflow_loaded("SystemTest", "planning/quick_job_2")
-        self.expect_scheduler_job_created("SystemTest/planning/quick_job_2")
+        assert any(
+            cfg.global_id == "SystemTest/planning/quick_job_2" for cfg in workflows
+        ), "Subfolder workflow not loaded"
+        assert any(
+            job.job_id == "SystemTest__planning__quick_job_2" for job in jobs
+        ), "Subfolder scheduler job not created"
 
         # Capture original job properties
         original_next_run = self.get_next_run_time(vault, "quick_job")
@@ -57,30 +67,23 @@ class TestSystemStartupValidationScenario(BaseScenario):
         restored_trigger = self.get_job_trigger(vault, "quick_job")
         restored_name = self.get_job_name(vault, "quick_job")
 
-        self.expect_true(
-            original_next_run == restored_next_run,
-            "Next run time preserved across restart",
+        assert original_next_run == restored_next_run, (
+            "Next run time preserved across restart"
         )
-        self.expect_true(
-            str(original_trigger) == str(restored_trigger),
-            "Trigger preserved across restart",
+        assert str(original_trigger) == str(restored_trigger), (
+            "Trigger preserved across restart"
         )
-        self.expect_true(
-            original_name == restored_name,
-            "Job name preserved across restart",
-        )
+        assert original_name == restored_name, "Job name preserved across restart"
 
         # Validate subfolder job also persists
         restored_subfolder_next_run = self.get_next_run_time(vault, "planning/quick_job_2")
         restored_subfolder_trigger = self.get_job_trigger(vault, "planning/quick_job_2")
 
-        self.expect_true(
-            original_subfolder_next_run == restored_subfolder_next_run,
-            "Subfolder job next run time preserved",
+        assert original_subfolder_next_run == restored_subfolder_next_run, (
+            "Subfolder job next run time preserved"
         )
-        self.expect_true(
-            str(original_subfolder_trigger) == str(restored_subfolder_trigger),
-            "Subfolder job trigger preserved",
+        assert str(original_subfolder_trigger) == str(restored_subfolder_trigger), (
+            "Subfolder job trigger preserved"
         )
 
         # Test 3: Schedule Change Detection
@@ -91,26 +94,27 @@ class TestSystemStartupValidationScenario(BaseScenario):
         updated_next_run = self.get_next_run_time(vault, "quick_job")
         updated_trigger = self.get_job_trigger(vault, "quick_job")
 
-        self.expect_true(
-            str(original_trigger) != str(updated_trigger),
-            "Trigger changed after schedule update",
+        assert str(original_trigger) != str(updated_trigger), (
+            "Trigger changed after schedule update"
         )
-        self.expect_true(updated_next_run is not None, "Updated job should have next run time")
+        assert updated_next_run is not None, "Updated job should have next run time"
 
         # Test 4: Real-Time Scheduled Execution
         # Job runs every 2m (120s), so wait 150s to account for schedule + execution time
         execution_success = await self.wait_for_real_execution(vault, "quick_job", timeout=150)
-        self.expect_true(execution_success, "Job should execute in real time via APScheduler")
+        assert execution_success, "Job should execute in real time via APScheduler"
 
         today_file = f"results/{datetime.now().strftime('%Y-%m-%d')}.md"
-        self.expect_file_created(vault, today_file)
+        output_path = vault / today_file
+        assert output_path.exists(), f"Expected {today_file} to be created"
+        assert output_path.stat().st_size > 0, f"{today_file} is empty"
 
         # Test 5: Multiple Restart Cycle
         await self.restart_system()
         await self.restart_system()
 
         final_next_run = self.get_next_run_time(vault, "quick_job")
-        self.expect_true(final_next_run is not None, "Job should survive multiple restarts")
+        assert final_next_run is not None, "Job should survive multiple restarts"
 
         # Test 6: Malformed Workflow Resilience
         # Add a malformed workflow file with invalid schedule syntax
@@ -118,16 +122,32 @@ class TestSystemStartupValidationScenario(BaseScenario):
         await self.restart_system()
 
         # Verify the system still started successfully
-        self.expect_vault_discovered("SystemTest")
+        assert "SystemTest" in self.get_discovered_vaults(), "Vault not discovered"
 
         # Verify good workflows are still loaded and working
-        self.expect_workflow_loaded("SystemTest", "quick_job")
-        self.expect_workflow_loaded("SystemTest", "planning/quick_job_2")
-        self.expect_scheduler_job_created("SystemTest/quick_job")
-        self.expect_scheduler_job_created("SystemTest/planning/quick_job_2")
+        workflows = self.get_loaded_workflows()
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            cfg.global_id == "SystemTest/quick_job" for cfg in workflows
+        ), "Workflow not loaded after restart"
+        assert any(
+            cfg.global_id == "SystemTest/planning/quick_job_2" for cfg in workflows
+        ), "Subfolder workflow not loaded after restart"
+        assert any(
+            job.job_id == "SystemTest__quick_job" for job in jobs
+        ), "Scheduler job not created after restart"
+        assert any(
+            job.job_id == "SystemTest__planning__quick_job_2" for job in jobs
+        ), "Subfolder scheduler job not created after restart"
 
         # Verify the malformed workflow error was captured
-        self.expect_configuration_error("SystemTest", "malformed_schedule", "ValueError")
+        startup_errors = self.get_startup_errors()
+        assert any(
+            error.vault == "SystemTest"
+            and error.workflow_name == "malformed_schedule"
+            and "valueerror" in error.error_type.lower()
+            for error in startup_errors
+        ), "Expected ValueError configuration error for malformed_schedule"
 
         # Clean up
         await self.stop_system()

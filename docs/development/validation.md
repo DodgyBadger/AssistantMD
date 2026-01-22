@@ -71,14 +71,14 @@ The YAML includes `name`, `tag`, `timestamp`, trace information and the `data` c
 
 ### How to Assert in Scenarios
 
-Load a YAML event file (via `BaseScenario.load_yaml`) and assert on structured fields.
+Use regular python `assert` statements.
 
 ```python
 event_path = self.run_path / "artifacts" / "validation_events" / "0001_step-workflow_workflow_step_prompt.yaml"
 event = self.load_yaml(event_path) or {}
 
-self.expect_true(event.get("data", {}).get("step_name") == "PATHS_ONLY")
-self.expect_true("INLINE_CONTENT" in event.get("data", {}).get("prompt", ""))
+assert event.get("data", {}).get("step_name") == "PATHS_ONLY"
+assert "INLINE_CONTENT" in event.get("data", {}).get("prompt", "")
 ```
 
 ## Running Scenarios

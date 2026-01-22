@@ -32,10 +32,21 @@ class TestBasicHaikuScenario(BaseScenario):
         await self.start_system()
 
         # Validate system startup completed correctly
-        self.expect_vault_discovered("HaikuVault")
-        self.expect_workflow_loaded("HaikuVault", "haiku_writer")
-        self.expect_scheduler_job_created("HaikuVault/haiku_writer")
-        self.expect_schedule_parsed_correctly("HaikuVault/haiku_writer", "cron")
+        assert "HaikuVault" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "HaikuVault/haiku_writer" for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "HaikuVault__haiku_writer" for job in jobs
+        ), "Scheduler job not created"
+        job = next(
+            (job for job in jobs if job.job_id == "HaikuVault__haiku_writer"),
+            None,
+        )
+        assert job is not None, "Scheduler job not found for schedule check"
+        assert "cron" in job.trigger.lower(), "Expected cron trigger"
 
         # === SCHEDULED WORKFLOW EXECUTION ===
         # Set a known date for predictable output file naming
@@ -46,10 +57,14 @@ class TestBasicHaikuScenario(BaseScenario):
 
         # === ASSERTIONS ===
         # Verify the scheduled job executed successfully
-        self.expect_scheduled_execution_success(vault, "haiku_writer")
+        assert len(self.get_job_executions(vault, "haiku_writer")) > 0, (
+            "No executions recorded for HaikuVault/haiku_writer"
+        )
 
         # Check output file was created with content
-        self.expect_file_created(vault, "2025-01-15.md")
+        output_path = vault / "2025-01-15.md"
+        assert output_path.exists(), "Expected 2025-01-15.md to be created"
+        assert output_path.stat().st_size > 0, "Output file is empty"
 
         # Clean up
         await self.stop_system()

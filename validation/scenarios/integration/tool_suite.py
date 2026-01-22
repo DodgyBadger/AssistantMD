@@ -24,16 +24,18 @@ class ToolSuiteScenario(BaseScenario):
 
         await self.start_system()
 
-        self.expect_vault_discovered("ToolSuiteVault")
-        self.expect_workflow_loaded("ToolSuiteVault", "tool_suite")
+        assert "ToolSuiteVault" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "ToolSuiteVault/tool_suite" for cfg in workflows
+        ), "Workflow not loaded"
 
         # Run with deterministic date for pattern placeholders if used later
         self.set_date("2025-01-06")  # Monday
 
         result = await self.run_workflow(vault, "tool_suite")
-        self.expect_true(
-            result.status == "completed",
-            "Tool suite workflow should finish successfully",
+        assert result.status == "completed", (
+            "Tool suite workflow should finish successfully"
         )
 
         expected_outputs = [
@@ -46,7 +48,9 @@ class ToolSuiteScenario(BaseScenario):
         ]
 
         for relative_path in expected_outputs:
-            self.expect_file_created(vault, relative_path)
+            output_path = vault / relative_path
+            assert output_path.exists(), f"Expected {relative_path} to be created"
+            assert output_path.stat().st_size > 0, f"{relative_path} is empty"
 
         await self.stop_system()
         self.teardown_scenario()

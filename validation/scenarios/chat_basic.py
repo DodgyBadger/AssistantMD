@@ -28,15 +28,11 @@ class TestChatBasicScenario(BaseScenario):
             use_conversation_history=False,
         )
 
-        self.expect_true(
-            result.session_id == session_id,
-            "Session ID should round-trip",
-        )
-        self.expect_chat_history_exists(vault, session_id)
-        self.expect_chat_history_contains(
-            vault,
-            session_id,
-            [prompt, "haiku"],
-        )
+        assert result.session_id == session_id, "Session ID should round-trip"
+        history_path = vault / "AssistantMD" / "Chat_Sessions" / f"{session_id}.md"
+        assert history_path.exists(), f"Chat history not found: {history_path}"
+        history_content = history_path.read_text()
+        assert prompt in history_content
+        assert "haiku" in history_content
 
         self.teardown_scenario()
