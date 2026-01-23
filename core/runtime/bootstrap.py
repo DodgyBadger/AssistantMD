@@ -64,12 +64,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             )
             raise RuntimeConfigError("; ".join(error_messages))
 
-        for warning in config_status.warnings:
-            logger.warning(
-                warning.message,
-                data={"issue": warning.name, "severity": warning.severity},
-            )
-
         # Ensure env defaults reflect the configured roots before services that read env/context
         import os
 
