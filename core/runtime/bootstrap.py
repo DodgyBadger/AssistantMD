@@ -45,7 +45,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         RuntimeStartupError: If service initialization fails
     """
     logger = UnifiedLogger(tag="runtime-bootstrap")
-    logger.info("Starting runtime bootstrap", metadata={"data_root": str(config.data_root)})
+    logger.info(
+        "Starting runtime bootstrap",
+        data={"data_root": str(config.data_root)},
+    )
 
     try:
         # Make bootstrap roots available for helpers that run before context is set
@@ -64,7 +67,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         for warning in config_status.warnings:
             logger.warning(
                 warning.message,
-                metadata={"issue": warning.name, "severity": warning.severity},
+                data={"issue": warning.name, "severity": warning.severity},
             )
 
         # Ensure env defaults reflect the configured roots before services that read env/context
@@ -120,7 +123,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         # Start scheduler in paused mode to allow job synchronization
         scheduler.start(paused=True)
-        logger.info("Scheduler started in paused mode for job synchronization")
+        # Scheduler starts paused to sync jobs before first run.
 
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
@@ -141,7 +144,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         try:
             # Load workflow configurations and synchronize jobs using runtime context
             await runtime_context.reload_workflows(manual=False)
-            logger.info("Workflow configurations loaded and jobs synchronized")
 
             # Schedule ingestion worker
             scheduler.add_job(
@@ -156,7 +158,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
             # Resume scheduler after successful synchronization
             scheduler.resume()
-            logger.info("Scheduler resumed and ready for execution")
 
         except Exception:
             # If job synchronization fails, clean up and rethrow

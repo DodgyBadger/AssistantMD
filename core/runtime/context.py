@@ -61,11 +61,9 @@ class RuntimeContext:
 
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=True)
-            self.logger.info("Scheduler shutdown complete")
 
         # Clear global runtime context to allow clean restart
         runtime_state.clear_runtime_context()
-        self.logger.info("Runtime context cleared")
 
     def sync_shutdown(self):
         """
@@ -96,7 +94,8 @@ class RuntimeContext:
         Args:
             manual: Whether this is a manual reload (affects logging)
         """
-        self.logger.info(f"Reloading workflows (manual={manual})")
+        if manual:
+            self.logger.info("Reloading workflows (manual=True)")
         return await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
 
     def get_runtime_summary(self) -> dict:

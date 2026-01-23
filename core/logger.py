@@ -26,8 +26,11 @@ _activity_logger: Optional[logging.Logger] = None
 _activity_log_path: Optional[Path] = None
 _activity_logger_lock = Lock()
 _validation_log_lock = Lock()
+_warning_dedupe_lock = Lock()
 _validation_event_counter = 0
 _validation_boot_id: Optional[int] = None
+_warning_dedupe_boot_id: Optional[int] = None
+_warning_dedupe_keys: set[tuple[str, str, Optional[str]]] = set()
 _logfire_config_state: Optional[Tuple[bool, Optional[str]]] = None
 _logfire_instrumented = False
 _logger_internal = logging.getLogger(__name__)
@@ -150,6 +153,12 @@ def _validation_features() -> Dict[str, Any]:
 def _validation_enabled() -> bool:
     """Return True when the runtime is in validation mode."""
     return bool(_validation_features().get("validation"))
+
+
+def _warnings_deduped() -> bool:
+    """Return True when warning deduplication is enabled."""
+    features = _validation_features()
+    return features.get("dedupe_warnings", True)
 
 
 def _resolve_validation_artifact_dir() -> Optional[Path]:
@@ -435,6 +444,21 @@ class UnifiedLogger:
         }
         if boot_id is not None:
             record["boot_id"] = boot_id
+
+        if level == "warning" and _warnings_deduped():
+            issue = None
+            if isinstance(payload, dict):
+                issue = payload.get("issue")
+            dedupe_key = (record["tag"], record["message"], issue)
+            with _warning_dedupe_lock:
+                global _warning_dedupe_boot_id
+                global _warning_dedupe_keys
+                if record.get("boot_id") is not None and record["boot_id"] != _warning_dedupe_boot_id:
+                    _warning_dedupe_keys.clear()
+                    _warning_dedupe_boot_id = record["boot_id"]
+                if dedupe_key in _warning_dedupe_keys:
+                    return
+                _warning_dedupe_keys.add(dedupe_key)
 
         if "activity" in resolved_sinks:
             _emit_activity_record(record)

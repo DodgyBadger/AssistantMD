@@ -102,8 +102,6 @@ class SystemController:
         # Ensure secrets path points to the configured base for every start.
         os.environ["SECRETS_PATH"] = str(self._secrets_file)
 
-        self.logger.info("Starting AssistantMD system with runtime bootstrap")
-
         # Clear any existing runtime context for test isolation
         clear_runtime_context()
 
@@ -135,9 +133,6 @@ class SystemController:
 
             self.is_running = True
             self._api_app.state.runtime = self._runtime
-            self.logger.info(f"System startup completed - discovered {len(self._discovered_vaults)} vaults, "
-                           f"loaded {len(self._loaded_workflows)} workflows, "
-                           f"created {self._startup_results.get('scheduler_jobs_synced', 0)} jobs")
 
         except Exception as e:
             self.logger.error(f"System startup failed: {str(e)}")
@@ -151,8 +146,6 @@ class SystemController:
         """Stop the system gracefully using runtime context."""
         if not self.is_running:
             return
-
-        self.logger.info("Stopping AssistantMD system")
 
         # Restore original datetime module
         if self._current_test_date:
