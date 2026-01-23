@@ -182,11 +182,15 @@ def _write_validation_record(record: Dict[str, Any]) -> None:
         global _validation_event_counter
         _validation_event_counter += 1
         event_id = _validation_event_counter
+        boot_id = _get_runtime_boot_id()
 
         directory.mkdir(parents=True, exist_ok=True)
         tag = _sanitize_validation_name(record.get("tag", "event"))
         name = _sanitize_validation_name(record.get("name", "event"))
-        filename = f"{event_id:04d}_{tag}_{name}.yaml"
+        if boot_id is not None:
+            filename = f"{boot_id:03d}_{event_id:04d}_{tag}_{name}.yaml"
+        else:
+            filename = f"{event_id:04d}_{tag}_{name}.yaml"
         path = directory / filename
 
         payload = yaml.safe_dump(record, allow_unicode=False, sort_keys=False)
@@ -222,6 +226,17 @@ def _get_validation_caller() -> Dict[str, Any]:
     }
 
 
+def _get_runtime_boot_id() -> Optional[int]:
+    """Return the runtime boot sequence number if available."""
+    if not runtime_state.has_runtime_context():
+        return None
+    try:
+        runtime = runtime_state.get_runtime_context()
+    except Exception:
+        return None
+    return getattr(runtime, "boot_id", None)
+
+
 def _emit_activity_record(record: Dict[str, Any]) -> None:
     """Write a record to the activity log."""
     payload = {
@@ -243,6 +258,7 @@ def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, 
         return
 
     event_name = data.get("event") if isinstance(data, dict) else None
+    boot_id = _get_runtime_boot_id()
     record = {
         "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
         "type": "validation_event",
@@ -251,6 +267,8 @@ def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, 
         "level": level,
         "data": data,
     }
+    if boot_id is not None:
+        record["boot_id"] = boot_id
     caller = _get_validation_caller()
     if caller:
         record.update(caller)

@@ -5,6 +5,7 @@ Provides single entry point for initializing all runtime services
 with proper configuration, error handling, and lifecycle management.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,6 +22,7 @@ from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .state import set_runtime_context, clear_runtime_context
 from .paths import set_bootstrap_roots
+from . import state as runtime_state
 
 
 async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
@@ -121,12 +123,16 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         logger.info("Scheduler started in paused mode for job synchronization")
 
         # Create runtime context with all initialized services
+        boot_id = runtime_state.next_boot_id()
+        started_at = datetime.utcnow()
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,
             workflow_loader=workflow_loader,
             logger=logger,
-            ingestion=ingestion_service
+            ingestion=ingestion_service,
+            boot_id=boot_id,
+            started_at=started_at,
         )
 
         # Register context globally before job synchronization

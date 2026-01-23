@@ -42,6 +42,8 @@ class RuntimeContext:
     workflow_loader: WorkflowLoader
     logger: UnifiedLogger
     ingestion: IngestionService
+    boot_id: int
+    started_at: datetime
     last_config_reload: Optional[datetime] = None
 
     async def start(self):
