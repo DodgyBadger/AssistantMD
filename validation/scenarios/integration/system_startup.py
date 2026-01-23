@@ -33,53 +33,40 @@ class TestSystemStartupValidationScenario(BaseScenario):
         # Test 1: System Discovery and Job Creation
         await self.start_system()
 
-        events_dir = self.run_path / "artifacts" / "validation_events"
-
-        def find_events(events, name, **criteria):
-            matches = []
-            for event in events:
-                if event.get("name") != name:
-                    continue
-                data = event.get("data", {})
-                if all(data.get(key) == value for key, value in criteria.items()):
-                    matches.append(event)
-            return matches
-
-        def latest_event(events, name, **criteria):
-            matches = find_events(events, name, **criteria)
-            return matches[-1] if matches else None
-
-        events = self._load_validation_events(events_dir)
+        events = self.validation_events()
         checkpoint = len(events)
 
         assert "SystemTest" in self.get_discovered_vaults(), "Vault not discovered"
-        assert find_events(
+        self.assert_event_contains(
             events,
-            "workflow_loaded",
-            workflow_id="SystemTest/quick_job",
-        ), "Workflow not loaded"
-        assert find_events(
+            name="workflow_loaded",
+            expected={"workflow_id": "SystemTest/quick_job"},
+        )
+        self.assert_event_contains(
             events,
-            "job_synced",
-            job_id="SystemTest__quick_job",
-        ), "Scheduler job not created"
+            name="job_synced",
+            expected={"job_id": "SystemTest__quick_job", "action": "created"},
+        )
 
         # Validate subfolder workflow was discovered and loaded
-        assert find_events(
+        self.assert_event_contains(
             events,
-            "workflow_loaded",
-            workflow_id="SystemTest/planning/quick_job_2",
-        ), "Subfolder workflow not loaded"
-        assert find_events(
+            name="workflow_loaded",
+            expected={"workflow_id": "SystemTest/planning/quick_job_2"},
+        )
+        self.assert_event_contains(
             events,
-            "job_synced",
-            job_id="SystemTest__planning__quick_job_2",
-        ), "Subfolder scheduler job not created"
+            name="job_synced",
+            expected={
+                "job_id": "SystemTest__planning__quick_job_2",
+                "action": "created",
+            },
+        )
 
         # Capture original job properties
-        original_event = latest_event(
+        original_event = self.latest_event(
             events,
-            "job_synced",
+            name="job_synced",
             workflow_id="SystemTest/quick_job",
         )
         assert original_event is not None, "Missing job_synced event for quick_job"
@@ -89,9 +76,9 @@ class TestSystemStartupValidationScenario(BaseScenario):
         original_name = original_data.get("job_name")
 
         # Capture subfolder job properties
-        original_subfolder_event = latest_event(
+        original_subfolder_event = self.latest_event(
             events,
-            "job_synced",
+            name="job_synced",
             workflow_id="SystemTest/planning/quick_job_2",
         )
         assert original_subfolder_event is not None, "Missing job_synced event for quick_job_2"
@@ -102,13 +89,12 @@ class TestSystemStartupValidationScenario(BaseScenario):
         # Test 2: Job Persistence Across Restart
         await self.restart_system()
 
-        events = self._load_validation_events(events_dir)
-        new_events = events[checkpoint:]
-        checkpoint = len(events)
+        new_events = self.events_since(checkpoint)
+        checkpoint = self.event_checkpoint()
 
-        restored_event = latest_event(
+        restored_event = self.latest_event(
             new_events,
-            "job_synced",
+            name="job_synced",
             workflow_id="SystemTest/quick_job",
         )
         assert restored_event is not None, "Missing job_synced event after restart"
@@ -126,9 +112,9 @@ class TestSystemStartupValidationScenario(BaseScenario):
         assert original_name == restored_name, "Job name preserved across restart"
 
         # Validate subfolder job also persists
-        restored_subfolder_event = latest_event(
+        restored_subfolder_event = self.latest_event(
             new_events,
-            "job_synced",
+            name="job_synced",
             workflow_id="SystemTest/planning/quick_job_2",
         )
         assert restored_subfolder_event is not None, "Missing job_synced event for quick_job_2 after restart"
@@ -148,14 +134,14 @@ class TestSystemStartupValidationScenario(BaseScenario):
         self.create_file(vault, "AssistantMD/Workflows/quick_job.md", QUICK_JOB_UPDATED_WORKFLOW)
         await self.restart_system()
 
-        events = self._load_validation_events(events_dir)
-        new_events = events[checkpoint:]
-        checkpoint = len(events)
+        new_events = self.events_since(checkpoint)
+        checkpoint = self.event_checkpoint()
 
-        updated_event = latest_event(
+        updated_event = self.latest_event(
             new_events,
-            "job_synced",
+            name="job_synced",
             workflow_id="SystemTest/quick_job",
+            action="replaced",
         )
         assert updated_event is not None, "Missing job_synced event after schedule update"
         updated_data = updated_event.get("data", {})
@@ -189,58 +175,49 @@ class TestSystemStartupValidationScenario(BaseScenario):
         self.create_file(vault, "AssistantMD/Workflows/malformed_schedule.md", MALFORMED_SCHEDULE_WORKFLOW)
         await self.restart_system()
 
-        events = self._load_validation_events(events_dir)
-        new_events = events[checkpoint:]
-        checkpoint = len(events)
+        new_events = self.events_since(checkpoint)
+        checkpoint = self.event_checkpoint()
 
         # Verify the system still started successfully
         assert "SystemTest" in self.get_discovered_vaults(), "Vault not discovered"
 
         # Verify good workflows are still loaded and working
-        assert find_events(
+        self.assert_event_contains(
             new_events,
-            "workflow_loaded",
-            workflow_id="SystemTest/quick_job",
-        ), "Workflow not loaded after restart"
-        assert find_events(
+            name="workflow_loaded",
+            expected={"workflow_id": "SystemTest/quick_job"},
+        )
+        self.assert_event_contains(
             new_events,
-            "workflow_loaded",
-            workflow_id="SystemTest/planning/quick_job_2",
-        ), "Subfolder workflow not loaded after restart"
-        assert find_events(
+            name="workflow_loaded",
+            expected={"workflow_id": "SystemTest/planning/quick_job_2"},
+        )
+        self.assert_event_contains(
             new_events,
-            "job_synced",
-            job_id="SystemTest__quick_job",
-        ), "Scheduler job not created after restart"
-        assert find_events(
+            name="job_synced",
+            expected={"job_id": "SystemTest__quick_job"},
+        )
+        self.assert_event_contains(
             new_events,
-            "job_synced",
-            job_id="SystemTest__planning__quick_job_2",
-        ), "Subfolder scheduler job not created after restart"
+            name="job_synced",
+            expected={"job_id": "SystemTest__planning__quick_job_2"},
+        )
 
         # Verify the malformed workflow error was captured
-        assert any(
-            event.get("name") == "workflow_load_failed"
-            and event.get("data", {}).get("vault") == "SystemTest"
-            and event.get("data", {}).get("workflow_name") == "malformed_schedule"
-            and "valueerror" in (event.get("data", {}).get("error_type", "")).lower()
-            for event in new_events
-        ), "Expected ValueError configuration error for malformed_schedule"
+        self.assert_event_contains(
+            new_events,
+            name="workflow_load_failed",
+            expected={
+                "vault": "SystemTest",
+                "workflow_name": "malformed_schedule",
+                "error_type": "ValueError",
+            },
+        )
 
         # Clean up
         await self.stop_system()
         self.teardown_scenario()
 
-    def _load_validation_events(self, events_dir: Path) -> list[dict]:
-        """Load validation events from per-event YAML files."""
-        events = []
-        if not events_dir.exists():
-            return events
-
-        for path in sorted(events_dir.glob("*.yaml")):
-            events.append(self.load_yaml(path) or {})
-
-        return events
 
 
 # === WORKFLOW TEMPLATES ===

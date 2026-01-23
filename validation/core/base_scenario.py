@@ -291,6 +291,78 @@ class BaseScenario(ABC):
     def get_startup_results(self) -> Dict[str, Any]:
         """Get complete startup results including statistics."""
         return self._get_system_controller().get_startup_results()
+
+    # === VALIDATION EVENT HELPERS ===
+
+    def validation_events(self) -> List[Dict[str, Any]]:
+        """Load validation events from artifact files."""
+        events_dir = self.run_path / "artifacts" / "validation_events"
+        events: List[Dict[str, Any]] = []
+        if not events_dir.exists():
+            return events
+
+        for path in sorted(events_dir.glob("*.yaml")):
+            events.append(self.load_yaml(path) or {})
+
+        return events
+
+    def event_checkpoint(self) -> int:
+        """Return the current count of validation events."""
+        return len(self.validation_events())
+
+    def events_since(self, checkpoint: int) -> List[Dict[str, Any]]:
+        """Return events emitted after the provided checkpoint."""
+        events = self.validation_events()
+        return events[checkpoint:]
+
+    def find_events(
+        self,
+        events: Optional[List[Dict[str, Any]]] = None,
+        *,
+        name: Optional[str] = None,
+        data: Optional[Dict[str, Any]] = None,
+        **data_subset: Any,
+    ) -> List[Dict[str, Any]]:
+        """Find events by name and partial data match."""
+        if events is None:
+            events = self.validation_events()
+
+        expected = dict(data or {})
+        expected.update(data_subset)
+
+        matches = []
+        for event in events:
+            if name and event.get("name") != name:
+                continue
+            if expected and not self._event_data_matches(event.get("data", {}), expected):
+                continue
+            matches.append(event)
+        return matches
+
+    def latest_event(
+        self,
+        events: Optional[List[Dict[str, Any]]] = None,
+        *,
+        name: Optional[str] = None,
+        data: Optional[Dict[str, Any]] = None,
+        **data_subset: Any,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the most recent matching event."""
+        matches = self.find_events(events, name=name, data=data, **data_subset)
+        return matches[-1] if matches else None
+
+    def assert_event_contains(
+        self,
+        events: Optional[List[Dict[str, Any]]] = None,
+        *,
+        name: str,
+        expected: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Assert a matching event exists and return it."""
+        matches = self.find_events(events, name=name, data=expected)
+        if not matches:
+            raise AssertionError(f"No validation event '{name}' matched: {expected}")
+        return matches[-1]
     
     # === API ENDPOINT TESTING ===
     
@@ -756,6 +828,28 @@ class BaseScenario(ABC):
         """Load YAML content from a file."""
         with open(path, "r", encoding="utf-8") as handle:
             return yaml.safe_load(handle)
+
+    def _event_data_matches(self, actual: Any, expected: Any) -> bool:
+        """Return True when expected is a deep partial match of actual."""
+        if isinstance(expected, dict):
+            if not isinstance(actual, dict):
+                return False
+            for key, value in expected.items():
+                if key not in actual:
+                    return False
+                if not self._event_data_matches(actual[key], value):
+                    return False
+            return True
+
+        if isinstance(expected, list):
+            if not isinstance(actual, list):
+                return False
+            for item in expected:
+                if not any(self._event_data_matches(actual_item, item) for actual_item in actual):
+                    return False
+            return True
+
+        return actual == expected
     
     # === LAZY LOADING OF CONTROL SYSTEMS ===
     

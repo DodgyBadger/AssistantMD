@@ -86,6 +86,30 @@ assert event.get("data", {}).get("step_name") == "PATHS_ONLY"
 assert "INLINE_CONTENT" in event.get("data", {}).get("prompt", "")
 ```
 
+### Validation Event Helpers
+
+`BaseScenario` provides helpers to make validation event assertions concise without manual file parsing. Events are loaded fresh from `artifacts/validation_events` on each call, so loading/refreshing is automatic. If you want to control it explicitly, you can call the helper methods directly in your scenario.
+
+Common helpers:
+- `validation_events()` - load all events.
+- `event_checkpoint()` and `events_since(checkpoint)` - scope assertions to newly emitted events.
+- `find_events(...)` / `latest_event(...)` - filter by event name and partial data.
+- `assert_event_contains(...)` - assert a partial match on YAML keys at any depth and return the matching event.
+
+Example:
+
+```python
+checkpoint = self.event_checkpoint()
+await self.restart_system()
+events = self.events_since(checkpoint)
+
+self.assert_event_contains(
+    events,
+    name="job_synced",
+    expected={"workflow_id": "SystemTest/quick_job", "action": "updated"},
+)
+```
+
 ## Running Scenarios
 
 ```bash

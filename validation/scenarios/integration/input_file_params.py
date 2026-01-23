@@ -20,7 +20,6 @@ class InputFileParamsScenario(BaseScenario):
 
     async def test_scenario(self):
         vault = self.create_vault("InputFileParamsVault")
-        artifacts_root = self.run_path / "artifacts"
 
         # Seed files referenced by the workflow
         self.create_file(vault, "notes/inline.md", "INLINE_CONTENT")
@@ -38,17 +37,14 @@ class InputFileParamsScenario(BaseScenario):
         # Execute workflow to emit validation artifacts for prompt composition
         await self.run_workflow(vault, "input_file_params")
 
-        events = self._load_validation_events(artifacts_root / "validation_events")
+        events = self.validation_events()
 
-        prompt_events = [
-            event for event in events
-            if event.get("name") == "workflow_step_prompt"
-            and event.get("data", {}).get("step_name") == "PATHS_ONLY"
-        ]
-        assert len(prompt_events) > 0, (
-            "Expected workflow_step_prompt event for PATHS_ONLY step"
+        prompt_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "PATHS_ONLY"},
         )
-        prompt = prompt_events[0].get("data", {}).get("prompt", "")
+        prompt = prompt_event.get("data", {}).get("prompt", "")
         assert "INLINE_CONTENT" in prompt, (
             "Inline file content should be present in prompt"
         )
@@ -59,28 +55,14 @@ class InputFileParamsScenario(BaseScenario):
             "Path-only file content should not be inlined"
         )
 
-        skip_events = [
-            event for event in events
-            if event.get("name") == "workflow_step_skipped"
-            and event.get("data", {}).get("step_name") == "REQUIRED_SKIP"
-        ]
-        assert len(skip_events) > 0, (
-            "Expected workflow_step_skipped event for REQUIRED_SKIP step"
+        self.assert_event_contains(
+            events,
+            name="workflow_step_skipped",
+            expected={"step_name": "REQUIRED_SKIP"},
         )
 
         await self.stop_system()
         self.teardown_scenario()
-
-    def _load_validation_events(self, events_dir: Path) -> list[dict]:
-        """Load validation events from per-event YAML files."""
-        events = []
-        if not events_dir.exists():
-            return events
-
-        for path in sorted(events_dir.glob("*.yaml")):
-            events.append(self.load_yaml(path) or {})
-
-        return events
 
 WORKFLOW_CONTENT = """---
 workflow_engine: step
