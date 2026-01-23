@@ -13,7 +13,6 @@ from core.settings.store import get_general_settings
 logger = UnifiedLogger(tag="agents")
 
 
-@logger.trace("create_agent")
 async def create_agent(instructions: str, model=None, tools: Optional[List] = None, retries: Optional[int] = None) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
@@ -92,7 +91,6 @@ async def generate_stream(agent, prompt, message_history) -> AsyncIterator[str]:
         raise
 
 
-@logger.trace("generate_response")
 async def generate_response(agent, prompt, message_history=None):
     try:
         if message_history:

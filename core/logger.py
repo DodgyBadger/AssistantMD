@@ -370,28 +370,6 @@ class UnifiedLogger:
         async with self._logfire.span(f"{self.tag}:{operation}", **span_data):
             yield
     
-    def trace(self, func_name_template: Optional[str] = None):
-        """
-        Decorator for function instrumentation with sensible defaults.
-
-        Args:
-            func_name_template: Optional template for span name (e.g., "Processing {vault=}")
-
-        Usage:
-            @logger.trace()  # Full instrumentation with function name
-            def critical_function(vault_path: str, config: dict): pass
-
-            @logger.trace("Workflow {step=} for {global_id=}")  # Custom template
-            def run_workflow_step(step: str, global_id: str): pass
-        """
-        def decorator(func):
-            span_name = func_name_template or f"{self.tag}:{func.__name__}"
-            return self._logfire.instrument(
-                span_name,
-                extract_args=True,
-                record_return=True
-            )(func)
-        return decorator
     
     def _log(
         self,

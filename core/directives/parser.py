@@ -81,7 +81,6 @@ class ParsedDirectives:
 DIRECTIVE_PATTERN = re.compile(r'^@([a-zA-Z][a-zA-Z0-9\-_]*):?\s+(.+)$')
 
 
-@logger.trace("parse_directives")
 def parse_directives(content: str) -> ParsedDirectives:
     """Parse directives from the beginning of step content.
     

@@ -14,7 +14,6 @@ logger = UnifiedLogger(tag="step-workflow")
 ## Workflow entry. All workflow modules must implement run_workflow.
 ########################################################################
 
-@logger.trace("run_workflow")
 async def run_workflow(job_args: dict, **kwargs):
     """
     Sequential content generation workflow with predictable, deterministic structure.

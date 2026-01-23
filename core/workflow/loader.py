@@ -43,7 +43,6 @@ class ConfigurationError:
 ## Vault Discovery Interface
 #######################################################################
 
-@logger.trace("vault_discovery")
 def discover_vaults(data_root: str = None) -> List[str]:
     """Return list of vault names from first-level directories, excluding ignored directories."""
     if data_root is None:
@@ -62,7 +61,6 @@ def discover_vaults(data_root: str = None) -> List[str]:
     return sorted(vaults)
 
 
-@logger.trace("workflow_file_discovery")
 def discover_workflow_files(vault_path: str) -> List[str]:
     """Return list of workflow file paths in AssistantMD/Workflows (one level deep)."""
     workflows_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR)
@@ -95,7 +93,6 @@ def discover_workflow_files(vault_path: str) -> List[str]:
 ## Assistant Loading Functions
 #######################################################################
 
-@logger.trace("workflow_engine_loading")
 def validate_and_load_engine(engine_name: str) -> tuple[types.ModuleType, Callable]:
     """Load and validate a workflow engine module and its run_workflow function.
 
@@ -117,7 +114,6 @@ def validate_and_load_engine(engine_name: str) -> tuple[types.ModuleType, Callab
 
     return workflow_module, workflow_function
 
-@logger.trace("workflow_loading")
 def load_workflow_from_file(
     file_path: str,
     vault: str,
@@ -186,7 +182,6 @@ class WorkflowLoader:
         self._last_loaded: Optional[datetime] = None
         self._vault_info: Dict[str, Dict[str, Any]] = {}  # Cache vault discovery data
 
-    @logger.trace("workflow_loading")
     async def load_workflows(self, force_reload: bool = False, target_global_id: str = None) -> List[WorkflowDefinition]:
         """Load workflows from all vaults or a specific workflow."""
         # Parse target if specified

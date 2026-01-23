@@ -313,7 +313,6 @@ class ProcessedStep:
 ## Step Processing Functions
 #######################################################################
 
-@logger.trace("process_step_content")
 def process_step_content(
     step_content: str, 
     vault_path: str, 

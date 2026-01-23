@@ -62,7 +62,6 @@ class ParameterRegistry:
         """Initialize an empty parameter registry."""
         self._processors: Dict[str, DirectiveProcessor] = {}
     
-    @logger.trace("register_directive")
     def register_directive(self, processor: DirectiveProcessor) -> None:
         """Register a directive processor.
         
@@ -120,7 +119,6 @@ class ParameterRegistry:
         """
         return list(self._processors.keys())
     
-    @logger.trace("process_directive")
     def process_directive(self, directive_name: str, value: str, vault_path: str, **context) -> DirectiveProcessingResult:
         """Process a directive value using its registered processor.
         

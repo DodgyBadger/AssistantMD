@@ -61,7 +61,6 @@ def create_job_args(global_id: str, data_root: str = None):
 
 
 
-@logger.trace("setup_scheduler_jobs")
 async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[str, Any]:
     """
     Set up or update scheduler jobs based on vault workflow configuration.
