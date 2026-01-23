@@ -17,7 +17,7 @@ Scenarios can be narrow (e.g. verifying a single prompt composition rule) or bro
 
 **Run**: One execution of a scenario. Each run gets a dedicated folder under `validation/runs/` containing the scenario vault(s), system folder and artifacts.  
 
-**Artifacts**: Evidence emitted during a run such as run and system logs, outputs of the feature being exercised (e.g. chat response, workflow output) and internal events emitted via `UnifiedLogger.validation_event`.  
+**Artifacts**: Evidence emitted during a run such as run and system logs, outputs of the feature being exercised (e.g. chat response, workflow output) and internal events emitted via validation sinks on `UnifiedLogger`.  
 
 **Assertions**: Checks against artifacts that validate expected functionality. The collection of assertions in a scenario is what passes or fails the run.
 
@@ -51,16 +51,21 @@ See `validation/scenarios/integration/basic_haiku.py` for a minimal example.
 
 ## Validation events
 
-Use validation events when you need to assert on intermediate state that is not visible in final outputs (for example, prompt composition or step-level decisions). This is accomplished using `UnifiedLogger.validation_event` in the code where you want to emit the event. These only fire when the app is run through the validation framework - they will not fire when running in production. `validation_event` accepts any key/value pairs you want to capture; the example below is illustrative.
+Use validation events when you need to assert on intermediate state that is not visible in final outputs (for example, prompt composition or step-level decisions). Emit them via the validation sink on `UnifiedLogger` at the code location you want to observe. These only fire when the app is run through the validation framework - they will not fire when running in production.
+
+Use `logger.set_sinks(["validation"]).info(...)` when you want **only** the validation artifact, or `logger.add_sink("validation").info(...)` when you want validation artifacts alongside the default sinks. The validation sink accepts any key/value pairs you want to capture. You can optionally set a stable event name by passing `data={"event": "my_event", ...}`; otherwise the log message becomes the event name.
 
 ```python
 logger = UnifiedLogger(tag="step-workflow")
 
-logger.validation_event(
+logger.set_sinks(["validation"]).info(
     "workflow_step_prompt",
-    step_name=step_name,
-    output_file=output_file_path,
-    prompt=final_prompt,
+    data={
+        "event": "workflow_step_prompt",
+        "step_name": step_name,
+        "output_file": output_file_path,
+        "prompt": final_prompt,
+    },
 )
 ```
 

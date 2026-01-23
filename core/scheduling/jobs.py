@@ -16,6 +16,24 @@ RESERVED_JOB_IDS = {
     "ingestion-worker",
 }
 
+def _get_job_snapshot(scheduler, job_id: str) -> Dict[str, Any]:
+    """Capture job metadata for validation events."""
+    job = scheduler.get_job(job_id) if scheduler is not None else None
+    if job is None:
+        return {}
+
+    next_run_time = None
+    if job.next_run_time is not None:
+        try:
+            next_run_time = job.next_run_time.isoformat()
+        except Exception:
+            next_run_time = str(job.next_run_time)
+
+    return {
+        "job_name": job.name,
+        "next_run_time": next_run_time,
+    }
+
 def create_job_args(global_id: str, data_root: str = None):
     """Create picklable job arguments for workflow execution.
 
@@ -96,59 +114,86 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                     scheduler.remove_job(existing_job.id)
 
                     job_args = create_job_args(workflow.global_id)
+                    job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.add_job(
                         func=workflow.workflow_function,
                         trigger=workflow.trigger,
                         args=[job_args],
                         id=workflow.scheduler_job_id,
-                        name=f"Workflow: {workflow.global_id}"
+                        name=job_name
                     )
 
-                    logger.activity(
+                    snapshot = _get_job_snapshot(scheduler, workflow.scheduler_job_id)
+                    logger.add_sink("validation").info(
                         "Workflow job replaced (schedule/engine changed)",
-                        vault=workflow.global_id,
-                        metadata={
+                        data={
+                            "event": "job_synced",
+                            "vault": workflow.vault,
+                            "workflow_id": workflow.global_id,
+                            "job_id": workflow.scheduler_job_id,
+                            "job_name": snapshot.get("job_name", job_name),
+                            "action": "replaced",
+                            "trigger": str(workflow.trigger),
+                            "next_run_time": snapshot.get("next_run_time"),
+                            "engine": workflow.workflow_name,
                             "schedule": str(workflow.trigger),
-                            "workflow_engine": workflow.workflow_name,
                         },
                     )
                 else:
                     job_args = create_job_args(workflow.global_id)
+                    job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.modify_job(
                         job_id=workflow.scheduler_job_id,
                         args=[job_args],
-                        name=f"Workflow: {workflow.global_id}"
+                        name=job_name
                     )
 
-                    logger.activity(
+                    snapshot = _get_job_snapshot(scheduler, workflow.scheduler_job_id)
+                    logger.add_sink("validation").info(
                         "Workflow job updated (timing preserved)",
-                        vault=workflow.global_id,
-                        metadata={
+                        data={
+                            "event": "job_synced",
+                            "vault": workflow.vault,
+                            "workflow_id": workflow.global_id,
+                            "job_id": workflow.scheduler_job_id,
+                            "job_name": snapshot.get("job_name", job_name),
+                            "action": "updated",
+                            "trigger": str(workflow.trigger),
+                            "next_run_time": snapshot.get("next_run_time"),
+                            "engine": workflow.workflow_name,
                             "schedule": str(workflow.trigger),
-                            "workflow_engine": workflow.workflow_name,
                         },
                     )
 
                 scheduler_jobs_synced += 1
             else:
                 job_args = create_job_args(workflow.global_id)
+                job_name = f"Workflow: {workflow.global_id}"
 
                 scheduler.add_job(
                     func=workflow.workflow_function,
                     trigger=workflow.trigger,
                     args=[job_args],
                     id=workflow.scheduler_job_id,
-                    name=f"Workflow: {workflow.global_id}"
+                    name=job_name
                 )
 
-                logger.activity(
+                snapshot = _get_job_snapshot(scheduler, workflow.scheduler_job_id)
+                logger.add_sink("validation").info(
                     "Workflow job created",
-                    vault=workflow.global_id,
-                    metadata={
+                    data={
+                        "event": "job_synced",
+                        "vault": workflow.vault,
+                        "workflow_id": workflow.global_id,
+                        "job_id": workflow.scheduler_job_id,
+                        "job_name": snapshot.get("job_name", job_name),
+                        "action": "created",
+                        "trigger": str(workflow.trigger),
+                        "next_run_time": snapshot.get("next_run_time"),
+                        "engine": workflow.workflow_name,
                         "schedule": str(workflow.trigger),
-                        "workflow_engine": workflow.workflow_name,
                     },
                 )
 
@@ -168,10 +213,13 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
 
         for job_id in jobs_to_remove:
             scheduler.remove_job(job_id)
-            logger.activity(
+            logger.add_sink("validation").info(
                 "Removed job for disabled workflow",
-                vault=job_id,
-                metadata={"reason": "Workflow disabled or schedule removed"}
+                data={
+                    "event": "job_removed",
+                    "job_id": job_id,
+                    "reason": "workflow_disabled_or_schedule_removed",
+                },
             )
     else:
         pass  # Scheduler not available - configurations loaded but jobs not updated

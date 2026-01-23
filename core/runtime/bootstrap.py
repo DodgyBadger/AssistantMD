@@ -158,15 +158,14 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             clear_runtime_context()
             raise
 
-        logger.activity(
+        logger.info(
             "Runtime bootstrap completed successfully",
-            vault="system",
-            metadata={
+            data={
                 "data_root": str(config.data_root),
                 "system_root": str(config.system_root),
                 "scheduler_workers": config.max_scheduler_workers,
-                "features": config.features
-            }
+                "features": config.features,
+            },
         )
 
         return runtime_context

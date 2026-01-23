@@ -277,6 +277,17 @@ class WorkflowLoader:
 
                     # Add to vault cache
                     vault_info[vault]['workflows'].append(workflow.name)
+                    logger.set_sinks(["validation"]).info(
+                        "workflow_loaded",
+                        data={
+                            "vault": vault,
+                            "workflow_id": workflow.global_id,
+                            "workflow_path": file_path,
+                            "enabled": workflow.enabled,
+                            "schedule": workflow.schedule_string,
+                            "engine": workflow.workflow_name,
+                        },
+                    )
 
                 except Exception as e:
                     # Create configuration error record
@@ -291,13 +302,16 @@ class WorkflowLoader:
                     self._config_errors.append(config_error)
 
                     vault_identifier = f"{vault}/{name}" if 'name' in locals() else vault
-                    logger.activity(
+                    logger.add_sink("validation").error(
                         f"Failed to load workflow file {file_path}: {str(e)}",
-                        vault=vault_identifier,
-                        level="error",
-                        metadata={
-                            "file_path": file_path,
+                        data={
+                            "event": "workflow_load_failed",
+                            "vault": vault,
+                            "workflow_name": name if 'name' in locals() else None,
+                            "workflow_path": file_path,
                             "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "vault_identifier": vault_identifier,
                         },
                     )
                     # Continue with other files rather than failing completely

@@ -13,21 +13,25 @@ Enable validation scenarios to assert on in-flow artifacts emitted by the runtim
 ```python
 logger = UnifiedLogger(tag="context-manager")
 
-logger.validation_event(
+logger.set_sinks(["validation"]).info(
     "context_step_output",
-    step_name="Summary",
-    output=summary_text,
-    model=model_name,
-    ttl="weekly",
-    cache_hit=False,
+    data={
+        "step_name": "Summary",
+        "output": summary_text,
+        "model": model_name,
+        "ttl": "weekly",
+        "cache_hit": False,
+    },
 )
 
-logger.validation_event(
+logger.set_sinks(["validation"]).info(
     "context_step",
-    step_name="Summary",
-    model=model_name,
-    ttl="weekly",
-    output=summary_text,
+    data={
+        "step_name": "Summary",
+        "model": model_name,
+        "ttl": "weekly",
+        "output": summary_text,
+    },
 )
 ```
 
@@ -55,7 +59,7 @@ data:
      - `_validation_enabled()` checks runtime config `features["validation"]`.
     - `_validation_artifact_path()` resolves the validation events directory (use `features["validation_artifacts_dir"]` or fallback to `get_system_root().parent / "artifacts"`).
    - Add methods:
-     - `validation_event(name: str, **data)`
+    - `logger.set_sinks(["validation"]).info(name, data={...})`
    - Use a file lock to write per-event YAML safely.
    - No-ops outside validation.
 
@@ -93,7 +97,7 @@ class ContextManagerArtifacts(BaseScenario):
 ```
 
 ## Notes
-- The artifacts are explicit and controlled: only data intentionally emitted via `validation_event` is captured.
+- The artifacts are explicit and controlled: only data intentionally emitted via the validation sink is captured.
 - YAML keeps auditability high while remaining simple to parse.
 
 ## Next Step: Shift Observability to Validation Events

@@ -12,14 +12,13 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import logfire
 import yaml
-from core import constants as core_constants
 from core.settings.secrets_store import get_secret_value
 from core.settings.store import get_general_settings
-from core.runtime.paths import get_data_root, get_system_root
+from core.runtime.paths import get_system_root
 from core.runtime import state as runtime_state
 
 
@@ -223,19 +222,78 @@ def _get_validation_caller() -> Dict[str, Any]:
     }
 
 
-class UnifiedLogger:
-    """Unified logger providing instrumentation and persistent activity logging."""
+def _emit_activity_record(record: Dict[str, Any]) -> None:
+    """Write a record to the activity log."""
+    payload = {
+        "timestamp": record["timestamp"],
+        "level": record["level"],
+        "tag": record["tag"],
+        "message": record["message"],
+    }
+    if record.get("data") is not None:
+        payload["data"] = record["data"]
 
-    def __init__(self, tag: str, vault_context: Optional[str] = None):
+    activity_logger = _ensure_activity_logger()
+    activity_logger.info(json.dumps(payload, ensure_ascii=False))
+
+
+def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, Any]) -> None:
+    """Write a validation artifact record when validation is enabled."""
+    if not _validation_enabled():
+        return
+
+    event_name = data.get("event") if isinstance(data, dict) else None
+    record = {
+        "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        "type": "validation_event",
+        "tag": tag,
+        "name": event_name or message,
+        "level": level,
+        "data": data,
+    }
+    caller = _get_validation_caller()
+    if caller:
+        record.update(caller)
+
+    _write_validation_record(record)
+
+
+def _emit_logfire_record(logfire_client, level: str, message: str, tag: str, data: Dict[str, Any]) -> None:
+    """Mirror a record to Logfire if configured."""
+    log_method = getattr(logfire_client, level, None)
+    payload = {"tag": tag}
+    if data:
+        payload["data"] = data
+
+    if callable(log_method):
+        log_method(message, **payload)
+    else:
+        logfire_client.info(message, level=level, **payload)
+
+
+class UnifiedLogger:
+    """Unified logger providing instrumentation and sink-based logging."""
+
+    def __init__(
+        self,
+        tag: str,
+        vault_context: Optional[str] = None,
+        default_sinks: Optional[Iterable[str]] = None,
+    ):
         """
         Initialize unified logger for a module or component.
 
         Args:
             tag: Module or component identifier
-            vault_context: Optional explicit vault context (auto-detected if not provided)
+            vault_context: Optional explicit vault context (stored for convenience)
+            default_sinks: Optional iterable of sink names for log output
         """
         self.tag = tag
         self.vault_context = vault_context
+        self.default_sinks = list(default_sinks) if default_sinks is not None else [
+            "activity",
+            "logfire",
+        ]
         self._logfire_instance = None  # Lazy initialization
 
     @property
@@ -260,23 +318,31 @@ class UnifiedLogger:
             _logfire_instrumented = True
         return logfire
     
-    # Technical Instrumentation Methods
-    
-    def info(self, message: str, **extra: Any) -> None:
-        """Technical info logging."""
-        self._logfire.info(message, **extra)
+    # Sink-Based Logging
 
-    def warning(self, message: str, **extra: Any) -> None:
-        """Technical warning logging."""
-        self._logfire.warning(message, **extra)
+    def add_sink(self, *sinks: str) -> "OneShotLogger":
+        """Return a one-shot logger that appends sinks for the next log call."""
+        return OneShotLogger(self, list(sinks), mode="append")
 
-    def error(self, message: str, **extra: Any) -> None:
-        """Technical error logging."""
-        self._logfire.error(message, **extra)
+    def set_sinks(self, sinks: Iterable[str]) -> "OneShotLogger":
+        """Return a one-shot logger that replaces sinks for the next log call."""
+        return OneShotLogger(self, list(sinks), mode="replace")
 
-    def debug(self, message: str, **extra: Any) -> None:
-        """Technical debug logging."""
-        self._logfire.debug(message, **extra)
+    def info(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        """Info logging routed to configured sinks."""
+        self._log("info", message, data=data, **fields)
+
+    def warning(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        """Warning logging routed to configured sinks."""
+        self._log("warning", message, data=data, **fields)
+
+    def error(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        """Error logging routed to configured sinks."""
+        self._log("error", message, data=data, **fields)
+
+    def debug(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        """Debug logging routed to configured sinks."""
+        self._log("debug", message, data=data, **fields)
     
     @contextmanager
     def span(self, operation: str, **span_data: Any):
@@ -327,77 +393,48 @@ class UnifiedLogger:
             )(func)
         return decorator
     
-    # Activity Logging
-
-    def activity(
+    def _log(
         self,
+        level: str,
         message: str,
         *,
-        vault: Optional[str] = None,
-        level: str = "info",
-        metadata: Optional[Dict[str, Any]] = None,
-        **context: Any,
+        data: Optional[Dict[str, Any]] = None,
+        sinks: Optional[Iterable[str]] = None,
+        sink_mode: str = "append",
+        **fields: Any,
     ) -> None:
-        """Record an operational activity entry and mirror it to Logfire when enabled.
+        payload: Dict[str, Any] = {}
+        if data:
+            payload.update(data)
+        if fields:
+            payload.update(fields)
 
-        Args:
-            message: Human-readable description of the activity.
-            vault: Explicit vault identifier (e.g., ``vault/workflow``). If omitted
-                an identifier is derived from the supplied context.
-            level: Activity level; used for Logfire mirroring and stored payload.
-            metadata: Optional structured payload persisted alongside the message.
-            **context: Additional context used for vault detection and persisted.
-        """
+        resolved_sinks = list(self.default_sinks)
+        if sinks:
+            if sink_mode == "replace":
+                resolved_sinks = list(sinks)
+            else:
+                for sink in sinks:
+                    if sink not in resolved_sinks:
+                        resolved_sinks.append(sink)
 
-        resolved_vault = vault or self.vault_context or _detect_vault_context(**context)
-        if not resolved_vault:
-            raise ValueError(f"Unable to determine vault context for activity logging. "
-                           f"Provide explicit vault parameter or ensure context contains "
-                           f"vault identification (vault_path, global_id, etc.). "
-                           f"Tag: {self.tag}, Context keys: {list(context.keys())}")
-
-        payload = {
-            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        record = {
+            "timestamp": timestamp,
             "level": level,
             "tag": self.tag,
-            "vault": resolved_vault,
             "message": message,
+            "data": payload or None,
         }
 
-        if metadata:
-            payload["metadata"] = metadata
+        if "activity" in resolved_sinks:
+            _emit_activity_record(record)
 
-        if context:
-            payload["context"] = context
+        if "validation" in resolved_sinks:
+            _emit_validation_record(self.tag, message, level, payload)
 
-        activity_logger = _ensure_activity_logger()
-        activity_logger.info(json.dumps(payload, ensure_ascii=False))
-
-        log_method = getattr(self._logfire, level, None)
-        if callable(log_method):
-            log_method(message, tag=self.tag, vault=resolved_vault, metadata=metadata, **context)
-        else:
-            self._logfire.info(message, tag=self.tag, vault=resolved_vault, metadata=metadata, level=level, **context)
-
-    # Validation Artifacts
-
-    def validation_event(self, name: str, **data: Any) -> None:
-        """Record a validation-only artifact event (no-op outside validation runs)."""
-        if not _validation_enabled():
-            return
-
-        record = {
-            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
-            "type": "validation_event",
-            "tag": self.tag,
-            "name": name,
-            "data": data,
-        }
-        caller = _get_validation_caller()
-        if caller:
-            record.update(caller)
-
-        _write_validation_record(record)
+        if "logfire" in resolved_sinks:
+            _emit_logfire_record(self._logfire, level, message, self.tag, payload)
     
     # Instrumentation Setup
     
@@ -435,86 +472,24 @@ class UnifiedLogger:
             # Unexpected instrumentation failures should be visible
             self.error(f"Failed to set up instrumentation: {e}")
             raise
-    
-def _detect_vault_context(**kwargs: Any) -> Optional[str]:
-    """Derive vault identifier from common context keys."""
-
-    direct_keys: Iterable[str] = ("vault", "vault_id", "global_id", "workflow_id")
-    for key in direct_keys:
-        value = kwargs.get(key)
-        if isinstance(value, str) and value:
-            return value
-
-    vault_path = kwargs.get("vault_path")
-    if isinstance(vault_path, str):
-        detected = _detect_from_path(vault_path)
-        if detected:
-            return detected
-
-    file_path = (
-        kwargs.get("file_path")
-        or kwargs.get("workflow_file_path")
-        or kwargs.get("assistant_file_path")
-    )
-    if isinstance(file_path, str):
-        detected = _detect_from_path(file_path, prefer_workflow=True)
-        if detected:
-            return detected
-
-    vault_name = kwargs.get("vault")
-    workflow_name = (
-        kwargs.get("workflow_name")
-        or kwargs.get("assistant_name")
-        or kwargs.get("name")
-    )
-    if isinstance(vault_name, str) and vault_name:
-        if isinstance(workflow_name, str) and workflow_name:
-            return f"{vault_name}/{workflow_name}"
-        return f"{vault_name}/system"
-
-    return None
 
 
-def _detect_from_path(path_value: str, *, prefer_workflow: bool = False) -> Optional[str]:
-    """Map filesystem paths under the data root to vault identifiers."""
+class OneShotLogger:
+    """One-shot logger proxy to override sinks for a single call."""
 
-    try:
-        path = Path(path_value)
-    except (TypeError, ValueError):
-        return None
+    def __init__(self, base: UnifiedLogger, sinks: List[str], mode: str):
+        self._base = base
+        self._sinks = sinks
+        self._mode = mode
 
-    try:
-        data_root = get_data_root()
-    except Exception:
-        return None
+    def info(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        self._base._log("info", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
 
-    if not path.exists():
-        # Allow non-existent targets; rely on path semantics
-        try:
-            path_relative = path.relative_to(data_root)
-        except ValueError:
-            return None
-    else:
-        if data_root not in path.parents and path != data_root:
-            return None
-        path_relative = path.relative_to(data_root)
+    def warning(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        self._base._log("warning", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
 
-    if not path_relative.parts:
-        return None
+    def error(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        self._base._log("error", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
 
-    vault_name = path_relative.parts[0]
-
-    if (
-        prefer_workflow
-        and len(path_relative.parts) >= 4
-        and path_relative.parts[1] == core_constants.ASSISTANTMD_ROOT_DIR
-        and path_relative.parts[2] == core_constants.WORKFLOW_DEFINITIONS_DIR
-    ):
-        workflow_parts = list(path_relative.parts[3:])
-        if not workflow_parts:
-            return f"{vault_name}/system"
-        workflow_parts[-1] = Path(workflow_parts[-1]).stem
-        workflow_name = "/".join(workflow_parts)
-        return f"{vault_name}/{workflow_name}"
-
-    return f"{vault_name}/system"
+    def debug(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+        self._base._log("debug", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)

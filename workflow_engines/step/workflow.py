@@ -107,10 +107,10 @@ async def run_workflow(job_args: dict, **kwargs):
         #######################################################################
         
         # Log successful workflow completion
-        logger.activity(
+        logger.info(
             "Workflow completed successfully",
-            vault=services.workflow_id,
-            metadata={
+            data={
+                "vault": services.workflow_id,
                 "steps_completed": len(workflow_steps),
                 "output_files_created": len(context['created_files']),
             },
@@ -118,11 +118,10 @@ async def run_workflow(job_args: dict, **kwargs):
         
     except Exception as e:
         # Log workflow failure with context
-        logger.activity(
+        logger.error(
             "Workflow execution failed",
-            vault=services.workflow_id,
-            level="error",
-            metadata={
+            data={
+                "vault": services.workflow_id,
                 "error_message": str(e),
                 "steps_attempted": len(workflow_steps),
             },
@@ -321,11 +320,10 @@ async def write_step_output(step_content: str, output_file: str, processed_step,
         context['state_manager'].update_from_processed_step(processed_step)
             
     except (IOError, OSError, PermissionError) as file_error:
-        logger.activity(
+        logger.error(
             "Failed to create output file",
-            vault=global_id,
-            level="error",
-            metadata={
+            data={
+                "vault": global_id,
                 "target_file": output_file,
                 "step_name": step_name,
                 "reason": str(file_error),
@@ -402,35 +400,38 @@ async def process_workflow_step(
 
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
-        logger.validation_event(
+        logger.set_sinks(["validation"]).info(
             "workflow_step_skipped",
-            step_name=step_name,
-            reason="run_on",
+            data={
+                "step_name": step_name,
+                "reason": "run_on",
+            },
         )
         return  # Skip this step
 
     # Check for workflow skip signals from directives (e.g., required input files missing)
     should_skip, skip_reason = has_workflow_skip_signal(processed_step)
     if should_skip:
-        logger.activity(
+        logger.add_sink("validation").info(
             f"Step skipped: {skip_reason}",
-            vault=services.workflow_id,
-            metadata={"step_name": step_name}
-        )
-        logger.validation_event(
-            "workflow_step_skipped",
-            step_name=step_name,
-            reason=skip_reason,
+            data={
+                "event": "workflow_step_skipped",
+                "vault": services.workflow_id,
+                "step_name": step_name,
+                "reason": skip_reason,
+            },
         )
         return  # Skip this step
 
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
-    logger.validation_event(
+    logger.set_sinks(["validation"]).info(
         "workflow_step_prompt",
-        step_name=step_name,
-        output_file=output_file_path,
-        prompt=final_prompt,
+        data={
+            "step_name": step_name,
+            "output_file": output_file_path,
+            "prompt": final_prompt,
+        },
     )
 
     # Generate AI content

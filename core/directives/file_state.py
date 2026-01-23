@@ -200,10 +200,9 @@ class WorkflowFileStateManager:
             except (IOError, OSError) as e:
                 # If we can't read the file, include it as pending (it will fail
                 # later with a clear error)
-                logger.activity(
+                logger.warning(
                     f"Warning: Could not read file for hash comparison: {filepath}",
-                    level="warning",
-                    metadata={"error": str(e)}
+                    data={"error": str(e)},
                 )
                 pending_files.append(filepath)
 
