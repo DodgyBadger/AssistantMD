@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class TestSystemStartupValidationScenario(BaseScenario):
+class SystemStartupScenario(BaseScenario):
     """Comprehensive system startup, shutdown, and persistence validation."""
 
     async def test_scenario(self):

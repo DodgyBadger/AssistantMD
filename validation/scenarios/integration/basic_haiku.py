@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class TestBasicHaikuScenario(BaseScenario):
+class BasicHaikuScenario(BaseScenario):
     """Test basic single-step workflow execution."""
 
     async def test_scenario(self):

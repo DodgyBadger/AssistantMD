@@ -27,6 +27,7 @@ _activity_log_path: Optional[Path] = None
 _activity_logger_lock = Lock()
 _validation_log_lock = Lock()
 _validation_event_counter = 0
+_validation_boot_id: Optional[int] = None
 _logfire_config_state: Optional[Tuple[bool, Optional[str]]] = None
 _logfire_instrumented = False
 _logger_internal = logging.getLogger(__name__)
@@ -180,17 +181,21 @@ def _write_validation_record(record: Dict[str, Any]) -> None:
 
     with _validation_log_lock:
         global _validation_event_counter
+        global _validation_boot_id
+        boot_id = _get_runtime_boot_id()
+        if boot_id is not None and boot_id != _validation_boot_id:
+            _validation_event_counter = 0
+            _validation_boot_id = boot_id
         _validation_event_counter += 1
         event_id = _validation_event_counter
-        boot_id = _get_runtime_boot_id()
 
         directory.mkdir(parents=True, exist_ok=True)
         tag = _sanitize_validation_name(record.get("tag", "event"))
         name = _sanitize_validation_name(record.get("name", "event"))
         if boot_id is not None:
-            filename = f"{boot_id:03d}_{event_id:04d}_{tag}_{name}.yaml"
+            filename = f"{boot_id:04d}_{event_id:02d}_{tag}_{name}.yaml"
         else:
-            filename = f"{event_id:04d}_{tag}_{name}.yaml"
+            filename = f"{event_id:02d}_{tag}_{name}.yaml"
         path = directory / filename
 
         payload = yaml.safe_dump(record, allow_unicode=False, sort_keys=False)
@@ -245,6 +250,8 @@ def _emit_activity_record(record: Dict[str, Any]) -> None:
         "tag": record["tag"],
         "message": record["message"],
     }
+    if record.get("boot_id") is not None:
+        payload["boot_id"] = record["boot_id"]
     if record.get("data") is not None:
         payload["data"] = record["data"]
 
@@ -280,6 +287,9 @@ def _emit_logfire_record(logfire_client, level: str, message: str, tag: str, dat
     """Mirror a record to Logfire if configured."""
     log_method = getattr(logfire_client, level, None)
     payload = {"tag": tag}
+    boot_id = _get_runtime_boot_id()
+    if boot_id is not None:
+        payload["boot_id"] = boot_id
     if data:
         payload["data"] = data
 
@@ -415,6 +425,7 @@ class UnifiedLogger:
                         resolved_sinks.append(sink)
 
         timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        boot_id = _get_runtime_boot_id()
         record = {
             "timestamp": timestamp,
             "level": level,
@@ -422,6 +433,8 @@ class UnifiedLogger:
             "message": message,
             "data": payload or None,
         }
+        if boot_id is not None:
+            record["boot_id"] = boot_id
 
         if "activity" in resolved_sinks:
             _emit_activity_record(record)
