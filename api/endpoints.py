@@ -43,7 +43,6 @@ from .services import (
     get_system_status,
     execute_workflow_manually,
     get_metadata,
-    compact_conversation_history,
     start_workflow_creation,
     get_system_activity_log,
     get_system_settings,
@@ -479,35 +478,6 @@ async def metadata():
     """
     try:
         return await get_metadata()
-    except Exception as e:
-        return create_error_response(e)
-
-
-@router.post("/chat/compact", response_model=ChatSessionTransformResponse)
-async def compact_chat_history(request: ChatSessionTransformRequest):
-    """
-    Compact conversation history by summarizing with LLM.
-
-    Replaces the full conversation history with a concise summary,
-    preserving context while reducing token count.
-    """
-    try:
-        result = await compact_conversation_history(
-            session_id=request.session_id,
-            vault_name=request.vault_name,
-            model=request.model,
-            user_instructions=request.user_instructions,
-            session_manager=session_manager
-        )
-
-        return ChatSessionTransformResponse(
-            success=True,
-            summary=result["summary"],
-            original_message_count=result["original_count"],
-            compacted_to=result["compacted_count"],
-            new_session_id=result["new_session_id"],
-            message=f"History compacted from {result['original_count']} to {result['compacted_count']} messages"
-        )
     except Exception as e:
         return create_error_response(e)
 

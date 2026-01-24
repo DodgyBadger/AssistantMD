@@ -43,7 +43,7 @@ class ChatExecuteRequest(BaseModel):
 
 
 class ChatSessionTransformRequest(BaseModel):
-    """Request model for chat session transformations (compact, assistant creation, etc)."""
+    """Request model for chat session transformations (workflow creation, etc)."""
     session_id: str = Field(..., description="Session ID to transform")
     vault_name: str = Field(..., description="Vault name for session")
     model: str = Field(..., description="Model to use for transformation")
@@ -145,7 +145,7 @@ class ChatExecuteResponse(BaseModel):
 
 
 class ChatSessionTransformResponse(BaseModel):
-    """Response model for chat session transformations (compact, assistant creation, etc)."""
+    """Response model for chat session transformations (workflow creation, etc)."""
     success: bool = Field(..., description="Whether the operation succeeded")
     summary: str = Field(..., description="Generated summary text")
     original_message_count: int = Field(..., description="Number of messages before transformation")

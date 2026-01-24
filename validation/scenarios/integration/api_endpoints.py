@@ -197,24 +197,11 @@ Summarize the validation run context.
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
 
-        compact_response = self.call_api(
-            "/api/chat/compact",
-            method="POST",
-            data={
-                "session_id": session_id,
-                "vault_name": vault.name,
-                "model": "gpt-mini",
-                "user_instructions": "Keep it brief.",
-            },
-        )
-        assert compact_response.status_code == 200, "Chat compact endpoint succeeds"
-        new_session_id = compact_response.json()["new_session_id"]
-
         create_workflow_response = self.call_api(
             "/api/chat/create-workflow",
             method="POST",
             data={
-                "session_id": new_session_id,
+                "session_id": session_id,
                 "vault_name": vault.name,
                 "model": "gpt-mini",
                 "user_instructions": "Outline a simple workflow.",

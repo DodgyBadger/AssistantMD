@@ -214,6 +214,19 @@ async def execute_chat_prompt(
 
     # Save chat history to markdown file
     history_file = save_chat_history(vault_path, session_id, prompt, result.output)
+    logger.info(
+        "Chat executed",
+        data={
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "model": model,
+            "tools_count": len(tools),
+            "use_history": use_conversation_history,
+            "session_type": session_type,
+            "prompt_length": len(prompt),
+            "history_file": history_file,
+        },
+    )
 
     return ChatExecutionResult(
         response=result.output,

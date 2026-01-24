@@ -71,15 +71,6 @@ Format your responses using markdown for visual clarity:
 - Use lists for steps or multiple items
 - Use > blockquotes for important notes or warnings"""
 
-# Compact History Prompts
-COMPACT_SUMMARY_PROMPT = """
-Review the conversation and provide a concise summary (under 500 words) that captures key points, decisions, and context.
-"""
-
-COMPACT_INSTRUCTIONS = """
-You are a conversation summarizer. Provide ONLY the summary, no preamble or explanation.
-"""
-
 # Assistant Creation Prompts
 WORKFLOW_CREATION_SUMMARY_PROMPT = """
 Review our conversation and summarize it focusing on:

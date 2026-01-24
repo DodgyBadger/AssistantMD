@@ -56,16 +56,3 @@ class SessionManager:
         """Get count of messages in session."""
         history = self.get_history(session_id, vault_name)
         return len(history) if history else 0
-
-    def compact_session(
-        self,
-        session_id: str,
-        vault_name: str,
-        summary_message: ModelMessage
-    ):
-        """
-        Replace session history with a single summary message.
-
-        Used to preserve context while reducing token count.
-        """
-        self._sessions[session_id] = [summary_message]
