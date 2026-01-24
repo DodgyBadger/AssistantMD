@@ -327,7 +327,13 @@ class SystemController:
         
         # Trigger the job immediately
         job.modify(next_run_time=datetime.now())
-        self.logger.info(f"Manually triggered job: {global_id}")
+        self.logger.info(
+            f"Manually triggered job: {global_id}",
+            data={
+                "global_id": global_id,
+                "job_id": safe_job_id,
+            },
+        )
     
     def set_test_date(self, test_date):
         """Set test date for scheduled job execution."""

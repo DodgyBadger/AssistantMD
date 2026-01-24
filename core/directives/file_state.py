@@ -211,6 +211,16 @@ class WorkflowFileStateManager:
         if count_limit is not None:
             pending_files = pending_files[:count_limit]
 
+        logger.set_sinks(["validation"]).info(
+            "pending_files_resolved",
+            data={
+                "workflow_id": self.workflow_id,
+                "pattern": pattern,
+                "candidate_count": len(all_files),
+                "pending_count": len(pending_files),
+                "pending_paths": [self._normalize_path_for_state(path) for path in pending_files],
+            },
+        )
         return pending_files
     
     def update_from_processed_step(self, processed_step):

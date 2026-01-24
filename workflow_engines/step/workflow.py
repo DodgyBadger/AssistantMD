@@ -106,12 +106,22 @@ async def run_workflow(job_args: dict, **kwargs):
         #######################################################################
         
         # Log successful workflow completion
+        created_files = sorted(context['created_files'])
+        output_files = []
+        for path in created_files:
+            if path.startswith(f"{services.vault_path}/"):
+                output_files.append(path[len(services.vault_path) + 1:])
+            else:
+                output_files.append(path)
+        max_files = 10
         logger.info(
             "Workflow completed successfully",
             data={
                 "vault": services.workflow_id,
                 "steps_completed": len(workflow_steps),
-                "output_files_created": len(context['created_files']),
+                "output_files_created": len(created_files),
+                "output_files": output_files[:max_files],
+                "output_files_truncated": len(output_files) > max_files,
             },
         )
         
