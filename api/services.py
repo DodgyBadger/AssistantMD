@@ -265,6 +265,16 @@ def scan_import_folder(
             refreshed_jobs.append(ingest_service.get_job(job.id) or job)
         jobs_created = refreshed_jobs
 
+    logger.info(
+        "Import scan completed",
+        data={
+            "vault": vault,
+            "jobs_created": len(jobs_created),
+            "skipped": len(skipped),
+            "queue_only": queue_only,
+        },
+    )
+
     return jobs_created, skipped
 
 
@@ -287,7 +297,18 @@ def import_url_direct(vault: str, url: str, clean_html: bool = True):
     except Exception:
         # process_job records failure status; propagate via job state
         pass
-    return ingest_service.get_job(job.id)
+    job = ingest_service.get_job(job.id)
+    outputs = job.outputs if job else None
+    logger.info(
+        "Import URL completed",
+        data={
+            "vault": vault,
+            "status": job.status if job else None,
+            "outputs_count": len(outputs) if outputs is not None else 0,
+            "clean_html": clean_html,
+        },
+    )
+    return job
 
 
 def collect_system_health() -> SystemInfo:
@@ -1088,6 +1109,14 @@ async def execute_workflow_manually(global_id: str, step_name: str = None) -> Di
 
         workflow_function = target_workflow.workflow_function
         
+        logger.info(
+            "Workflow execution started",
+            data={
+                "global_id": global_id,
+                "step_name": step_name,
+            },
+        )
+
         # Execute workflow with timing using job arguments
         start_time = datetime.now()
         try:

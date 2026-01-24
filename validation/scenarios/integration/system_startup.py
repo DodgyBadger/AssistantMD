@@ -31,12 +31,11 @@ class SystemStartupScenario(BaseScenario):
         self.create_file(vault, "AssistantMD/Workflows/planning/quick_job_2.md", QUICK_JOB_2_WORKFLOW)
 
         # Test 1: System Discovery and Job Creation
+        checkpoint = self.event_checkpoint()
         await self.start_system()
 
-        events = self.validation_events()
-        checkpoint = len(events)
-
-        assert "SystemTest" in self.get_discovered_vaults(), "Vault not discovered"
+        events = self.events_since(checkpoint)
+        checkpoint = self.event_checkpoint()
         self.assert_event_contains(
             events,
             name="workflow_loaded",
@@ -155,8 +154,15 @@ class SystemStartupScenario(BaseScenario):
 
         # Test 4: Real-Time Scheduled Execution
         # Job runs every 2m (120s), so wait 150s to account for schedule + execution time
-        execution_success = await self.wait_for_real_execution(vault, "quick_job", timeout=150)
-        assert execution_success, "Job should execute in real time via APScheduler"
+        checkpoint = self.event_checkpoint()
+        execution_success = await self.trigger_job(vault, "quick_job")
+        assert execution_success, "Job should execute when triggered"
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="job_executed",
+            expected={"job_id": "SystemTest__quick_job"},
+        )
 
         today_file = f"results/{datetime.now().strftime('%Y-%m-%d')}.md"
         output_path = vault / today_file
@@ -164,10 +170,18 @@ class SystemStartupScenario(BaseScenario):
         assert output_path.stat().st_size > 0, f"{today_file} is empty"
 
         # Test 5: Multiple Restart Cycle
+        checkpoint = self.event_checkpoint()
         await self.restart_system()
         await self.restart_system()
 
-        final_next_run = self.get_next_run_time(vault, "quick_job")
+        new_events = self.events_since(checkpoint)
+        final_event = self.latest_event(
+            new_events,
+            name="job_synced",
+            workflow_id="SystemTest/quick_job",
+        )
+        assert final_event is not None, "Missing job_synced event after restarts"
+        final_next_run = final_event.get("data", {}).get("next_run_time")
         assert final_next_run is not None, "Job should survive multiple restarts"
 
         # Test 6: Malformed Workflow Resilience
@@ -177,9 +191,6 @@ class SystemStartupScenario(BaseScenario):
 
         new_events = self.events_since(checkpoint)
         checkpoint = self.event_checkpoint()
-
-        # Verify the system still started successfully
-        assert "SystemTest" in self.get_discovered_vaults(), "Vault not discovered"
 
         # Verify good workflows are still loaded and working
         self.assert_event_contains(

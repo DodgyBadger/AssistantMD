@@ -270,6 +270,14 @@ class SystemController:
                 future.set_result(execution_time)
         
         self.logger.info(f"Job executed: {job_id} at {execution_time}")
+        self.logger.set_sinks(["validation"]).info(
+            "job_executed",
+            data={
+                "job_id": job_id,
+                "global_id": job_id.replace("__", "/"),
+                "executed_at": execution_time.isoformat(),
+            },
+        )
     
     def _on_job_error(self, event):
         """Handle job error events from APScheduler."""

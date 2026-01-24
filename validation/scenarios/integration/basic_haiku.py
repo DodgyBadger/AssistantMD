@@ -29,36 +29,38 @@ class BasicHaikuScenario(BaseScenario):
 
         # === SYSTEM STARTUP VALIDATION ===
         # Test real system startup with vault discovery and job scheduling
+        checkpoint = self.event_checkpoint()
         await self.start_system()
 
         # Validate system startup completed correctly
-        assert "HaikuVault" in self.get_discovered_vaults(), "Vault not discovered"
-        workflows = self.get_loaded_workflows()
-        assert any(
-            cfg.global_id == "HaikuVault/haiku_writer" for cfg in workflows
-        ), "Workflow not loaded"
-        jobs = self.get_scheduler_jobs()
-        assert any(
-            job.job_id == "HaikuVault__haiku_writer" for job in jobs
-        ), "Scheduler job not created"
-        job = next(
-            (job for job in jobs if job.job_id == "HaikuVault__haiku_writer"),
-            None,
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="workflow_loaded",
+            expected={"workflow_id": "HaikuVault/haiku_writer"},
         )
-        assert job is not None, "Scheduler job not found for schedule check"
-        assert "cron" in job.trigger.lower(), "Expected cron trigger"
+        job_event = self.assert_event_contains(
+            events,
+            name="job_synced",
+            expected={"job_id": "HaikuVault__haiku_writer", "action": "created"},
+        )
+        trigger = str(job_event.get("data", {}).get("trigger", "")).lower()
+        assert "cron" in trigger, "Expected cron trigger"
 
         # === SCHEDULED WORKFLOW EXECUTION ===
         # Set a known date for predictable output file naming
         self.set_date("2025-01-15")  # Wednesday
 
         # Trigger the scheduled job and wait for completion
-        await self.trigger_job(vault, "haiku_writer")
-
-        # === ASSERTIONS ===
-        # Verify the scheduled job executed successfully
-        assert len(self.get_job_executions(vault, "haiku_writer")) > 0, (
-            "No executions recorded for HaikuVault/haiku_writer"
+        checkpoint = self.event_checkpoint()
+        assert await self.trigger_job(vault, "haiku_writer"), (
+            "Job should execute when triggered"
+        )
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="job_executed",
+            expected={"job_id": "HaikuVault__haiku_writer"},
         )
 
         # Check output file was created with content

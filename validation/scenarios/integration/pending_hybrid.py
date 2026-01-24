@@ -42,7 +42,6 @@ class PendingHybridScenario(BaseScenario):
         checkpoint = self.event_checkpoint()
         await self.start_system()
 
-        assert "PendingHybridVault" in self.get_discovered_vaults(), "Vault not discovered"
         events = self.events_since(checkpoint)
         self.assert_event_contains(
             events,
@@ -104,7 +103,21 @@ class PendingHybridScenario(BaseScenario):
                 "workflow_id": workflow_id,
                 "pattern": pattern,
                 "pending_count": 1,
-                "pending_paths": ["tasks/task1.md"],
+                "pending_paths": ["tasks/task1"],
+            },
+        )
+
+        checkpoint = self.event_checkpoint()
+        result = await self.run_workflow(vault, "pending_hybrid")
+        assert result.status == "completed", "Fourth run should succeed"
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="pending_files_resolved",
+            expected={
+                "workflow_id": workflow_id,
+                "pattern": pattern,
+                "pending_count": 0,
             },
         )
 

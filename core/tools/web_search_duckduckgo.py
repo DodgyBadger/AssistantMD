@@ -9,6 +9,10 @@ from pydantic_ai.tools import Tool
 from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from .base import BaseTool
+from core.logger import UnifiedLogger
+
+
+logger = UnifiedLogger(tag="web-search-duckduckgo-tool")
 
 
 class WebSearchDuckDuckGo(BaseTool):
@@ -28,6 +32,10 @@ class WebSearchDuckDuckGo(BaseTool):
                 Search results formatted as text
             """
             try:
+                logger.set_sinks(["validation"]).info(
+                    "tool_invoked",
+                    data={"tool": "web_search_duckduckgo"},
+                )
                 # Configure DuckDuckGo with timeout
                 ddgs_client = DDGS(timeout=int(get_default_api_timeout()))
 

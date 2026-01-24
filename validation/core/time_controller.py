@@ -38,8 +38,6 @@ class TimeController:
         self.current_test_date = test_date
         self.logger.info(f"Set test date to: {test_date}")
         
-        # Apply datetime mocking (simplified for Phase 1)
-        self._apply_datetime_mock(test_date)
     
     def advance_time(self, hours: int = 1, minutes: int = 0):
         """Advance time by specified amount."""
@@ -49,10 +47,3 @@ class TimeController:
         self.current_test_date += timedelta(hours=hours, minutes=minutes)
         self.logger.info(f"Advanced time to: {self.current_test_date}")
         
-        self._apply_datetime_mock(self.current_test_date)
-    
-    def _apply_datetime_mock(self, test_date: datetime):
-        """Apply datetime mocking to system."""
-        # For Phase 1, store the mock date for future use
-        # Full implementation will patch datetime modules
-        pass

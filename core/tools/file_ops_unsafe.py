@@ -7,8 +7,14 @@ Provides file editing, deletion, and overwrite capabilities within vault boundar
 """
 
 import os
+from pydantic_ai.tools import Tool
+
+from core.logger import UnifiedLogger
 from .base import BaseTool
 from .utils import validate_and_resolve_path
+
+
+logger = UnifiedLogger(tag="file-ops-unsafe-tool")
 
 
 class FileOpsUnsafe(BaseTool):
@@ -44,6 +50,13 @@ class FileOpsUnsafe(BaseTool):
                 Operation result message
             """
             try:
+                logger.set_sinks(["validation"]).info(
+                    "tool_invoked",
+                    data={
+                        "tool": "file_ops_unsafe",
+                        "vault": vault_path.rstrip("/").split("/")[-1] if vault_path else None,
+                    },
+                )
                 if not vault_path:
                     raise ValueError("vault_path is required for file operations")
 
@@ -64,7 +77,7 @@ class FileOpsUnsafe(BaseTool):
             except Exception as e:
                 return f"Error performing '{operation}' operation: {str(e)}"
 
-        return file_ops_unsafe
+        return Tool(file_ops_unsafe, name="file_ops_unsafe")
 
     @classmethod
     def get_instructions(cls) -> str:

@@ -1,6 +1,7 @@
 
 from datetime import datetime
 import os
+import re
 from typing import Dict
 
 from core.logger import UnifiedLogger
@@ -122,6 +123,7 @@ async def run_workflow(job_args: dict, **kwargs):
                 "output_files_created": len(created_files),
                 "output_files": output_files[:max_files],
                 "output_files_truncated": len(output_files) > max_files,
+                "tools_used": sorted(context["tools_used"]),
             },
         )
         
@@ -375,8 +377,10 @@ def initialize_workflow_context(services: CoreServices):
         'today_formatted': today_formatted,
         'week_start_day': services.week_start_day,
         'state_manager': services.get_state_manager(),
-        'created_files': set()
+        'created_files': set(),
+        'tools_used': set(),
     }
+
 
 async def process_workflow_step(
     step_name: str,
@@ -431,6 +435,23 @@ async def process_workflow_step(
             },
         )
         return  # Skip this step
+
+    tools_result = processed_step.get_directive_value('tools', ([], ""))
+    tool_functions = tools_result[0] if isinstance(tools_result, tuple) else []
+    if tool_functions:
+        raw_tools = None
+        for line in raw_step_content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("@tools"):
+                raw_tools = stripped[len("@tools"):].strip()
+                break
+        if raw_tools:
+            tool_names = [name for name in re.split(r"[ ,]+", raw_tools) if name]
+        else:
+            tool_names = [
+                getattr(tool, "__name__", "tool") for tool in tool_functions
+            ]
+        context["tools_used"].update(tool_names)
 
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
