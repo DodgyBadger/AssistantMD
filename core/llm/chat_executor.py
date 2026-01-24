@@ -20,7 +20,6 @@ from pydantic_ai import (
 from core.llm.agents import create_agent
 from core.llm.session_manager import SessionManager
 from core.constants import (
-    WORKFLOW_CREATION_INSTRUCTIONS,
     REGULAR_CHAT_INSTRUCTIONS,
     ASSISTANTMD_ROOT_DIR,
     CHAT_SESSIONS_DIR,
@@ -117,7 +116,6 @@ def _prepare_agent_config(
     tools: List[str],
     model: str,
     instructions: Optional[str],
-    session_type: str
 ) -> tuple:
     """
     Prepare agent configuration (shared between streaming and non-streaming).
@@ -125,10 +123,8 @@ def _prepare_agent_config(
     Returns:
         Tuple of (final_instructions, model_instance, tool_functions)
     """
-    # Select base instructions by session type
-    if session_type == "workflow_creation":
-        base_instructions = WORKFLOW_CREATION_INSTRUCTIONS
-    elif instructions:
+    # Select base instructions
+    if instructions:
         base_instructions = instructions  # Custom instructions override
     else:
         base_instructions = REGULAR_CHAT_INSTRUCTIONS
@@ -168,7 +164,6 @@ async def execute_chat_prompt(
     use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
-    session_type: str = "regular"
 ) -> ChatExecutionResult:
     """
     Execute chat prompt with user-selected tools and model.
@@ -182,15 +177,14 @@ async def execute_chat_prompt(
         model: Model name selected by user
         use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular" or "workflow_creation")
+        instructions: Optional system instructions (defaults to regular chat instructions)
 
     Returns:
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
     final_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, instructions, session_type
+        vault_name, vault_path, tools, model, instructions
     )
 
     # Create agent with user-selected configuration
@@ -222,7 +216,6 @@ async def execute_chat_prompt(
             "model": model,
             "tools_count": len(tools),
             "use_history": use_conversation_history,
-            "session_type": session_type,
             "prompt_length": len(prompt),
             "history_file": history_file,
         },
@@ -246,7 +239,6 @@ async def execute_chat_prompt_stream(
     use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
-    session_type: str = "regular"
 ) -> AsyncIterator[str]:
     """
     Execute chat prompt with streaming response.
@@ -262,15 +254,14 @@ async def execute_chat_prompt_stream(
         model: Model name selected by user
         use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults based on session_type)
-        session_type: Chat mode ("regular" or "workflow_creation")
+        instructions: Optional system instructions (defaults to regular chat instructions)
 
     Yields:
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
     final_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, instructions, session_type
+        vault_name, vault_path, tools, model, instructions
     )
 
     # Create agent with user-selected configuration

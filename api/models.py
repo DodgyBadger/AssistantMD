@@ -38,7 +38,6 @@ class ChatExecuteRequest(BaseModel):
     model: str = Field(..., description="Model name to use")
     use_conversation_history: bool = Field(True, description="Whether to maintain conversation state")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
-    session_type: str = Field("regular", description="Chat mode: 'regular' or 'workflow_creation'")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 

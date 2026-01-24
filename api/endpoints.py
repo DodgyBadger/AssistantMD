@@ -427,8 +427,7 @@ async def chat_execute(request: ChatExecuteRequest):
                 model=request.model,
                 use_conversation_history=request.use_conversation_history,
                 session_manager=session_manager,
-                instructions=request.instructions,
-                session_type=request.session_type
+                instructions=request.instructions
             )
 
             return StreamingResponse(
@@ -455,8 +454,7 @@ async def chat_execute(request: ChatExecuteRequest):
                 model=request.model,
                 use_conversation_history=request.use_conversation_history,
                 session_manager=session_manager,
-                instructions=request.instructions,
-                session_type=request.session_type
+                instructions=request.instructions
             )
 
             return ChatExecuteResponse(
