@@ -39,13 +39,16 @@ class PendingHybridScenario(BaseScenario):
             PENDING_HYBRID_WORKFLOW,
         )
 
+        checkpoint = self.event_checkpoint()
         await self.start_system()
 
         assert "PendingHybridVault" in self.get_discovered_vaults(), "Vault not discovered"
-        workflows = self.get_loaded_workflows()
-        assert any(
-            cfg.global_id == "PendingHybridVault/pending_hybrid" for cfg in workflows
-        ), "Workflow not loaded"
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="workflow_loaded",
+            expected={"workflow_id": "PendingHybridVault/pending_hybrid"},
+        )
 
         pattern = "tasks/{pending:5}"
         workflow_id = "PendingHybridVault/pending_hybrid"
