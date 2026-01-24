@@ -20,8 +20,6 @@ from .models import (
     StatusResponse,
     ChatExecuteRequest,
     ChatExecuteResponse,
-    ChatSessionTransformRequest,
-    ChatSessionTransformResponse,
     SystemLogResponse,
     SystemSettingsResponse,
     UpdateSettingsRequest,
@@ -43,7 +41,6 @@ from .services import (
     get_system_status,
     execute_workflow_manually,
     get_metadata,
-    start_workflow_creation,
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
@@ -478,45 +475,6 @@ async def metadata():
     """
     try:
         return await get_metadata()
-    except Exception as e:
-        return create_error_response(e)
-
-
-@router.post("/chat/create-workflow", response_model=ChatSessionTransformResponse)
-async def create_workflow(request: ChatSessionTransformRequest):
-    """
-    Start interactive workflow creation conversation.
-
-    Creates a new session focused on designing and creating a step workflow.
-    Handles both scenarios:
-    - Existing conversation: Summarizes with creation focus, starts new session
-    - No/minimal conversation: Starts fresh with workflow creation guidance
-
-    The LLM will ask questions to gather requirements and ultimately use tools
-    to read documentation and write the workflow file.
-    """
-    try:
-        # Get vault path from runtime context
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / request.vault_name)
-
-        result = await start_workflow_creation(
-            session_id=request.session_id,
-            vault_name=request.vault_name,
-            model=request.model,
-            user_instructions=request.user_instructions,
-            session_manager=session_manager,
-            vault_path=vault_path
-        )
-
-        return ChatSessionTransformResponse(
-            success=True,
-            summary=result["summary"],
-            original_message_count=result["original_count"],
-            compacted_to=result["compacted_count"],
-            new_session_id=result["new_session_id"],
-            message="Workflow creation started - continue conversation in new session"
-        )
     except Exception as e:
         return create_error_response(e)
 

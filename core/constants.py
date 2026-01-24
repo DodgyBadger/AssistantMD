@@ -72,16 +72,6 @@ Format your responses using markdown for visual clarity:
 - Use > blockquotes for important notes or warnings"""
 
 # Assistant Creation Prompts
-WORKFLOW_CREATION_SUMMARY_PROMPT = """
-Review our conversation and summarize it focusing on:
-- The user's goals and desired outcomes
-- Any workflows, patterns, or automations discussed
-- Files, data sources, or outputs mentioned
-- Tasks that could be automated
-
-Keep it under 300 words, focusing on what would help design an automated assistant.
-"""
-
 WORKFLOW_CREATION_INSTRUCTIONS = """
 You are an expert assistant creator helping the user design a workflow assistant.
 

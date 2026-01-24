@@ -43,11 +43,7 @@ from core.settings.secrets_store import (
     delete_secret,
     secret_has_value,
 )
-from core.llm.session_manager import SessionManager
-from core.llm.chat_executor import execute_chat_prompt
-from core.constants import WORKFLOW_CREATION_SUMMARY_PROMPT
 from core.runtime.paths import get_system_root
-from .utils import generate_session_id
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -1213,102 +1209,3 @@ async def get_metadata() -> MetadataResponse:
         models=models,
         tools=tools
     )
-
-
-async def start_workflow_creation(
-    session_id: str,
-    vault_name: str,
-    model: str,
-    user_instructions: Optional[str],
-    session_manager: SessionManager,
-    vault_path: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Start workflow creation conversation from current chat session or fresh.
-
-    Handles two scenarios:
-    1. Existing conversation: Summarizes with creation focus, starts new session
-    2. No/minimal conversation: Skips summary, starts fresh creation session
-
-    The new session uses workflow creation instructions so the LLM gathers
-    requirements and writes the workflow file using available tools.
-
-    Args:
-        session_id: Current session to summarize (may be empty/minimal)
-        vault_name: Vault context for workflow creation
-        model: Model name to use for creation conversation
-        user_instructions: Optional user guidance for workflow requirements
-        session_manager: SessionManager instance
-        vault_path: Path to vault directory (optional, resolved from runtime if not provided)
-
-    Returns:
-        Dict with summary, original_count, compacted_count, and new_session_id
-    """
-    history = session_manager.get_history(session_id, vault_name)
-
-    # Get vault path from runtime context if not provided
-    if vault_path is None:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / vault_name)
-
-    # Check if we have existing conversation to summarize
-    has_history = history and len(history) > 2
-
-    if has_history:
-        # Scenario 1: Existing conversation - summarize with creation focus
-        original_count = len(history)
-
-        summarize_prompt = WORKFLOW_CREATION_SUMMARY_PROMPT
-        if user_instructions:
-            summarize_prompt += f"\n\nUser's requirements: {user_instructions}"
-
-        # Execute summarization in SAME session (gets added to history)
-        result = await execute_chat_prompt(
-            vault_name=vault_name,
-            vault_path=vault_path,
-            prompt=summarize_prompt,
-            session_id=session_id,
-            tools=[],
-            model=model,
-            use_conversation_history=True,
-            session_manager=session_manager,
-            instructions="Summarize focusing on automation opportunities and workflow design."
-        )
-
-        summary = result.response
-
-        # Generate new session_id for creation conversation
-        new_session_id = generate_session_id(vault_name)
-
-        # Get summary message from current session (last assistant message)
-        current_history = session_manager.get_history(session_id, vault_name)
-        if current_history:
-            summary_message = current_history[-1]
-            # Initialize new session with summary
-            session_manager.add_messages(new_session_id, vault_name, [summary_message])
-    else:
-        # Scenario 2: No/minimal conversation - start fresh
-        original_count = len(history) if history else 0
-        summary = "Starting fresh workflow creation conversation."
-
-        # Generate new session_id for creation conversation
-        new_session_id = generate_session_id(vault_name)
-
-        # No summary to add - new session starts empty, will use creation instructions
-
-    logger.info(
-        "Workflow creation started",
-        data={
-            "vault_name": vault_name,
-            "session_id": session_id,
-            "new_session_id": new_session_id,
-            "has_history": bool(has_history),
-            "original_count": original_count,
-        },
-    )
-    return {
-        "summary": summary,
-        "original_count": original_count,
-        "compacted_count": 1 if has_history else 0,
-        "new_session_id": new_session_id,
-    }

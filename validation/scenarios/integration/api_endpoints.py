@@ -197,19 +197,5 @@ Summarize the validation run context.
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
 
-        create_workflow_response = self.call_api(
-            "/api/chat/create-workflow",
-            method="POST",
-            data={
-                "session_id": session_id,
-                "vault_name": vault.name,
-                "model": "gpt-mini",
-                "user_instructions": "Outline a simple workflow.",
-            },
-        )
-        assert create_workflow_response.status_code == 200, (
-            "Workflow creation flow initializes"
-        )
-
         await self.stop_system()
         self.teardown_scenario()
