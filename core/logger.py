@@ -8,7 +8,7 @@ import logging
 import os
 import inspect
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
@@ -276,7 +276,7 @@ def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, 
     event_name = data.get("event") if isinstance(data, dict) else None
     boot_id = _get_runtime_boot_id()
     record = {
-        "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "type": "validation_event",
         "tag": tag,
         "name": event_name or message,
@@ -433,7 +433,7 @@ class UnifiedLogger:
                     if sink not in resolved_sinks:
                         resolved_sinks.append(sink)
 
-        timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         boot_id = _get_runtime_boot_id()
         record = {
             "timestamp": timestamp,
