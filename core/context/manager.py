@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -37,6 +37,8 @@ from core.context.store import (
     upsert_cached_step_output,
     upsert_session,
 )
+from core.utils.hash import hash_file_content
+from core.runtime.state import has_runtime_context, get_runtime_context
 
 logger = UnifiedLogger(tag="context-manager")
 
@@ -68,6 +70,83 @@ def _normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any
     if isinstance(input_file_data, list):
         return input_file_data
     return []
+
+
+def _count_input_files(input_file_data: Any) -> Dict[str, int]:
+    file_lists = _normalize_input_file_lists(input_file_data)
+    if not file_lists:
+        return {"total": 0, "paths_only": 0, "missing": 0}
+    total = 0
+    paths_only = 0
+    missing = 0
+    for file_list in file_lists:
+        for file_data in file_list:
+            if not isinstance(file_data, dict):
+                continue
+            total += 1
+            if file_data.get("paths_only"):
+                paths_only += 1
+            if file_data.get("found") is False:
+                missing += 1
+    return {"total": total, "paths_only": paths_only, "missing": missing}
+
+
+def _summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> List[Dict[str, Any]]:
+    file_lists = _normalize_input_file_lists(input_file_data)
+    if not file_lists:
+        return []
+    summaries: List[Dict[str, Any]] = []
+    for file_list in file_lists:
+        for file_data in file_list:
+            if not isinstance(file_data, dict):
+                continue
+            content = ""
+            if file_data.get("found") and not file_data.get("paths_only"):
+                content = file_data.get("content", "") or ""
+            preview = None
+            if content:
+                preview = content.strip().replace("\n", " ")
+                if len(preview) > preview_limit:
+                    preview = f"{preview[:preview_limit - 1]}…"
+            summaries.append(
+                {
+                    "filepath": file_data.get("filepath"),
+                    "found": file_data.get("found", True),
+                    "paths_only": file_data.get("paths_only", False),
+                    "content_length": len(content),
+                    "content_preview": preview,
+                }
+            )
+    return summaries
+
+
+def _hash_output(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return hash_file_content(value, length=12)
+
+
+def _resolve_cache_now(run_context: RunContext[Any]) -> datetime:
+    deps = getattr(run_context, "deps", None)
+    now_override = getattr(deps, "context_manager_now", None) if deps is not None else None
+    if isinstance(now_override, datetime):
+        return now_override
+    if isinstance(now_override, str):
+        try:
+            return datetime.fromisoformat(now_override)
+        except ValueError:
+            pass
+    if has_runtime_context():
+        try:
+            runtime = get_runtime_context()
+            raw_value = (runtime.config.features or {}).get("context_manager_now")
+            if isinstance(raw_value, datetime):
+                return raw_value
+            if isinstance(raw_value, str):
+                return datetime.fromisoformat(raw_value)
+        except Exception:
+            pass
+    return datetime.now(timezone.utc)
 
 
 def _format_input_files_for_prompt(
@@ -195,6 +274,10 @@ def _cache_entry_is_valid(
     created_dt = _parse_db_timestamp(created_at)
     if created_dt is None:
         return False
+    if created_dt.tzinfo is None and now.tzinfo is not None:
+        created_dt = created_dt.replace(tzinfo=timezone.utc)
+    elif created_dt.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     if cache_mode == "duration":
         if ttl_seconds is None:
             return False
@@ -396,6 +479,26 @@ def build_context_manager_history_processor(
     else:
         default_sections = []
 
+    logger.info(
+        "Context template loaded",
+        data={
+            "template_name": template.name,
+            "template_source": template.source,
+            "section_count": len(default_sections),
+            "passthrough_runs": passthrough_runs,
+        },
+    )
+    logger.set_sinks(["validation"]).info(
+        "Context template loaded",
+        data={
+            "event": "context_template_loaded",
+            "template_name": template.name,
+            "template_source": template.source,
+            "section_count": len(default_sections),
+            "passthrough_runs": passthrough_runs,
+        },
+    )
+
     async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:
             return []
@@ -565,6 +668,17 @@ def build_context_manager_history_processor(
                         },
                     )
                 if token_estimate < section_token_threshold:
+                    logger.set_sinks(["validation"]).info(
+                        "Context section skipped (token threshold)",
+                        data={
+                            "event": "context_section_skipped",
+                            "section_name": section.name,
+                            "section_key": section_key,
+                            "reason": "token_threshold",
+                            "token_estimate": token_estimate,
+                            "threshold": section_token_threshold,
+                        },
+                    )
                     continue
 
             manager_slice = _run_slice(messages, section_recent_runs)
@@ -585,6 +699,21 @@ def build_context_manager_history_processor(
                 section_cache_entry = section_cache.get(section_key, {})
                 managed_output = section_cache_entry.get("raw_output")
                 managed_model_alias = section_cache_entry.get("model_alias", model_alias)
+                cache_hit_scope: Optional[str] = None
+                cache_mode: Optional[str] = None
+                if managed_output is not None:
+                    cache_hit_scope = "run"
+                    cached_hash = _hash_output(managed_output)
+                    logger.set_sinks(["validation"]).info(
+                        "Context cache hit (run)",
+                        data={
+                            "event": "context_cache_hit",
+                            "section_name": section.name,
+                            "section_key": section_key,
+                            "cache_scope": cache_hit_scope,
+                            "output_hash": cached_hash,
+                        },
+                    )
 
                 input_file_values = section_directives.get("input-file", [])
                 empty_input_file_directive = _has_empty_input_file_directive(section.content)
@@ -630,7 +759,32 @@ def build_context_manager_history_processor(
                     if processed_values:
                         input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
                     elif input_file_data is None and processed_values == []:
+                        logger.set_sinks(["validation"]).info(
+                            "Context section skipped (input-file required)",
+                            data={
+                                "event": "context_section_skipped",
+                                "section_name": section.name,
+                                "section_key": section_key,
+                                "reason": "input_file_required",
+                            },
+                        )
                         continue
+
+                if input_file_values:
+                    counts = _count_input_files(input_file_data)
+                    file_summaries = _summarize_input_files(input_file_data)
+                    logger.set_sinks(["validation"]).info(
+                        "Context input files resolved",
+                        data={
+                            "event": "context_input_files_resolved",
+                            "section_name": section.name,
+                            "section_key": section_key,
+                            "file_count": counts["total"],
+                            "paths_only_count": counts["paths_only"],
+                            "missing_count": counts["missing"],
+                            "files": file_summaries,
+                        },
+                    )
 
                 cache_config: Optional[Dict[str, Any]] = None
                 cache_values = section_directives.get("cache", [])
@@ -647,9 +801,10 @@ def build_context_manager_history_processor(
                             "Failed to process context manager cache directive",
                             metadata={"error": str(exc)},
                         )
+                if cache_config and not cache_mode:
+                    cache_mode = cache_config.get("mode")
 
                 if managed_output is None and cache_config:
-                    cache_mode = cache_config.get("mode")
                     ttl_seconds = cache_config.get("ttl_seconds")
                     if cache_mode:
                         cached_entry = get_cached_step_output(
@@ -659,8 +814,9 @@ def build_context_manager_history_processor(
                             section_key=section_key,
                             cache_mode=cache_mode,
                         )
+                        cache_reason = None
                         if cached_entry and cached_entry.get("template_hash") == template.sha256:
-                            now = datetime.utcnow()
+                            now = _resolve_cache_now(run_context)
                             if _cache_entry_is_valid(
                                 created_at=cached_entry.get("created_at"),
                                 cache_mode=cache_mode,
@@ -670,6 +826,20 @@ def build_context_manager_history_processor(
                             ):
                                 managed_output = cached_entry.get("raw_output")
                                 managed_model_alias = model_alias
+                                cache_hit_scope = "persistent"
+                                cached_hash = _hash_output(managed_output)
+                                logger.set_sinks(["validation"]).info(
+                                    "Context cache hit (persistent)",
+                                    data={
+                                        "event": "context_cache_hit",
+                                        "section_name": section.name,
+                                        "section_key": section_key,
+                                        "cache_mode": cache_mode,
+                                        "cache_scope": cache_hit_scope,
+                                        "created_at": cached_entry.get("created_at"),
+                                        "output_hash": cached_hash,
+                                    },
+                                )
                                 section_cache_entry = {
                                     "raw_output": managed_output,
                                     "model_alias": managed_model_alias,
@@ -677,6 +847,23 @@ def build_context_manager_history_processor(
                                 section_cache[section_key] = section_cache_entry
                                 cache_entry["sections"] = section_cache
                                 cache_store[run_scope_key] = cache_entry
+                            else:
+                                cache_reason = "expired"
+                        elif cached_entry:
+                            cache_reason = "template_changed"
+                        else:
+                            cache_reason = "missing"
+                        if managed_output is None and cache_reason:
+                            logger.set_sinks(["validation"]).info(
+                                "Context cache miss",
+                                data={
+                                    "event": "context_cache_miss",
+                                    "section_name": section.name,
+                                    "section_key": section_key,
+                                    "cache_mode": cache_mode,
+                                    "reason": cache_reason,
+                                },
+                            )
 
                 if managed_output is None:
                     previous_summary_text = None
@@ -686,6 +873,16 @@ def build_context_manager_history_processor(
                                 session_id=session_id,
                                 vault_name=vault_name,
                                 limit=summaries_limit,
+                            )
+                            logger.set_sinks(["validation"]).info(
+                                "Context recent summaries loaded",
+                                data={
+                                    "event": "context_recent_summaries_loaded",
+                                    "section_name": section.name,
+                                    "section_key": section_key,
+                                    "count": len(recent_summaries_rows or []),
+                                    "limit": summaries_limit,
+                                },
                             )
                             if recent_summaries_rows:
                                 previous_summary_text = "\n\n".join(
@@ -740,6 +937,16 @@ def build_context_manager_history_processor(
                     manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
                     if tool_instructions:
                         manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"
+                    logger.set_sinks(["validation"]).info(
+                        "Context manager LLM invoked",
+                        data={
+                            "event": "context_llm_invoked",
+                            "section_name": section.name,
+                            "section_key": section_key,
+                            "model_alias": model_directive_value or model_alias,
+                            "cache_mode": cache_mode,
+                        },
+                    )
                     managed_obj = await manage_context(
                         manager_input,
                         instructions_override=manager_instruction,
@@ -772,6 +979,21 @@ def build_context_manager_history_processor(
                             )
 
                 summary_text = managed_output or "N/A"
+                output_hash = _hash_output(summary_text)
+                logger.set_sinks(["validation"]).info(
+                    "Context section completed",
+                    data={
+                        "event": "context_section_completed",
+                        "section_name": section.name,
+                        "section_key": section_key,
+                        "model_alias": managed_model_alias,
+                        "output_length": len(summary_text),
+                        "output_hash": output_hash,
+                        "from_cache": cache_hit_scope is not None,
+                        "cache_scope": cache_hit_scope,
+                        "cache_mode": cache_mode,
+                    },
+                )
                 section_name = section.name or "Template"
                 summary_title = f"Context summary (managed: {section_name})"
                 summary_messages.append(
@@ -811,6 +1033,26 @@ def build_context_manager_history_processor(
                         "sections": [section["name"] for section in persisted_sections],
                     },
                 )
+                logger.info(
+                    "Context summary persisted",
+                    data={
+                        "session_id": session_id,
+                        "vault_name": vault_name,
+                        "template_name": template.name,
+                        "sections": [section["name"] for section in persisted_sections],
+                    },
+                )
+                logger.set_sinks(["validation"]).info(
+                    "Context summary persisted",
+                    data={
+                        "event": "context_summary_persisted",
+                        "session_id": session_id,
+                        "vault_name": vault_name,
+                        "template_name": template.name,
+                        "sections": [section["name"] for section in persisted_sections],
+                        "summary_length": len(combined_output),
+                    },
+                )
                 cache_entry["persisted"] = True
                 cache_store[run_scope_key] = cache_entry
             except Exception as exc:  # pragma: no cover - defensive
@@ -823,6 +1065,33 @@ def build_context_manager_history_processor(
         curated_history.extend(passthrough_slice)
         if latest_user_message is not None:
             curated_history.append(latest_user_message)
+        summary_sections: List[str] = []
+        for msg in summary_messages:
+            parts = getattr(msg, "parts", None)
+            if not parts:
+                continue
+            for part in parts:
+                if isinstance(part, SystemPromptPart):
+                    content = getattr(part, "content", "") or ""
+                    if content.startswith("Context summary (managed: "):
+                        section = content.split("Context summary (managed: ", 1)[1]
+                        section = section.split(")", 1)[0]
+                        if section:
+                            summary_sections.append(section)
+        logger.set_sinks(["validation"]).info(
+            "Context history compiled",
+            data={
+                "event": "context_history_compiled",
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "template_name": template.name,
+                "total_messages": len(curated_history),
+                "summary_section_count": len(summary_sections),
+                "summary_sections": summary_sections,
+                "passthrough_count": len(passthrough_slice),
+                "latest_user_included": latest_user_message is not None,
+            },
+        )
         return curated_history
 
     return processor

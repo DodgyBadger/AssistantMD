@@ -116,6 +116,9 @@ self.assert_event_contains(
 # List available scenarios with descriptions
 python validation/run_validation.py list
 
+# Filter list by glob pattern
+python validation/run_validation.py list integration/context_manager*
+
 # Run specific scenario(s)
 python validation/run_validation.py run integration/basic_haiku
 python validation/run_validation.py run integration/basic_haiku, integration/tool_suite
@@ -123,8 +126,8 @@ python validation/run_validation.py run integration/basic_haiku, integration/too
 # Run all scenarios in a folder
 python validation/run_validation.py run integration
 
-# Filter by name pattern
-python validation/run_validation.py run --pattern planner
+# Filter by name pattern (glob)
+python validation/run_validation.py run integration/context_manager*
 ```
 
 ## Tips for fast iteration

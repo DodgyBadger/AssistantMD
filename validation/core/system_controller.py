@@ -77,6 +77,7 @@ class SystemController:
         self._loaded_workflows: List[Any] = []  # Workflow definitions imported later
         self._startup_errors: List[Any] = []  # ConfigurationError imported later
         self._startup_results: Dict[str, Any] = {}
+        self._context_manager_now: Optional[datetime] = None
 
         # Job execution tracking
         self._job_executions: Dict[str, List[datetime]] = {}
@@ -114,6 +115,8 @@ class SystemController:
 
             # Bootstrap runtime services with test configuration
             self._runtime = await bootstrap_runtime(config)
+            if self._context_manager_now is not None:
+                self._runtime.config.features["context_manager_now"] = self._context_manager_now.isoformat()
 
             # Add job execution listeners
             self._runtime.scheduler.add_listener(self._on_job_executed, EVENT_JOB_EXECUTED)
@@ -173,6 +176,16 @@ class SystemController:
         else:
             os.environ["SECRETS_PATH"] = self._original_secrets_path
         self._original_secrets_path = None
+
+    def set_context_manager_now(self, value: Optional[datetime]) -> None:
+        """Override cache clock used by context manager in validation runs."""
+        self._context_manager_now = value
+        if self._runtime is None:
+            return
+        if value is None:
+            self._runtime.config.features.pop("context_manager_now", None)
+        else:
+            self._runtime.config.features["context_manager_now"] = value.isoformat()
 
     
     async def restart_system(self):

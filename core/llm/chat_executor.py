@@ -31,6 +31,7 @@ from core.context.manager import build_context_manager_history_processor
 from core.context.templates import load_template
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
+from core.runtime.state import get_runtime_context, has_runtime_context
 
 
 logger = UnifiedLogger(tag="chat-executor")
@@ -140,6 +141,28 @@ class ChatExecutionResult:
 class ChatRunDeps:
     """Per-run dependencies/caches for chat agents."""
     context_manager_cache: dict[str, Any] = field(default_factory=dict)
+    context_manager_now: Optional[datetime] = None
+
+
+def _resolve_context_manager_now() -> Optional[datetime]:
+    if not has_runtime_context():
+        return None
+    try:
+        runtime = get_runtime_context()
+    except Exception:
+        return None
+    features = runtime.config.features or {}
+    raw_value = features.get("context_manager_now")
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return datetime.fromisoformat(raw_value)
+        except ValueError:
+            return None
+    return None
 
 
 def save_chat_history(vault_path: str, session_id: str, prompt: str, response: str):
@@ -268,7 +291,7 @@ async def execute_chat_prompt(
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
     # Run agent
-    run_deps = ChatRunDeps()
+    run_deps = ChatRunDeps(context_manager_now=_resolve_context_manager_now())
     result = await agent.run(
         prompt,
         message_history=message_history,
@@ -362,7 +385,7 @@ async def execute_chat_prompt_stream(
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
-    run_deps = ChatRunDeps()
+    run_deps = ChatRunDeps(context_manager_now=_resolve_context_manager_now())
 
     try:
         # Use run_stream_events() to properly handle tool calls

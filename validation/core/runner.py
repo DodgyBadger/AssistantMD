@@ -58,7 +58,7 @@ class ValidationRunner:
         self.runs_dir = self.validation_root / "runs"
         self.runs_dir.mkdir(parents=True, exist_ok=True)
     
-    def discover_scenarios(self, pattern: Optional[str] = None) -> List[str]:
+    def discover_scenarios(self) -> List[str]:
         """
         Discover V2 validation scenarios by finding BaseScenario subclasses.
 
@@ -95,9 +95,6 @@ class ValidationRunner:
                     if (obj.__module__ == module_name and
                         hasattr(obj, 'test_scenario') and
                         obj.__name__ != 'BaseScenario'):
-
-                        if pattern and pattern not in scenario_name:
-                            continue
 
                         scenarios.append(scenario_name)
                         break  # Only take first valid scenario class per file
@@ -269,8 +266,7 @@ class ValidationRunner:
         except Exception as e:
             logger.warning(f"Failed to cleanup old validation runs: {e}")
 
-    def run_scenarios(self, scenario_names: Optional[List[str]] = None,
-                     pattern: Optional[str] = None) -> ValidationRun:
+    def run_scenarios(self, scenario_names: Optional[List[str]] = None) -> ValidationRun:
         """Run V2 validation scenarios."""
         run_start = datetime.now()
         run_id = run_start.strftime("%Y%m%d_%H%M%S")
@@ -280,7 +276,7 @@ class ValidationRunner:
 
         # Discover scenarios if not specified
         if scenario_names is None:
-            scenario_names = self.discover_scenarios(pattern=pattern)
+            scenario_names = self.discover_scenarios()
         
         if not scenario_names:
             logger.warning("No scenarios found to execute")

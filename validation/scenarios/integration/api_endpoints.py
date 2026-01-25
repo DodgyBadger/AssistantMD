@@ -196,58 +196,6 @@ Summarize the validation run context.
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
 
-        # Context-template chat with a scenario-scoped template
-        self.create_file(
-            vault,
-            "AssistantMD/ContextTemplates/validation_template.md",
-            MANAGED_CONTEXT_TEMPLATE,
-        )
-        managed_payload = {
-            "vault_name": vault.name,
-            "prompt": "Hello. Write a haiku about context managers.",
-            "tools": [],
-            "model": "gpt-mini",
-            "context_template": "validation_template.md",
-        }
-        managed_first = self.call_api("/api/chat/execute", method="POST", data=managed_payload)
-        assert managed_first.status_code == 200, "Managed-context chat execution succeeds"
-        managed_session = managed_first.json()["session_id"]
-        assert managed_session, "Managed-context session id returned"
-
-        managed_second = self.call_api(
-            "/api/chat/execute",
-            method="POST",
-            data={
-                **managed_payload,
-                "session_id": managed_session,
-                "prompt": "Second turn for managed context.",
-            },
-        )
-        assert managed_second.status_code == 200, "Managed-context follow-up succeeds"
-        assert managed_second.json().get("response"), "Managed-context response should not be empty"
-
         await self.stop_system()
         self.teardown_scenario()
 
-
-# === TEMPLATES ===
-
-MANAGED_CONTEXT_TEMPLATE = """
----
-description: Simply tracks the current topic. Allows meandering conversation.
----
-
-## TEMPLATE
-
-Keep the view concise and helpful without locking onto a mission. Summarize what matters for the next reply, but allow topic changes naturally.
-
-What to include:
-- **topic**: brief description of the current conversation focus.
-- **constraints**: any explicit rules or formats mentioned recently.
-- **key_points**: 3-5 bullets capturing important details or asks.
-- **recent_turns**: succinct snippets from the latest exchange.
-- **latest_input**: the most recent user message, concisely restated.
-
-Keep it short and avoid unnecessary repetition.
-
-"""
