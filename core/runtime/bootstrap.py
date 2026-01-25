@@ -5,6 +5,7 @@ Provides single entry point for initializing all runtime services
 with proper configuration, error handling, and lifecycle management.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,6 +22,7 @@ from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .state import set_runtime_context, clear_runtime_context
 from .paths import set_bootstrap_roots
+from . import state as runtime_state
 
 
 async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
@@ -43,7 +45,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         RuntimeStartupError: If service initialization fails
     """
     logger = UnifiedLogger(tag="runtime-bootstrap")
-    logger.info("Starting runtime bootstrap", metadata={"data_root": str(config.data_root)})
+    logger.info(
+        "Starting runtime bootstrap",
+        data={"data_root": str(config.data_root)},
+    )
 
     try:
         # Make bootstrap roots available for helpers that run before context is set
@@ -58,12 +63,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 metadata={"errors": error_messages},
             )
             raise RuntimeConfigError("; ".join(error_messages))
-
-        for warning in config_status.warnings:
-            logger.warning(
-                warning.message,
-                metadata={"issue": warning.name, "severity": warning.severity},
-            )
 
         # Ensure env defaults reflect the configured roots before services that read env/context
         import os
@@ -118,15 +117,19 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         # Start scheduler in paused mode to allow job synchronization
         scheduler.start(paused=True)
-        logger.info("Scheduler started in paused mode for job synchronization")
+        # Scheduler starts paused to sync jobs before first run.
 
         # Create runtime context with all initialized services
+        boot_id = runtime_state.next_boot_id()
+        started_at = datetime.utcnow()
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,
             workflow_loader=workflow_loader,
             logger=logger,
-            ingestion=ingestion_service
+            ingestion=ingestion_service,
+            boot_id=boot_id,
+            started_at=started_at,
         )
 
         # Register context globally before job synchronization
@@ -135,7 +138,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         try:
             # Load workflow configurations and synchronize jobs using runtime context
             await runtime_context.reload_workflows(manual=False)
-            logger.info("Workflow configurations loaded and jobs synchronized")
 
             # Schedule ingestion worker
             scheduler.add_job(
@@ -150,7 +152,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
             # Resume scheduler after successful synchronization
             scheduler.resume()
-            logger.info("Scheduler resumed and ready for execution")
 
         except Exception:
             # If job synchronization fails, clean up and rethrow
@@ -158,15 +159,14 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             clear_runtime_context()
             raise
 
-        logger.activity(
+        logger.info(
             "Runtime bootstrap completed successfully",
-            vault="system",
-            metadata={
+            data={
                 "data_root": str(config.data_root),
                 "system_root": str(config.system_root),
                 "scheduler_workers": config.max_scheduler_workers,
-                "features": config.features
-            }
+                "features": config.features,
+            },
         )
 
         return runtime_context

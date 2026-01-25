@@ -24,6 +24,13 @@ class ImportUrlTool(BaseTool):
             raise ValueError("Unable to derive vault name from vault_path")
 
         def import_url(url: str, clean_html: bool = True):
+            logger.set_sinks(["validation"]).info(
+                "tool_invoked",
+                data={
+                    "tool": "import_url",
+                    "vault": vault_name,
+                },
+            )
             runtime = get_runtime_context()
             svc: IngestionService = runtime.ingestion
             job = svc.enqueue_job(

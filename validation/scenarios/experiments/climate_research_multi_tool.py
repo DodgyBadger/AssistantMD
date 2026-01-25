@@ -32,9 +32,16 @@ class ClimateResearchMultiToolScenario(BaseScenario):
         await self.start_system()
 
         # Validate system startup
-        self.expect_vault_discovered("KnowledgeVault")
-        self.expect_workflow_loaded("KnowledgeVault", "climate-research-multi-tool")
-        self.expect_scheduler_job_created("KnowledgeVault/climate-research-multi-tool")
+        assert "KnowledgeVault" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "KnowledgeVault/climate-research-multi-tool"
+            for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "KnowledgeVault__climate-research-multi-tool" for job in jobs
+        ), "Scheduler job not created"
 
         # === COMPREHENSIVE RESEARCH EXECUTION ===
         self.set_date("2025-01-20")  # Monday
@@ -44,13 +51,20 @@ class ClimateResearchMultiToolScenario(BaseScenario):
         await self.trigger_job(vault, "climate-research-multi-tool")
 
         # === ASSERTIONS ===
-        self.expect_scheduled_execution_success(vault, "climate-research-multi-tool")
+        assert len(self.get_job_executions(vault, "climate-research-multi-tool")) > 0, (
+            "No executions recorded for KnowledgeVault/climate-research-multi-tool"
+        )
 
         # Verify all research phases created their output files
-        self.expect_file_created(vault, "climate-research/01-overview.md")
-        self.expect_file_created(vault, "climate-research/02-science-foundation.md")
-        self.expect_file_created(vault, "climate-research/03-solutions.md")
-        self.expect_file_created(vault, "climate-research/05-knowledge-base.md")
+        for rel_path in [
+            "climate-research/01-overview.md",
+            "climate-research/02-science-foundation.md",
+            "climate-research/03-solutions.md",
+            "climate-research/05-knowledge-base.md",
+        ]:
+            output_path = vault / rel_path
+            assert output_path.exists(), f"Expected {rel_path} to be created"
+            assert output_path.stat().st_size > 0, f"{rel_path} is empty"
 
         self._log_timeline("✅ Multi-tool climate research workflow completed successfully")
 

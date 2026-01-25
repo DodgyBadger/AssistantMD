@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 # Global runtime context instance
 _runtime_context: Optional["RuntimeContext"] = None
+_runtime_boot_counter = 0
 
 
 def set_runtime_context(context: Optional["RuntimeContext"]) -> None:
@@ -79,6 +80,13 @@ def clear_runtime_context() -> None:
     Useful for cleanup and test teardown.
     """
     set_runtime_context(None)
+
+
+def next_boot_id() -> int:
+    """Return the next runtime boot sequence number."""
+    global _runtime_boot_counter
+    _runtime_boot_counter += 1
+    return _runtime_boot_counter
 
 
 class RuntimeStateError(Exception):

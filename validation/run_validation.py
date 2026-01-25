@@ -121,7 +121,6 @@ def run_scenarios(args):
         print("\n=== FOLLOW-UP ACTIONS ===")
         print("📋 Check individual scenario timelines in validation/runs/")
         print("🔍 Review vault snapshots for expected vs actual outputs")
-        print("⚠️  Check validation/issues_log.md for tracked issues")
         
         if validation_run.error_scenarios > 0:
             print(f"🚨 CRITICAL: {validation_run.error_scenarios} system errors require immediate attention")

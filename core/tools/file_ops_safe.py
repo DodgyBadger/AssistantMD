@@ -8,8 +8,14 @@ import os
 import glob
 import shutil
 import subprocess
+from pydantic_ai.tools import Tool
+
+from core.logger import UnifiedLogger
 from .base import BaseTool
 from .utils import validate_and_resolve_path
+
+
+logger = UnifiedLogger(tag="file-ops-safe-tool")
 
 
 class FileOpsSafe(BaseTool):
@@ -39,6 +45,13 @@ class FileOpsSafe(BaseTool):
                 Operation result message
             """
             try:
+                logger.set_sinks(["validation"]).info(
+                    "tool_invoked",
+                    data={
+                        "tool": "file_ops_safe",
+                        "vault": vault_path.rstrip("/").split("/")[-1] if vault_path else None,
+                    },
+                )
                 if not vault_path:
                     raise ValueError("vault_path is required for file operations")
 
@@ -63,7 +76,7 @@ class FileOpsSafe(BaseTool):
             except Exception as e:
                 return f"Error performing '{operation}' operation: {str(e)}"
         
-        return file_operations
+        return Tool(file_operations, name="file_ops_safe")
     
     @classmethod
     def get_instructions(cls) -> str:

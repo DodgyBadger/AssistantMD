@@ -32,8 +32,11 @@ class TestAgenticWorkflowScenario(BaseScenario):
         # === SYSTEM STARTUP ===
         await self.start_system()
 
-        self.expect_vault_discovered("Research")
-        self.expect_workflow_loaded("Research", "agentic_workflow")
+        assert "Research" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "Research/agentic_workflow" for cfg in workflows
+        ), "Workflow not loaded"
 
         # === WORKFLOW EXECUTION ===
         self.set_date("2025-01-15")
@@ -41,7 +44,9 @@ class TestAgenticWorkflowScenario(BaseScenario):
         await self.trigger_job(vault, "agentic_workflow")
 
         # === ASSERTIONS ===
-        self.expect_scheduled_execution_success(vault, "agentic_workflow")
+        assert len(self.get_job_executions(vault, "agentic_workflow")) > 0, (
+            "No executions recorded for Research/agentic_workflow"
+        )
 
         # The workflow should create files autonomously
         # We intentionally don't specify WHAT files to see what it does

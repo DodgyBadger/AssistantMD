@@ -5,6 +5,7 @@ Provides a standard interface for tool creation and instruction generation.
 """
 
 from abc import ABC, abstractmethod
+from pydantic_ai.tools import Tool
 
 
 class BaseTool(ABC):
@@ -12,8 +13,8 @@ class BaseTool(ABC):
     
     @classmethod
     @abstractmethod
-    def get_tool(cls, vault_path: str = None):
-        """Get the Pydantic AI tool implementation.
+    def get_tool(cls, vault_path: str = None) -> Tool:
+        """Get the Pydantic AI Tool implementation.
         
         Args:
             vault_path: Optional path to vault for tools that need vault context

@@ -47,6 +47,10 @@ class TavilyExtract(BaseTool):
             Returns:
                 Extracted content as formatted text
             """
+            logger.set_sinks(["validation"]).info(
+                "tool_invoked",
+                data={"tool": "tavily_extract"},
+            )
             # Tavily API has max 120 second timeout, use min of our default and 120
             timeout = min(int(get_default_api_timeout()), 120)
             

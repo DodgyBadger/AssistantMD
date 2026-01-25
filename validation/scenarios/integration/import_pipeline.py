@@ -33,26 +33,26 @@ class ImportPipelineScenario(BaseScenario):
             method="POST",
             data={"vault": vault.name, "queue_only": False},
         )
-        self.expect_equals(response.status_code, 200, "Import scan should succeed")
+        assert response.status_code == 200, "Import scan should succeed"
         payload = response.json()
         jobs = payload.get("jobs_created") or []
-        self.expect_equals(len(jobs), 1, "One job should be created for the PDF")
+        assert len(jobs) == 1, "One job should be created for the PDF"
         job = jobs[0]
-        self.expect_equals(job.get("status"), "completed", "Job should complete inline")
+        assert job.get("status") == "completed", "Job should complete inline"
         outputs = job.get("outputs") or []
-        self.expect_equals(
-            any(out.endswith("Imported/sample.md") for out in outputs),
-            True,
-            "Output path should include Imported/sample.md",
-        )
+        assert any(
+            out.endswith("Imported/sample.md") for out in outputs
+        ), "Output path should include Imported/sample.md"
 
         # Source file should be removed after successful import
-        self.expect_equals(import_path.exists(), False, "Source file should be cleaned up")
+        assert not import_path.exists(), "Source file should be cleaned up"
 
         # Validate the rendered markdown exists and contains the extracted text
-        self.expect_file_created(vault, "Imported/sample.md")
-        self.expect_file_contains(vault, "Imported/sample.md", "Import validation")
-        self.expect_file_contains(vault, "Imported/sample.md", "mime: application/pdf")
+        sample_path = vault / "Imported" / "sample.md"
+        assert sample_path.exists(), "Expected Imported/sample.md to be created"
+        sample_content = sample_path.read_text()
+        assert "Import validation" in sample_content
+        assert "mime: application/pdf" in sample_content
 
         # === URL INGEST ===
         url_response = self.call_api(
@@ -60,22 +60,20 @@ class ImportPipelineScenario(BaseScenario):
             method="POST",
             data={"vault": vault.name, "url": "https://example.com", "clean_html": True},
         )
-        self.expect_equals(url_response.status_code, 200, "URL ingest should return 200")
+        assert url_response.status_code == 200, "URL ingest should return 200"
         url_payload = url_response.json()
-        self.expect_equals(
-            url_payload.get("status"), "completed", "URL ingest job should complete"
+        assert url_payload.get("status") == "completed", (
+            "URL ingest job should complete"
         )
         url_outputs = url_payload.get("outputs") or []
-        self.expect_equals(
-            len(url_outputs) > 0,
-            True,
-            "URL ingest should return at least one output path",
-        )
+        assert len(url_outputs) > 0, "URL ingest should return at least one output path"
         # Verify the rendered file exists and contains expected markers
         for rel_path in url_outputs:
-            self.expect_file_created(vault, rel_path)
-            self.expect_file_contains(vault, rel_path, "example")
-            self.expect_file_contains(vault, rel_path, "mime: text/html")
+            output_path = vault / rel_path
+            assert output_path.exists(), f"Expected {rel_path} to be created"
+            output_content = output_path.read_text()
+            assert "example" in output_content
+            assert "mime: text/html" in output_content
 
         await self.stop_system()
         self.teardown_scenario()

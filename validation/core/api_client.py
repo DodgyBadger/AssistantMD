@@ -15,7 +15,19 @@ from fastapi.testclient import TestClient
 
 from core.logger import UnifiedLogger
 
-from validation.core.models import APIResponse, CommandResult
+from dataclasses import dataclass
+
+
+@dataclass
+class APIResponse:
+    """Wrapper for API response data."""
+
+    status_code: int
+    data: dict | None = None
+    text: str = ""
+
+    def json(self) -> dict:
+        return self.data or {}
 
 
 class APIClient:
@@ -29,7 +41,6 @@ class APIClient:
 
         # Track interactions for artifact logging
         self.api_calls: list[Dict[str, Any]] = []
-        self.cli_commands: list[Dict[str, Any]] = []
 
     # === PUBLIC API ===
 
@@ -86,26 +97,6 @@ class APIClient:
             text=text,
         )
 
-    def launcher_command(self, command: str) -> CommandResult:
-        """
-        Execute launcher CLI command.
-
-        Placeholder implementation until launcher commands are wired in.
-        """
-        interaction = {
-            "timestamp": datetime.now().isoformat(),
-            "command": command,
-        }
-        self.cli_commands.append(interaction)
-
-        if "status" in command:
-            return CommandResult(0, "Vaults: 1\nScheduler: Running", "")
-        if "create" in command:
-            return CommandResult(0, "Vault created successfully", "")
-        if "--help" in command:
-            return CommandResult(0, "Usage: launcher [command]", "")
-        return CommandResult(1, "", "Unknown command")
-
     def save_interaction_log(self, log_file: Path):
         """Save all API and CLI interactions to single log file."""
         with open(log_file, "w") as handle:
@@ -130,11 +121,6 @@ class APIClient:
                     elif call.get("response_text"):
                         handle.write(f"  Response Text: {call['response_text']}\n")
                     handle.write("\n")
-
-            if self.cli_commands:
-                handle.write("## CLI Commands\n\n")
-                for cmd in self.cli_commands:
-                    handle.write(f"**{cmd['timestamp']}**: {cmd['command']}\n\n")
 
     def shutdown(self):
         """No-op for compatibility; lifetime managed by the system controller."""

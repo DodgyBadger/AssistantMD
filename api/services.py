@@ -43,15 +43,7 @@ from core.settings.secrets_store import (
     delete_secret,
     secret_has_value,
 )
-from core.llm.session_manager import SessionManager
-from core.llm.chat_executor import execute_chat_prompt
-from core.constants import (
-    COMPACT_SUMMARY_PROMPT,
-    COMPACT_INSTRUCTIONS,
-    WORKFLOW_CREATION_SUMMARY_PROMPT,
-)
 from core.runtime.paths import get_system_root
-from .utils import generate_session_id
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -273,6 +265,16 @@ def scan_import_folder(
             refreshed_jobs.append(ingest_service.get_job(job.id) or job)
         jobs_created = refreshed_jobs
 
+    logger.info(
+        "Import scan completed",
+        data={
+            "vault": vault,
+            "jobs_created": len(jobs_created),
+            "skipped": len(skipped),
+            "queue_only": queue_only,
+        },
+    )
+
     return jobs_created, skipped
 
 
@@ -295,7 +297,18 @@ def import_url_direct(vault: str, url: str, clean_html: bool = True):
     except Exception:
         # process_job records failure status; propagate via job state
         pass
-    return ingest_service.get_job(job.id)
+    job = ingest_service.get_job(job.id)
+    outputs = job.outputs if job else None
+    logger.info(
+        "Import URL completed",
+        data={
+            "vault": vault,
+            "status": job.status if job else None,
+            "outputs_count": len(outputs) if outputs is not None else 0,
+            "clean_html": clean_html,
+        },
+    )
+    return job
 
 
 def collect_system_health() -> SystemInfo:
@@ -479,7 +492,17 @@ async def rescan_vaults_and_update_scheduler(scheduler=None) -> Dict[str, Any]:
         
         # Use the shared scheduler utilities for the rescan
         results = await setup_scheduler_jobs(scheduler, manual_reload=True)
-        
+
+        logger.info(
+            "Vault rescan completed",
+            data={
+                "vaults_discovered": results.get("vaults_discovered"),
+                "workflows_loaded": results.get("workflows_loaded"),
+                "enabled_workflows": results.get("enabled_workflows"),
+                "scheduler_jobs_synced": results.get("scheduler_jobs_synced"),
+            },
+        )
+
         return results
         
     except Exception as e:
@@ -576,6 +599,10 @@ async def update_system_settings(new_content: str) -> SystemSettingsResponse:
         raise SystemConfigurationError(f"Failed to write settings file: {exc}") from exc
 
     reload_configuration()
+    logger.info(
+        "Settings updated",
+        data={"settings_path": str(path), "content_size": len(normalized_content)},
+    )
 
     return _build_settings_response(path)
 
@@ -733,6 +760,13 @@ def update_general_setting_value(setting_name: str, payload: SettingUpdateReques
     reload_result = reload_configuration(restart_required=updated.restart_required)
     setting_info = _build_setting_info(setting_name, updated)
     setting_info.restart_required = setting_info.restart_required or reload_result.restart_required
+    logger.info(
+        "General setting updated",
+        data={
+            "setting_key": setting_name,
+            "restart_required": setting_info.restart_required,
+        },
+    )
     return setting_info
 
 
@@ -854,6 +888,10 @@ def upsert_configurable_model(model_name: str, payload: ModelConfigRequest) -> M
         if issue.name.startswith('model:')
     }
 
+    logger.info(
+        "Model alias upserted",
+        data={"alias": model_name, "provider": payload.provider},
+    )
     return _build_model_info(model_name, updated, config_status.model_availability, issue_messages)
 
 
@@ -865,6 +903,7 @@ def delete_configurable_model(model_name: str) -> OperationResult:
         raise SystemConfigurationError(str(exc)) from exc
 
     reload_result = reload_configuration()
+    logger.info("Model alias deleted", data={"alias": model_name})
     return OperationResult(
         success=True,
         message=f"Model '{model_name}' removed.",
@@ -920,6 +959,14 @@ def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequ
 
     reload_result = reload_configuration()
 
+    logger.info(
+        "Provider upserted",
+        data={
+            "alias": provider_name,
+            "has_api_key": bool(api_key),
+            "has_base_url": bool(base_url),
+        },
+    )
     return _build_provider_info(
         provider_name,
         updated,
@@ -935,6 +982,7 @@ def delete_configurable_provider(provider_name: str) -> OperationResult:
         raise SystemConfigurationError(str(exc)) from exc
 
     reload_result = reload_configuration()
+    logger.info("Provider deleted", data={"alias": provider_name})
     return OperationResult(
         success=True,
         message=f"Provider '{provider_name}' removed.",
@@ -1002,6 +1050,10 @@ def update_secret(request: SecretUpdateRequest) -> OperationResult:
     reload_result = reload_configuration()
 
     action = "Updated" if value else "Cleared"
+    logger.info(
+        "Secret updated",
+        data={"name": request.name, "has_value": bool(value)},
+    )
     return OperationResult(
         success=True,
         message=f"{action} {request.name}.",
@@ -1016,6 +1068,7 @@ def delete_secret_entry(name: str) -> OperationResult:
     delete_secret(name)
     reload_result = reload_configuration()
 
+    logger.info("Secret deleted", data={"name": name})
     return OperationResult(
         success=True,
         message=f"Deleted {name}.",
@@ -1056,6 +1109,14 @@ async def execute_workflow_manually(global_id: str, step_name: str = None) -> Di
 
         workflow_function = target_workflow.workflow_function
         
+        logger.info(
+            "Workflow execution started",
+            data={
+                "global_id": global_id,
+                "step_name": step_name,
+            },
+        )
+
         # Execute workflow with timing using job arguments
         start_time = datetime.now()
         try:
@@ -1082,6 +1143,13 @@ async def execute_workflow_manually(global_id: str, step_name: str = None) -> Di
             'output_files': [],  # TODO: Enhanced in Phase 4
             'message': f"Workflow '{global_id}' executed successfully in {execution_time:.2f} seconds"
         }
+        logger.info(
+            "Workflow execution finished",
+            data={
+                "global_id": global_id,
+                "execution_time_seconds": execution_time,
+            },
+        )
         
         return results
         
@@ -1170,180 +1238,3 @@ async def get_metadata() -> MetadataResponse:
         models=models,
         tools=tools
     )
-
-
-async def compact_conversation_history(
-    session_id: str,
-    vault_name: str,
-    model: str,
-    user_instructions: Optional[str],
-    session_manager: SessionManager,
-    vault_path: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Compact conversation history by generating LLM summary in the current session,
-    then creating a new session starting with that summary.
-
-    Flow:
-    1. Send summarization prompt to current session (added to history)
-    2. Get summary response from LLM
-    3. Generate new session_id
-    4. Initialize new session with summary as first message
-    5. Return new session_id for UI to update
-
-    Args:
-        session_id: Current session to compact
-        vault_name: Vault context
-        model: Model name to use for summarization
-        user_instructions: Optional user guidance for what to prioritize
-        session_manager: SessionManager instance
-        vault_path: Path to vault directory (optional, resolved from runtime if not provided)
-
-    Returns:
-        Dict with summary, original_count, compacted_count, and new_session_id
-
-    Raises:
-        ValueError: If history is too short to compact or session not found
-    """
-    history = session_manager.get_history(session_id, vault_name)
-
-    if not history or len(history) <= 2:
-        raise ValueError("History too short to compact (need more than 2 messages)")
-
-    original_count = len(history)
-
-    # Build summarization prompt
-    summarize_prompt = COMPACT_SUMMARY_PROMPT
-
-    if user_instructions:
-        summarize_prompt += f"\n\nUser guidance: {user_instructions}"
-
-    # Build instructions for the summarization agent
-    summarize_instructions = COMPACT_INSTRUCTIONS
-
-    # Get vault path from runtime context if not provided
-    if vault_path is None:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / vault_name)
-
-    # Execute summarization in the SAME session (gets added to history like any other turn)
-    result = await execute_chat_prompt(
-        vault_name=vault_name,
-        vault_path=vault_path,
-        prompt=summarize_prompt,
-        session_id=session_id,  # Same session, not temp
-        tools=[],  # No tools needed for summarization
-        model=model,
-        use_conversation_history=True,
-        session_manager=session_manager,
-        instructions=summarize_instructions
-    )
-
-    summary = result.response
-
-    # Generate new session_id for fresh conversation
-    new_session_id = generate_session_id(vault_name)
-
-    # Get the summary message from current session (last assistant message)
-    current_history = session_manager.get_history(session_id, vault_name)
-    if current_history:
-        summary_message = current_history[-1]  # Last message is the summary
-
-        # Initialize new session with just the summary
-        session_manager.add_messages(new_session_id, vault_name, [summary_message])
-
-    return {
-        "summary": summary,
-        "original_count": original_count,
-        "compacted_count": 1,
-        "new_session_id": new_session_id
-    }
-
-
-async def start_workflow_creation(
-    session_id: str,
-    vault_name: str,
-    model: str,
-    user_instructions: Optional[str],
-    session_manager: SessionManager,
-    vault_path: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Start workflow creation conversation from current chat session or fresh.
-
-    Handles two scenarios:
-    1. Existing conversation: Summarizes with creation focus, starts new session
-    2. No/minimal conversation: Skips summary, starts fresh creation session
-
-    The new session uses workflow creation instructions so the LLM gathers
-    requirements and writes the workflow file using available tools.
-
-    Args:
-        session_id: Current session to summarize (may be empty/minimal)
-        vault_name: Vault context for workflow creation
-        model: Model name to use for creation conversation
-        user_instructions: Optional user guidance for workflow requirements
-        session_manager: SessionManager instance
-        vault_path: Path to vault directory (optional, resolved from runtime if not provided)
-
-    Returns:
-        Dict with summary, original_count, compacted_count, and new_session_id
-    """
-    history = session_manager.get_history(session_id, vault_name)
-
-    # Get vault path from runtime context if not provided
-    if vault_path is None:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / vault_name)
-
-    # Check if we have existing conversation to summarize
-    has_history = history and len(history) > 2
-
-    if has_history:
-        # Scenario 1: Existing conversation - summarize with creation focus
-        original_count = len(history)
-
-        summarize_prompt = WORKFLOW_CREATION_SUMMARY_PROMPT
-        if user_instructions:
-            summarize_prompt += f"\n\nUser's requirements: {user_instructions}"
-
-        # Execute summarization in SAME session (gets added to history)
-        result = await execute_chat_prompt(
-            vault_name=vault_name,
-            vault_path=vault_path,
-            prompt=summarize_prompt,
-            session_id=session_id,
-            tools=[],
-            model=model,
-            use_conversation_history=True,
-            session_manager=session_manager,
-            instructions="Summarize focusing on automation opportunities and workflow design."
-        )
-
-        summary = result.response
-
-        # Generate new session_id for creation conversation
-        new_session_id = generate_session_id(vault_name)
-
-        # Get summary message from current session (last assistant message)
-        current_history = session_manager.get_history(session_id, vault_name)
-        if current_history:
-            summary_message = current_history[-1]
-            # Initialize new session with summary
-            session_manager.add_messages(new_session_id, vault_name, [summary_message])
-    else:
-        # Scenario 2: No/minimal conversation - start fresh
-        original_count = len(history) if history else 0
-        summary = "Starting fresh workflow creation conversation."
-
-        # Generate new session_id for creation conversation
-        new_session_id = generate_session_id(vault_name)
-
-        # No summary to add - new session starts empty, will use creation instructions
-
-    return {
-        "summary": summary,
-        "original_count": original_count,
-        "compacted_count": 1 if has_history else 0,
-        "new_session_id": new_session_id
-    }

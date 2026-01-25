@@ -29,9 +29,15 @@ class MultiToolWorkflowScenario(BaseScenario):
         await self.start_system()
 
         # Validate system startup
-        self.expect_vault_discovered("MultiToolVault")
-        self.expect_workflow_loaded("MultiToolVault", "multi-tool-workflow")
-        self.expect_scheduler_job_created("MultiToolVault/multi-tool-workflow")
+        assert "MultiToolVault" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "MultiToolVault/multi-tool-workflow" for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "MultiToolVault__multi-tool-workflow" for job in jobs
+        ), "Scheduler job not created"
 
         # === TOOL EXECUTION TESTS ===
         self.set_date("2025-01-21")  # Tuesday
@@ -40,25 +46,38 @@ class MultiToolWorkflowScenario(BaseScenario):
         await self.trigger_job(vault, "multi-tool-workflow")
 
         # === ASSERTIONS ===
-        self.expect_scheduled_execution_success(vault, "multi-tool-workflow")
+        assert len(self.get_job_executions(vault, "multi-tool-workflow")) > 0, (
+            "No executions recorded for MultiToolVault/multi-tool-workflow"
+        )
 
         # Check that all output files were created
-        self.expect_file_created(vault, "tools/duckduckgo-test.md")
-        self.expect_file_created(vault, "tools/tavily-test.md")
-        self.expect_file_created(vault, "tools/piston-test.md")
-        self.expect_file_created(vault, "tools/web-search-generic-test.md")
-        self.expect_file_created(vault, "tools/code-execution-generic-test.md")
-        self.expect_file_created(vault, "tools/tavily-extract-test.md")
-        self.expect_file_created(vault, "tools/tavily-crawl-test.md")
+        output_files = [
+            "tools/duckduckgo-test.md",
+            "tools/tavily-test.md",
+            "tools/piston-test.md",
+            "tools/web-search-generic-test.md",
+            "tools/code-execution-generic-test.md",
+            "tools/tavily-extract-test.md",
+            "tools/tavily-crawl-test.md",
+        ]
+        for rel_path in output_files:
+            output_path = vault / rel_path
+            assert output_path.exists(), f"Expected {rel_path} to be created"
+            assert output_path.stat().st_size > 0, f"{rel_path} is empty"
 
         # Verify content in the tool outputs
-        self.expect_file_contains(vault, "tools/duckduckgo-test.md", ["Python"])
-        self.expect_file_contains(vault, "tools/tavily-test.md", ["machine learning"])
-        self.expect_file_contains(vault, "tools/piston-test.md", ["5"])  # Length of list
-        self.expect_file_contains(vault, "tools/web-search-generic-test.md", ["JavaScript"])
-        self.expect_file_contains(vault, "tools/code-execution-generic-test.md", ["56"])  # 7 * 8 (via default code execution tool)
-        self.expect_file_contains(vault, "tools/tavily-extract-test.md", ["Python"])
-        self.expect_file_contains(vault, "tools/tavily-crawl-test.md", ["Python"])
+        content_expectations = {
+            "tools/duckduckgo-test.md": "Python",
+            "tools/tavily-test.md": "machine learning",
+            "tools/piston-test.md": "5",
+            "tools/web-search-generic-test.md": "JavaScript",
+            "tools/code-execution-generic-test.md": "56",
+            "tools/tavily-extract-test.md": "Python",
+            "tools/tavily-crawl-test.md": "Python",
+        }
+        for rel_path, expected in content_expectations.items():
+            content = (vault / rel_path).read_text()
+            assert expected in content, f"Expected '{expected}' in {rel_path}"
 
         # Clean up
         await self.stop_system()

@@ -266,11 +266,10 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
         error_msg = f"Failed to validate configuration for {vault}/{name}: {str(e)}"
         
         # Add user-facing vault log for configuration errors
-        logger.activity(
+        logger.error(
             "Invalid workflow configuration detected",
-            vault=f"{vault}/{name}",
-            level="error",
-            metadata={
+            data={
+                "vault": f"{vault}/{name}",
                 "config_error": str(e),
                 "fix_suggestion": "Check YAML frontmatter syntax and required fields",
             },
@@ -314,7 +313,6 @@ class ProcessedStep:
 ## Step Processing Functions
 #######################################################################
 
-@logger.trace("process_step_content")
 def process_step_content(
     step_content: str, 
     vault_path: str, 

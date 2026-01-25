@@ -57,7 +57,10 @@ Step 3 content - should also run.
         
         # === SYSTEM STARTUP ===
         await self.start_system()
-        self.expect_workflow_loaded("NeverTestVault", "never_test")
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "NeverTestVault/never_test" for cfg in workflows
+        ), "Workflow not loaded"
         
         # === EXECUTE WORKFLOW ===
         self.set_date("2025-01-15")
@@ -65,11 +68,14 @@ Step 3 content - should also run.
         
         # === ASSERTIONS ===
         # Step 1 should create empty file (pre-creation issue)
-        self.expect_file_created(vault, "debug/step1.md")
+        step1_path = vault / "debug" / "step1.md"
+        assert step1_path.exists(), "Expected debug/step1.md to be created"
         
         # Steps 2 and 3 should run and create content
-        self.expect_file_created(vault, "debug/step2.md")
-        self.expect_file_created(vault, "debug/step3.md")
+        for rel_path in ["debug/step2.md", "debug/step3.md"]:
+            output_path = vault / rel_path
+            assert output_path.exists(), f"Expected {rel_path} to be created"
+            assert output_path.stat().st_size > 0, f"{rel_path} is empty"
         
         # Clean up
         await self.stop_system()

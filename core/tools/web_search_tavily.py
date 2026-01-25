@@ -10,6 +10,10 @@ from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from .base import BaseTool
 from core.settings.secrets_store import get_secret_value
+from core.logger import UnifiedLogger
+
+
+logger = UnifiedLogger(tag="web-search-tavily-tool")
 
 
 class WebSearchTavily(BaseTool):
@@ -32,6 +36,10 @@ class WebSearchTavily(BaseTool):
                 Search results formatted as text
             """
             try:
+                logger.set_sinks(["validation"]).info(
+                    "tool_invoked",
+                    data={"tool": "web_search_tavily"},
+                )
                 # Make request to Tavily API
                 with httpx.Client(timeout=float(get_default_api_timeout())) as client:
                     response = client.post(

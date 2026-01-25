@@ -91,6 +91,16 @@ class WorkflowExecutionService:
                 # Record files before execution
                 files_before = self._get_vault_files(vault)
 
+                self.logger.info(
+                    "Workflow execution started",
+                    data={
+                        "global_id": global_id,
+                        "vault_name": vault_name,
+                        "workflow_name": workflow_name,
+                        "step_name": step_name,
+                    },
+                )
+
                 # Create job arguments with test data root for clean dependency injection
                 job_args = create_job_args(global_id, data_root=str(self.test_vaults_path))
 

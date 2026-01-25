@@ -38,16 +38,9 @@ class ChatExecuteRequest(BaseModel):
     model: str = Field(..., description="Model name to use")
     use_conversation_history: bool = Field(True, description="Whether to maintain conversation state")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
-    session_type: str = Field("regular", description="Chat mode: 'regular' or 'workflow_creation'")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 
-class ChatSessionTransformRequest(BaseModel):
-    """Request model for chat session transformations (compact, assistant creation, etc)."""
-    session_id: str = Field(..., description="Session ID to transform")
-    vault_name: str = Field(..., description="Vault name for session")
-    model: str = Field(..., description="Model to use for transformation")
-    user_instructions: Optional[str] = Field(None, description="Optional user guidance for transformation")
 
 
 #######################################################################
@@ -144,14 +137,6 @@ class ChatExecuteResponse(BaseModel):
     message_count: int = Field(..., description="Total messages in conversation")
 
 
-class ChatSessionTransformResponse(BaseModel):
-    """Response model for chat session transformations (compact, assistant creation, etc)."""
-    success: bool = Field(..., description="Whether the operation succeeded")
-    summary: str = Field(..., description="Generated summary text")
-    original_message_count: int = Field(..., description="Number of messages before transformation")
-    compacted_to: int = Field(..., description="Number of messages after transformation")
-    new_session_id: str = Field(..., description="New session ID for continuing conversation")
-    message: str = Field(..., description="Human-readable confirmation message")
 
 
 class ModelInfo(BaseModel):

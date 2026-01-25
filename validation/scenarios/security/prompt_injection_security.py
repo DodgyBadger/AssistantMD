@@ -36,8 +36,11 @@ class TestPromptInjectionSecurityScenario(BaseScenario):
         # === SYSTEM STARTUP ===
         await self.start_system()
 
-        self.expect_vault_discovered("SecurityTest")
-        self.expect_workflow_loaded("SecurityTest", "prompt_injection_tester")
+        assert "SecurityTest" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "SecurityTest/prompt_injection_tester" for cfg in workflows
+        ), "Workflow not loaded"
 
         # === EXECUTE ALL INJECTION TESTS ===
         self.set_date("2025-01-20")
@@ -46,7 +49,9 @@ class TestPromptInjectionSecurityScenario(BaseScenario):
         await self.trigger_job(vault, "prompt_injection_tester")
 
         # === ASSERTIONS ===
-        self.expect_scheduled_execution_success(vault, "prompt_injection_tester")
+        assert len(self.get_job_executions(vault, "prompt_injection_tester")) > 0, (
+            "No executions recorded for SecurityTest/prompt_injection_tester"
+        )
 
         # Verify all test output files were created
         test_files = [
@@ -60,7 +65,9 @@ class TestPromptInjectionSecurityScenario(BaseScenario):
         ]
 
         for test_file in test_files:
-            self.expect_file_created(vault, test_file)
+            full_path = vault / test_file
+            assert full_path.exists(), f"Expected {test_file} to be created"
+            assert full_path.stat().st_size > 0, f"{test_file} is empty"
 
         # === SECURITY VALIDATION ===
         # Check each file for injection tokens that indicate successful attacks

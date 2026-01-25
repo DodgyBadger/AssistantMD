@@ -9,9 +9,14 @@ from pathlib import Path
 
 from pydantic import Field
 from pydantic_ai import RunContext
+from pydantic_ai.tools import Tool
 
 from .base import BaseTool
 from core.runtime.paths import get_docs_root
+from core.logger import UnifiedLogger
+
+
+logger = UnifiedLogger(tag="documentation-access-tool")
 
 
 class DocumentationAccessTool(BaseTool):
@@ -19,7 +24,7 @@ class DocumentationAccessTool(BaseTool):
     
     @classmethod
     def get_tool(cls, *, vault_path: str | None = None):
-        """Return the Pydantic AI tool function for documentation access."""
+        """Return the Pydantic AI tool for documentation access."""
         async def read_documentation(
             ctx: RunContext,
             path: str | None = Field(
@@ -36,10 +41,14 @@ class DocumentationAccessTool(BaseTool):
             Returns:
                 Documentation content
             """
+            logger.set_sinks(["validation"]).info(
+                "tool_invoked",
+                data={"tool": "documentation_access"},
+            )
             tool = cls()
             return tool._read_document(path)
         
-        return read_documentation
+        return Tool(read_documentation, name="documentation_access")
     
     @classmethod
     def get_instructions(cls) -> str:
