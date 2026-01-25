@@ -155,6 +155,10 @@ class CodeExecutionPiston(BaseTool):
                 stdin: Optional stdin content to pass to the program.
             """
             try:
+                logger.set_sinks(["validation"]).info(
+                    "tool_invoked",
+                    data={"tool": "code_execution"},
+                )
                 result = await client.execute_code(code, language=language, stdin=stdin)
             except httpx.HTTPError as exc:
                 logger.error("Piston HTTP error", metadata={"error": str(exc)})

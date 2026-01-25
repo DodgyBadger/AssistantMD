@@ -102,8 +102,6 @@ class SystemController:
         # Ensure secrets path points to the configured base for every start.
         os.environ["SECRETS_PATH"] = str(self._secrets_file)
 
-        self.logger.info("Starting AssistantMD system with runtime bootstrap")
-
         # Clear any existing runtime context for test isolation
         clear_runtime_context()
 
@@ -135,9 +133,6 @@ class SystemController:
 
             self.is_running = True
             self._api_app.state.runtime = self._runtime
-            self.logger.info(f"System startup completed - discovered {len(self._discovered_vaults)} vaults, "
-                           f"loaded {len(self._loaded_workflows)} workflows, "
-                           f"created {self._startup_results.get('scheduler_jobs_synced', 0)} jobs")
 
         except Exception as e:
             self.logger.error(f"System startup failed: {str(e)}")
@@ -151,8 +146,6 @@ class SystemController:
         """Stop the system gracefully using runtime context."""
         if not self.is_running:
             return
-
-        self.logger.info("Stopping AssistantMD system")
 
         # Restore original datetime module
         if self._current_test_date:
@@ -277,6 +270,14 @@ class SystemController:
                 future.set_result(execution_time)
         
         self.logger.info(f"Job executed: {job_id} at {execution_time}")
+        self.logger.set_sinks(["validation"]).info(
+            "job_executed",
+            data={
+                "job_id": job_id,
+                "global_id": job_id.replace("__", "/"),
+                "executed_at": execution_time.isoformat(),
+            },
+        )
     
     def _on_job_error(self, event):
         """Handle job error events from APScheduler."""
@@ -334,7 +335,13 @@ class SystemController:
         
         # Trigger the job immediately
         job.modify(next_run_time=datetime.now())
-        self.logger.info(f"Manually triggered job: {global_id}")
+        self.logger.info(
+            f"Manually triggered job: {global_id}",
+            data={
+                "global_id": global_id,
+                "job_id": safe_job_id,
+            },
+        )
     
     def set_test_date(self, test_date):
         """Set test date for scheduled job execution."""

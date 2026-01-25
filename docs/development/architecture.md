@@ -40,7 +40,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Context Manager | Curated chat context, template loading, history processing, summary persistence | `core/context/`, `core/llm/chat_executor.py` |
 | LLM Interface | Model resolution, agent creation, response generation | `core/llm/`, `core/settings/store.py` |
 | Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
-| Logging & Activity | Unified logging, Logfire instrumentation | `core/logger.py/`, `system/activity.log` |
+| Logging & Activity | Sink-based logging (activity file, Logfire, validation artifacts) | `core/logger.py/`, `system/activity.log`, `validation/runs/*/artifacts/validation_events/` |
 | Validation | Scenario-based end-to-end checks | `validation/` |
 | Ingestion | File import pipeline (PDF text/OCR, markdownify HTML), registry-driven strategies, queued worker | `core/ingestion/`, `api/services.py` |
 
@@ -71,7 +71,8 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 
 ## Observability & Validation
 
-- `UnifiedLogger` instruments FastAPI, APScheduler, and Pydantic AI while writing structured activity entries to `system/activity.log`.
+- `UnifiedLogger` routes `info`/`warning`/`error`/`debug` through configurable sinks (activity log, Logfire, validation artifacts).
+- Logfire instrumentation covers FastAPI, APScheduler, and Pydantic AI spans/traces, independent of sink-based logs.
 - The validation framework (`validation/`) spins up isolated runtimes, runs workflows against sandbox vaults, and captures artifacts for review.
 
 ## Configuration Services

@@ -178,7 +178,7 @@ def _prepare_agent_config(
     vault_path: str,
     tools: List[str],
     model: str,
-    instructions: Optional[str]
+    instructions: Optional[str],
 ) -> tuple:
     """
     Prepare agent configuration (shared between streaming and non-streaming).
@@ -233,7 +233,7 @@ async def execute_chat_prompt(
         tools: List of tool names selected by user
         model: Model name selected by user
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults to regular chat)
+        instructions: Optional system instructions (defaults to regular chat instructions)
 
     Returns:
         ChatExecutionResult with response and session metadata
@@ -280,6 +280,17 @@ async def execute_chat_prompt(
 
     # Save chat history to markdown file
     history_file = save_chat_history(vault_path, session_id, prompt, result.output)
+    logger.info(
+        "Chat executed",
+        data={
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "model": model,
+            "tools_count": len(tools),
+            "prompt_length": len(prompt),
+            "history_file": history_file,
+        },
+    )
 
     return ChatExecutionResult(
         response=result.output,
@@ -313,7 +324,7 @@ async def execute_chat_prompt_stream(
         tools: List of tool names selected by user
         model: Model name selected by user
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults to regular chat)
+        instructions: Optional system instructions (defaults to regular chat instructions)
 
     Yields:
         SSE-formatted chunks in OpenAI-compatible format

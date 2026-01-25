@@ -80,7 +80,10 @@ class RuntimeConfig:
             max_scheduler_workers=DEFAULT_MAX_SCHEDULER_WORKERS,
             enable_api=False,
             log_level="DEBUG",
-            features={"validation": True}
+            features={
+                "validation": True,
+                "validation_artifacts_dir": str(run_path / "artifacts"),
+            }
         )
 
 

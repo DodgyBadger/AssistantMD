@@ -1,6 +1,7 @@
 
 from datetime import datetime
 import os
+import re
 from typing import Dict
 
 from core.logger import UnifiedLogger
@@ -14,7 +15,6 @@ logger = UnifiedLogger(tag="step-workflow")
 ## Workflow entry. All workflow modules must implement run_workflow.
 ########################################################################
 
-@logger.trace("run_workflow")
 async def run_workflow(job_args: dict, **kwargs):
     """
     Sequential content generation workflow with predictable, deterministic structure.
@@ -107,22 +107,32 @@ async def run_workflow(job_args: dict, **kwargs):
         #######################################################################
         
         # Log successful workflow completion
-        logger.activity(
+        created_files = sorted(context['created_files'])
+        output_files = []
+        for path in created_files:
+            if path.startswith(f"{services.vault_path}/"):
+                output_files.append(path[len(services.vault_path) + 1:])
+            else:
+                output_files.append(path)
+        max_files = 10
+        logger.info(
             "Workflow completed successfully",
-            vault=services.workflow_id,
-            metadata={
+            data={
+                "vault": services.workflow_id,
                 "steps_completed": len(workflow_steps),
-                "output_files_created": len(context['created_files']),
+                "output_files_created": len(created_files),
+                "output_files": output_files[:max_files],
+                "output_files_truncated": len(output_files) > max_files,
+                "tools_used": sorted(context["tools_used"]),
             },
         )
         
     except Exception as e:
         # Log workflow failure with context
-        logger.activity(
+        logger.error(
             "Workflow execution failed",
-            vault=services.workflow_id,
-            level="error",
-            metadata={
+            data={
+                "vault": services.workflow_id,
                 "error_message": str(e),
                 "steps_attempted": len(workflow_steps),
             },
@@ -321,11 +331,10 @@ async def write_step_output(step_content: str, output_file: str, processed_step,
         context['state_manager'].update_from_processed_step(processed_step)
             
     except (IOError, OSError, PermissionError) as file_error:
-        logger.activity(
+        logger.error(
             "Failed to create output file",
-            vault=global_id,
-            level="error",
-            metadata={
+            data={
+                "vault": global_id,
                 "target_file": output_file,
                 "step_name": step_name,
                 "reason": str(file_error),
@@ -372,8 +381,10 @@ def initialize_workflow_context(services: CoreServices):
         'today_formatted': today_formatted,
         'week_start_day': services.week_start_day,
         'state_manager': services.get_state_manager(),
-        'created_files': set()
+        'created_files': set(),
+        'tools_used': set(),
     }
+
 
 async def process_workflow_step(
     step_name: str,
@@ -386,10 +397,10 @@ async def process_workflow_step(
 ):
     """Process a single workflow step with all directives and AI generation."""
     today = context['today']
-    
+
     # Process all directives with current context (single parse operation)
     processed_step = services.process_step(raw_step_content, reference_date=today)
-    
+
     # Get output file path from processed step (optional)
     output_file_path = processed_step.get_directive_value('output_file')
     output_file = None
@@ -403,24 +414,60 @@ async def process_workflow_step(
 
         # Ensure output directory exists
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    
+
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
+        logger.set_sinks(["validation"]).info(
+            "workflow_step_skipped",
+            data={
+                "step_name": step_name,
+                "reason": "run_on",
+            },
+        )
         return  # Skip this step
 
     # Check for workflow skip signals from directives (e.g., required input files missing)
     should_skip, skip_reason = has_workflow_skip_signal(processed_step)
     if should_skip:
-        logger.activity(
+        logger.add_sink("validation").info(
             f"Step skipped: {skip_reason}",
-            vault=services.workflow_id,
-            metadata={"step_name": step_name}
+            data={
+                "event": "workflow_step_skipped",
+                "vault": services.workflow_id,
+                "step_name": step_name,
+                "reason": skip_reason,
+            },
         )
         return  # Skip this step
 
+    tools_result = processed_step.get_directive_value('tools', ([], ""))
+    tool_functions = tools_result[0] if isinstance(tools_result, tuple) else []
+    if tool_functions:
+        raw_tools = None
+        for line in raw_step_content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("@tools"):
+                raw_tools = stripped[len("@tools"):].strip()
+                break
+        if raw_tools:
+            tool_names = [name for name in re.split(r"[ ,]+", raw_tools) if name]
+        else:
+            tool_names = [
+                getattr(tool, "__name__", "tool") for tool in tool_functions
+            ]
+        context["tools_used"].update(tool_names)
+
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
-    
+    logger.set_sinks(["validation"]).info(
+        "workflow_step_prompt",
+        data={
+            "step_name": step_name,
+            "output_file": output_file_path,
+            "prompt": final_prompt,
+        },
+    )
+
     # Generate AI content
     chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
     step_content = await services.generate_response(chat_agent, final_prompt)

@@ -56,18 +56,7 @@ class ValidationRunner:
         self.validation_root = Path(validation_root)
         self.scenarios_dir = self.validation_root / "scenarios"
         self.runs_dir = self.validation_root / "runs"
-        self.issues_log = self.validation_root / "issues_log.md"
-        
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-        self._initialize_issues_log()
-    
-    def _initialize_issues_log(self):
-        """Initialize the central issues log file if it doesn't exist."""
-        if not self.issues_log.exists():
-            with open(self.issues_log, "w") as f:
-                f.write("# Validation Issues Log\\n\\n")
-                f.write("This file tracks validation failures and system errors from scenarios.\\n\\n")
-                f.write("## Issues Requiring Action\\n\\n")
     
     def discover_scenarios(self, pattern: Optional[str] = None) -> List[str]:
         """

@@ -55,6 +55,10 @@ class TavilyCrawl(BaseTool):
             Returns:
                 Formatted content from all crawled pages
             """
+            logger.set_sinks(["validation"]).info(
+                "tool_invoked",
+                data={"tool": "tavily_crawl"},
+            )
             # Ensure reasonable limits
             max_depth = max(1, min(max_depth, 5))  # Tavily limit
             max_breadth = max(1, min(max_breadth, 50))  # Reasonable limit

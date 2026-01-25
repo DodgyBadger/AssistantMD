@@ -19,20 +19,26 @@ class TestChatBasicScenario(BaseScenario):
         session_id = "session-basic"
         prompt = "Write a haiku celebrating validation frameworks."
 
-        result = await self.run_chat_prompt(
-            vault,
-            prompt,
-            session_id=session_id,
-            tools=[],
-            model="sonnet",
+        response = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                "vault_name": vault.name,
+                "prompt": prompt,
+                "session_id": session_id,
+                "tools": [],
+                "model": "sonnet",
+                "stream": False,
+            },
         )
+        assert response.status_code == 200, response.text
+        data = response.data or {}
 
-        self.expect_equals(result.session_id, session_id, "Session ID should round-trip")
-        self.expect_chat_history_exists(vault, session_id)
-        self.expect_chat_history_contains(
-            vault,
-            session_id,
-            [prompt, "haiku"],
-        )
+        assert data.get("session_id") == session_id, "Session ID should round-trip"
+        history_path = vault / "AssistantMD" / "Chat_Sessions" / f"{session_id}.md"
+        assert history_path.exists(), f"Chat history not found: {history_path}"
+        history_content = history_path.read_text()
+        assert prompt in history_content
+        assert "haiku" in history_content
 
         self.teardown_scenario()

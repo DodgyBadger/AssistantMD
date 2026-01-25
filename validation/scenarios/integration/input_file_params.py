@@ -9,17 +9,14 @@ Philosophy:
 
 import sys
 from pathlib import Path
-from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from validation.core.base_scenario import BaseScenario
-from core.workflow.parser import process_step_content
-from workflow_engines.step.workflow import build_final_prompt
 
 
 class InputFileParamsScenario(BaseScenario):
-    """Validate @input-file path-only and required behaviors via prompt composition."""
+    """Validate @input-file path-only and required behaviors via validation artifacts."""
 
     async def test_scenario(self):
         vault = self.create_vault("InputFileParamsVault")
@@ -28,75 +25,44 @@ class InputFileParamsScenario(BaseScenario):
         self.create_file(vault, "notes/inline.md", "INLINE_CONTENT")
         self.create_file(vault, "notes/with (parens).md", "PARENS_CONTENT")
 
-        # Seed a representative workflow file (not executed end-to-end here)
+        # Seed a representative workflow file (executed end-to-end here)
         self.create_file(
             vault,
             "AssistantMD/Workflows/input_file_params.md",
             WORKFLOW_CONTENT,
         )
 
-        # Parse step bodies from the workflow file to feed the directive processor
-        steps = self._extract_steps(vault / "AssistantMD/Workflows/input_file_params.md")
+        await self.start_system()
 
-        # --- paths_only behavior ---
-        paths_step = steps["PATHS_ONLY"]
-        processed_paths = process_step_content(paths_step, str(vault))
-        prompt_paths = build_final_prompt(processed_paths)
+        # Execute workflow to emit validation artifacts for prompt composition
+        await self.run_workflow(vault, "input_file_params")
 
-        # Inline file content should appear; path-only file should be listed but not inlined
-        self.expect_equals(
-            "INLINE_CONTENT" in prompt_paths,
-            True,
-            "Inline file content should be present in prompt",
+        events = self.validation_events()
+
+        prompt_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "PATHS_ONLY"},
         )
-        self.expect_equals(
-            "PARENS_CONTENT" in prompt_paths,
-            False,
-            "Path-only file content should not be inlined",
+        prompt = prompt_event.get("data", {}).get("prompt", "")
+        assert "INLINE_CONTENT" in prompt, (
+            "Inline file content should be present in prompt"
         )
-        self.expect_equals(
-            "- notes/with (parens)" in prompt_paths,
-            True,
-            "Path-only file should be listed in prompt",
+        assert "- notes/with (parens)" in prompt, (
+            "Path-only file should be listed in prompt"
+        )
+        assert "PARENS_CONTENT" not in prompt, (
+            "Path-only file content should not be inlined"
         )
 
-        # --- required skip signal ---
-        required_step = steps["REQUIRED_SKIP"]
-        processed_required = process_step_content(required_step, str(vault))
-        input_result = processed_required.get_directive_value("input_file", [])
-        skip_signal = input_result and input_result[0].get("_workflow_signal") == "skip_step"
-        self.expect_equals(
-            skip_signal,
-            True,
-            "Required input should signal skip when no files are found",
+        self.assert_event_contains(
+            events,
+            name="workflow_step_skipped",
+            expected={"step_name": "REQUIRED_SKIP"},
         )
 
+        await self.stop_system()
         self.teardown_scenario()
-
-    def _extract_steps(self, workflow_path: Path) -> Dict[str, str]:
-        """Lightweight step extractor: split on '## ' headers after frontmatter."""
-        content = workflow_path.read_text()
-        # Drop frontmatter if present
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            content = parts[2] if len(parts) > 2 else ""
-
-        steps: Dict[str, str] = {}
-        current = None
-        buffer: list[str] = []
-        for line in content.splitlines():
-            if line.startswith("## "):
-                # Save previous step
-                if current:
-                    steps[current] = "\n".join(buffer).strip()
-                    buffer = []
-                current = line[3:].strip()
-            else:
-                buffer.append(line)
-        if current:
-            steps[current] = "\n".join(buffer).strip()
-        return steps
-
 
 WORKFLOW_CONTENT = """---
 workflow_engine: step

@@ -32,9 +32,17 @@ class TavilyCrawlStressWorkflowScenario(BaseScenario):
         await self.start_system()
 
         # Validate system startup
-        self.expect_vault_discovered("StressTestVault")
-        self.expect_workflow_loaded("StressTestVault", "tavily-crawl-stress-workflow")
-        self.expect_scheduler_job_created("StressTestVault/tavily-crawl-stress-workflow")
+        assert "StressTestVault" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "StressTestVault/tavily-crawl-stress-workflow"
+            for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "StressTestVault__tavily-crawl-stress-workflow"
+            for job in jobs
+        ), "Scheduler job not created"
 
         # === STRESS TEST CRAWL EXECUTION ===
         self.set_date("2025-01-20")  # Monday
@@ -45,10 +53,14 @@ class TavilyCrawlStressWorkflowScenario(BaseScenario):
 
         # === ASSERTIONS ===
         # Note: This may legitimately fail due to API timeouts - that's part of what we're testing
-        self.expect_scheduled_execution_success(vault, "tavily-crawl-stress-workflow")
+        assert len(self.get_job_executions(vault, "tavily-crawl-stress-workflow")) > 0, (
+            "No executions recorded for StressTestVault/tavily-crawl-stress-workflow"
+        )
 
         # Check that research file was created (if job succeeded)
-        self.expect_file_created(vault, "research/2025-01-20.md")
+        output_path = vault / "research" / "2025-01-20.md"
+        assert output_path.exists(), "Expected research/2025-01-20.md to be created"
+        assert output_path.stat().st_size > 0, "research/2025-01-20.md is empty"
 
         self._log_timeline("🏁 Stress test completed - review results for timeout/error patterns")
 

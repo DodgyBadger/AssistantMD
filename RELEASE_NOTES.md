@@ -1,5 +1,31 @@
 # Release Notes
 
+
+## 2026-01-24
+
+This release refactors the UnifiedLogger and parts of the validation framework.
+
+### UnifiedLogger
+- Refactored logging to a sink-based model
+- Added one-shot sink overrides in the form `logger.add_sink().info()` / `logger.set_sinks().warning()`
+- Added new validation sink that logs to yaml files only during validation runs.
+- Removed redundant trace decorator
+
+### Validation framework
+- Updated all integration scenarios to use the new validation sink logs to test internal state and removed tightly coupled helpers
+- Removed all custom assertion helpers and refactored scenarios to use regular python assert statements
+- Improved coverage of several integration scenarios
+- Tools now emit tool_invoked validation events
+- Overall reduction in surface area of the validation framework, slowly moving it toward a generic validation platform
+
+## Other
+- App runtime now assigns unique boot_id on each restart
+- Review and cleanup of activity.log calls: dedupe, reduce noise and identify logging gaps
+- Removal of lingering code from various deprecated features (e.g. chat compact endpoint, workflow creation endpoint, session type switching)
+- Tools were normalized to pydantic_ai.tools.Tool
+- Docs updated to reflect changes to logging and validation
+
+
 ## 2025-12-08
 
 ### Feature: Import to markdown pipeline

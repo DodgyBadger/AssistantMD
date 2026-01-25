@@ -32,10 +32,21 @@ class TestFileOperationsScenario(BaseScenario):
         await self.start_system()
         
         # Validate system startup completed correctly
-        self.expect_vault_discovered("FileOpsTestVault")
-        self.expect_workflow_loaded("FileOpsTestVault", "file_ops_test")
-        self.expect_scheduler_job_created("FileOpsTestVault/file_ops_test")
-        self.expect_schedule_parsed_correctly("FileOpsTestVault/file_ops_test", "cron")
+        assert "FileOpsTestVault" in self.get_discovered_vaults(), "Vault not discovered"
+        workflows = self.get_loaded_workflows()
+        assert any(
+            cfg.global_id == "FileOpsTestVault/file_ops_test" for cfg in workflows
+        ), "Workflow not loaded"
+        jobs = self.get_scheduler_jobs()
+        assert any(
+            job.job_id == "FileOpsTestVault__file_ops_test" for job in jobs
+        ), "Scheduler job not created"
+        job = next(
+            (job for job in jobs if job.job_id == "FileOpsTestVault__file_ops_test"),
+            None,
+        )
+        assert job is not None, "Scheduler job not found for schedule check"
+        assert "cron" in job.trigger.lower(), "Expected cron trigger"
         
         # === SCHEDULED WORKFLOW EXECUTION ===
         # Set a known date for predictable output file naming
@@ -46,15 +57,24 @@ class TestFileOperationsScenario(BaseScenario):
         
         # === ASSERTIONS ===
         # Verify the scheduled job executed successfully
-        self.expect_scheduled_execution_success(vault, "file_ops_test")
+        assert len(self.get_job_executions(vault, "file_ops_test")) > 0, (
+            "No executions recorded for FileOpsTestVault/file_ops_test"
+        )
 
         # Check output files were created with content (step1, step2, and step3 outputs)
-        self.expect_file_created(vault, "test-results/step1.md")
-        self.expect_file_created(vault, "test-results/step2.md")
-        self.expect_file_created(vault, "test-results/step3.md")
+        for rel_path in [
+            "test-results/step1.md",
+            "test-results/step2.md",
+            "test-results/step3.md",
+        ]:
+            output_path = vault / rel_path
+            assert output_path.exists(), f"Expected {rel_path} to be created"
+            assert output_path.stat().st_size > 0, f"{rel_path} is empty"
 
         # Verify unsafe operations created and modified files
-        self.expect_file_created(vault, "template.md")
+        template_path = vault / "template.md"
+        assert template_path.exists(), "Expected template.md to be created"
+        assert template_path.stat().st_size > 0, "template.md is empty"
         
         # Verify the workflow had file_operations tool available by checking tool was loaded
         # The presence of the tool in the workflow and successful execution indicates it worked

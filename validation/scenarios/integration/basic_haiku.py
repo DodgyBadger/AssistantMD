@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class TestBasicHaikuScenario(BaseScenario):
+class BasicHaikuScenario(BaseScenario):
     """Test basic single-step workflow execution."""
 
     async def test_scenario(self):
@@ -29,27 +29,44 @@ class TestBasicHaikuScenario(BaseScenario):
 
         # === SYSTEM STARTUP VALIDATION ===
         # Test real system startup with vault discovery and job scheduling
+        checkpoint = self.event_checkpoint()
         await self.start_system()
 
         # Validate system startup completed correctly
-        self.expect_vault_discovered("HaikuVault")
-        self.expect_workflow_loaded("HaikuVault", "haiku_writer")
-        self.expect_scheduler_job_created("HaikuVault/haiku_writer")
-        self.expect_schedule_parsed_correctly("HaikuVault/haiku_writer", "cron")
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="workflow_loaded",
+            expected={"workflow_id": "HaikuVault/haiku_writer"},
+        )
+        job_event = self.assert_event_contains(
+            events,
+            name="job_synced",
+            expected={"job_id": "HaikuVault__haiku_writer", "action": "created"},
+        )
+        trigger = str(job_event.get("data", {}).get("trigger", "")).lower()
+        assert "cron" in trigger, "Expected cron trigger"
 
         # === SCHEDULED WORKFLOW EXECUTION ===
         # Set a known date for predictable output file naming
         self.set_date("2025-01-15")  # Wednesday
 
         # Trigger the scheduled job and wait for completion
-        await self.trigger_job(vault, "haiku_writer")
-
-        # === ASSERTIONS ===
-        # Verify the scheduled job executed successfully
-        self.expect_scheduled_execution_success(vault, "haiku_writer")
+        checkpoint = self.event_checkpoint()
+        assert await self.trigger_job(vault, "haiku_writer"), (
+            "Job should execute when triggered"
+        )
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="job_executed",
+            expected={"job_id": "HaikuVault__haiku_writer"},
+        )
 
         # Check output file was created with content
-        self.expect_file_created(vault, "2025-01-15.md")
+        output_path = vault / "2025-01-15.md"
+        assert output_path.exists(), "Expected 2025-01-15.md to be created"
+        assert output_path.stat().st_size > 0, "Output file is empty"
 
         # Clean up
         await self.stop_system()

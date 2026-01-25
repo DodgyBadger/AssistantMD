@@ -3,17 +3,10 @@ import json
 from datetime import datetime
 
 from pydantic_ai.agent import Agent
-
-# Create system logger for agent operations
-from core.logger import UnifiedLogger
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.directives.model import ModelDirective
 from core.settings.store import get_general_settings
 
-logger = UnifiedLogger(tag="agents")
-
-
-@logger.trace("create_agent")
 async def create_agent(
     model=None,
     tools: Optional[List] = None,
@@ -30,6 +23,7 @@ async def create_agent(
         tools: Optional list of tool functions (extracted from BaseTool classes by directives)
         retries: Number of retries for tool validation errors (defaults to DEFAULT_TOOL_RETRIES)
         output_type: Optional structured output specification for the agent
+        history_processors: Optional list of history processors to apply
 
     Returns:
         Configured Pydantic AI Agent ready for use
@@ -98,7 +92,6 @@ async def generate_stream(agent, prompt, message_history) -> AsyncIterator[str]:
         raise
 
 
-@logger.trace("generate_response")
 async def generate_response(agent, prompt, message_history=None):
     try:
         if message_history:
