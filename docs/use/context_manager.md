@@ -26,14 +26,15 @@ The chat agent receives system instructions from the context manager in the foll
 - How many runs (before the latest user message) are passed through to the chat agent. Can be any value >=0, or `all` for full history.
 - The latest user message is always passed to the chat agent verbatim.
 
+**token_threshold**
+- Only run the context manager when estimated history tokens exceed this threshold.
+- When below the threshold, the full passthrough history is sent and no context manager steps run.
+
 **description**
 - Human-readable description of what this template does
 - For user documentation only. Has no functional impact on the template.
 
 ## Directives
-**@token-threshold**
-- Only run this step if total chat history exceeds this token threshold.
-
 **@recent-runs**
 - Number of recent chat runs (roughly user-agent message turns but can include tool call or subagent messages), starting from the latest and moving backward, made available to this step for action in your prompt. Can be any value >=0, or `all` for full history.
 
@@ -84,6 +85,7 @@ Single step chat history summarization to maintain focus on a mission.
 ```
 ---
 passthrough_runs: 3
+token_threshold: 4000
 description: Keep the chat focused and summarize recent runs.
 ---
 

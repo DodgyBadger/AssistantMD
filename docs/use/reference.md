@@ -13,7 +13,6 @@
 | `@run-on` | Limit which days a step runs. | Workflow | `@run-on monday, friday` | Works with scheduled workflows; `daily` and `never` supported. |
 | `@tools` | Enable tools for a step. | Workflow, Context Template | `@tools file_ops_safe` | Names must match tool IDs from the UI. |
 | `@cache` | Cache a context step output for reuse. | Context Template | `@cache 24h` | Values: `session`, `daily`, `weekly`, or duration `30s/10m/2h/1d`. Invalidates on template edit. Gating directives override cache. |
-| `@token-threshold` | Only run the step if estimated history tokens exceed the threshold. | Context Template | `@token-threshold 4000` | Skips the step if below threshold (no cache reuse). |
 | `@recent-runs` | Control how many recent runs are available to the step. | Context Template | `@recent-runs 3` | Use `all` for full history, `0` for none. |
 | `@recent-summaries` | Control how many prior context manager outputs are available. | Context Template | `@recent-summaries 1` | Use `all` for all prior outputs. |
 
@@ -26,6 +25,7 @@
 | `enabled` | Enable scheduled runs. | Workflow | `enabled: false` | Affects scheduled runs only. Manual runs still work. |
 | `week_start_day` | Choose the week start used by patterns. | Workflow, Context Template | `week_start_day: monday` | Defaults to monday. |
 | `passthrough_runs` | How many recent runs are passed to the chat agent. | Context Template | `passthrough_runs: 3` | Use `all` for full history or `0` for summary-only. |
+| `token_threshold` | Only run the context manager when history exceeds this token estimate. | Context Template | `token_threshold: 4000` | When below threshold, the full passthrough history is used. |
 | `description` | Human-readable description. | Workflow, Context Template | `description: Daily planning` | For documentation only. |
 | Custom fields | Any extra metadata. | Workflow, Context Template | `team: ops` | Ignored by the runtime. |
 

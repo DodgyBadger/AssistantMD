@@ -63,7 +63,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - Each non-instruction `##` section is treated as an independent context step, processed in order. The manager runs once per section and injects one system message per section output; later sections can incorporate earlier section outputs.
 - Context manager directives control per-section behavior:
   - `@recent-runs`: How many recent chat runs the manager reads (0 disables that section).
-  - `@token-threshold`: Skip the section if total history is under this token estimate.
+  - `token_threshold` (frontmatter): Skip all context manager steps if total history is under this token estimate.
   - `@recent-summaries`: How many prior managed summaries to feed into the manager prompt.
   - `@tools`: Tools the manager can call while generating the summary.
   - `@model`: Model alias to use for the manager.

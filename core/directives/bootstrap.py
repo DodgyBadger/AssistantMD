@@ -24,7 +24,6 @@ from .context_manager import (
     PassthroughRunsDirective,
     RecentRunsDirective,
     RecentSummariesDirective,
-    TokenThresholdDirective,
 )
 from .cache import CacheDirective
 
@@ -41,7 +40,6 @@ _BUILTIN_DIRECTIVES: tuple[Type[DirectiveProcessor], ...] = (
     CacheDirective,
     RecentRunsDirective,
     PassthroughRunsDirective,
-    TokenThresholdDirective,
     RecentSummariesDirective,
 )
 

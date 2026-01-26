@@ -323,6 +323,45 @@ def _resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: in
     return default
 
 
+def _resolve_token_threshold(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
+    if not frontmatter:
+        return default
+    raw_value = frontmatter.get("token_threshold")
+    if raw_value is None:
+        raw_value = frontmatter.get("token-threshold")
+    if raw_value is None:
+        return default
+    if isinstance(raw_value, int):
+        if raw_value < 0:
+            logger.warning(
+                "Invalid token_threshold in context template; defaulting",
+                metadata={"value": raw_value},
+            )
+            return default
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            parsed = int(raw_value.strip())
+        except ValueError:
+            logger.warning(
+                "Invalid token_threshold in context template; defaulting",
+                metadata={"value": raw_value},
+            )
+            return default
+        if parsed < 0:
+            logger.warning(
+                "Invalid token_threshold in context template; defaulting",
+                metadata={"value": raw_value},
+            )
+            return default
+        return parsed
+    logger.warning(
+        "Invalid token_threshold in context template; defaulting",
+        metadata={"value": raw_value},
+    )
+    return default
+
+
 async def manage_context(
     input_data: ContextManagerInput,
     instructions_override: Optional[str] = None,
@@ -465,6 +504,7 @@ def build_context_manager_history_processor(
 
     token_threshold = 0
     recent_summaries = 0
+    template_token_threshold = _resolve_token_threshold(template.frontmatter, token_threshold)
     if template_sections:
         default_sections = template_sections
     elif template.template_body or template.content:
@@ -624,6 +664,41 @@ def build_context_manager_history_processor(
         prior_outputs: List[str] = []
         persisted_sections: List[Dict[str, Any]] = []
 
+        if template_token_threshold > 0:
+            estimate_parts: List[str] = []
+            for m in messages:
+                role, text = _extract_role_and_text(m)
+                if text:
+                    estimate_parts.append(f"{role}: {text}")
+            estimate_basis = "\n".join(estimate_parts)
+            token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
+            logger.debug(
+                "Context manager template threshold check",
+                metadata={
+                    "run_id": run_context.run_id,
+                    "token_estimate": token_estimate,
+                    "threshold": template_token_threshold,
+                },
+            )
+            if token_estimate < template_token_threshold:
+                logger.set_sinks(["validation"]).info(
+                    "Context template skipped (token threshold)",
+                    data={
+                        "event": "context_template_skipped",
+                        "template_name": template.name,
+                        "token_estimate": token_estimate,
+                        "threshold": template_token_threshold,
+                    },
+                )
+                passthrough_slice = _run_slice(history_before_latest, -1)
+                curated_history: List[ModelMessage] = []
+                if chat_instruction_message:
+                    curated_history.append(chat_instruction_message)
+                curated_history.extend(passthrough_slice)
+                if latest_user_message is not None:
+                    curated_history.append(latest_user_message)
+                return curated_history
+
         for idx, section in enumerate(default_sections):
             section_key = f"{idx}:{section.name}"
             section_directives = section.directives or {}
@@ -646,40 +721,8 @@ def build_context_manager_history_processor(
                 return default
 
             section_recent_runs = _resolve_section_int("recent-runs", manager_runs)
-            section_token_threshold = _resolve_section_int("token-threshold", token_threshold)
             section_recent_summaries = _resolve_section_int("recent-summaries", recent_summaries)
             summaries_limit = None if section_recent_summaries < 0 else section_recent_summaries
-
-            if section_token_threshold > 0:
-                if token_estimate is None:
-                    estimate_parts: List[str] = []
-                    for m in messages:
-                        role, text = _extract_role_and_text(m)
-                        if text:
-                            estimate_parts.append(f"{role}: {text}")
-                    estimate_basis = "\n".join(estimate_parts)
-                    token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
-                    logger.debug(
-                        "Context manager threshold check",
-                        metadata={
-                            "run_id": run_context.run_id,
-                            "token_estimate": token_estimate,
-                            "threshold": section_token_threshold,
-                        },
-                    )
-                if token_estimate < section_token_threshold:
-                    logger.set_sinks(["validation"]).info(
-                        "Context section skipped (token threshold)",
-                        data={
-                            "event": "context_section_skipped",
-                            "section_name": section.name,
-                            "section_key": section_key,
-                            "reason": "token_threshold",
-                            "token_estimate": token_estimate,
-                            "threshold": section_token_threshold,
-                        },
-                    )
-                    continue
 
             manager_slice = _run_slice(messages, section_recent_runs)
             rendered_lines: List[str] = []

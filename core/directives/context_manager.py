@@ -87,23 +87,6 @@ class PassthroughRunsDirective(DirectiveProcessor):
         return _parse_passthrough_runs(value)
 
 
-class TokenThresholdDirective(DirectiveProcessor):
-    """Processor for @token-threshold directive."""
-
-    def get_directive_name(self) -> str:
-        return "token-threshold"
-
-    def validate_value(self, value: str) -> bool:
-        try:
-            _parse_non_negative_int(value)
-            return True
-        except ValueError:
-            return False
-
-    def process_value(self, value: str, vault_path: str, **context) -> int:
-        return _parse_non_negative_int(value)
-
-
 class RecentSummariesDirective(DirectiveProcessor):
     """Processor for @recent-summaries directive."""
 

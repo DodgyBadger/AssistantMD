@@ -65,11 +65,6 @@ class ContextManagerScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="context_section_skipped",
-            expected={"section_name": "High Threshold", "reason": "token_threshold"},
-        )
-        self.assert_event_contains(
-            events,
             name="context_summary_persisted",
             expected={"sections": ["Summary", "Recap"]},
         )
@@ -81,6 +76,29 @@ class ContextManagerScenario(BaseScenario):
                 "summary_sections": ["Summary", "Recap"],
                 "latest_user_included": True,
             },
+        )
+
+        self.create_file(
+            vault,
+            "AssistantMD/ContextTemplates/validation_context_threshold.md",
+            VALIDATION_CONTEXT_TEMPLATE_THRESHOLD,
+        )
+        checkpoint = self.event_checkpoint()
+        threshold_response = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                **first_payload,
+                "context_template": "validation_context_threshold.md",
+                "prompt": "Threshold gate check.",
+            },
+        )
+        assert threshold_response.status_code == 200, "Threshold-gated chat succeeds"
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="context_template_skipped",
+            expected={"template_name": "validation_context_threshold.md"},
         )
 
         checkpoint = self.event_checkpoint()
@@ -146,11 +164,21 @@ Call out any imagery or mood from the haiku.
 
 Restate the current topic in one sentence, referencing the haiku theme.
 
-## High Threshold
-@token-threshold 999999
+"""
+
+VALIDATION_CONTEXT_TEMPLATE_THRESHOLD = """---
+passthrough_runs: all
+token_threshold: 999999
+description: Validation template for global token threshold gating.
+---
+
+## Summary
+@recent-runs 1
+@recent-summaries 0
+@input-file notes/seed
 @model gpt-mini
 
-This section should be skipped due to the high token threshold.
+Summarize the seed note in one sentence.
 """
 
 SEED_NOTE_CONTENT = "Winter moonlight drifts, quiet code hums through the night, tests bloom with soft light."
