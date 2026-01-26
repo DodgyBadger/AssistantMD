@@ -79,7 +79,7 @@ def refresh_logfire_configuration(force: bool = False) -> None:
 
     logfire.configure(
         send_to_logfire=send_option,
-        scrubbing=logfire.ScrubbingOptions(),
+        scrubbing=False,
     )
 
     _logfire_config_state = desired_state
