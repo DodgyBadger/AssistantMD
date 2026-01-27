@@ -650,15 +650,25 @@ def build_context_manager_history_processor(
 
         token_estimate = None
         cache_store = getattr(run_context.deps, "context_manager_cache", None)
-        if cache_store is None:
-            cache_store = {}
-            try:
-                setattr(run_context.deps, "context_manager_cache", cache_store)
-            except Exception:
+        cache_enabled = bool(run_context.run_id)
+        if cache_enabled:
+            if cache_store is None:
                 cache_store = {}
-        run_scope_key = run_context.run_id or "default_run"
-        cache_entry = cache_store.get(run_scope_key, {})
-        section_cache = cache_entry.get("sections", {})
+                try:
+                    setattr(run_context.deps, "context_manager_cache", cache_store)
+                except Exception:
+                    cache_store = {}
+            run_scope_key = run_context.run_id
+            cache_entry = cache_store.get(run_scope_key, {})
+            section_cache = cache_entry.get("sections", {})
+        else:
+            logger.warning(
+                "Context manager cache disabled due to missing run_id",
+                metadata={"session_id": session_id, "vault_name": vault_name},
+            )
+            run_scope_key = None
+            cache_entry = {}
+            section_cache = {}
 
         summary_messages: List[ModelMessage] = []
         prior_outputs: List[str] = []
@@ -744,7 +754,7 @@ def build_context_manager_history_processor(
                 managed_model_alias = section_cache_entry.get("model_alias", model_alias)
                 cache_hit_scope: Optional[str] = None
                 cache_mode: Optional[str] = None
-                if managed_output is not None:
+                if cache_enabled and managed_output is not None:
                     cache_hit_scope = "run"
                     cached_hash = _hash_output(managed_output)
                     logger.set_sinks(["validation"]).info(
@@ -757,6 +767,8 @@ def build_context_manager_history_processor(
                             "output_hash": cached_hash,
                         },
                     )
+                elif not cache_enabled:
+                    managed_output = None
 
                 input_file_values = section_directives.get("input-file", [])
                 empty_input_file_directive = _has_empty_input_file_directive(section.content)
@@ -769,6 +781,7 @@ def build_context_manager_history_processor(
                                 "input-file",
                                 value,
                                 vault_path,
+                                # TODO: use centralized time manager once available for consistency with workflows.
                                 reference_date=datetime.now(),
                                 week_start_day=week_start_day,
                                 state_manager=None,
@@ -847,7 +860,7 @@ def build_context_manager_history_processor(
                 if cache_config and not cache_mode:
                     cache_mode = cache_config.get("mode")
 
-                if managed_output is None and cache_config:
+                if cache_enabled and managed_output is None and cache_config:
                     ttl_seconds = cache_config.get("ttl_seconds")
                     if cache_mode:
                         cached_entry = get_cached_step_output(
@@ -1002,24 +1015,25 @@ def build_context_manager_history_processor(
                         "raw_output": managed_output,
                         "model_alias": managed_model_alias,
                     }
-                    section_cache[section_key] = section_cache_entry
-                    cache_entry["sections"] = section_cache
-                    cache_store[run_scope_key] = cache_entry
-                    if cache_config:
-                        cache_mode = cache_config.get("mode")
-                        ttl_seconds = cache_config.get("ttl_seconds")
-                        if cache_mode:
-                            upsert_cached_step_output(
-                                run_id=run_scope_key,
-                                session_id=session_id,
-                                vault_name=vault_name,
-                                template_name=template.name,
-                                template_hash=template.sha256,
-                                section_key=section_key,
-                                cache_mode=cache_mode,
-                                ttl_seconds=ttl_seconds,
-                                raw_output=managed_output or "",
-                            )
+                    if cache_enabled:
+                        section_cache[section_key] = section_cache_entry
+                        cache_entry["sections"] = section_cache
+                        cache_store[run_scope_key] = cache_entry
+                        if cache_config:
+                            cache_mode = cache_config.get("mode")
+                            ttl_seconds = cache_config.get("ttl_seconds")
+                            if cache_mode:
+                                upsert_cached_step_output(
+                                    run_id=run_scope_key,
+                                    session_id=session_id,
+                                    vault_name=vault_name,
+                                    template_name=template.name,
+                                    template_hash=template.sha256,
+                                    section_key=section_key,
+                                    cache_mode=cache_mode,
+                                    ttl_seconds=ttl_seconds,
+                                    raw_output=managed_output or "",
+                                )
 
                 summary_text = managed_output or "N/A"
                 output_hash = _hash_output(summary_text)
@@ -1096,8 +1110,9 @@ def build_context_manager_history_processor(
                         "summary_length": len(combined_output),
                     },
                 )
-                cache_entry["persisted"] = True
-                cache_store[run_scope_key] = cache_entry
+                if cache_enabled:
+                    cache_entry["persisted"] = True
+                    cache_store[run_scope_key] = cache_entry
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("Failed to persist managed context summary", metadata={"error": str(exc)})
 
