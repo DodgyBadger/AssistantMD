@@ -16,13 +16,13 @@ This release introduces the **Context Manager** as a first-class feature, adds b
 
 ### Buffers (virtualized I/O)
 - Added a run-scoped buffer store to pass context between steps without file I/O.
-- `@output variable:NAME` writes to a buffer; `@input variable:NAME` reads from it.
+- `@output variable: NAME` writes to a buffer; `@input variable: NAME` reads from it.
 - Extended to workflows so the same buffer semantics work outside the context manager.
 - Validation coverage added for buffer read/write/append/replace and required-missing behavior.
 
 ### Breaking changes
 - **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
-- **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file:` / `variable:`).
+- **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file: ` / `variable: `).
 - **Parameter rename**: `paths-only` → `refs-only` for `@input` (no backward compatibility).
 
 ### Documentation

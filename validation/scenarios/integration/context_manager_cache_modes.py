@@ -270,7 +270,7 @@ description: Validation template for cache modes.
 ## Daily Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache daily
 @model gpt-mini
 
@@ -279,7 +279,7 @@ Summarize the haiku imagery in one short sentence.
 ## Weekly Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache weekly
 @model gpt-mini
 
@@ -288,7 +288,7 @@ Summarize the haiku mood in one short sentence.
 ## Duration Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache 5m
 @model gpt-mini
 
@@ -297,7 +297,7 @@ Summarize the haiku setting in one short sentence.
 ## Session Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache session
 @model gpt-mini
 
@@ -312,7 +312,7 @@ description: Validation template for cache modes (v2).
 ## Daily Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache daily
 @model gpt-mini
 
@@ -321,7 +321,7 @@ Summarize the haiku imagery in one short sentence, focusing on light.
 ## Weekly Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache weekly
 @model gpt-mini
 
@@ -330,7 +330,7 @@ Summarize the haiku mood in one short sentence.
 ## Duration Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache 5m
 @model gpt-mini
 
@@ -339,7 +339,7 @@ Summarize the haiku setting in one short sentence.
 ## Session Summary
 @recent-runs 1
 @recent-summaries 0
-@input file:notes/seed
+@input file: notes/seed
 @cache session
 @model gpt-mini
 

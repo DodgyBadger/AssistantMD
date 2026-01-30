@@ -8,10 +8,10 @@ Use explicit targets in the directive value.
 
 Examples:
 ```
-@output variable:summary
-@input variable:summary
-@output file:reports/{today}
-@input file:notes/*.md
+@output variable: summary
+@input variable: summary
+@output file: reports/{today}
+@input file: notes/*.md
 @tools url_import(variable=source_dump)
 ```
 
@@ -23,9 +23,9 @@ Examples:
 
 ## Validation Rules
 - If the target scheme is missing or invalid, return a directive error.
-- `@input variable:name`:
+- `@input variable: name`:
   - If missing, either skip the step (like `(required)`) or inject a clear "missing buffer" marker (policy TBD).
-- `@output variable:name`:
+- `@output variable: name`:
   - Honors existing write mode (append/new/replace) if applicable.
 
 ## Buffer Store (internal)
@@ -52,7 +52,7 @@ Examples:
 ## Search + Buffers (outline)
 - `file_ops_safe.search(..., variable=results_var)` writes structured results to a buffer instead of inlining.
 - Add buffer exploration tools: `peek`, `filter`, `read`, `export`.
-- Optional directive sugar: `@input variable:results_var (select=...)` to inline a subset.
+- Optional directive sugar: `@input variable: results_var (select=...)` to inline a subset.
 
 ## Future-Friendly Extensions (RLM / Large-Input Exploration)
 Buffers provide a foundation for REPL-like tools:
@@ -124,5 +124,5 @@ This enables iterative exploration of large content without stuffing it into a s
    - Update docs: directives reference + examples for `file:` and `variable:`.
    - Add validation scenario covering:
      - buffer read/write in workflow steps
-    - input variable required/optional behavior
+     - input variable required/optional behavior
      - search-to-buffer tool path

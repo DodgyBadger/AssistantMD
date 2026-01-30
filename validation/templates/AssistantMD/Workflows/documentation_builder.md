@@ -14,7 +14,7 @@ General guidance:
 - Keep file paths relative to the vault root.
 
 ## STEP1
-@output file:analysis/research
+@output file: analysis/research
 @write-mode append
 @header Documentation Recon
 @model sonnet
@@ -23,33 +23,33 @@ General guidance:
 Investigate the AssistantMD documentation to understand how workflows are defined and configured. Create a concise research log that lists the documents you consulted, the most important facts you discovered, and any open questions you want to follow up on.
 
 ## STEP2
-@output file:outputs/generated_workflow
+@output file: outputs/generated_workflow
 @write-mode append
 @header Proposed Workflow
 @model sonnet
 @tools documentation_access
-@input file:analysis/research
+@input file: analysis/research
 
 Design a new workflow that helps me plan my day. It should run automatically at 7am, review my goals, and generate a daily plan in the planning folder. Please return a complete workflow file ready to use.
 
 ## STEP3
-@output file:outputs/fixed_workflow
+@output file: outputs/fixed_workflow
 @write-mode append
 @header Repaired Workflow
 @model sonnet
 @tools documentation_access
-@input file:inputs/broken_workflow
+@input file: inputs/broken_workflow
 
 You are given a malformed workflow file. Diagnose the issues using documentation references and produce a corrected version that will parse successfully. After the YAML frontmatter, add a short comment section that summarizes the fixes you applied.
 
 ## STEP4
-@output file:reports/user_summary
+@output file: reports/user_summary
 @write-mode append
 @header User Guidance
 @model sonnet
 @tools documentation_access
-@input file:analysis/research
-@input file:outputs/generated_workflow
-@input file:outputs/fixed_workflow
+@input file: analysis/research
+@input file: outputs/generated_workflow
+@input file: outputs/fixed_workflow
 
 Explain to a non-technical teammate what AssistantMD does and how they would work with it day to day. Mention the workflow you created and how it fits into their routine. Keep it approachable and under 250 words.

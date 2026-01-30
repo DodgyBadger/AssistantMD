@@ -85,7 +85,7 @@ description: Validation workflow that exercises every available tool with a ligh
 ## DOCUMENTATION
 @model gpt-mini
 @tools documentation_access
-@output file:tool-outputs/documentation-access
+@output file: tool-outputs/documentation-access
 
 Summarize the documentation home page in 3 bullet points.
 You must call the documentation tool before responding.
@@ -93,7 +93,7 @@ You must call the documentation tool before responding.
 ## FILE_OPS_SAFE
 @model gpt-mini
 @tools file_ops_safe
-@output file:tool-outputs/file-ops-safe
+@output file: tool-outputs/file-ops-safe
 
 Use the safe file operations tool to list the root of the vault and report the first entry found.
 Also create a file at tmp/unsafe-test.md with the content 'original'.
@@ -102,7 +102,7 @@ You must call the tool before responding.
 ## FILE_OPS_UNSAFE
 @model gpt-mini
 @tools file_ops_safe, file_ops_unsafe
-@output file:tool-outputs/file-ops-unsafe
+@output file: tool-outputs/file-ops-unsafe
 
 Use the unsafe file operations tool to replace_text in tmp/unsafe-test.md, replacing 'original' with 'edited', then report success. Do not touch any other files.
 You must call file_ops_unsafe before responding.
@@ -110,7 +110,7 @@ You must call file_ops_unsafe before responding.
 ## WEB_SEARCH_DUCKDUCKGO
 @model gpt-mini
 @tools web_search_duckduckgo
-@output file:tool-outputs/web-search-duckduckgo
+@output file: tool-outputs/web-search-duckduckgo
 
 Search DuckDuckGo for "pydantic ai release" and return the top results in a short list.
 You must call the web search tool before responding.
@@ -118,7 +118,7 @@ You must call the web search tool before responding.
 ## IMPORT_URL
 @model gpt-mini
 @tools import_url
-@output file:tool-outputs/import-url
+@output file: tool-outputs/import-url
 
 Import the webpage https://example.com.
 You must call the import tool before responding.
@@ -126,7 +126,7 @@ You must call the import tool before responding.
 ## CODE_EXECUTION
 @model gpt-mini
 @tools code_execution
-@output file:tool-outputs/code-execution
+@output file: tool-outputs/code-execution
 
 Run a tiny Python snippet that prints 2+2.
 You must call the code execution tool before responding.

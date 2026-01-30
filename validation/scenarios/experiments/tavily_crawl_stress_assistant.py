@@ -85,7 +85,7 @@ You are a comprehensive research workflow that uses Tavily's crawl tool to deepl
 @model gemini-flash
 @tools tavily_crawl
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output file:research/{today}
+@output file: research/{today}
 
 Perform a comprehensive crawl of the Tavily documentation website: https://docs.tavily.com/documentation/about
 

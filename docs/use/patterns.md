@@ -56,14 +56,14 @@ What doesn’t work:
 
 **Output File Patterns**
 ```markdown
-@output file:planning/{today}          # Creates planning/2025-09-11.md
-@output file:reports/{this-week}       # Creates reports/2025-09-09.md (Monday)
-@output file:archive/{this-month}      # Creates archive/2025-09.md
+@output file: planning/{today}          # Creates planning/2025-09-11.md
+@output file: reports/{this-week}       # Creates reports/2025-09-09.md (Monday)
+@output file: archive/{this-month}      # Creates archive/2025-09.md
 ```
 
 **Input File Patterns**
 ```markdown
-@input file:journal/{latest:3}         # Reads 3 most recent journal files
-@input file:tasks/{pending:5}          # Reads next 5 unprocessed task files
-@input file:notes/*.md                 # Reads all markdown files in notes folder
+@input file: journal/{latest:3}         # Reads 3 most recent journal files
+@input file: tasks/{pending:5}          # Reads next 5 unprocessed task files
+@input file: notes/*.md                 # Reads all markdown files in notes folder
 ```

@@ -24,15 +24,15 @@ description: Daily poet
 You are a helpful assistant.
 
 ## Daily haiku
-@output file:test/{today}
+@output file: test/{today}
 @header Weekly Haiku
 @model gpt-mini
 
 Write a haiku to go with the current season or nearest holiday.
 
 ## Haiku critic
-@output file:test/{today}
-@input file:test/{today}
+@output file: test/{today}
+@input file: test/{today}
 @write-mode append
 @header Haiku feedback
 @model gpt-mini

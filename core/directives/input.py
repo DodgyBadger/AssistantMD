@@ -155,7 +155,7 @@ class InputFileDirective(DirectiveProcessor):
         """Process input file with directive-specific pattern resolution.
 
         Supports optional 'required' parameter to signal workflow skip if no files found.
-        Format: @input file:path/to/files (required) or @input file:path/to/files (required=true)
+        Format: @input file: path/to/files (required) or @input file: path/to/files (required=true)
         """
         value = value.strip()
 

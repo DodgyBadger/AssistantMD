@@ -36,7 +36,7 @@ class BufferVariablesScenario(BaseScenario):
             expected={"step_name": "READ_BUFFER"},
         )
         prompt = prompt_event.get("data", {}).get("prompt", "")
-        assert "--- FILE: variable:buffer_main ---" in prompt
+        assert "--- FILE: variable: buffer_main ---" in prompt
         assert "success (no tool calls)" in prompt
 
         # Step 4: read after append (expect two occurrences)
@@ -64,7 +64,7 @@ class BufferVariablesScenario(BaseScenario):
             expected={"step_name": "PATHS_ONLY"},
         )
         prompt = prompt_event.get("data", {}).get("prompt", "")
-        assert "- variable:buffer_main" in prompt
+        assert "- variable: buffer_main" in prompt
         assert "success (no tool calls)" not in prompt
 
         # Step 8: required missing buffer should skip
@@ -86,52 +86,52 @@ description: Validation workflow for buffer variables
 
 ## WRITE_BUFFER
 @model test
-@output variable:buffer_main
+@output variable: buffer_main
 
 Write buffer seed.
 
 ## READ_BUFFER
 @model test
-@input variable:buffer_main
+@input variable: buffer_main
 
 Read buffer content.
 
 ## APPEND_BUFFER
 @model test
-@input variable:buffer_main
-@output variable:buffer_main
+@input variable: buffer_main
+@output variable: buffer_main
 @write-mode append
 
 Append another entry.
 
 ## READ_AFTER_APPEND
 @model test
-@input variable:buffer_main
+@input variable: buffer_main
 
 Read appended content.
 
 ## REPLACE_BUFFER
 @model test
-@output variable:buffer_main
+@output variable: buffer_main
 @write-mode replace
 
 Replace content.
 
 ## READ_AFTER_REPLACE
 @model test
-@input variable:buffer_main
+@input variable: buffer_main
 
 Read replaced content.
 
 ## PATHS_ONLY
 @model test
-@input variable:buffer_main (refs_only=true)
+@input variable: buffer_main (refs_only=true)
 
 Paths only check.
 
 ## REQUIRED_MISSING
 @model test
-@input variable:missing_buffer (required)
+@input variable: missing_buffer (required)
 
 Should skip.
 """
