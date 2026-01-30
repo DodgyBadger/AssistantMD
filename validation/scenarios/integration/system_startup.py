@@ -241,7 +241,7 @@ description: Quick job for persistence testing
 ---
 
 ## STEP1
-@output-file results/{today}
+@output file:results/{today}
 @model test
 
 Quick persistence test - creating file at scheduled intervals.
@@ -255,7 +255,7 @@ description: Second quick job for subfolder testing
 ---
 
 ## STEP1
-@output-file results/{today}
+@output file:results/{today}
 @model test
 
 Quick subfolder test - creating file from subfolder workflow.
@@ -269,7 +269,7 @@ description: Updated schedule for persistence testing
 ---
 
 ## STEP1
-@output-file results/{today}
+@output file:results/{today}
 @model test
 
 Updated persistence test - now running every 2 minutes.
@@ -283,7 +283,7 @@ description: Malformed workflow with invalid old schedule syntax
 ---
 
 ## STEP1
-@output-file test.md
+@output file:test.md
 
 This workflow has invalid schedule syntax (old format) and should fail to load without crashing the system.
 """

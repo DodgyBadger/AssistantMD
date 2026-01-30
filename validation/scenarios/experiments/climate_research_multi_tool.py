@@ -89,7 +89,7 @@ You are a comprehensive climate research workflow helping build a detailed knowl
 @model gemini
 @tools web_search, tavily_extract, tavily_crawl
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output-file climate-research/01-overview
+@output file:climate-research/01-overview
 
 Search for current climate science consensus and overview information:
 - Find the latest IPCC report key findings and summary
@@ -101,9 +101,9 @@ Use whichever tool(s) work best to get authoritative, recent sources that provid
 ## SCIENTIFIC_FOUNDATION
 @model gemini
 @tools web_search, tavily_extract, tavily_crawl
-@input-file climate-research/01-overview
+@input file:climate-research/01-overview
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output-file climate-research/02-science-foundation
+@output file:climate-research/02-science-foundation
 
 Based on the overview research, gather detailed content from the most promising authoritative climate science sources identified:
 - Get key sections from NASA climate science pages
@@ -116,10 +116,10 @@ Choose the most effective tool for each source - extract for single pages, crawl
 ## SOLUTIONS_ANALYSIS
 @model gemini
 @tools web_search, tavily_extract, tavily_crawl
-@input-file climate-research/01-overview
-@input-file climate-research/02-science-foundation
+@input file:climate-research/01-overview
+@input file:climate-research/02-science-foundation
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output-file climate-research/03-solutions
+@output file:climate-research/03-solutions
 
 Using the scientific foundation established in previous steps, comprehensively research climate solutions:
 - Research climate.gov for detailed climate solutions information
@@ -137,11 +137,11 @@ If crawling fails due to site protection, fall back to targeted extraction or se
 ## KNOWLEDGE_SUMMARY
 @model gemini
 @tools web_search, tavily_extract, tavily_crawl
-@input-file climate-research/01-overview
-@input-file climate-research/02-science-foundation
-@input-file climate-research/03-solutions
+@input file:climate-research/01-overview
+@input file:climate-research/02-science-foundation
+@input file:climate-research/03-solutions
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output-file climate-research/05-knowledge-base
+@output file:climate-research/05-knowledge-base
 
 Create the final comprehensive climate change knowledge base by synthesizing all research phases:
 - Integrate findings from overview, scientific foundation, solutions, and analysis

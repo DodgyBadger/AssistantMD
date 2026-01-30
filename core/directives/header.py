@@ -14,7 +14,7 @@ class HeaderDirective(DirectiveProcessor):
     Header directive processor for customizing step output headers.
     
     Allows specification of headers using literal text and pattern variables.
-    Supports the same time-based patterns as output-file directive for consistency.
+    Supports the same time-based patterns as output directive for consistency.
     
     Supported Patterns:
         {today}           - Current date (YYYY-MM-DD)

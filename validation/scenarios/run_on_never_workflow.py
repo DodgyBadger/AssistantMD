@@ -33,21 +33,21 @@ enabled: true
 
 ## STEP1
 @run-on never
-@output-file debug/step1
+@output file:debug/step1
 @model test
 
 Step 1 content - should be skipped.
 
 ## STEP2  
 @run-on daily
-@output-file debug/step2
+@output file:debug/step2
 @model test
 
 Step 2 content - should run.
 
 ## STEP3
 @run-on daily
-@output-file debug/step3
+@output file:debug/step3
 @model test
 
 Step 3 content - should also run.

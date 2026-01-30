@@ -38,7 +38,7 @@
   - `@passthrough-runs` (overrides context_manager_passthrough_runs)
   - `@token-threshold` (overrides context_manager_token_threshold)
   - `@recent-summaries` (new; controls how many prior summaries to include in the manager prompt)
-  - can also use `@input-file` (but ignores required=true as not currently relevant)
+  - can also use `@input` (but ignores required=true as not currently relevant)
 - Add a new global setting `context_manager_recent_summaries` (default TBD) and use it when no directive is present.
 
 9) Context Manager Wiring ✅

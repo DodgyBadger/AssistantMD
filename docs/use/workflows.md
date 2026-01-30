@@ -24,15 +24,15 @@ description: Daily poet
 You are a helpful assistant.
 
 ## Daily haiku
-@output-file test/{today}
+@output file:test/{today}
 @header Weekly Haiku
 @model gpt-mini
 
 Write a haiku to go with the current season or nearest holiday.
 
 ## Haiku critic
-@output-file test/{today}
-@input-file test/{today}
+@output file:test/{today}
+@input file:test/{today}
 @write-mode append
 @header Haiku feedback
 @model gpt-mini
@@ -49,5 +49,5 @@ Read the haiku above and provide your feedback.
 Explore detailed documentation for each component:
 
 - **[YAML frontmatter](frontmatter.md)** - Schedules, workflow engines, and settings
-- **[Directives](directives.md)** - File input/output, models, and tools (@input-file, @output-file, @model, @tools, etc.)
+- **[Directives](directives.md)** - File input/output, models, and tools (@input, @output, @model, @tools, etc.)
 - **[Pattern variables](patterns.md)** - Dynamic file names using {today}, {this-week}, etc.

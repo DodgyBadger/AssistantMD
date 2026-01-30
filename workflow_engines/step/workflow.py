@@ -47,8 +47,8 @@ async def run_workflow(job_args: dict, **kwargs):
     
     CAPABILITIES:
     - Dynamic step discovery (e.g. STEP1, STEP2, STEP3, ...) from workflow file
-    - Flexible output files using @output-file directives with time patterns
-    - File content embedding using @input-file directives  
+    - Flexible output files using @output directives with time patterns
+    - File content embedding using @input directives  
     - Automatic directory creation for nested paths
     - Configurable week start day for time pattern resolution
     - External tool integration (@tools directive) for enhanced AI capabilities
@@ -240,24 +240,24 @@ def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
 
     Directives can signal that a step should be skipped by returning a dict
     with '_workflow_signal': 'skip_step'. This is used by directives like
-    @input-file with required=true when no files are found.
+    @input with required=true when no files are found.
 
     Returns:
         Tuple of (should_skip, reason)
     """
-    input_file_data = processed_step.get_directive_value('input_file', [])
+    input_file_data = processed_step.get_directive_value('input', [])
 
     # Normalize to list-of-lists format for consistent handling
     if not input_file_data:
         return False, ""
     elif isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
-        # Single @input-file directive
+        # Single @input directive
         input_file_lists = [input_file_data]
     else:
-        # Multiple @input-file directives
+        # Multiple @input directives
         input_file_lists = input_file_data
 
-    # Check each input-file result for skip signals
+    # Check each input result for skip signals
     for file_list in input_file_lists:
         for file_data in file_list:
             if isinstance(file_data, dict) and file_data.get('_workflow_signal') == 'skip_step':
@@ -271,7 +271,7 @@ def build_final_prompt(processed_step) -> str:
     """Build final prompt with input file content."""
     final_prompt = processed_step.content
     
-    input_file_data = processed_step.get_directive_value('input_file', [])
+    input_file_data = processed_step.get_directive_value('input', [])
     if input_file_data:
         # Normalize to list-of-lists format for consistent handling
         if not input_file_data:
@@ -449,7 +449,7 @@ async def process_workflow_step(
     )
 
     # Get output file path from processed step (optional)
-    output_target = processed_step.get_directive_value('output_file')
+    output_target = processed_step.get_directive_value('output')
     output_file = None
     output_variable = None
 
@@ -516,11 +516,18 @@ async def process_workflow_step(
 
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
+    output_target_label = None
+    if output_variable is not None:
+        output_target_label = f"variable:{output_variable}"
+    elif isinstance(output_target, dict) and output_target.get("type") == "buffer":
+        output_target_label = f"variable:{output_target.get('name')}"
+    elif output_target:
+        output_target_label = f"file:{output_target}"
     logger.set_sinks(["validation"]).info(
         "workflow_step_prompt",
         data={
             "step_name": step_name,
-            "output_file": output_file_path,
+            "output_target": output_target_label,
             "prompt": final_prompt,
         },
     )
@@ -529,7 +536,7 @@ async def process_workflow_step(
     chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
     step_content = await services.generate_response(chat_agent, final_prompt)
 
-    # Write AI-generated content to output file (if @output-file specified)
+    # Write AI-generated content to output file (if @output specified)
     if output_file:
         await write_step_output(step_content, output_file, processed_step,
                                 context, step_index, step_name, services.workflow_id)

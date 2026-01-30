@@ -5,9 +5,9 @@
 
 | Name | Description | Applies To | Example | Notes |
 | --- | --- | --- | --- | --- |
-| `@output-file` | Write step output to a specific file. | Workflow | `@output-file reports/{today}` | Auto-adds `.md` if missing. Avoid mixing with `file_ops_safe` in the same step. |
-| `@input-file` | Inline file content or paths as additional context. | Workflow, Context Template | `@input-file notes/*.md` | Supports `(required)` and `(paths-only)` options; patterns/globs allowed. |
-| `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output-file` is present. Supports patterns. |
+| `@output` | Write step output to a specific file or buffer. | Workflow | `@output file:reports/{today}` | Auto-adds `.md` if missing. Avoid mixing with `file_ops_safe` in the same step. |
+| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file:notes/*.md` | Supports `(required)` and `(paths-only)` options; patterns/globs allowed. |
+| `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Context template defaults to chat model. |
 | `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default) or `new` (numbered files). |
 | `@run-on` | Limit which days a step runs. | Workflow | `@run-on monday, friday` | Works with scheduled workflows; `daily` and `never` supported. |
@@ -33,16 +33,16 @@
 
 | Name | Description | Applies To | Example | Notes |
 | --- | --- | --- | --- | --- |
-| `{today}` | Current date (YYYY-MM-DD). | `@input-file`, `@output-file`, `@header` | `@output-file daily/{today}` | Time-based pattern. |
-| `{yesterday}` | Previous day date. | `@input-file`, `@output-file`, `@header` | `@output-file daily/{yesterday}` | Time-based pattern. |
-| `{tomorrow}` | Next day date. | `@input-file`, `@output-file`, `@header` | `@output-file daily/{tomorrow}` | Time-based pattern. |
-| `{this-week}` | Current week start date. | `@input-file`, `@output-file`, `@header` | `@output-file reports/{this-week}` | Respects `week_start_day`. |
-| `{last-week}` | Previous week start date. | `@input-file`, `@output-file`, `@header` | `@output-file reports/{last-week}` | Respects `week_start_day`. |
-| `{next-week}` | Next week start date. | `@input-file`, `@output-file`, `@header` | `@output-file reports/{next-week}` | Respects `week_start_day`. |
-| `{this-month}` | Current month (YYYY-MM). | `@input-file`, `@output-file`, `@header` | `@output-file archive/{this-month}` | Time-based pattern. |
-| `{last-month}` | Previous month (YYYY-MM). | `@input-file`, `@output-file`, `@header` | `@output-file archive/{last-month}` | Time-based pattern. |
-| `{day-name}` | Current day name. | `@input-file`, `@output-file`, `@header` | `@header {day-name} Review` | Name-based pattern. |
-| `{month-name}` | Current month name. | `@input-file`, `@output-file`, `@header` | `@header {month-name} Plan` | Name-based pattern. |
-| `{latest}` | Most recent file or folder by date in name. | `@input-file` | `@input-file journal/{latest}` | Use `{latest:N}` for N most recent files. |
-| `{pending}` | Unprocessed files for a workflow pattern. | `@input-file` | `@input-file tasks/{pending:5}` | Per-workflow tracking; files re-queue on edits. |
-| Glob patterns | Match files by wildcard. | `@input-file` | `@input-file notes/*.md` | Recursive `**` and parent `..` are not allowed. |
+| `{today}` | Current date (YYYY-MM-DD). | `@input`, `@output`, `@header` | `@output file:daily/{today}` | Time-based pattern. |
+| `{yesterday}` | Previous day date. | `@input`, `@output`, `@header` | `@output file:daily/{yesterday}` | Time-based pattern. |
+| `{tomorrow}` | Next day date. | `@input`, `@output`, `@header` | `@output file:daily/{tomorrow}` | Time-based pattern. |
+| `{this-week}` | Current week start date. | `@input`, `@output`, `@header` | `@output file:reports/{this-week}` | Respects `week_start_day`. |
+| `{last-week}` | Previous week start date. | `@input`, `@output`, `@header` | `@output file:reports/{last-week}` | Respects `week_start_day`. |
+| `{next-week}` | Next week start date. | `@input`, `@output`, `@header` | `@output file:reports/{next-week}` | Respects `week_start_day`. |
+| `{this-month}` | Current month (YYYY-MM). | `@input`, `@output`, `@header` | `@output file:archive/{this-month}` | Time-based pattern. |
+| `{last-month}` | Previous month (YYYY-MM). | `@input`, `@output`, `@header` | `@output file:archive/{last-month}` | Time-based pattern. |
+| `{day-name}` | Current day name. | `@input`, `@output`, `@header` | `@header {day-name} Review` | Name-based pattern. |
+| `{month-name}` | Current month name. | `@input`, `@output`, `@header` | `@header {month-name} Plan` | Name-based pattern. |
+| `{latest}` | Most recent file or folder by date in name. | `@input` | `@input file:journal/{latest}` | Use `{latest:N}` for N most recent files. |
+| `{pending}` | Unprocessed files for a workflow pattern. | `@input` | `@input file:tasks/{pending:5}` | Per-workflow tracking; files re-queue on edits. |
+| Glob patterns | Match files by wildcard. | `@input` | `@input file:notes/*.md` | Recursive `**` and parent `..` are not allowed. |

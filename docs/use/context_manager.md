@@ -41,7 +41,7 @@ The chat agent receives system instructions from the context manager in the foll
 **@recent-summaries**
 - Number of prior context manager outputs (all steps treated as a single output) made available to this step for action in your prompt. Can be any value >=0, or `all` for all prior outputs.
 
-**@input-file**
+**@input**
 - File contents are included as additional context for the step
 - Same syntax and options as [workflow directives](directives.md)
 
@@ -139,7 +139,7 @@ Stay concise and practical.
 ## File Summary
 @recent-runs 0
 @recent-summaries 0
-@input-file research/*.md
+@input file:research/*.md
 @model gpt-mini
 
 Summarize the key themes and notable facts across the files above.
@@ -170,7 +170,7 @@ Use the selected skill to guide your response.
 ## Skill Index
 @recent-runs 0
 @recent-summaries 0
-@input-file skills/*.md
+@input file:skills/*.md
 @model gpt-mini
 
 Create a concise list of the available skills with:
@@ -181,7 +181,7 @@ Create a concise list of the available skills with:
 ## Skill Selection
 @recent-runs 5
 @recent-summaries 2
-@input-file skills/*.md
+@input file:skills/*.md
 @model gpt-mini
 
 Pick the single best skill that will help the chat agent complete the user's task or mission.

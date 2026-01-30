@@ -1,5 +1,5 @@
 """
-Output file directive processor with directive-owned pattern resolution.
+Output directive processor with directive-owned pattern resolution.
 """
 
 import os
@@ -13,7 +13,7 @@ from .parser import DirectiveValueParser
 
 class OutputFileDirective(DirectiveProcessor):
     """
-    Output file directive with directive-owned pattern resolution.
+    Output directive with directive-owned pattern resolution.
     
     Generates single file paths from patterns. Supports time-based patterns for 
     creating organized file structures.
@@ -31,34 +31,48 @@ class OutputFileDirective(DirectiveProcessor):
         {month-name}      - Current month name (e.g., January)
         
     Examples:
-        @output-file planning/{today}           # planning/2025-08-07
-        @output-file journal/{this-week}        # journal/2025-08-04  
-        @output-file reports/monthly/{this-month}  # reports/monthly/2025-08
-        @output-file tasks/{day-name}           # tasks/Thursday
-        @output-file monthly/{month-name}       # monthly/September
-        @output-file goals                      # goals (literal path)
+        @output file:planning/{today}           # planning/2025-08-07
+        @output file:journal/{this-week}        # journal/2025-08-04  
+        @output file:reports/monthly/{this-month}  # reports/monthly/2025-08
+        @output file:tasks/{day-name}           # tasks/Thursday
+        @output file:monthly/{month-name}       # monthly/September
+        @output file:goals                      # goals (literal path)
     
     Note: {pending} and multi-file patterns like {latest:3} are not supported
-    for output files as they don't make sense in this context.
+    for output targets as they don't make sense in this context.
     """
     
     def __init__(self):
         self.pattern_utils = PatternUtilities()
     
     def get_directive_name(self) -> str:
-        return "output-file"
+        return "output"
     
     def validate_value(self, value: str) -> bool:
         if not value or not value.strip():
             return False
 
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value.strip(), allowed_parameters={"variable"}
+            value.strip()
         )
 
-        if base_value and (base_value.startswith('/') or '..' in base_value):
+        if parameters:
             return False
-        if not base_value and "variable" not in {k.lower() for k in parameters.keys()}:
+
+        if not base_value:
+            return False
+
+        if base_value.startswith("file:"):
+            file_path = base_value[len("file:"):].strip()
+            if not file_path:
+                return False
+            if file_path.startswith('/') or '..' in file_path:
+                return False
+        elif base_value.startswith("variable:"):
+            variable_name = base_value[len("variable:"):].strip()
+            if not variable_name:
+                return False
+        else:
             return False
 
         return True
@@ -67,13 +81,20 @@ class OutputFileDirective(DirectiveProcessor):
         """Process output file with directive-specific pattern resolution."""
         value = value.strip()
 
-        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"variable"}
-        )
-        variable_name = parameters.get("variable", "").strip()
-        if variable_name:
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(value)
+        if parameters:
+            raise ValueError("Output target does not accept parameters")
+
+        if base_value.startswith("variable:"):
+            variable_name = base_value[len("variable:"):].strip()
+            if not variable_name:
+                raise ValueError("Variable name is required for variable output")
             return {"type": "buffer", "name": variable_name}
-        value = base_value.strip()
+
+        if base_value.startswith("file:"):
+            value = base_value[len("file:"):].strip()
+        else:
+            raise ValueError("Output target must start with file: or variable:")
         
         # Strip Obsidian-style square brackets for hotlinked files
         if value.startswith('[[') and value.endswith(']]'):
@@ -97,9 +118,9 @@ class OutputFileDirective(DirectiveProcessor):
             
             # Validate pattern is appropriate for output files
             if base_pattern == 'pending':
-                raise ValueError("'{pending}' pattern not supported in @output-file directive")
+                raise ValueError("'{pending}' pattern not supported in @output directive")
             elif count is not None:
-                raise ValueError(f"Multi-file pattern '{pattern}' not supported in @output-file directive")
+                raise ValueError(f"Multi-file pattern '{pattern}' not supported in @output directive")
             
             # Resolve the pattern to a date string
             resolved_value = self._resolve_output_pattern(base_pattern, reference_date, week_start_day, vault_path)
@@ -110,7 +131,7 @@ class OutputFileDirective(DirectiveProcessor):
     
     def _resolve_output_pattern(self, pattern: str, reference_date: datetime, 
                               week_start_day: int, vault_path: str) -> str:
-        """Resolve patterns specific to output-file directive needs (single paths)."""
+        """Resolve patterns specific to output directive needs (single paths)."""
         
         if pattern in ['today', 'yesterday', 'tomorrow', 'this-week', 'last-week', 
                       'next-week', 'this-month', 'last-month']:

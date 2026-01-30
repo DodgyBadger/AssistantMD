@@ -96,13 +96,13 @@ def parse_directives(content: str) -> ParsedDirectives:
         ParsedDirectives with extracted directives and cleaned content
         
     Examples:
-        >>> content = '''@output-file planning/{today}
+        >>> content = '''@output file:planning/{today}
         ... @headers true
         ... 
         ... Create a weekly plan.'''
         >>> result = parse_directives(content)
         >>> result.directives
-        {'output-file': ['planning/{today}'], 'headers': ['true']}
+        {'output': ['file:planning/{today}'], 'headers': ['true']}
         >>> result.cleaned_content
         'Create a weekly plan.'
         
@@ -185,10 +185,10 @@ def extract_directive_from_line(line: str) -> Optional[tuple[str, str]]:
         Tuple of (directive_name, directive_value) if valid, None otherwise
         
     Examples:
-        >>> extract_directive_from_line("@output-file planning/{today}")
-        ('output-file', 'planning/{today}')
-        >>> extract_directive_from_line("@input-file: goals.md")
-        ('input-file', 'goals.md')
+        >>> extract_directive_from_line("@output file:planning/{today}")
+        ('output', 'file:planning/{today}')
+        >>> extract_directive_from_line("@input: file:goals.md")
+        ('input', 'file:goals.md')
         >>> extract_directive_from_line("Not a directive")
         None
     """

@@ -314,8 +314,8 @@ class ProcessedStep:
             The processed directive value, or default if not found
             
         Examples:
-            result.get_directive_value('output_file')  # for @output-file
-            result.get_directive_value('input_file', [])  # for @input-file
+            result.get_directive_value('output')  # for @output
+            result.get_directive_value('input', [])  # for @input
         """
         return self.directive_config.get(directive_name, default)
 

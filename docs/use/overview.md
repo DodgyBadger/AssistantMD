@@ -58,9 +58,8 @@ Use the **Configuration** tab in the web UI to configure providers (e.g. OpenAI,
 
 🔶 Start simple, test and refine. One step with a compound prompt might do the trick. If not, split the prompt into two or more steps. Remember that each step can define a different `@model`, allowing for fine grained cost control.
 
-🔶 Context is not passed automatically between steps. Use the `@output-file` of a previous step as `@input-file` in later steps to pass context. Nothing is assumed - you are always in control. You can have steps that build goals or checklists for later steps to process, allowing dynamic behaviour.
+🔶 Context is not passed automatically between steps. Use the `@output` of a previous step as `@input` in later steps to pass context. Nothing is assumed - you are always in control. You can have steps that build goals or checklists for later steps to process, allowing dynamic behaviour.
 
 🔶 If using Obsidian, set up a base (Obsidian v1.9 or later) to view and manage all your workflow files and frontmatter properties in one place, making it easy to enable/disable or update schedules.
 
-🔶 If using Obsidian, enabled `Use [[Wikilinks]]` and set `New link format` to `Absolute path in vault` in `Settings > Files & Links`. This will allow you to drag-and-drop from the Obsidian file explorer into input-file and output-file directives. AssistantMD will simply ignore the square brackets (`[[filename]]`).
-
+🔶 If using Obsidian, enabled `Use [[Wikilinks]]` and set `New link format` to `Absolute path in vault` in `Settings > Files & Links`. This will allow you to drag-and-drop from the Obsidian file explorer into input and output directives. AssistantMD will simply ignore the square brackets (`[[filename]]`).

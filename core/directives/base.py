@@ -12,7 +12,7 @@ from typing import Any
 class DirectiveProcessor(ABC):
     """Base class for directive processors.
     
-    Each directive type (output-file, input-file, headers, etc.) implements
+    Each directive type (output, input, headers, etc.) implements
     this interface to provide validation and processing logic.
     """
     
@@ -21,7 +21,7 @@ class DirectiveProcessor(ABC):
         """Return the name of the directive this processor handles.
         
         Returns:
-            The directive name (e.g., "output-file", "headers", "input-file")
+            The directive name (e.g., "output", "headers", "input")
         """
         pass
     

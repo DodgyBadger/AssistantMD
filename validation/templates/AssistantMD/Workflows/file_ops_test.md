@@ -12,7 +12,7 @@ You are a helpful workflow that tests file operations tools. Use lots of emojis!
 ## STEP1
 @model sonnet
 @tools file_ops_safe
-@output-file test-results/step1
+@output file:test-results/step1
 
 Test the file operations capabilities by:
 1. Creating a directory called 'files'
@@ -26,7 +26,7 @@ Use the file_operations tool to perform these tasks and document what you did.
 ## STEP2
 @model sonnet
 @tools file_ops_safe
-@output-file test-results/step2
+@output file:test-results/step2
 
 Now test the safety features by attempting unsafe operations:
 1. Try to overwrite the existing test file (should fail safely)
@@ -39,7 +39,7 @@ Use the file_operations tool to test these safety boundaries and report the resu
 ## STEP3
 @model sonnet
 @tools file_ops_safe, file_ops_unsafe
-@output-file test-results/step3
+@output file:test-results/step3
 
 Test the unsafe file operations tool by performing these operations:
 

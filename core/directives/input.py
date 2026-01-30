@@ -1,5 +1,5 @@
 """
-Input file directive processor with directive-owned pattern resolution.
+Input directive processor with directive-owned pattern resolution.
 """
 
 import os
@@ -61,7 +61,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
 
 class InputFileDirective(DirectiveProcessor):
     """
-    Input file directive with directive-owned pattern resolution.
+    Input directive with directive-owned pattern resolution.
     
     Loads file content from specified paths with support for time-based, glob, and stateful patterns.
     
@@ -92,27 +92,27 @@ class InputFileDirective(DirectiveProcessor):
         *-draft.md        - All .md files ending with -draft
     
     Examples:
-        @input-file goals.md                    # Direct file reference
-        @input-file journal/{today}             # Today's journal entry
-        @input-file journal/{latest:3}          # 3 most recent journal files
-        @input-file notes/{pending:5}           # 5 oldest unprocessed notes
-        @input-file projects/{this-week}        # All files from current week
-        @input-file *.md                        # All markdown files in root
-        @input-file journal/*.md                # All journal files
-        @input-file draft-*.md                  # All files starting with "draft-"
+        @input file:goals.md                    # Direct file reference
+        @input file:journal/{today}             # Today's journal entry
+        @input file:journal/{latest:3}          # 3 most recent journal files
+        @input file:notes/{pending:5}           # 5 oldest unprocessed notes
+        @input file:projects/{this-week}        # All files from current week
+        @input file:*.md                        # All markdown files in root
+        @input file:journal/*.md                # All journal files
+        @input file:draft-*.md                  # All files starting with "draft-"
         
     Security Notes:
         - Glob patterns restricted to single directories only
         - No recursive patterns (**/) allowed
         - No parent directory access (../) allowed
-        - Multiple @input-file directives required for multiple directories
+        - Multiple @input directives required for multiple directories
     """
     
     def __init__(self):
         self.pattern_utils = PatternUtilities()
     
     def get_directive_name(self) -> str:
-        return "input-file"
+        return "input"
     
     def validate_value(self, value: str) -> bool:
         if not value or not value.strip():
@@ -121,24 +121,30 @@ class InputFileDirective(DirectiveProcessor):
         # Parse base value and parameters
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters={"required", "paths_only", "paths-only", "variable"},
+            allowed_parameters={"required", "paths_only", "paths-only"},
         )
 
-        # Validate base value (file path)
-        if base_value and (base_value.startswith('/') or '..' in base_value):
+        if not base_value:
             return False
-        if not base_value and "variable" not in {k.lower() for k in parameters.keys()}:
+
+        if base_value.startswith("file:"):
+            file_path = base_value[len("file:"):].strip()
+            if not file_path:
+                return False
+            if file_path.startswith('/') or '..' in file_path:
+                return False
+        elif base_value.startswith("variable:"):
+            variable_name = base_value[len("variable:"):].strip()
+            if not variable_name:
+                return False
+        else:
             return False
 
         # Validate parameters (currently 'required' and 'paths_only' are supported)
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {'required', 'paths_only', 'paths-only', 'variable'}:
+            if param_name not in {'required', 'paths_only', 'paths-only'}:
                 return False
-            if param_name == "variable":
-                if not param_value.strip():
-                    return False
-                continue
             # Validate required parameter is a boolean-like value
             if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
                 return False
@@ -149,22 +155,22 @@ class InputFileDirective(DirectiveProcessor):
         """Process input file with directive-specific pattern resolution.
 
         Supports optional 'required' parameter to signal workflow skip if no files found.
-        Format: @input-file path/to/files (required) or @input-file path/to/files (required=true)
+        Format: @input file:path/to/files (required) or @input file:path/to/files (required=true)
         """
         value = value.strip()
 
         # Parse required parameter if present
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"required", "paths_only", "paths-only", "variable"}
+            value, allowed_parameters={"required", "paths_only", "paths-only"}
         )
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
         paths_only = (
             parameters.get('paths_only', parameters.get('paths-only', '')).lower()
             in ['true', 'yes', '1']
         )
-        variable_name = parameters.get('variable', '').strip()
 
-        if variable_name:
+        if base_value.startswith("variable:"):
+            variable_name = base_value[len("variable:"):].strip()
             buffer_store = context.get("buffer_store")
             if buffer_store is None:
                 if required:
@@ -207,8 +213,10 @@ class InputFileDirective(DirectiveProcessor):
                 result["paths_only"] = True
             return [result]
 
-        # Use base_value for file resolution (without parameters)
-        file_path = base_value.strip()
+        if base_value.startswith("file:"):
+            file_path = base_value[len("file:"):].strip()
+        else:
+            raise ValueError("Input target must start with file: or variable:")
 
         # Strip Obsidian-style square brackets for hotlinked files
         if file_path.startswith('[[') and file_path.endswith(']]'):
@@ -335,7 +343,7 @@ class InputFileDirective(DirectiveProcessor):
     ) -> List[Dict[str, Any]]:
         """Resolve {latest} when used as a directory segment (e.g., logs/{latest}/file.md)."""
         if count not in (None, 1):
-            raise ValueError("'{latest:N}' not supported for directory resolution in @input-file")
+            raise ValueError("'{latest:N}' not supported for directory resolution in @input")
 
         search_directory = os.path.join(vault_path, path_prefix)
         latest_dir = self._find_latest_dated_subdir(search_directory)

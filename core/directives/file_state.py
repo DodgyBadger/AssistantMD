@@ -39,7 +39,7 @@ class WorkflowFileStateManager:
     """Manages persistent state for workflow file processing.
 
     Uses a single system database to track which files have been
-    processed by each workflow for each @input-file pattern across all vaults.
+    processed by each workflow for each @input pattern across all vaults.
     """
 
     def __init__(self, vault_name: str, workflow_id: str):
@@ -113,7 +113,7 @@ class WorkflowFileStateManager:
 
         Args:
             file_records: List of dicts with 'content_hash' and 'filepath' keys
-            pattern: The @input-file pattern (e.g., "journal/{pending:5}")
+            pattern: The @input pattern (e.g., "file:journal/{pending:5}")
         """
         if not file_records:
             return
@@ -151,7 +151,7 @@ class WorkflowFileStateManager:
         Args:
             all_files: List of all available file paths (absolute paths, should be
                 pre-sorted chronologically)
-            pattern: The @input-file pattern that requested these files
+            pattern: The @input pattern that requested these files
             count_limit: Maximum number of files to return
 
         Returns:
@@ -224,7 +224,7 @@ class WorkflowFileStateManager:
         Args:
             processed_step: ProcessedStep instance containing directive results
         """
-        input_file_data = processed_step.get_directive_value('input_file', [])
+        input_file_data = processed_step.get_directive_value('input', [])
         if not input_file_data:
             return
         

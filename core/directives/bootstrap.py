@@ -13,9 +13,9 @@ from core.logger import UnifiedLogger
 
 from .base import DirectiveProcessor
 from .header import HeaderDirective
-from .input_file import InputFileDirective
+from .input import InputFileDirective
 from .model import ModelDirective
-from .output_file import OutputFileDirective
+from .output import OutputFileDirective
 from .registry import get_global_registry
 from .run_on import RunOnDirective
 from .tools import ToolsDirective

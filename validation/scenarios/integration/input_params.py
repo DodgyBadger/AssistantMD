@@ -1,5 +1,5 @@
 """
-Directive-focused scenario to keep @input-file params stable without heavy runs.
+Directive-focused scenario to keep @input params stable without heavy runs.
 
 Philosophy:
 - Work from a real workflow file so structure stays representative.
@@ -15,11 +15,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class InputFileParamsScenario(BaseScenario):
-    """Validate @input-file path-only and required behaviors via validation artifacts."""
+class InputParamsScenario(BaseScenario):
+    """Validate @input path-only and required behaviors via validation artifacts."""
 
     async def test_scenario(self):
-        vault = self.create_vault("InputFileParamsVault")
+        vault = self.create_vault("InputParamsVault")
 
         # Seed files referenced by the workflow
         self.create_file(vault, "notes/inline.md", "INLINE_CONTENT")
@@ -28,14 +28,14 @@ class InputFileParamsScenario(BaseScenario):
         # Seed a representative workflow file (executed end-to-end here)
         self.create_file(
             vault,
-            "AssistantMD/Workflows/input_file_params.md",
+            "AssistantMD/Workflows/input_params.md",
             WORKFLOW_CONTENT,
         )
 
         await self.start_system()
 
         # Execute workflow to emit validation artifacts for prompt composition
-        await self.run_workflow(vault, "input_file_params")
+        await self.run_workflow(vault, "input_params")
 
         events = self.validation_events()
 
@@ -67,19 +67,19 @@ class InputFileParamsScenario(BaseScenario):
 WORKFLOW_CONTENT = """---
 workflow_engine: step
 enabled: false
-description: Directive-level validation for input-file params
+description: Directive-level validation for input params
 ---
 
 ## PATHS_ONLY
 @model test
-@input-file notes/inline
-@input-file notes/with (parens) (paths_only)
+@input file:notes/inline
+@input file:notes/with (parens) (paths_only)
 
 Summarize the files.
 
 ## REQUIRED_SKIP
 @model test
-@input-file missing-file (required)
+@input file:missing-file (required)
 
 Confirm required input behavior.
 """

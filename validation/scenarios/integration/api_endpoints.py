@@ -28,7 +28,7 @@ description: Validation helper workflow
 ---
 
 ## STEP1
-@output-file logs/{today}
+@output file:logs/{today}
 @model gpt-mini
 
 Summarize the validation run context.

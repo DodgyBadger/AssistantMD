@@ -84,7 +84,7 @@ description: Simple haiku writing workflow
 
 ## STEP1
 @model gpt-mini
-@output-file {today}
+@output file:{today}
 @header My new haiku - {today}
 
 Write a beautiful haiku about integration testing. Format it nicely with proper line breaks.

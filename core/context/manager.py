@@ -213,8 +213,8 @@ def _has_empty_input_file_directive(content: str) -> bool:
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped.lower().startswith("@input-file"):
-            return stripped in ("@input-file", "@input-file:")
+        if stripped.lower().startswith("@input"):
+            return stripped in ("@input", "@input:")
     return False
 
 
@@ -735,11 +735,11 @@ def build_context_manager_history_processor(
             section_key = f"{idx}:{section.name}"
             section_directives = section.directives or {}
             output_target = None
-            output_values = section_directives.get("output-file", [])
+            output_values = section_directives.get("output", [])
             if output_values:
                 try:
                     output_result = registry.process_directive(
-                        "output-file",
+                        "output",
                         output_values[-1],
                         vault_path,
                         reference_date=datetime.now(),
@@ -769,7 +769,7 @@ def build_context_manager_history_processor(
                             )
                 except Exception as exc:
                     logger.warning(
-                        "Failed to process context manager output-file directive",
+                        "Failed to process context manager output directive",
                         metadata={"error": str(exc)},
                     )
             header_value = None
@@ -864,7 +864,7 @@ def build_context_manager_history_processor(
                 elif not cache_enabled:
                     managed_output = None
 
-                input_file_values = section_directives.get("input-file", [])
+                input_file_values = section_directives.get("input", [])
                 empty_input_file_directive = _has_empty_input_file_directive(section.content)
                 input_file_data = None
                 if input_file_values:
@@ -872,7 +872,7 @@ def build_context_manager_history_processor(
                     for value in input_file_values:
                         try:
                             result = registry.process_directive(
-                                "input-file",
+                                "input",
                                 value,
                                 vault_path,
                                 # TODO: use centralized time manager once available for consistency with workflows.
@@ -883,13 +883,13 @@ def build_context_manager_history_processor(
                             )
                         except Exception as exc:
                             logger.warning(
-                                "Failed to process context manager input-file directive",
+                                "Failed to process context manager input directive",
                                 metadata={"error": str(exc)},
                             )
                             continue
                         if not result.success:
                             logger.warning(
-                                "Context manager input-file directive returned an error",
+                                "Context manager input directive returned an error",
                                 metadata={"error": result.error_message},
                             )
                             continue
@@ -902,7 +902,7 @@ def build_context_manager_history_processor(
                                 processed_values = []
                                 input_file_data = None
                                 logger.info(
-                                    "Skipping context section due to required input-file directive",
+                                    "Skipping context section due to required input directive",
                                     metadata={"section": section.name},
                                 )
                                 break
@@ -911,7 +911,7 @@ def build_context_manager_history_processor(
                         input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
                     elif input_file_data is None and processed_values == []:
                         logger.set_sinks(["validation"]).info(
-                            "Context section skipped (input-file required)",
+                            "Context section skipped (input required)",
                             data={
                                 "event": "context_section_skipped",
                                 "section_name": section.name,

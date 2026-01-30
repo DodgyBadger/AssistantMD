@@ -165,8 +165,8 @@ description: Validation template for context manager events.
 ## Summary
 @recent-runs 1
 @recent-summaries 0
-@input-file notes/seed
-@output-file (variable=summary_buffer)
+@input file:notes/seed
+@output variable:summary_buffer
 @model gpt-mini
 
 Summarize the seed-note haiku and the latest input in 2 bullets.
@@ -175,7 +175,7 @@ Call out any imagery or mood from the haiku.
 ## Recap
 @recent-runs 2
 @recent-summaries 1
-@input-file (variable=summary_buffer)
+@input variable:summary_buffer
 @model gpt-mini
 
 Restate the current topic in one sentence, referencing the haiku theme.
@@ -191,7 +191,7 @@ description: Validation template for global token threshold gating.
 ## Summary
 @recent-runs 1
 @recent-summaries 0
-@input-file notes/seed
+@input file:notes/seed
 @model gpt-mini
 
 Summarize the seed note in one sentence.

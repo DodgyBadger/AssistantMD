@@ -1,6 +1,6 @@
 # Pattern Variables Reference
 
-AssistantMD supports pattern variables for dynamic file paths and headers. Patterns are used in `@output-file`, `@input-file`, and `@header` directives.
+AssistantMD supports pattern variables for dynamic file paths and headers. Patterns are used in `@output`, `@input`, and `@header` directives.
 
 ## Time-Based Patterns
 
@@ -22,7 +22,7 @@ AssistantMD supports pattern variables for dynamic file paths and headers. Patte
 - `{day-name}` - Current day name (e.g., Monday, Tuesday)
 - `{month-name}` - Current month name (e.g., January, September)
 
-## File Collection Patterns (@input-file only)
+## File Collection Patterns (@input only)
 
 **Latest File Patterns**
 - `{latest}` - Most recent file or folder by date found in the file or folder name
@@ -56,14 +56,14 @@ What doesn’t work:
 
 **Output File Patterns**
 ```markdown
-@output-file planning/{today}          # Creates planning/2025-09-11.md
-@output-file reports/{this-week}       # Creates reports/2025-09-09.md (Monday)
-@output-file archive/{this-month}      # Creates archive/2025-09.md
+@output file:planning/{today}          # Creates planning/2025-09-11.md
+@output file:reports/{this-week}       # Creates reports/2025-09-09.md (Monday)
+@output file:archive/{this-month}      # Creates archive/2025-09.md
 ```
 
 **Input File Patterns**
 ```markdown
-@input-file journal/{latest:3}         # Reads 3 most recent journal files
-@input-file tasks/{pending:5}          # Reads next 5 unprocessed task files
-@input-file notes/*.md                 # Reads all markdown files in notes folder
+@input file:journal/{latest:3}         # Reads 3 most recent journal files
+@input file:tasks/{pending:5}          # Reads next 5 unprocessed task files
+@input file:notes/*.md                 # Reads all markdown files in notes folder
 ```

@@ -82,7 +82,7 @@ Use this tool to read AssistantMD documentation. Call it with no arguments to re
             ("setup/workflow-setup", "Complete workflow template and walkthrough"),
             ("setup/installation", "Deployment prerequisites and docker-compose setup"),
             ("core/yaml-frontmatter", "Frontmatter keys: workflow, schedule, enabled"),
-            ("core/core-directives", "Directive reference for @output-file, @tools, etc."),
+            ("core/core-directives", "Directive reference for @output, @tools, etc."),
             ("core/patterns", "Pattern variables like {today}, {this-week}"),
         ]
 

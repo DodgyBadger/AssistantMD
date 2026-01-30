@@ -7,35 +7,35 @@ Directives are special commands that control how workflow steps execute. All dir
 
 ## Directives
 
-**@output-file** (string, optional)
+**@output** (string, optional)
 - Specifies where the step's AI-generated content should be written
-- Format: `@output-file path/to/file` or `@output-file [[path/to/file]]`
+- Format: `@output file:path/to/file` or `@output file:[[path/to/file]]` or `@output variable:buffer_name`
 - Path resolution: All paths are relative to the vault root
 - Automatic .md extension: The system automatically adds `.md` extension if not present
 - **Best Practice**: Choose one approach per step:
-  - **Explicit outputs**: Use @output-file for predictable, workflow-controlled file creation (recommended for most workflows)
-  - **Tool-managed outputs**: Omit @output-file and enable file_ops_safe to let the LLM manage all file creation
-  - **Avoid mixing both**: Using @output-file AND file_ops_safe in the same step creates unpredictable outputs (LLM response goes to @output-file, but LLM may also create additional files)
+  - **Explicit outputs**: Use @output for predictable, workflow-controlled file creation (recommended for most workflows)
+  - **Tool-managed outputs**: Omit @output and enable file_ops_safe to let the LLM manage all file creation
+  - **Avoid mixing both**: Using @output AND file_ops_safe in the same step creates unpredictable outputs (LLM response goes to @output, but LLM may also create additional files)
 
-You may use time patterns in the output-file directive to generate files dynamically. See [Pattern Reference](patterns.md) for all available patterns.
+You may use time patterns in the output directive to generate files dynamically. See [Pattern Reference](patterns.md) for all available patterns.
 
 ---
 
-**@input-file** (string, optional)
+**@input** (string, optional)
 - File contents are included as additional context for the step
-- Format: `@input-file path/to/file` or `@input-file [[path/to/file]]`
-- Multiple files: Use multiple `@input-file` directives for multiple files
+- Format: `@input file:path/to/file` or `@input file:[[path/to/file]]` or `@input variable:buffer_name`
+- Multiple files: Use multiple `@input` directives for multiple files
 - Path resolution: All paths are relative to the vault root
 - Automatic .md extension: The system automatically adds `.md` extension if not present
-- When the optional parameter `(required)` or `(required=true)` is specified, the step will be skipped if no files are found for this @input-file directive. Useful for workflows that should only run when input data is available (e.g., only generate invoices when there are billable hours to process).
+- When the optional parameter `(required)` or `(required=true)` is specified, the step will be skipped if no files are found for this @input directive. Useful for workflows that should only run when input data is available (e.g., only generate invoices when there are billable hours to process).
 - When the optional parameter `(paths-only)` / `(paths_only)` is specified, the directive passes only file paths into the prompt (listed as bullet points) and does not inline file contents. Use this when you want the model or tools to open the files one-by-one instead of loading large contexts directly.
 
 Examples:
-- `goals.md` or `projects/notes.md` - Specific file
-- `reports/*.md` - All files in the reports folder
-- `timesheets/{pending} (required, paths_only)` - Only run if unprocessed timesheets exist and pass only the file paths
+- `file:goals.md` or `file:projects/notes.md` - Specific file
+- `file:reports/*.md` - All files in the reports folder
+- `file:timesheets/{pending} (required, paths_only)` - Only run if unprocessed timesheets exist and pass only the file paths
 
-You may use time patterns and glob patterns in the input-file directive to retrieve files dynamically. See [Pattern Reference](patterns.md) for all available patterns.
+You may use time patterns and glob patterns in the input directive to retrieve files dynamically. See [Pattern Reference](patterns.md) for all available patterns.
 
 **Security restrictions:** All paths are relative to the vault root and cannot access system files outside of that. Recursive patterns (`**`) and parent directory access (`..`) are not allowed.
 
@@ -46,7 +46,7 @@ You may use time patterns and glob patterns in the input-file directive to retri
 - Format: `@header Header Text`
 - Supports pattern variables for dynamic headers (e.g., `{today}`, `{this-week}`)
 - The header is written as a level 1 markdown heading (`# Header`) at the beginning of the step's output
-- Only works when `@output-file` is specified (no output file means no header to write)
+- Only works when `@output` is specified (no output file means no header to write)
 
 Examples:
 - `@header Daily Planning` - Simple literal header
