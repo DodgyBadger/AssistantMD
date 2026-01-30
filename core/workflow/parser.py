@@ -329,7 +329,8 @@ def process_step_content(
     vault_path: str, 
     reference_date: Optional[datetime] = None,
     week_start_day: int = 0,
-    state_manager=None
+    state_manager=None,
+    buffer_store=None,
 ) -> ProcessedStep:
     """Process workflow step content by extracting and processing directives.
     
@@ -378,7 +379,8 @@ def process_step_content(
                         vault_path, 
                         reference_date=reference_date,
                         week_start_day=week_start_day,
-                        state_manager=state_manager
+                        state_manager=state_manager,
+                        buffer_store=buffer_store,
                     )
                     if not result.success:
                         raise ValueError(f"Failed to process directive '{directive_name}': {result.error_message}")

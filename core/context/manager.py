@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -251,6 +252,42 @@ def _parse_db_timestamp(raw_value: Optional[str]) -> Optional[datetime]:
             return datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return None
+    return None
+
+
+def _generate_numbered_file_path(full_file_path: str, vault_path: str) -> str:
+    """Generate a numbered file path for write-mode new."""
+    if full_file_path.startswith(vault_path + '/'):
+        relative_path = full_file_path[len(vault_path) + 1:]
+    else:
+        relative_path = full_file_path
+
+    if relative_path.endswith('.md'):
+        base_path = relative_path[:-3]
+    else:
+        base_path = relative_path
+
+    directory = os.path.dirname(base_path) if os.path.dirname(base_path) else '.'
+    basename = os.path.basename(base_path)
+    full_directory = os.path.join(vault_path, directory)
+
+    existing_numbers = set()
+    if os.path.exists(full_directory):
+        for filename in os.listdir(full_directory):
+            if filename.startswith(f"{basename}_") and filename.endswith('.md'):
+                number_part = filename[len(basename) + 1:-3]
+                try:
+                    number = int(number_part)
+                    existing_numbers.add(number)
+                except ValueError:
+                    continue
+
+    next_number = 0
+    while next_number in existing_numbers:
+        next_number += 1
+
+    numbered_relative_path = f"{base_path}_{next_number:03d}.md"
+    return f"{vault_path}/{numbered_relative_path}"
 
 
 def _start_of_week(value: datetime, week_start_day: int) -> datetime:
@@ -388,11 +425,6 @@ async def manage_context(
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
     input_files = input_data.context_payload.get("input_files") if isinstance(input_data.context_payload, dict) else None
-    prior_outputs = (
-        input_data.context_payload.get("prior_outputs")
-        if isinstance(input_data.context_payload, dict)
-        else None
-    )
     prompt_parts: List[str] = []
     manager_task = ""
     section_body = None
@@ -411,16 +443,6 @@ async def manage_context(
         )
     if input_files:
         prompt_parts.append(input_files)
-    if prior_outputs:
-        prompt_parts.append(
-            "\n".join(
-                [
-                    "=== BEGIN PRIOR_SECTION_OUTPUTS ===",
-                    prior_outputs,
-                    "=== END PRIOR_SECTION_OUTPUTS ===",
-                ]
-            )
-        )
     if previous_summary:
         prompt_parts.append(
             "\n".join(
@@ -671,7 +693,6 @@ def build_context_manager_history_processor(
             section_cache = {}
 
         summary_messages: List[ModelMessage] = []
-        prior_outputs: List[str] = []
         persisted_sections: List[Dict[str, Any]] = []
 
         if template_token_threshold > 0:
@@ -709,9 +730,82 @@ def build_context_manager_history_processor(
                     curated_history.append(latest_user_message)
                 return curated_history
 
+        buffer_store = getattr(run_context.deps, "buffer_store", None)
         for idx, section in enumerate(default_sections):
             section_key = f"{idx}:{section.name}"
             section_directives = section.directives or {}
+            output_target = None
+            output_values = section_directives.get("output-file", [])
+            if output_values:
+                try:
+                    output_result = registry.process_directive(
+                        "output-file",
+                        output_values[-1],
+                        vault_path,
+                        reference_date=datetime.now(),
+                        week_start_day=week_start_day,
+                    )
+                    if output_result.success:
+                        output_target = output_result.processed_value
+                        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                            logger.info(
+                                "Context output target resolved (buffer)",
+                                data={
+                                    "session_id": session_id,
+                                    "vault_name": vault_name,
+                                    "section_name": section.name,
+                                    "variable": output_target.get("name"),
+                                },
+                            )
+                        elif isinstance(output_target, str):
+                            logger.info(
+                                "Context output target resolved (file)",
+                                data={
+                                    "session_id": session_id,
+                                    "vault_name": vault_name,
+                                    "section_name": section.name,
+                                    "output_file": output_target,
+                                },
+                            )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to process context manager output-file directive",
+                        metadata={"error": str(exc)},
+                    )
+            header_value = None
+            header_values = section_directives.get("header", [])
+            if header_values:
+                try:
+                    header_result = registry.process_directive(
+                        "header",
+                        header_values[-1],
+                        vault_path,
+                        reference_date=datetime.now(),
+                        week_start_day=week_start_day,
+                    )
+                    if header_result.success:
+                        header_value = header_result.processed_value
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to process context manager header directive",
+                        metadata={"error": str(exc)},
+                    )
+            write_mode = None
+            write_mode_values = section_directives.get("write-mode", [])
+            if write_mode_values:
+                try:
+                    write_mode_result = registry.process_directive(
+                        "write-mode",
+                        write_mode_values[-1],
+                        vault_path,
+                    )
+                    if write_mode_result.success:
+                        write_mode = write_mode_result.processed_value
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to process context manager write-mode directive",
+                        metadata={"error": str(exc)},
+                    )
 
             def _resolve_section_int(directive_key: str, default: int = 0) -> int:
                 values = section_directives.get(directive_key, [])
@@ -785,6 +879,7 @@ def build_context_manager_history_processor(
                                 reference_date=datetime.now(),
                                 week_start_day=week_start_day,
                                 state_manager=None,
+                                buffer_store=buffer_store,
                             )
                         except Exception as exc:
                             logger.warning(
@@ -841,6 +936,19 @@ def build_context_manager_history_processor(
                             "files": file_summaries,
                         },
                     )
+                    if file_summaries:
+                        logger.info(
+                            "Context input files resolved",
+                            data={
+                                "session_id": session_id,
+                                "vault_name": vault_name,
+                                "section_name": section.name,
+                                "file_count": counts["total"],
+                                "paths_only_count": counts["paths_only"],
+                                "missing_count": counts["missing"],
+                                "files": file_summaries,
+                            },
+                        )
 
                 cache_config: Optional[Dict[str, Any]] = None
                 cache_values = section_directives.get("cache", [])
@@ -983,7 +1091,6 @@ def build_context_manager_history_processor(
                             "latest_input": latest_input,
                             "rendered_history": rendered_history,
                             "previous_summary": previous_summary_text,
-                            "prior_outputs": "\n\n".join(prior_outputs) if prior_outputs else None,
                             "input_files": _format_input_files_for_prompt(
                                 input_file_data,
                                 has_empty_directive=empty_input_file_directive and not input_file_data,
@@ -1036,6 +1143,63 @@ def build_context_manager_history_processor(
                                 )
 
                 summary_text = managed_output or "N/A"
+                if output_target:
+                    if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                        if buffer_store is not None:
+                            if write_mode == "replace":
+                                buffer_mode = "replace"
+                            else:
+                                buffer_mode = "append"
+                            buffer_store.put(
+                                output_target.get("name", ""),
+                                summary_text,
+                                mode=buffer_mode,
+                                metadata={
+                                    "source": "context_manager",
+                                    "section": section.name,
+                                },
+                            )
+                            logger.info(
+                                "Context output written to buffer",
+                                data={
+                                    "session_id": session_id,
+                                    "vault_name": vault_name,
+                                    "section_name": section.name,
+                                    "variable": output_target.get("name"),
+                                    "output_length": len(summary_text),
+                                },
+                            )
+                    elif isinstance(output_target, str):
+                        try:
+                            output_file = os.path.join(vault_path, output_target)
+                            if write_mode == "new":
+                                output_file = _generate_numbered_file_path(output_file, vault_path)
+                            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+                            if write_mode == "new" or write_mode == "replace":
+                                file_mode = "w"
+                            else:
+                                file_mode = "a"
+                            with open(output_file, file_mode, encoding="utf-8") as file:
+                                if header_value:
+                                    file.write(f"# {header_value}\n\n")
+                                file.write(summary_text)
+                                file.write("\n\n")
+                            logger.info(
+                                "Context output written to file",
+                                data={
+                                    "session_id": session_id,
+                                    "vault_name": vault_name,
+                                    "section_name": section.name,
+                                    "output_file": output_file,
+                                    "write_mode": write_mode or "append",
+                                    "output_length": len(summary_text),
+                                },
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to write context manager output file",
+                                metadata={"error": str(exc)},
+                            )
                 output_hash = _hash_output(summary_text)
                 logger.set_sinks(["validation"]).info(
                     "Context section completed",
@@ -1056,7 +1220,6 @@ def build_context_manager_history_processor(
                 summary_messages.append(
                     ModelRequest(parts=[SystemPromptPart(content=f"{summary_title}:\n{summary_text}")])
                 )
-                prior_outputs.append(summary_text)
                 persisted_sections.append(
                     {
                         "name": section_name,

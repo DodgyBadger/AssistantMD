@@ -120,18 +120,25 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse base value and parameters
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value.strip(), allowed_parameters={"required", "paths_only", "paths-only"}
+            value.strip(),
+            allowed_parameters={"required", "paths_only", "paths-only", "variable"},
         )
 
         # Validate base value (file path)
-        if base_value.startswith('/') or '..' in base_value:
+        if base_value and (base_value.startswith('/') or '..' in base_value):
+            return False
+        if not base_value and "variable" not in {k.lower() for k in parameters.keys()}:
             return False
 
         # Validate parameters (currently 'required' and 'paths_only' are supported)
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {'required', 'paths_only', 'paths-only'}:
+            if param_name not in {'required', 'paths_only', 'paths-only', 'variable'}:
                 return False
+            if param_name == "variable":
+                if not param_value.strip():
+                    return False
+                continue
             # Validate required parameter is a boolean-like value
             if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
                 return False
@@ -148,13 +155,57 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse required parameter if present
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"required", "paths_only", "paths-only"}
+            value, allowed_parameters={"required", "paths_only", "paths-only", "variable"}
         )
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
         paths_only = (
             parameters.get('paths_only', parameters.get('paths-only', '')).lower()
             in ['true', 'yes', '1']
         )
+        variable_name = parameters.get('variable', '').strip()
+
+        if variable_name:
+            buffer_store = context.get("buffer_store")
+            if buffer_store is None:
+                if required:
+                    return [{
+                        '_workflow_signal': 'skip_step',
+                        'reason': f"Required input variable not available: {variable_name}",
+                    }]
+                return [{
+                    "filepath": f"variable:{variable_name}",
+                    "filename": variable_name,
+                    "content": "",
+                    "found": False,
+                    "error": "Variable store unavailable",
+                }]
+
+            entry = buffer_store.get(variable_name)
+            if entry is None:
+                if required:
+                    return [{
+                        '_workflow_signal': 'skip_step',
+                        'reason': f"Required input variable not found: {variable_name}",
+                    }]
+                return [{
+                    "filepath": f"variable:{variable_name}",
+                    "filename": variable_name,
+                    "content": "",
+                    "found": False,
+                    "error": "Variable not found",
+                }]
+
+            content_value = entry.content or ""
+            result = {
+                "filepath": f"variable:{variable_name}",
+                "filename": variable_name,
+                "content": "" if paths_only else content_value,
+                "found": True,
+                "error": None,
+            }
+            if paths_only:
+                result["paths_only"] = True
+            return [result]
 
         # Use base_value for file resolution (without parameters)
         file_path = base_value.strip()

@@ -409,6 +409,13 @@ class DirectiveValueParser:
 
             return candidate_base, params_section
 
+        # Support parameter-only values like "(variable=foo)" when allowed.
+        if value.startswith("(") and value.endswith(")") and allowed_normalized is not None:
+            params_section = value[1:-1].strip()
+            parsed = parse_parameters(params_section) if params_section else None
+            if parsed:
+                return "", parsed
+
         # Handle quoted or Obsidian-style paths up front and leave any trailing
         # parentheses to be treated as parameters on the remainder.
         base_value: str | None = None

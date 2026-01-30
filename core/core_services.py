@@ -138,7 +138,8 @@ class CoreServices:
             vault_path=self.vault_path,
             reference_date=reference_date,
             week_start_day=self.week_start_day,
-            state_manager=self._state_manager
+            state_manager=self._state_manager,
+            buffer_store=context.get("buffer_store"),
         )
     
     async def create_agent(self, model=None, tools=None, history_processors=None):

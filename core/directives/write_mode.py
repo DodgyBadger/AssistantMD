@@ -12,7 +12,7 @@ from .parser import DirectiveValueParser
 class WriteModeDirective(DirectiveProcessor):
     """Processor for @write-mode directive that controls file writing behavior."""
     
-    VALID_MODES = {'append', 'new'}
+    VALID_MODES = {'append', 'new', 'replace'}
     
     def get_directive_name(self) -> str:
         return "write-mode"
@@ -30,7 +30,7 @@ class WriteModeDirective(DirectiveProcessor):
             **context: Additional context (not used for write-mode directive)
             
         Returns:
-            Normalized write mode ('append' or 'new')
+            Normalized write mode ('append', 'new', or 'replace')
             
         Raises:
             ValueError: If write mode is not recognized

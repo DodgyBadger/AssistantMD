@@ -32,6 +32,7 @@ from core.context.templates import load_template
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
+from core.runtime.buffers import BufferStore
 
 
 logger = UnifiedLogger(tag="chat-executor")
@@ -142,6 +143,7 @@ class ChatRunDeps:
     """Per-run dependencies/caches for chat agents."""
     context_manager_cache: dict[str, Any] = field(default_factory=dict)
     context_manager_now: Optional[datetime] = None
+    buffer_store: BufferStore = field(default_factory=BufferStore)
 
 
 def _resolve_context_manager_now() -> Optional[datetime]:

@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .base import DirectiveProcessor
 from .pattern_utilities import PatternUtilities
+from .parser import DirectiveValueParser
 
 
 class OutputFileDirective(DirectiveProcessor):
@@ -50,16 +51,29 @@ class OutputFileDirective(DirectiveProcessor):
     def validate_value(self, value: str) -> bool:
         if not value or not value.strip():
             return False
-        
-        value = value.strip()
-        if value.startswith('/') or '..' in value:
+
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value.strip(), allowed_parameters={"variable"}
+        )
+
+        if base_value and (base_value.startswith('/') or '..' in base_value):
             return False
-        
+        if not base_value and "variable" not in {k.lower() for k in parameters.keys()}:
+            return False
+
         return True
     
     def process_value(self, value: str, vault_path: str, **context) -> str:
         """Process output file with directive-specific pattern resolution."""
         value = value.strip()
+
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value, allowed_parameters={"variable"}
+        )
+        variable_name = parameters.get("variable", "").strip()
+        if variable_name:
+            return {"type": "buffer", "name": variable_name}
+        value = base_value.strip()
         
         # Strip Obsidian-style square brackets for hotlinked files
         if value.startswith('[[') and value.endswith(']]'):

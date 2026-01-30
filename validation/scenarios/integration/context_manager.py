@@ -60,6 +60,20 @@ class ContextManagerScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="context_input_files_resolved",
+            expected={
+                "section_name": "Recap",
+                "file_count": 1,
+                "files": [
+                    {
+                        "filepath": "variable:summary_buffer",
+                        "found": True,
+                    }
+                ],
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="context_section_completed",
             expected={"section_name": "Summary", "from_cache": False},
         )
@@ -152,6 +166,7 @@ description: Validation template for context manager events.
 @recent-runs 1
 @recent-summaries 0
 @input-file notes/seed
+@output-file (variable=summary_buffer)
 @model gpt-mini
 
 Summarize the seed-note haiku and the latest input in 2 bullets.
@@ -160,6 +175,7 @@ Call out any imagery or mood from the haiku.
 ## Recap
 @recent-runs 2
 @recent-summaries 1
+@input-file (variable=summary_buffer)
 @model gpt-mini
 
 Restate the current topic in one sentence, referencing the haiku theme.

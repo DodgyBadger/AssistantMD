@@ -6,6 +6,7 @@ from typing import Dict
 
 from core.logger import UnifiedLogger
 from core.core_services import CoreServices
+from core.runtime.buffers import BufferStore
 
 # Create workflow logger
 logger = UnifiedLogger(tag="step-workflow")
@@ -197,6 +198,19 @@ def generate_numbered_file_path(full_file_path: str, vault_path: str) -> str:
     return f"{vault_path}/{numbered_relative_path}"
 
 
+def generate_numbered_buffer_name(base_name: str, buffer_store) -> str:
+    """Generate a numbered variable name for write-mode new."""
+    if not base_name:
+        base_name = "output"
+    existing = set(buffer_store.list().keys()) if buffer_store else set()
+    next_number = 0
+    candidate = f"{base_name}_{next_number:03d}"
+    while candidate in existing:
+        next_number += 1
+        candidate = f"{base_name}_{next_number:03d}"
+    return candidate
+
+
 def should_step_run_today(processed_step, step_name: str, context: Dict, single_step_name: str, global_id: str) -> bool:
     """Check if step should run today based on @run-on directive."""
     if single_step_name:
@@ -317,7 +331,10 @@ async def write_step_output(step_content: str, output_file: str, processed_step,
     try:
         created_files = context['created_files']
         write_mode = processed_step.get_directive_value('write_mode')
-        file_mode = 'w' if write_mode == 'new' else 'a'
+        if write_mode == 'new' or write_mode == 'replace':
+            file_mode = 'w'
+        else:
+            file_mode = 'a'
         
         with open(output_file, file_mode, encoding='utf-8') as file:
             # Check for custom header from @header directive
@@ -342,6 +359,31 @@ async def write_step_output(step_content: str, output_file: str, processed_step,
         )
         raise
 
+
+def write_step_output_to_buffer(
+    step_content: str,
+    variable_name: str,
+    processed_step,
+    context: Dict,
+) -> None:
+    """Write step content to a buffer variable."""
+    buffer_store = context.get("buffer_store")
+    if buffer_store is None:
+        raise ValueError("Buffer store unavailable for variable output")
+    write_mode = processed_step.get_directive_value('write_mode')
+    if write_mode == "replace":
+        buffer_mode = "replace"
+    else:
+        buffer_mode = "append"
+    buffer_store.put(
+        variable_name,
+        step_content,
+        mode=buffer_mode,
+        metadata={
+            "source": "workflow_step",
+            "step": processed_step,
+        },
+    )
 
 async def create_step_agent(processed_step, workflow_instructions: str, services: CoreServices):
     """Create AI agent for step execution with optional tool integration."""
@@ -383,6 +425,7 @@ def initialize_workflow_context(services: CoreServices):
         'state_manager': services.get_state_manager(),
         'created_files': set(),
         'tools_used': set(),
+        'buffer_store': BufferStore(),
     }
 
 
@@ -399,21 +442,35 @@ async def process_workflow_step(
     today = context['today']
 
     # Process all directives with current context (single parse operation)
-    processed_step = services.process_step(raw_step_content, reference_date=today)
+    processed_step = services.process_step(
+        raw_step_content,
+        reference_date=today,
+        buffer_store=context.get("buffer_store"),
+    )
 
     # Get output file path from processed step (optional)
-    output_file_path = processed_step.get_directive_value('output_file')
+    output_target = processed_step.get_directive_value('output_file')
     output_file = None
+    output_variable = None
 
-    if output_file_path:
+    if output_target:
         # Apply write-mode from processed step (no re-parsing)
         write_mode = processed_step.get_directive_value('write_mode')
-        output_file = f'{services.vault_path}/{output_file_path}'
-        if write_mode == 'new':
-            output_file = generate_numbered_file_path(output_file, services.vault_path)
+        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+            output_variable = output_target.get("name")
+            if write_mode == "new":
+                output_variable = generate_numbered_buffer_name(
+                    output_variable or "output",
+                    context.get("buffer_store"),
+                )
+        else:
+            output_file_path = output_target
+            output_file = f'{services.vault_path}/{output_file_path}'
+            if write_mode == 'new':
+                output_file = generate_numbered_file_path(output_file, services.vault_path)
 
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
@@ -476,6 +533,8 @@ async def process_workflow_step(
     if output_file:
         await write_step_output(step_content, output_file, processed_step,
                                 context, step_index, step_name, services.workflow_id)
+    elif output_variable:
+        write_step_output_to_buffer(step_content, output_variable, processed_step, context)
     else:
         # No output file - step executed for side effects only (e.g., tool calls)
         # Still update state manager for any pending patterns used
