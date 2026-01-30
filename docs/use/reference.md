@@ -6,7 +6,7 @@
 | Name | Description | Applies To | Example | Notes |
 | --- | --- | --- | --- | --- |
 | `@output` | Write step output to a specific file or buffer. | Workflow | `@output file:reports/{today}` | Auto-adds `.md` if missing. Avoid mixing with `file_ops_safe` in the same step. |
-| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file:notes/*.md` | Supports `(required)` and `(paths-only)` options; patterns/globs allowed. |
+| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file:notes/*.md` | Supports `(required)` and `(refs-only)` options; patterns/globs allowed. |
 | `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Context template defaults to chat model. |
 | `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default) or `new` (numbered files). |

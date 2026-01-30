@@ -121,7 +121,7 @@ class InputFileDirective(DirectiveProcessor):
         # Parse base value and parameters
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters={"required", "paths_only", "paths-only"},
+            allowed_parameters={"required", "refs_only", "refs-only"},
         )
 
         if not base_value:
@@ -140,10 +140,10 @@ class InputFileDirective(DirectiveProcessor):
         else:
             return False
 
-        # Validate parameters (currently 'required' and 'paths_only' are supported)
+        # Validate parameters (currently 'required' and 'refs_only' are supported)
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {'required', 'paths_only', 'paths-only'}:
+            if param_name not in {'required', 'refs_only', 'refs-only'}:
                 return False
             # Validate required parameter is a boolean-like value
             if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
@@ -161,11 +161,11 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse required parameter if present
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"required", "paths_only", "paths-only"}
+            value, allowed_parameters={"required", "refs_only", "refs-only"}
         )
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
-        paths_only = (
-            parameters.get('paths_only', parameters.get('paths-only', '')).lower()
+        refs_only = (
+            parameters.get('refs_only', parameters.get('refs-only', '')).lower()
             in ['true', 'yes', '1']
         )
 
@@ -205,11 +205,11 @@ class InputFileDirective(DirectiveProcessor):
             result = {
                 "filepath": f"variable:{variable_name}",
                 "filename": variable_name,
-                "content": "" if paths_only else content_value,
+                "content": "" if refs_only else content_value,
                 "found": True,
                 "error": None,
             }
-            if paths_only:
+            if refs_only:
                 result["paths_only"] = True
             return [result]
 
@@ -248,8 +248,8 @@ class InputFileDirective(DirectiveProcessor):
                     'reason': f'No required input files found: {file_path}'
                 }]
 
-        # If paths_only=true, strip content to reduce prompt size but retain metadata
-        if paths_only:
+        # If refs_only=true, strip content to reduce prompt size but retain metadata
+        if refs_only:
             for file_data in result_files:
                 if isinstance(file_data, dict):
                     file_data['paths_only'] = True

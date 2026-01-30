@@ -3,25 +3,31 @@
 
 ## 2026-01-30
 
-This release completes the current context manager and buffer foundation work, with a deliberate breaking change to directive syntax in preparation for future extensibility (e.g., additional input schemes).
+This release introduces the **Context Manager** as a first-class feature, adds buffer-backed context passing, and then refines the directive model with a deliberate breaking change to improve semantics and future extensibility.
+
+### Context manager (new feature)
+- **Purpose**: curate a compact, task-relevant working context instead of appending full chat history, improving stability for long-running sessions.
+- **Architecture**:
+  - Template-driven: templates live in `AssistantMD/ContextTemplates/` (vault) or `system/ContextTemplates/` (global), with vault → system resolution.
+  - Step-based: each `##` section (non-instructions) is a step that can include directives; steps run in order and inject system summaries.
+  - Controlled history: `@recent-runs`, `@recent-summaries`, `passthrough_runs`, and `token_threshold` gate how much history is passed through or summarized.
+  - Caching: optional `@cache` directive supports session/daily/weekly/duration reuse; cache is keyed by template + section and invalidated on template changes.
+  - Observability: managed summaries are persisted to SQLite with template metadata and validation events capture key decisions.
+
+### Buffers (virtualized I/O)
+- Added a run-scoped buffer store to pass context between steps without file I/O.
+- `@output variable:NAME` writes to a buffer; `@input variable:NAME` reads from it.
+- Extended to workflows so the same buffer semantics work outside the context manager.
+- Validation coverage added for buffer read/write/append/replace and required-missing behavior.
 
 ### Breaking changes
 - **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
-- **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file:` / `variable:`). Parameter-only forms (e.g., `(variable=...)`) are no longer supported.
+- **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file:` / `variable:`).
+- **Parameter rename**: `paths-only` → `refs-only` for `@input` (no backward compatibility).
 
-### Buffers (virtualized I/O)
-- Added run-scoped buffer store and plumbed it through workflows and the context manager.
-- `@output variable:NAME` writes to a buffer; `@input variable:NAME` reads from it.
-- Buffer semantics support append/replace via `@write-mode` and respect paths-only input behavior.
-- Validation scenario coverage added for buffer read/write/append/replace and required-missing behavior.
-
-### Context manager
-- Continued hardening and observability improvements, with template-driven step processing and caching behavior stabilized.
-- Validation scenarios updated to use the new directive syntax.
-
-### Docs & validation
+### Documentation
 - Documentation updated to reflect the new directive names and scheme-based targets.
-- Validation templates and integration scenarios updated accordingly.
+- Docs folder now includes a library of example context and workflow templates.
 
 
 ## 2026-01-24

@@ -73,7 +73,7 @@ description: Directive-level validation for input params
 ## PATHS_ONLY
 @model test
 @input file:notes/inline
-@input file:notes/with (parens) (paths_only)
+@input file:notes/with (parens) (refs_only)
 
 Summarize the files.
 

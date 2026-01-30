@@ -63,7 +63,7 @@ This enables iterative exploration of large content without stuffing it into a s
 
 ## Decisions & Notes (on-the-fly)
 - **Terminology**: BufferStore is the container; entries are called **variables** in user-facing syntax.
-- **paths-only remains**: we did not rename to ref-only; use `paths-only` to avoid inlining buffer content.
+- **refs-only**: use `refs-only` to avoid inlining buffer content.
 - **write-mode**: added explicit `replace` for destructive writes.
   - Buffers default to **append**; use `replace` to overwrite.
   - `new` still supported for experimental context templates.

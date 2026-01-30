@@ -57,7 +57,7 @@ class BufferVariablesScenario(BaseScenario):
         prompt = prompt_event.get("data", {}).get("prompt", "")
         assert prompt.count("success (no tool calls)") == 1
 
-        # Step 7: paths-only should include path but not content
+        # Step 7: refs-only should include path but not content
         prompt_event = self.assert_event_contains(
             events,
             name="workflow_step_prompt",
@@ -125,7 +125,7 @@ Read replaced content.
 
 ## PATHS_ONLY
 @model test
-@input variable:buffer_main (paths_only=true)
+@input variable:buffer_main (refs_only=true)
 
 Paths only check.
 
