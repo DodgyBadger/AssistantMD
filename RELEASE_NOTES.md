@@ -1,6 +1,29 @@
 # Release Notes
 
 
+## 2026-01-30
+
+This release completes the current context manager and buffer foundation work, with a deliberate breaking change to directive syntax in preparation for future extensibility (e.g., additional input schemes).
+
+### Breaking changes
+- **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
+- **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file:` / `variable:`). Parameter-only forms (e.g., `(variable=...)`) are no longer supported.
+
+### Buffers (virtualized I/O)
+- Added run-scoped buffer store and plumbed it through workflows and the context manager.
+- `@output variable:NAME` writes to a buffer; `@input variable:NAME` reads from it.
+- Buffer semantics support append/replace via `@write-mode` and respect paths-only input behavior.
+- Validation scenario coverage added for buffer read/write/append/replace and required-missing behavior.
+
+### Context manager
+- Continued hardening and observability improvements, with template-driven step processing and caching behavior stabilized.
+- Validation scenarios updated to use the new directive syntax.
+
+### Docs & validation
+- Documentation updated to reflect the new directive names and scheme-based targets.
+- Validation templates and integration scenarios updated accordingly.
+
+
 ## 2026-01-24
 
 This release refactors the UnifiedLogger and parts of the validation framework.
