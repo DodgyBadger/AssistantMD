@@ -22,7 +22,7 @@ from core.workflow.parser import (
 from core.llm.agents import generate_response, create_agent
 from core.directives.registry import register_directive
 from core.directives.base import DirectiveProcessor
-from core.directives.file_state import WorkflowFileStateManager
+from core.utils.file_state import WorkflowFileStateManager
 
 
 @dataclass

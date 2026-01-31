@@ -7,9 +7,9 @@ import re
 from typing import List, Dict, Any, Optional
 
 from .base import DirectiveProcessor
-from .pattern_utilities import PatternUtilities
+from core.utils.patterns import PatternUtilities
 from .parser import DirectiveValueParser
-from core.directives.file_state import hash_file_content
+from core.utils.file_state import hash_file_content
 
 
 def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
@@ -172,6 +172,7 @@ class InputFileDirective(DirectiveProcessor):
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
             buffer_store = context.get("buffer_store")
+            display_name = f"variable: {variable_name}"
             if buffer_store is None:
                 if required:
                     return [{
@@ -179,7 +180,7 @@ class InputFileDirective(DirectiveProcessor):
                         'reason': f"Required input variable not available: {variable_name}",
                     }]
                 return [{
-                    "filepath": f"variable:{variable_name}",
+                    "filepath": display_name,
                     "filename": variable_name,
                     "content": "",
                     "found": False,
@@ -194,7 +195,7 @@ class InputFileDirective(DirectiveProcessor):
                         'reason': f"Required input variable not found: {variable_name}",
                     }]
                 return [{
-                    "filepath": f"variable:{variable_name}",
+                    "filepath": display_name,
                     "filename": variable_name,
                     "content": "",
                     "found": False,
@@ -203,7 +204,7 @@ class InputFileDirective(DirectiveProcessor):
 
             content_value = entry.content or ""
             result = {
-                "filepath": f"variable:{variable_name}",
+                "filepath": display_name,
                 "filename": variable_name,
                 "content": "" if refs_only else content_value,
                 "found": True,

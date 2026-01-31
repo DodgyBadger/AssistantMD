@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 
 from .base import DirectiveProcessor
-from .pattern_utilities import PatternUtilities
+from core.utils.patterns import PatternUtilities
 
 
 class HeaderDirective(DirectiveProcessor):
