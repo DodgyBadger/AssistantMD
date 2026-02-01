@@ -213,6 +213,7 @@ def write_output(
     buffer_store=None,
     vault_path: Optional[str] = None,
     header: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     mode = write_mode or "append"
     if target.type == "inline":
@@ -231,7 +232,10 @@ def write_output(
             mode_to_use = "replace"
         else:
             mode_to_use = "append"
-        buffer_store.put(name, content or "", mode=mode_to_use, metadata={"source": "routing"})
+        buffer_metadata = {"source": "routing"}
+        if metadata:
+            buffer_metadata.update(metadata)
+        buffer_store.put(name, content or "", mode=mode_to_use, metadata=buffer_metadata)
         return {"routed": True, "type": "buffer", "name": name, "write_mode": mode_to_use, "output_length": len(content or "")}
 
     if target.type == "file":

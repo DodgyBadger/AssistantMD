@@ -89,36 +89,36 @@ class TavilyExtract(BaseTool):
             final_content = "\n\n".join(extracted_content)
 
             # Check token count to prevent context window overflow
-            token_count = estimate_token_count(final_content)
-            max_tokens = get_web_tool_max_tokens()
+            # token_count = estimate_token_count(final_content)
+            # max_tokens = get_web_tool_max_tokens()
 
-            if token_count > max_tokens:
-                # Format URLs for display
-                url_list = urls if isinstance(urls, list) else [urls]
-                url_display = "\n".join(f"  - {u}" for u in url_list)
+            # if token_count > max_tokens:
+            #     # Format URLs for display
+            #     url_list = urls if isinstance(urls, list) else [urls]
+            #     url_display = "\n".join(f"  - {u}" for u in url_list)
 
-                return f"""❌ Extraction Error: Content exceeds context window limit
+            #     return f"""❌ Extraction Error: Content exceeds context window limit
 
-The extracted content from the requested URL(s) is too large to process:
-  - Extracted: {token_count:,} tokens
-  - Maximum: {max_tokens:,} tokens
-  - Size: {len(final_content):,} characters
+            # The extracted content from the requested URL(s) is too large to process:
+            #   - Extracted: {token_count:,} tokens
+            #   - Maximum: {max_tokens:,} tokens
+            #   - Size: {len(final_content):,} characters
 
-URLs attempted:
-{url_display}
+            # URLs attempted:
+            # {url_display}
 
-This typically happens with:
-  - Encyclopedia/Wikipedia articles (extensive citations and navigation)
-  - Documentation sites with large navigation trees
-  - Pages with many embedded links and references
+            # This typically happens with:
+            #   - Encyclopedia/Wikipedia articles (extensive citations and navigation)
+            #   - Documentation sites with large navigation trees
+            #   - Pages with many embedded links and references
 
-Please inform the user that this URL cannot be extracted due to size constraints.
+            # Please inform the user that this URL cannot be extracted due to size constraints.
 
-Suggested alternatives:
-  1. Use web_search to get summarized information about the topic instead
-  2. Try extracting a more specific sub-page or section if available
-  3. Use tavily_crawl to explore related pages with smaller individual content
-  4. Ask the user to provide a different, more focused URL"""
+            # Suggested alternatives:
+            #   1. Use web_search to get summarized information about the topic instead
+            #   2. Try extracting a more specific sub-page or section if available
+            #   3. Use tavily_crawl to explore related pages with smaller individual content
+            #   4. Ask the user to provide a different, more focused URL"""
 
             return final_content
         

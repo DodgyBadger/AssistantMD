@@ -44,6 +44,12 @@ DEFAULT_MAX_SCHEDULER_WORKERS = 1
 # Helps smaller models like gemini-flash that frequently make tool validation errors
 DEFAULT_TOOL_RETRIES = 3
 
+# Buffer operations limits (characters and counts)
+BUFFER_PEEK_MAX_CHARS = 2000
+BUFFER_READ_MAX_CHARS = 8000
+BUFFER_SEARCH_MAX_MATCHES = 100
+BUFFER_SEARCH_CONTEXT_CHARS = 0
+
 # ==============================================================================
 # LLM Prompts and Instructions
 # ==============================================================================
@@ -63,35 +69,20 @@ When processing web content:
 """
 
 # Regular Chat Prompts
-REGULAR_CHAT_INSTRUCTIONS = """You are a helpful AI assistant. Use the available tools to assist the user with their requests.
+REGULAR_CHAT_INSTRUCTIONS = """
+You are a helpful AI assistant. Use the available tools to assist the user with their requests.
 
 Format your responses using markdown for visual clarity:
 - Use **bold** for emphasis on key points
 - Use `code blocks` for file paths, commands, or code snippets
 - Use headers (##, ###) to organize longer responses
 - Use lists for steps or multiple items
-- Use > blockquotes for important notes or warnings"""
+- Use > blockquotes for important notes or warnings
 
-# Compact History Prompts
-COMPACT_SUMMARY_PROMPT = """
-Review the conversation and provide a concise summary (under 500 words) that captures key points, decisions, and context.
+Tool output routing (all tools):
+- Route tool results with output=... (e.g. output=variable:NAME or output=file:PATH)
+- Optional write_mode=append|replace|new can be used when routing
 """
-
-COMPACT_INSTRUCTIONS = """
-You are a conversation summarizer. Provide ONLY the summary, no preamble or explanation.
-"""
-
-# Assistant Creation Prompts
-WORKFLOW_CREATION_SUMMARY_PROMPT = """
-Review our conversation and summarize it focusing on:
-- The user's goals and desired outcomes
-- Any workflows, patterns, or automations discussed
-- Files, data sources, or outputs mentioned
-- Tasks that could be automated
-
-Keep it under 300 words, focusing on what would help design an automated assistant.
-"""
-
 
 # Optional context manager agent.instruction
 CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """

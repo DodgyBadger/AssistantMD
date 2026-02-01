@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import os
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -39,7 +38,7 @@ from core.context.store import (
     upsert_session,
 )
 from core.utils.hash import hash_file_content
-from core.utils.routing import format_input_files_block
+from core.utils.routing import OutputTarget, format_input_files_block, write_output
 from core.runtime.state import has_runtime_context, get_runtime_context
 
 logger = UnifiedLogger(tag="context-manager")
@@ -212,41 +211,6 @@ def _parse_db_timestamp(raw_value: Optional[str]) -> Optional[datetime]:
         except ValueError:
             return None
     return None
-
-
-def _generate_numbered_file_path(full_file_path: str, vault_path: str) -> str:
-    """Generate a numbered file path for write-mode new."""
-    if full_file_path.startswith(vault_path + '/'):
-        relative_path = full_file_path[len(vault_path) + 1:]
-    else:
-        relative_path = full_file_path
-
-    if relative_path.endswith('.md'):
-        base_path = relative_path[:-3]
-    else:
-        base_path = relative_path
-
-    directory = os.path.dirname(base_path) if os.path.dirname(base_path) else '.'
-    basename = os.path.basename(base_path)
-    full_directory = os.path.join(vault_path, directory)
-
-    existing_numbers = set()
-    if os.path.exists(full_directory):
-        for filename in os.listdir(full_directory):
-            if filename.startswith(f"{basename}_") and filename.endswith('.md'):
-                number_part = filename[len(basename) + 1:-3]
-                try:
-                    number = int(number_part)
-                    existing_numbers.add(number)
-                except ValueError:
-                    continue
-
-    next_number = 0
-    while next_number in existing_numbers:
-        next_number += 1
-
-    numbered_relative_path = f"{base_path}_{next_number:03d}.md"
-    return f"{vault_path}/{numbered_relative_path}"
 
 
 def _start_of_week(value: datetime, week_start_day: int) -> datetime:
@@ -1106,56 +1070,54 @@ def build_context_manager_history_processor(
                 summary_text = managed_output or "N/A"
                 if output_target:
                     if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-                        if buffer_store is not None:
-                            if write_mode == "replace":
-                                buffer_mode = "replace"
-                            else:
-                                buffer_mode = "append"
-                            buffer_store.put(
-                                output_target.get("name", ""),
-                                summary_text,
-                                mode=buffer_mode,
+                        target = OutputTarget(type="buffer", name=output_target.get("name"))
+                    elif isinstance(output_target, str):
+                        target = OutputTarget(type="file", path=output_target)
+                    else:
+                        target = None
+
+                    if target is not None:
+                        try:
+                            write_result = write_output(
+                                target=target,
+                                content=summary_text,
+                                write_mode=write_mode,
+                                buffer_store=buffer_store,
+                                vault_path=vault_path,
+                                header=header_value,
                                 metadata={
                                     "source": "context_manager",
-                                    "section": section.name,
-                                },
-                            )
-                            logger.info(
-                                "Context output written to buffer",
-                                data={
-                                    "session_id": session_id,
-                                    "vault_name": vault_name,
-                                    "section_name": section.name,
-                                    "variable": output_target.get("name"),
-                                    "output_length": len(summary_text),
-                                },
-                            )
-                    elif isinstance(output_target, str):
-                        try:
-                            output_file = os.path.join(vault_path, output_target)
-                            if write_mode == "new":
-                                output_file = _generate_numbered_file_path(output_file, vault_path)
-                            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-                            if write_mode == "new" or write_mode == "replace":
-                                file_mode = "w"
-                            else:
-                                file_mode = "a"
-                            with open(output_file, file_mode, encoding="utf-8") as file:
-                                if header_value:
-                                    file.write(f"# {header_value}\n\n")
-                                file.write(summary_text)
-                                file.write("\n\n")
-                            logger.info(
-                                "Context output written to file",
-                                data={
-                                    "session_id": session_id,
-                                    "vault_name": vault_name,
-                                    "section_name": section.name,
-                                    "output_file": output_file,
+                                    "origin_id": session_id,
+                                    "origin_name": section.name,
+                                    "origin_type": "context_section",
+                                    "run_id": run_context.run_id,
                                     "write_mode": write_mode or "append",
-                                    "output_length": len(summary_text),
+                                    "size_chars": len(summary_text),
                                 },
                             )
+                            if write_result.get("type") == "buffer":
+                                logger.info(
+                                    "Context output written to buffer",
+                                    data={
+                                        "session_id": session_id,
+                                        "vault_name": vault_name,
+                                        "section_name": section.name,
+                                        "variable": write_result.get("name"),
+                                        "output_length": len(summary_text),
+                                    },
+                                )
+                            elif write_result.get("type") == "file":
+                                logger.info(
+                                    "Context output written to file",
+                                    data={
+                                        "session_id": session_id,
+                                        "vault_name": vault_name,
+                                        "section_name": section.name,
+                                        "output_file": write_result.get("path"),
+                                        "write_mode": write_mode or "append",
+                                        "output_length": len(summary_text),
+                                    },
+                                )
                         except Exception as exc:
                             logger.warning(
                                 "Failed to write context manager output file",

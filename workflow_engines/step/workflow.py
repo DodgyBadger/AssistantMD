@@ -1,6 +1,5 @@
 
 from datetime import datetime
-import os
 import re
 from typing import Dict
 from types import SimpleNamespace
@@ -8,7 +7,7 @@ from types import SimpleNamespace
 from core.logger import UnifiedLogger
 from core.core_services import CoreServices
 from core.runtime.buffers import BufferStore
-from core.utils.routing import format_input_files_block
+from core.utils.routing import OutputTarget, format_input_files_block, write_output
 from core.directives.tools import ToolsDirective
 
 # Create workflow logger
@@ -149,71 +148,6 @@ async def run_workflow(job_args: dict, **kwargs):
 ## Helper Functions
 ########################################################################
 
-def generate_numbered_file_path(full_file_path: str, vault_path: str) -> str:
-    """Generate a numbered file path for new write mode.
-    
-    Args:
-        full_file_path: Full path to the file (e.g., '/vault/journal/2025-08-19.md')
-        vault_path: Root path of the vault
-        
-    Returns:
-        Numbered file path (e.g., '/vault/journal/2025-08-19_0.md')
-    """
-    # Extract the relative path within the vault
-    if full_file_path.startswith(vault_path + '/'):
-        relative_path = full_file_path[len(vault_path) + 1:]
-    else:
-        relative_path = full_file_path
-    
-    # Remove .md extension to get base path
-    if relative_path.endswith('.md'):
-        base_path = relative_path[:-3]
-    else:
-        base_path = relative_path
-    
-    # Find next available number
-    directory = os.path.dirname(base_path) if os.path.dirname(base_path) else '.'
-    basename = os.path.basename(base_path)
-    
-    # Full directory path in vault
-    full_directory = os.path.join(vault_path, directory)
-    
-    existing_numbers = set()
-    if os.path.exists(full_directory):
-        for filename in os.listdir(full_directory):
-            if filename.startswith(f"{basename}_") and filename.endswith('.md'):
-                # Extract number from filename (supports both old format _N and new format _NNN)
-                number_part = filename[len(basename) + 1:-3]  # Remove prefix_ and .md
-                try:
-                    number = int(number_part)
-                    existing_numbers.add(number)
-                except ValueError:
-                    # Skip files with non-numeric suffixes
-                    continue
-    
-    # Find the lowest available number starting from 0
-    next_number = 0
-    while next_number in existing_numbers:
-        next_number += 1
-    
-    # Return full path with zero-padded 3-digit number for proper sorting
-    numbered_relative_path = f"{base_path}_{next_number:03d}.md"
-    return f"{vault_path}/{numbered_relative_path}"
-
-
-def generate_numbered_buffer_name(base_name: str, buffer_store) -> str:
-    """Generate a numbered variable name for write-mode new."""
-    if not base_name:
-        base_name = "output"
-    existing = set(buffer_store.list().keys()) if buffer_store else set()
-    next_number = 0
-    candidate = f"{base_name}_{next_number:03d}"
-    while candidate in existing:
-        next_number += 1
-        candidate = f"{base_name}_{next_number:03d}"
-    return candidate
-
-
 def should_step_run_today(processed_step, step_name: str, context: Dict, single_step_name: str, global_id: str) -> bool:
     """Check if step should run today based on @run-on directive."""
     if single_step_name:
@@ -301,67 +235,6 @@ def _resolve_tools_result(tools_value) -> tuple[list, str, list]:
 ########################################################################
 ## Helper Functions - Configuration
 ########################################################################
-
-async def write_step_output(step_content: str, output_file: str, processed_step, 
-                            context: Dict, step_index: int, step_name: str, global_id: str):
-    """Write step content to output file."""
-    try:
-        created_files = context['created_files']
-        write_mode = processed_step.get_directive_value('write_mode')
-        if write_mode == 'new' or write_mode == 'replace':
-            file_mode = 'w'
-        else:
-            file_mode = 'a'
-        
-        with open(output_file, file_mode, encoding='utf-8') as file:
-            # Check for custom header from @header directive
-            custom_header = processed_step.get_directive_value('header')
-            if custom_header:
-                file.write(f"# {custom_header}\n\n")
-            file.write(step_content)
-            file.write("\n\n")
-        
-        created_files.add(output_file)
-        context['state_manager'].update_from_processed_step(processed_step)
-            
-    except (IOError, OSError, PermissionError) as file_error:
-        logger.error(
-            "Failed to create output file",
-            data={
-                "vault": global_id,
-                "target_file": output_file,
-                "step_name": step_name,
-                "reason": str(file_error),
-            },
-        )
-        raise
-
-
-def write_step_output_to_buffer(
-    step_content: str,
-    variable_name: str,
-    processed_step,
-    context: Dict,
-) -> None:
-    """Write step content to a buffer variable."""
-    buffer_store = context.get("buffer_store")
-    if buffer_store is None:
-        raise ValueError("Buffer store unavailable for variable output")
-    write_mode = processed_step.get_directive_value('write_mode')
-    if write_mode == "replace":
-        buffer_mode = "replace"
-    else:
-        buffer_mode = "append"
-    buffer_store.put(
-        variable_name,
-        step_content,
-        mode=buffer_mode,
-        metadata={
-            "source": "workflow_step",
-            "step": processed_step,
-        },
-    )
-
 async def create_step_agent(processed_step, workflow_instructions: str, services: CoreServices):
     """Create AI agent for step execution with optional tool integration."""
     # Get model instance from model directive (None if not specified)
@@ -421,29 +294,8 @@ async def process_workflow_step(
         buffer_store=context.get("buffer_store"),
     )
 
-    # Get output file path from processed step (optional)
+    # Get output target from processed step (optional)
     output_target = processed_step.get_directive_value('output')
-    output_file = None
-    output_variable = None
-
-    if output_target:
-        # Apply write-mode from processed step (no re-parsing)
-        write_mode = processed_step.get_directive_value('write_mode')
-        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-            output_variable = output_target.get("name")
-            if write_mode == "new":
-                output_variable = generate_numbered_buffer_name(
-                    output_variable or "output",
-                    context.get("buffer_store"),
-                )
-        else:
-            output_file_path = output_target
-            output_file = f'{services.vault_path}/{output_file_path}'
-            if write_mode == 'new':
-                output_file = generate_numbered_file_path(output_file, services.vault_path)
-
-            # Ensure output directory exists
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
@@ -493,9 +345,7 @@ async def process_workflow_step(
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
     output_target_label = None
-    if output_variable is not None:
-        output_target_label = f"variable:{output_variable}"
-    elif isinstance(output_target, dict) and output_target.get("type") == "buffer":
+    if isinstance(output_target, dict) and output_target.get("type") == "buffer":
         output_target_label = f"variable:{output_target.get('name')}"
     elif output_target:
         output_target_label = f"file:{output_target}"
@@ -513,12 +363,33 @@ async def process_workflow_step(
     deps = SimpleNamespace(buffer_store=context.get("buffer_store"))
     step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
 
-    # Write AI-generated content to output file (if @output specified)
-    if output_file:
-        await write_step_output(step_content, output_file, processed_step,
-                                context, step_index, step_name, services.workflow_id)
-    elif output_variable:
-        write_step_output_to_buffer(step_content, output_variable, processed_step, context)
+    # Write AI-generated content to output target (if @output specified)
+    if output_target:
+        write_mode = processed_step.get_directive_value('write_mode')
+        header_value = processed_step.get_directive_value('header')
+        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+            target = OutputTarget(type="buffer", name=output_target.get("name"))
+        else:
+            target = OutputTarget(type="file", path=output_target)
+        write_result = write_output(
+            target=target,
+            content=step_content,
+            write_mode=write_mode,
+            buffer_store=context.get("buffer_store"),
+            vault_path=services.vault_path,
+            header=header_value,
+            metadata={
+                "source": "workflow_step",
+                "origin_id": services.workflow_id,
+                "origin_name": step_name,
+                "origin_type": "workflow_step",
+                "write_mode": write_mode or "append",
+                "size_chars": len(step_content or ""),
+            },
+        )
+        if write_result.get("type") == "file" and write_result.get("path"):
+            context['created_files'].add(write_result.get("path"))
+        context['state_manager'].update_from_processed_step(processed_step)
     else:
         # No output file - step executed for side effects only (e.g., tool calls)
         # Still update state manager for any pending patterns used

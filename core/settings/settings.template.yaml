@@ -187,6 +187,11 @@ tools:
     description: "Read, write, append, list, search"
     requires_secrets: []
     user_editable: false
+  buffer_ops:
+    module: core.tools.buffer_ops
+    description: "Read-only buffer inspection (list, info, peek, read, search)"
+    requires_secrets: []
+    user_editable: false
   file_ops_unsafe:
     module: core.tools.file_ops_unsafe
     description: "Edit, delete, move/overwrite (use with caution)"

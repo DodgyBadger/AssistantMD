@@ -193,7 +193,7 @@ buffer_ops(operation="export", target="search_results", destination="reports/sea
 
 6) **Add buffer_ops tool**
    - Implement `buffer_ops` with `operation=...` shape aligned to `file_ops_safe`.
-   - Provide REPL-style access: `list`, `info`, `peek`, `read` (range-based), `search`, `export`.
+   - Provide REPL-style access: `list`, `info`, `peek`, `read` (range-based), `search`.
 
 7) **Unify write behavior**
    - Replace ad-hoc file/buffer writes in:
@@ -201,7 +201,17 @@ buffer_ops(operation="export", target="search_results", destination="reports/sea
      - `core/context/manager.py`
    - Use shared helpers from `core/utils/routing.py` or a dedicated writer.
 
-8) **Docs + validation**
+7.5) **Buffer scope semantics (decision point)**
+    - **Workflow runs**: buffer store is run-scoped; variables persist across steps within a single workflow execution, then reset.
+    - **Context manager (chat)**: buffer store is run-scoped to a single chat turn; variables persist across sections in that turn, then reset.
+    - **Implication**: pure run-scoped buffers are not useful across chat turns; define cross-turn behavior explicitly.
+    - Options:
+      - **Session-scoped in-memory**: keep a per-chat-session buffer store keyed by session id.
+      - **Persisted buffers**: serialize buffers to disk (e.g., `system/buffers/<session>.json`) and reload per turn.
+      - **Explicit opt-in**: introduce a `scope=session|run` flag on routing to control persistence.
+    - **User expectation note**: keep context templates self-contained. If chat buffers become session-scoped, prefer a separate run-scoped buffer store for the context manager so template internals do not leak into the primary chat session unless explicitly routed.
+
+ 8) **Docs + validation**
    - Update directive reference and examples.
   - Add validation scenarios for:
     - tool output routing to variable/file
