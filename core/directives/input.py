@@ -10,6 +10,10 @@ from .base import DirectiveProcessor
 from core.utils.patterns import PatternUtilities
 from .parser import DirectiveValueParser
 from core.utils.file_state import hash_file_content
+from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
+from core.logger import UnifiedLogger
+
+logger = UnifiedLogger(tag="directive-input")
 
 
 def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
@@ -121,7 +125,7 @@ class InputFileDirective(DirectiveProcessor):
         # Parse base value and parameters
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters={"required", "refs_only", "refs-only"},
+            allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode"},
         )
 
         if not base_value:
@@ -140,14 +144,14 @@ class InputFileDirective(DirectiveProcessor):
         else:
             return False
 
-        # Validate parameters (currently 'required' and 'refs_only' are supported)
+        # Validate parameters
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {'required', 'refs_only', 'refs-only'}:
+            if param_name not in {'required', 'refs_only', 'refs-only', 'output', 'write-mode', 'write_mode'}:
                 return False
-            # Validate required parameter is a boolean-like value
-            if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
-                return False
+            if param_name in {'required', 'refs_only', 'refs-only'}:
+                if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
+                    return False
 
         return True
     
@@ -161,13 +165,15 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse required parameter if present
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"required", "refs_only", "refs-only"}
+            value, allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode"}
         )
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
         refs_only = (
             parameters.get('refs_only', parameters.get('refs-only', '')).lower()
             in ['true', 'yes', '1']
         )
+        output_target_value = parameters.get('output')
+        write_mode_param = parameters.get('write-mode') or parameters.get('write_mode')
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
@@ -211,8 +217,18 @@ class InputFileDirective(DirectiveProcessor):
                 "error": None,
             }
             if refs_only:
-                result["paths_only"] = True
-            return [result]
+                result["refs_only"] = True
+            results = [result]
+            if output_target_value:
+                return self._route_input_results(
+                    results,
+                    output_target_value,
+                    write_mode_param,
+                    vault_path,
+                    context,
+                    refs_only=refs_only,
+                )
+            return results
 
         if base_value.startswith("file:"):
             file_path = base_value[len("file:"):].strip()
@@ -253,10 +269,110 @@ class InputFileDirective(DirectiveProcessor):
         if refs_only:
             for file_data in result_files:
                 if isinstance(file_data, dict):
-                    file_data['paths_only'] = True
+                    file_data['refs_only'] = True
                     file_data['content'] = ""
 
+        if output_target_value:
+            return self._route_input_results(
+                result_files,
+                output_target_value,
+                write_mode_param,
+                vault_path,
+                context,
+                refs_only=refs_only,
+            )
+
         return result_files
+
+    def _route_input_results(
+        self,
+        result_files: List[Dict[str, Any]],
+        output_target_value: str,
+        write_mode_param: Optional[str],
+        vault_path: str,
+        context: Dict[str, Any],
+        refs_only: bool,
+    ) -> List[Dict[str, Any]]:
+        parsed_target = parse_output_target(
+            output_target_value,
+            vault_path,
+            reference_date=context.get("reference_date"),
+            week_start_day=context.get("week_start_day", 0),
+        )
+        if parsed_target.type == "inline":
+            return result_files
+
+        found_files = [
+            file_data for file_data in result_files
+            if isinstance(file_data, dict) and file_data.get("found", True)
+        ]
+        if refs_only:
+            contents = [
+                file_data.get("filepath", "")
+                for file_data in found_files
+                if isinstance(file_data.get("filepath", ""), str)
+            ]
+            combined_content = "\n".join([c for c in contents if c])
+        else:
+            contents = [
+                file_data.get("content", "")
+                for file_data in found_files
+                if isinstance(file_data.get("content", ""), str)
+            ]
+            combined_content = "\n\n".join([c for c in contents if c])
+        total_chars = len(combined_content)
+        paths = [
+            file_data.get("filepath")
+            for file_data in found_files
+            if file_data.get("filepath")
+        ]
+
+        write_mode = normalize_write_mode(write_mode_param)
+        write_result = write_output(
+            target=parsed_target,
+            content=combined_content,
+            write_mode=write_mode,
+            buffer_store=context.get("buffer_store"),
+            vault_path=vault_path,
+        )
+
+        destination = ""
+        if write_result.get("type") == "buffer":
+            destination = f"variable: {write_result.get('name')}"
+        elif write_result.get("type") == "file":
+            destination = f"file: {write_result.get('path')}"
+        else:
+            destination = parsed_target.type
+
+        manifest = build_manifest(
+            source="input",
+            destination=destination,
+            item_count=len(found_files),
+            total_chars=total_chars,
+            paths=paths or None,
+        )
+
+        logger.set_sinks(["validation"]).info(
+            "input_routed",
+            data={
+                "event": "input_routed",
+                "destination": destination,
+                "refs_only": refs_only,
+                "item_count": len(found_files),
+                "total_chars": total_chars,
+            },
+        )
+
+        routed_results: List[Dict[str, Any]] = []
+        for file_data in result_files:
+            if isinstance(file_data, dict):
+                file_data['refs_only'] = True
+                file_data['content'] = ""
+                file_data['routed_to'] = destination
+            routed_results.append(file_data)
+
+        routed_results.append({"manifest": manifest, "found": True})
+        return routed_results
     
     def _resolve_glob_pattern(self, glob_pattern: str, vault_path: str) -> List[Dict[str, Any]]:
         """Handle glob patterns - single directory only, no recursion."""

@@ -92,15 +92,16 @@ async def generate_stream(agent, prompt, message_history) -> AsyncIterator[str]:
         raise
 
 
-async def generate_response(agent, prompt, message_history=None):
+async def generate_response(agent, prompt, message_history=None, deps=None):
     try:
         if message_history:
             result = await agent.run(
                 prompt,
-                message_history=message_history
+                message_history=message_history,
+                deps=deps,
             )
         else:
-            result = await agent.run(prompt)
+            result = await agent.run(prompt, deps=deps)
             
         return result.output
 

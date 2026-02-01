@@ -161,7 +161,7 @@ class CoreServices:
         """
         return await create_agent(model=model, tools=tools, history_processors=history_processors)
     
-    async def generate_response(self, agent, prompt: str, message_history=None) -> str:
+    async def generate_response(self, agent, prompt: str, message_history=None, deps=None) -> str:
         """
         Generate LLM response using a pre-configured agent.
         
@@ -178,7 +178,7 @@ class CoreServices:
         Raises:
             Exception: If LLM generation fails
         """
-        return await generate_response(agent, prompt, message_history)
+        return await generate_response(agent, prompt, message_history, deps=deps)
     
     def register_directive(self, processor: DirectiveProcessor) -> None:
         """

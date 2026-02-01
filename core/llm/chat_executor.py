@@ -224,7 +224,7 @@ def _prepare_agent_config(
     if tools:  # Only process if tools list is not empty
         tools_directive = ToolsDirective()
         tools_value = ", ".join(tools)  # Convert list to comma-separated string
-        tool_functions, tool_instructions = tools_directive.process_value(
+        tool_functions, tool_instructions, _ = tools_directive.process_value(
             tools_value,
             vault_path=vault_path
         )

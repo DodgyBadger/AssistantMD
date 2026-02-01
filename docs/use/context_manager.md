@@ -43,15 +43,15 @@ The chat agent receives system instructions from the context manager in the foll
 
 **@input**
 - File contents are included as additional context for the step
-- Same syntax and options as [workflow directives](directives.md)
+- Same syntax and options as [Reference](reference.md) (including buffer targets and routing)
 
 **@tools**
 - Enables tools for the step, allowing the AI to perform actions beyond text generation
-- Same syntax and options as [workflow directives](directives.md)
+- Same syntax and options as [Reference](reference.md) (including per-tool routing parameters)
 
 **@model**
 - Specifies which AI model to use for this step. If omitted, defaults to the chat model.
-- Same syntax and options as [workflow directives](directives.md)
+- Same syntax and options as [Reference](reference.md) (including `@model none` to skip the LLM)
 
 **@cache**
 - Caches the output of a step for reuse to avoid another LLM call when it is not needed

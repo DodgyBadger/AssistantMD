@@ -48,6 +48,6 @@ Read the haiku above and provide your feedback.
 
 Explore detailed documentation for each component:
 
-- **[YAML frontmatter](frontmatter.md)** - Schedules, workflow engines, and settings
-- **[Directives](directives.md)** - File input/output, models, and tools (@input, @output, @model, @tools, etc.)
-- **[Pattern variables](patterns.md)** - Dynamic file names using {today}, {this-week}, etc.
+- **[Reference](reference.md)** - Directives, frontmatter, patterns, buffers, and routing
+
+Note: Workflows now support buffer variables (`variable:` targets) and routing (`output=...`, `write-mode=...`) so steps can redirect inputs and tool outputs without inline prompts. See Reference for syntax.

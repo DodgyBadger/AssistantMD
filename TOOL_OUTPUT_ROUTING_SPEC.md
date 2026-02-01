@@ -166,27 +166,27 @@ buffer_ops(operation="export", target="search_results", destination="reports/sea
    - Keep directive classes + registry/bootstrap in `core/directives/`.
    - Update imports in `@input`, `@output`, and any pattern/state consumers.
 
-2) **Add routing helpers (single source of truth)**
+2) **Add routing helpers (single source of truth)** ✅
    - Create `core/utils/routing.py` (or similar) with:
      - `parse_output_target(...)` (supports `inline|discard|variable:|file:`)
      - `normalize_write_mode(...)` (reuse `WriteModeDirective`)
      - `write_output(...)` (buffer/file routing w/ write-mode)
      - `build_manifest(...)` (compact inline notice for routed outputs)
 
-3) **Extend @tools parsing (per-tool params)**
+3) **Extend @tools parsing (per-tool params)** ✅
    - Update `ToolsDirective` to parse tool tokens with parameters:
      - `web_search_tavily(output=variable:foo, write-mode=replace)`
    - Aggregate multiple `@tools` directives (per spec).
    - For each tool, wrap the tool function to support `output` + `write-mode`.
 
-4) **Tool routing wrapper**
+4) **Tool routing wrapper** ✅
    - Implement a wrapper that:
      - Calls the underlying tool (string output)
      - Routes output per explicit rule (or LLM-chosen when allowed)
      - Stores content in buffer/file
      - Returns a manifest string when routed (instead of full output)
 
-5) **@input routing**
+5) **@input routing** ✅
    - Allow `output=` + `write-mode=` parameters on `@input`.
    - If `output=` is present, route the content and inject only a manifest.
    - Default behavior stays unchanged when no `output=` is provided.

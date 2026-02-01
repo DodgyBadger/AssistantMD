@@ -39,6 +39,7 @@ from core.context.store import (
     upsert_session,
 )
 from core.utils.hash import hash_file_content
+from core.utils.routing import format_input_files_block
 from core.runtime.state import has_runtime_context, get_runtime_context
 
 logger = UnifiedLogger(tag="context-manager")
@@ -76,20 +77,22 @@ def _normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any
 def _count_input_files(input_file_data: Any) -> Dict[str, int]:
     file_lists = _normalize_input_file_lists(input_file_data)
     if not file_lists:
-        return {"total": 0, "paths_only": 0, "missing": 0}
+        return {"total": 0, "refs_only": 0, "missing": 0}
     total = 0
-    paths_only = 0
+    refs_only = 0
     missing = 0
     for file_list in file_lists:
         for file_data in file_list:
             if not isinstance(file_data, dict):
                 continue
+            if file_data.get("manifest"):
+                continue
             total += 1
-            if file_data.get("paths_only"):
-                paths_only += 1
+            if file_data.get("refs_only"):
+                refs_only += 1
             if file_data.get("found") is False:
                 missing += 1
-    return {"total": total, "paths_only": paths_only, "missing": missing}
+    return {"total": total, "refs_only": refs_only, "missing": missing}
 
 
 def _summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> List[Dict[str, Any]]:
@@ -101,8 +104,10 @@ def _summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> Li
         for file_data in file_list:
             if not isinstance(file_data, dict):
                 continue
+            if file_data.get("manifest"):
+                continue
             content = ""
-            if file_data.get("found") and not file_data.get("paths_only"):
+            if file_data.get("found") and not file_data.get("refs_only"):
                 content = file_data.get("content", "") or ""
             preview = None
             if content:
@@ -113,7 +118,7 @@ def _summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> Li
                 {
                     "filepath": file_data.get("filepath"),
                     "found": file_data.get("found", True),
-                    "paths_only": file_data.get("paths_only", False),
+                    "refs_only": file_data.get("refs_only", False),
                     "content_length": len(content),
                     "content_preview": preview,
                 }
@@ -154,56 +159,10 @@ def _format_input_files_for_prompt(
     input_file_data: Any,
     has_empty_directive: bool = False,
 ) -> Optional[str]:
-    file_lists = _normalize_input_file_lists(input_file_data)
-    if not file_lists and not has_empty_directive:
-        return None
-
-    flattened_files: List[Dict[str, Any]] = []
-    for file_list in file_lists:
-        flattened_files.extend(file_list)
-
-    formatted_content: List[str] = []
-    path_only_entries: List[str] = []
-    for file_data in flattened_files:
-        if not isinstance(file_data, dict):
-            continue
-        if file_data.get("paths_only"):
-            label = f"- {file_data.get('filepath', 'unknown')}"
-            if not file_data.get("found", True):
-                error_msg = file_data.get("error", "File not found")
-                label += f" (missing: {error_msg})"
-            path_only_entries.append(label)
-        elif file_data.get("found") and file_data.get("content"):
-            formatted_content.append(
-                f"--- FILE: {file_data.get('filepath', 'unknown')} ---\n{file_data.get('content', '')}"
-            )
-        elif file_data.get("found") is False:
-            formatted_content.append(
-                f"--- FILE: {file_data.get('filepath', 'unknown')} ---\n[FILE NOT FOUND: {file_data.get('error')}]"
-            )
-
-    if not path_only_entries and not formatted_content:
-        if has_empty_directive:
-            return "\n".join(
-                [
-                    "=== BEGIN INPUT_FILES ===",
-                    "--- FILE PATHS (CONTENT NOT INLINED) ---",
-                    "[NO INPUT FILES SPECIFIED IN TEMPLATE]",
-                    "=== END INPUT_FILES ===",
-                ]
-            )
-        return None
-
-    sections: List[str] = []
-    sections.append("=== BEGIN INPUT_FILES ===")
-    if path_only_entries:
-        sections.append("--- FILE PATHS (CONTENT NOT INLINED) ---")
-        sections.append("\n".join(path_only_entries))
-    if formatted_content:
-        sections.append("\n\n".join(formatted_content))
-    sections.append("=== END INPUT_FILES ===")
-
-    return "\n".join(sections)
+    return format_input_files_block(
+        input_file_data,
+        has_empty_directive=has_empty_directive,
+    )
 
 
 def _has_empty_input_file_directive(content: str) -> bool:
@@ -931,7 +890,7 @@ def build_context_manager_history_processor(
                             "section_name": section.name,
                             "section_key": section_key,
                             "file_count": counts["total"],
-                            "paths_only_count": counts["paths_only"],
+                            "refs_only_count": counts["refs_only"],
                             "missing_count": counts["missing"],
                             "files": file_summaries,
                         },
@@ -944,7 +903,7 @@ def build_context_manager_history_processor(
                                 "vault_name": vault_name,
                                 "section_name": section.name,
                                 "file_count": counts["total"],
-                                "paths_only_count": counts["paths_only"],
+                                "refs_only_count": counts["refs_only"],
                                 "missing_count": counts["missing"],
                                 "files": file_summaries,
                             },
@@ -1069,12 +1028,14 @@ def build_context_manager_history_processor(
                     model_values = section_directives.get("model", [])
                     if model_values:
                         model_directive_value = model_values[-1]
-                    if tools_directive_value:
+                    if tools_values:
                         try:
                             tools_directive = ToolsDirective()
-                            tools_for_manager, tool_instructions = tools_directive.process_value(
-                                tools_directive_value, vault_path=vault_path
-                            )
+                            tools_results = [
+                                tools_directive.process_value(value, vault_path=vault_path)
+                                for value in tools_values
+                            ]
+                            tools_for_manager, tool_instructions, _ = ToolsDirective.merge_results(tools_results)
                         except Exception as exc:
                             logger.warning(
                                 "Failed to process context manager tools directive",

@@ -40,6 +40,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Context Manager | Curated chat context, template loading, history processing, summary persistence | `core/context/`, `core/llm/chat_executor.py` |
 | LLM Interface | Model resolution, agent creation, response generation | `core/llm/`, `core/settings/store.py` |
 | Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
+| Buffers | Run-scoped in-memory variables for `variable:` input/output targets | `core/runtime/buffers.py` |
 | Logging & Activity | Sink-based logging (activity file, Logfire, validation artifacts) | `core/logger.py/`, `system/activity.log`, `validation/runs/*/artifacts/validation_events/` |
 | Validation | Scenario-based end-to-end checks | `validation/` |
 | Ingestion | File import pipeline (PDF text/OCR, markdownify HTML), registry-driven strategies, queued worker | `core/ingestion/`, `api/services.py` |
@@ -48,12 +49,13 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 
 - The system currently ships with the **step** workflow engine (`workflow_engines/step/`), which discovers all `##` headings (e.g. `## STEP 1`, `## STEP 2`, etc.), processes directives with `CoreServices.process_step`, and executes them sequentially.
 - Additional workflow engines can be added under `workflow_engines/<name>/` as long as they expose an `async def run_workflow(job_args: dict, **kwargs)` entry point.
-- Directives are resolved centrally by `core/directives/` and the helper functions in `core/workflow/parser.py`. Each directive processor is a parser: it validates input, resolves patterns, and returns structured data. Workflows decide how (or whether) to use that data, keeping directive logic decoupled from workflow behavior. Features like `{pending}` tracking are implemented via `WorkflowFileStateManager`, but the workflow determines when state updates occur.
+- Directives are resolved centrally by `core/directives/` and the helper functions in `core/workflow/parser.py`. Each directive processor validates input, resolves patterns, and returns structured data. Workflows decide how to use that data while keeping directive logic decoupled from workflow behavior. Features like `{pending}` tracking are implemented via `WorkflowFileStateManager`, but the workflow determines when state updates occur.
+- `@input` / `@output` support scheme-based targets (`file:` / `variable:`) and optional routing parameters (e.g. `output=...`, `write-mode=...`) so inputs and tool outputs can be redirected to buffers or files.
 
 ## LLM, Models, and Tools
 
 - Model aliases and provider requirements live in `core/settings/settings.template.yaml` (seeded to `system/settings.yaml`) and are loaded through `core/settings/store.py`. `core/llm/` handles API key  checks, agent creation, and response generation.
-- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions.
+- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write-mode=...`) to route tool results to buffers/files or keep them inline.
 
 ## Context Manager (Chat)
 

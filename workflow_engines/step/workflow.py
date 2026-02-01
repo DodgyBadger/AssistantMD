@@ -3,10 +3,13 @@ from datetime import datetime
 import os
 import re
 from typing import Dict
+from types import SimpleNamespace
 
 from core.logger import UnifiedLogger
 from core.core_services import CoreServices
 from core.runtime.buffers import BufferStore
+from core.utils.routing import format_input_files_block
+from core.directives.tools import ToolsDirective
 
 # Create workflow logger
 logger = UnifiedLogger(tag="step-workflow")
@@ -273,50 +276,24 @@ def build_final_prompt(processed_step) -> str:
     
     input_file_data = processed_step.get_directive_value('input', [])
     if input_file_data:
-        # Normalize to list-of-lists format for consistent handling
-        if not input_file_data:
-            input_file_lists = []
-        elif input_file_data and isinstance(input_file_data[0], dict):
-            input_file_lists = [input_file_data]
-        else:
-            input_file_lists = input_file_data
-        
-        # Flatten list-of-lists into single list of file metadata
-        flattened_files = []
-        for file_list in input_file_lists:
-            flattened_files.extend(file_list)
-        
-        # Format each file's content for inclusion in prompt
-        formatted_content = []
-        path_only_entries = []
-        for file_data in flattened_files:
-            if file_data.get('paths_only'):
-                label = f"- {file_data['filepath']}"
-                if not file_data.get('found', True):
-                    error_msg = file_data.get('error', 'File not found')
-                    label += f" (missing: {error_msg})"
-                path_only_entries.append(label)
-            elif file_data['found'] and file_data['content']:
-                formatted_content.append(
-                    f"--- FILE: {file_data['filepath']} ---\n{file_data['content']}"
-                )
-            elif not file_data['found']:
-                formatted_content.append(
-                    f"--- FILE: {file_data['filepath']} ---\n[FILE NOT FOUND: {file_data['error']}]"
-                )
-        
-        if path_only_entries or formatted_content:
-            sections = []
-            sections.append("=== BEGIN INPUT_FILES ===")
-            if path_only_entries:
-                sections.append("--- FILE PATHS (CONTENT NOT INLINED) ---")
-                sections.append("\n".join(path_only_entries))
-            if formatted_content:
-                sections.append("\n\n".join(formatted_content))
-            sections.append("=== END INPUT_FILES ===")
-            final_prompt += "\n\n" + "\n".join(sections)
+        formatted = format_input_files_block(input_file_data)
+        if formatted:
+            final_prompt += "\n\n" + formatted
     
     return final_prompt
+
+
+def _resolve_tools_result(tools_value) -> tuple[list, str, list]:
+    if isinstance(tools_value, list):
+        return ToolsDirective.merge_results(
+            [value for value in tools_value if isinstance(value, tuple)]
+        )
+    if isinstance(tools_value, tuple):
+        if len(tools_value) >= 3:
+            return tools_value[0], tools_value[1], tools_value[2]
+        if len(tools_value) == 2:
+            return tools_value[0], tools_value[1], []
+    return [], "", []
 
 
 
@@ -391,12 +368,8 @@ async def create_step_agent(processed_step, workflow_instructions: str, services
     model_instance = processed_step.get_directive_value('model', None)
 
     # Get tools and enhanced instructions from tools directive
-    tools_result = processed_step.get_directive_value('tools', ([], ""))
-    if isinstance(tools_result, tuple) and len(tools_result) == 2:
-        tool_functions, tool_instructions = tools_result
-    else:
-        # Fallback for empty tools
-        tool_functions, tool_instructions = [], ""
+    tools_result = processed_step.get_directive_value('tools', [])
+    tool_functions, tool_instructions, _ = _resolve_tools_result(tools_result)
 
     # Compose instructions using Pydantic AI's list support for clean composition
     if tool_instructions:
@@ -497,21 +470,24 @@ async def process_workflow_step(
         )
         return  # Skip this step
 
-    tools_result = processed_step.get_directive_value('tools', ([], ""))
-    tool_functions = tools_result[0] if isinstance(tools_result, tuple) else []
+    tools_result = processed_step.get_directive_value('tools', [])
+    tool_functions, _, tool_specs = _resolve_tools_result(tools_result)
     if tool_functions:
-        raw_tools = None
-        for line in raw_step_content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("@tools"):
-                raw_tools = stripped[len("@tools"):].strip()
-                break
-        if raw_tools:
-            tool_names = [name for name in re.split(r"[ ,]+", raw_tools) if name]
+        if tool_specs:
+            tool_names = [spec.name for spec in tool_specs]
         else:
-            tool_names = [
-                getattr(tool, "__name__", "tool") for tool in tool_functions
-            ]
+            raw_tools = None
+            for line in raw_step_content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("@tools"):
+                    raw_tools = stripped[len("@tools"):].strip()
+                    break
+            if raw_tools:
+                tool_names = [name for name in re.split(r"[ ,]+", raw_tools) if name]
+            else:
+                tool_names = [
+                    getattr(tool, "__name__", "tool") for tool in tool_functions
+                ]
         context["tools_used"].update(tool_names)
 
     # Build final prompt with input file content
@@ -534,7 +510,8 @@ async def process_workflow_step(
 
     # Generate AI content
     chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
-    step_content = await services.generate_response(chat_agent, final_prompt)
+    deps = SimpleNamespace(buffer_store=context.get("buffer_store"))
+    step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
 
     # Write AI-generated content to output file (if @output specified)
     if output_file:
