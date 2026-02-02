@@ -33,6 +33,7 @@ class BufferOps(BaseTool):
 
         def buffer_operations(
             ctx: RunContext,
+            *,
             operation: str,
             target: str = "",
             query: str = "",
@@ -86,7 +87,7 @@ class BufferOps(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for buffer operations."""
-        return """Read-only buffer operations (run-scoped variables):
+        return """Read-only buffer operations (buffer variables):
 
 DISCOVERY:
 - buffer_ops(operation="list")
@@ -104,6 +105,8 @@ SEARCH (regex):
 NOTES:
 - All reads are capped to keep outputs small.
 - Use search + read ranges instead of trying to read full buffers.
+- For large buffers: start with info/preview, then search for anchors, then read nearby line ranges.
+- Always pass named parameters (keyword arguments); positional arguments are not supported.
 """
 
     @staticmethod
@@ -129,13 +132,22 @@ NOTES:
         if entry is None:
             return f"Buffer '{name}' not found."
         meta = entry.metadata or {}
+        content = entry.content or ""
+        line_count = len(content.splitlines())
+        from core.tools.utils import estimate_token_count
+        token_count = estimate_token_count(content) if content else 0
+        preview_limit = 500
+        preview = content[:preview_limit]
         return "\n".join(
             [
                 f"Buffer: {name}",
-                f"Size: {len(entry.content or '')} chars",
-                f"Created: {entry.created_at.isoformat() if entry.created_at else 'unknown'}",
-                f"Updated: {entry.updated_at.isoformat() if entry.updated_at else 'unknown'}",
+                f"Size: {len(content)} chars",
+                f"Lines: {line_count}",
+                f"Tokens: {token_count}",
                 f"Metadata: {meta}",
+                "",
+                f"Preview (first {preview_limit} chars):",
+                preview,
             ]
         )
 

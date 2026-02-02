@@ -53,10 +53,11 @@ class OutputFileDirective(DirectiveProcessor):
             return False
 
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value.strip()
+            value.strip(),
+            allowed_parameters={"scope"},
         )
 
-        if parameters:
+        if parameters and "scope" not in parameters:
             return False
 
         if not base_value:
@@ -67,6 +68,8 @@ class OutputFileDirective(DirectiveProcessor):
             if not file_path:
                 return False
             if file_path.startswith('/') or '..' in file_path:
+                return False
+            if parameters.get("scope"):
                 return False
         elif base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
@@ -81,17 +84,23 @@ class OutputFileDirective(DirectiveProcessor):
         """Process output file with directive-specific pattern resolution."""
         value = value.strip()
 
-        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(value)
-        if parameters:
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value,
+            allowed_parameters={"scope"},
+        )
+        if parameters and "scope" not in parameters:
             raise ValueError("Output target does not accept parameters")
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
             if not variable_name:
                 raise ValueError("Variable name is required for variable output")
-            return {"type": "buffer", "name": variable_name}
+            scope_value = parameters.get("scope")
+            return {"type": "buffer", "name": variable_name, "scope": scope_value}
 
         if base_value.startswith("file:"):
+            if parameters.get("scope"):
+                raise ValueError("Scope is only supported for variable outputs")
             value = base_value[len("file:"):].strip()
         else:
             raise ValueError("Output target must start with file: or variable:")

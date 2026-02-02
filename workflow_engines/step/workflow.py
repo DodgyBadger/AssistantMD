@@ -378,6 +378,8 @@ async def process_workflow_step(
             buffer_store=context.get("buffer_store"),
             vault_path=services.vault_path,
             header=header_value,
+            buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
+            default_scope="run",
             metadata={
                 "source": "workflow_step",
                 "origin_id": services.workflow_id,

@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from core.directives.output import OutputFileDirective
 from core.directives.write_mode import WriteModeDirective
+from core.runtime.buffers import get_buffer_store_for_scope
 
 
 @dataclass(frozen=True)
@@ -211,9 +212,12 @@ def write_output(
     content: str,
     write_mode: Optional[str],
     buffer_store=None,
+    buffer_store_registry=None,
     vault_path: Optional[str] = None,
     header: Optional[str] = None,
     metadata: Optional[dict[str, Any]] = None,
+    buffer_scope: Optional[str] = None,
+    default_scope: str = "run",
 ) -> dict[str, Any]:
     mode = write_mode or "append"
     if target.type == "inline":
@@ -222,11 +226,17 @@ def write_output(
         return {"routed": True, "type": "discard"}
 
     if target.type == "buffer":
-        if buffer_store is None:
+        resolved_store = get_buffer_store_for_scope(
+            scope=buffer_scope,
+            default_scope=default_scope,
+            buffer_store=buffer_store,
+            buffer_store_registry=buffer_store_registry,
+        )
+        if resolved_store is None:
             raise ValueError("Buffer store unavailable for variable output")
         name = target.name or "output"
         if mode == "new":
-            name = _generate_numbered_buffer_name(name, buffer_store)
+            name = _generate_numbered_buffer_name(name, resolved_store)
             mode_to_use = "replace"
         elif mode == "replace":
             mode_to_use = "replace"
@@ -235,7 +245,7 @@ def write_output(
         buffer_metadata = {"source": "routing"}
         if metadata:
             buffer_metadata.update(metadata)
-        buffer_store.put(name, content or "", mode=mode_to_use, metadata=buffer_metadata)
+        resolved_store.put(name, content or "", mode=mode_to_use, metadata=buffer_metadata)
         return {"routed": True, "type": "buffer", "name": name, "write_mode": mode_to_use, "output_length": len(content or "")}
 
     if target.type == "file":

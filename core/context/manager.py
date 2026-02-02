@@ -39,6 +39,7 @@ from core.context.store import (
 )
 from core.utils.hash import hash_file_content
 from core.utils.routing import OutputTarget, format_input_files_block, write_output
+from core.runtime.buffers import BufferStore
 from core.runtime.state import has_runtime_context, get_runtime_context
 
 logger = UnifiedLogger(tag="context-manager")
@@ -452,12 +453,12 @@ def build_context_manager_history_processor(
     template_token_threshold = _resolve_token_threshold(template.frontmatter, token_threshold)
     if template_sections:
         default_sections = template_sections
-    elif template.template_body or template.content:
+    elif template.template_body:
         default_sections = [
             TemplateSection(
                 name=template.template_section or "Template",
-                content=template.template_body or template.content or "",
-                cleaned_content=template.template_body or template.content or "",
+                content=template.template_body or "",
+                cleaned_content=template.template_body or "",
                 directives=template_directives,
             )
         ]
@@ -577,7 +578,7 @@ def build_context_manager_history_processor(
                     elif isinstance(part, ToolCallPart):
                         tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
                         rendered_parts.append(f"[{tool_name}] (tool call)")
-                    else:
+                    if managed_output is None:
                         part_content = getattr(part, "content", None)
                         if isinstance(part_content, str):
                             rendered_parts.append(part_content)
@@ -653,10 +654,21 @@ def build_context_manager_history_processor(
                     curated_history.append(latest_user_message)
                 return curated_history
 
-        buffer_store = getattr(run_context.deps, "buffer_store", None)
+        run_buffer_store = BufferStore()
+        session_buffer_store = getattr(run_context.deps, "buffer_store", None)
+        buffer_store_registry = {"run": run_buffer_store}
+        if session_buffer_store is not None:
+            buffer_store_registry["session"] = session_buffer_store
         for idx, section in enumerate(default_sections):
             section_key = f"{idx}:{section.name}"
             section_directives = section.directives or {}
+            skip_llm = False
+            model_directive_value = None
+            model_values = section_directives.get("model", [])
+            if model_values:
+                model_directive_value = model_values[-1]
+                if model_directive_value.strip().lower() == "none":
+                    skip_llm = True
             output_target = None
             output_values = section_directives.get("output", [])
             if output_values:
@@ -802,7 +814,9 @@ def build_context_manager_history_processor(
                                 reference_date=datetime.now(),
                                 week_start_day=week_start_day,
                                 state_manager=None,
-                                buffer_store=buffer_store,
+                                buffer_store=run_buffer_store,
+                                buffer_store_registry=buffer_store_registry,
+                                buffer_scope="run",
                             )
                         except Exception as exc:
                             logger.warning(
@@ -891,7 +905,7 @@ def build_context_manager_history_processor(
                 if cache_config and not cache_mode:
                     cache_mode = cache_config.get("mode")
 
-                if cache_enabled and managed_output is None and cache_config:
+                if not skip_llm and cache_enabled and managed_output is None and cache_config:
                     ttl_seconds = cache_config.get("ttl_seconds")
                     if cache_mode:
                         cached_entry = get_cached_step_output(
@@ -953,122 +967,132 @@ def build_context_manager_history_processor(
                             )
 
                 if managed_output is None:
-                    previous_summary_text = None
-                    if summaries_limit is None or summaries_limit > 0:
-                        try:
-                            recent_summaries_rows = get_recent_summaries(
-                                session_id=session_id,
-                                vault_name=vault_name,
-                                limit=summaries_limit,
-                            )
-                            logger.set_sinks(["validation"]).info(
-                                "Context recent summaries loaded",
-                                data={
-                                    "event": "context_recent_summaries_loaded",
-                                    "section_name": section.name,
-                                    "section_key": section_key,
-                                    "count": len(recent_summaries_rows or []),
-                                    "limit": summaries_limit,
-                                },
-                            )
-                            if recent_summaries_rows:
-                                previous_summary_text = "\n\n".join(
-                                    [
-                                        row.get("raw_output") or ""
-                                        for row in reversed(recent_summaries_rows)
-                                        if row.get("raw_output")
-                                    ]
-                                ).strip() or None
-                        except Exception:
-                            previous_summary_text = None
-
-                    tools_for_manager = None
-                    tool_instructions = ""
-                    tools_directive_value = None
-                    model_directive_value = None
-                    tools_values = section_directives.get("tools", [])
-                    if tools_values:
-                        tools_directive_value = tools_values[-1]
-                    model_values = section_directives.get("model", [])
-                    if model_values:
-                        model_directive_value = model_values[-1]
-                    if tools_values:
-                        try:
-                            tools_directive = ToolsDirective()
-                            tools_results = [
-                                tools_directive.process_value(value, vault_path=vault_path)
-                                for value in tools_values
-                            ]
-                            tools_for_manager, tool_instructions, _ = ToolsDirective.merge_results(tools_results)
-                        except Exception as exc:
-                            logger.warning(
-                                "Failed to process context manager tools directive",
-                                metadata={"error": str(exc)},
-                            )
-                            tools_for_manager = None
-                            tool_instructions = ""
-
-                    manager_input = ContextManagerInput(
-                        model_alias=model_alias,
-                        template=template,
-                        template_section=section,
-                        context_payload={
-                            "latest_input": latest_input,
-                            "rendered_history": rendered_history,
-                            "previous_summary": previous_summary_text,
-                            "input_files": _format_input_files_for_prompt(
-                                input_file_data,
-                                has_empty_directive=empty_input_file_directive and not input_file_data,
-                            ),
-                        },
-                    )
-                    manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
-                    if tool_instructions:
-                        manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"
-                    logger.set_sinks(["validation"]).info(
-                        "Context manager LLM invoked",
-                        data={
-                            "event": "context_llm_invoked",
-                            "section_name": section.name,
-                            "section_key": section_key,
-                            "model_alias": model_directive_value or model_alias,
-                            "cache_mode": cache_mode,
-                        },
-                    )
-                    managed_obj = await manage_context(
-                        manager_input,
-                        instructions_override=manager_instruction,
-                        tools=tools_for_manager,
-                        model_override=model_directive_value,
-                    )
-                    managed_output = managed_obj.raw_output
-                    managed_model_alias = managed_obj.model_alias
-                    section_cache_entry = {
-                        "raw_output": managed_output,
-                        "model_alias": managed_model_alias,
-                    }
-                    if cache_enabled:
-                        section_cache[section_key] = section_cache_entry
-                        cache_entry["sections"] = section_cache
-                        cache_store[run_scope_key] = cache_entry
-                        if cache_config:
-                            cache_mode = cache_config.get("mode")
-                            ttl_seconds = cache_config.get("ttl_seconds")
-                            if cache_mode:
-                                upsert_cached_step_output(
-                                    run_id=run_scope_key,
+                    if skip_llm:
+                        managed_output = ""
+                        managed_model_alias = "none"
+                        logger.set_sinks(["validation"]).info(
+                            "Context manager LLM skipped (@model none)",
+                            data={
+                                "event": "context_llm_skipped",
+                                "section_name": section.name,
+                                "section_key": section_key,
+                            },
+                        )
+                    else:
+                        previous_summary_text = None
+                        if summaries_limit is None or summaries_limit > 0:
+                            try:
+                                recent_summaries_rows = get_recent_summaries(
                                     session_id=session_id,
                                     vault_name=vault_name,
-                                    template_name=template.name,
-                                    template_hash=template.sha256,
-                                    section_key=section_key,
-                                    cache_mode=cache_mode,
-                                    ttl_seconds=ttl_seconds,
-                                    raw_output=managed_output or "",
+                                    limit=summaries_limit,
                                 )
+                                logger.set_sinks(["validation"]).info(
+                                    "Context recent summaries loaded",
+                                    data={
+                                        "event": "context_recent_summaries_loaded",
+                                        "section_name": section.name,
+                                        "section_key": section_key,
+                                        "count": len(recent_summaries_rows or []),
+                                        "limit": summaries_limit,
+                                    },
+                                )
+                                if recent_summaries_rows:
+                                    previous_summary_text = "\n\n".join(
+                                        [
+                                            row.get("raw_output") or ""
+                                            for row in reversed(recent_summaries_rows)
+                                            if row.get("raw_output")
+                                        ]
+                                    ).strip() or None
+                            except Exception:
+                                previous_summary_text = None
+
+                        tools_for_manager = None
+                        tool_instructions = ""
+                        tools_directive_value = None
+                        tools_values = section_directives.get("tools", [])
+                        if tools_values:
+                            tools_directive_value = tools_values[-1]
+                        if tools_values:
+                            try:
+                                tools_directive = ToolsDirective()
+                                tools_results = [
+                                    tools_directive.process_value(value, vault_path=vault_path)
+                                    for value in tools_values
+                                ]
+                                tools_for_manager, tool_instructions, _ = ToolsDirective.merge_results(tools_results)
+                            except Exception as exc:
+                                logger.warning(
+                                    "Failed to process context manager tools directive",
+                                    metadata={"error": str(exc)},
+                                )
+                                tools_for_manager = None
+                                tool_instructions = ""
+
+                        manager_input = ContextManagerInput(
+                            model_alias=model_alias,
+                            template=template,
+                            template_section=section,
+                            context_payload={
+                                "latest_input": latest_input,
+                                "rendered_history": rendered_history,
+                                "previous_summary": previous_summary_text,
+                                "input_files": _format_input_files_for_prompt(
+                                    input_file_data,
+                                    has_empty_directive=empty_input_file_directive and not input_file_data,
+                                ),
+                            },
+                        )
+                        manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+                        if tool_instructions:
+                            manager_instruction = f"{manager_instruction}\n\n{tool_instructions}"
+                        logger.set_sinks(["validation"]).info(
+                            "Context manager LLM invoked",
+                            data={
+                                "event": "context_llm_invoked",
+                                "section_name": section.name,
+                                "section_key": section_key,
+                                "model_alias": model_directive_value or model_alias,
+                                "cache_mode": cache_mode,
+                            },
+                        )
+                        managed_obj = await manage_context(
+                            manager_input,
+                            instructions_override=manager_instruction,
+                            tools=tools_for_manager,
+                            model_override=model_directive_value,
+                        )
+                        managed_output = managed_obj.raw_output
+                        managed_model_alias = managed_obj.model_alias
+                        section_cache_entry = {
+                            "raw_output": managed_output,
+                            "model_alias": managed_model_alias,
+                        }
+                        if cache_enabled:
+                            section_cache[section_key] = section_cache_entry
+                            cache_entry["sections"] = section_cache
+                            cache_store[run_scope_key] = cache_entry
+                            if cache_config:
+                                cache_mode = cache_config.get("mode")
+                                ttl_seconds = cache_config.get("ttl_seconds")
+                                if cache_mode:
+                                    upsert_cached_step_output(
+                                        run_id=run_scope_key,
+                                        session_id=session_id,
+                                        vault_name=vault_name,
+                                        template_name=template.name,
+                                        template_hash=template.sha256,
+                                        section_key=section_key,
+                                        cache_mode=cache_mode,
+                                        ttl_seconds=ttl_seconds,
+                                        raw_output=managed_output or "",
+                                    )
 
                 summary_text = managed_output or "N/A"
-                if output_target:
+                if skip_llm and managed_output == "":
+                    summary_text = ""
+                if output_target and not skip_llm:
                     if isinstance(output_target, dict) and output_target.get("type") == "buffer":
                         target = OutputTarget(type="buffer", name=output_target.get("name"))
                     elif isinstance(output_target, str):
@@ -1082,9 +1106,12 @@ def build_context_manager_history_processor(
                                 target=target,
                                 content=summary_text,
                                 write_mode=write_mode,
-                                buffer_store=buffer_store,
+                                buffer_store=run_buffer_store,
+                                buffer_store_registry=buffer_store_registry,
                                 vault_path=vault_path,
                                 header=header_value,
+                                buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
+                                default_scope="run",
                                 metadata={
                                     "source": "context_manager",
                                     "origin_id": session_id,
@@ -1138,17 +1165,18 @@ def build_context_manager_history_processor(
                         "cache_mode": cache_mode,
                     },
                 )
-                section_name = section.name or "Template"
-                summary_title = f"Context summary (managed: {section_name})"
-                summary_messages.append(
-                    ModelRequest(parts=[SystemPromptPart(content=f"{summary_title}:\n{summary_text}")])
-                )
-                persisted_sections.append(
-                    {
-                        "name": section_name,
-                        "output": summary_text,
-                    }
-                )
+                if not skip_llm:
+                    section_name = section.name or "Template"
+                    summary_title = f"Context summary (managed: {section_name})"
+                    summary_messages.append(
+                        ModelRequest(parts=[SystemPromptPart(content=f"{summary_title}:\n{summary_text}")])
+                    )
+                    persisted_sections.append(
+                        {
+                            "name": section_name,
+                            "output": summary_text,
+                        }
+                    )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("Context management failed in history processor", metadata={"error": str(exc)})
                 return list(messages)

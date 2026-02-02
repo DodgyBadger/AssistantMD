@@ -32,7 +32,7 @@ from core.context.templates import load_template
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
-from core.runtime.buffers import BufferStore
+from core.runtime.buffers import BufferStore, get_session_buffer_store
 
 
 logger = UnifiedLogger(tag="chat-executor")
@@ -144,6 +144,7 @@ class ChatRunDeps:
     context_manager_cache: dict[str, Any] = field(default_factory=dict)
     context_manager_now: Optional[datetime] = None
     buffer_store: BufferStore = field(default_factory=BufferStore)
+    buffer_store_registry: dict[str, BufferStore] = field(default_factory=dict)
 
 
 def _resolve_context_manager_now() -> Optional[datetime]:
@@ -293,7 +294,12 @@ async def execute_chat_prompt(
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
     # Run agent
-    run_deps = ChatRunDeps(context_manager_now=_resolve_context_manager_now())
+    session_buffer_store = get_session_buffer_store(session_id)
+    run_deps = ChatRunDeps(
+        context_manager_now=_resolve_context_manager_now(),
+        buffer_store=session_buffer_store,
+        buffer_store_registry={"session": session_buffer_store},
+    )
     result = await agent.run(
         prompt,
         message_history=message_history,
@@ -387,7 +393,12 @@ async def execute_chat_prompt_stream(
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
-    run_deps = ChatRunDeps(context_manager_now=_resolve_context_manager_now())
+    session_buffer_store = get_session_buffer_store(session_id)
+    run_deps = ChatRunDeps(
+        context_manager_now=_resolve_context_manager_now(),
+        buffer_store=session_buffer_store,
+        buffer_store_registry={"session": session_buffer_store},
+    )
 
     try:
         # Use run_stream_events() to properly handle tool calls

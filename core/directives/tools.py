@@ -47,10 +47,11 @@ class ToolsDirective(DirectiveProcessor):
     ):
         original_func = tool.function
         original_takes_ctx = getattr(tool, "takes_ctx", False)
+        allow_output_params = tool_name != "buffer_ops"
 
         async def _call_async(ctx: RunContext, *args, **kwargs):
-            output_value = kwargs.pop("output", None)
-            write_mode_value = kwargs.pop("write_mode", None)
+            output_value = kwargs.pop("output", None) if allow_output_params else None
+            write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
 
             if original_takes_ctx:
                 result = await original_func(ctx, *args, **kwargs)
@@ -65,11 +66,12 @@ class ToolsDirective(DirectiveProcessor):
                 vault_path=vault_path,
                 week_start_day=week_start_day,
                 buffer_store=getattr(ctx, "deps", None) and ctx.deps.buffer_store,
+                buffer_store_registry=getattr(ctx, "deps", None) and ctx.deps.buffer_store_registry,
             )
 
         def _call_sync(ctx: RunContext, *args, **kwargs):
-            output_value = kwargs.pop("output", None)
-            write_mode_value = kwargs.pop("write_mode", None)
+            output_value = kwargs.pop("output", None) if allow_output_params else None
+            write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
 
             if original_takes_ctx:
                 result = original_func(ctx, *args, **kwargs)
@@ -84,6 +86,7 @@ class ToolsDirective(DirectiveProcessor):
                 vault_path=vault_path,
                 week_start_day=week_start_day,
                 buffer_store=getattr(ctx, "deps", None) and ctx.deps.buffer_store,
+                buffer_store_registry=getattr(ctx, "deps", None) and ctx.deps.buffer_store_registry,
             )
 
         is_async = inspect.iscoroutinefunction(original_func)
@@ -101,11 +104,11 @@ class ToolsDirective(DirectiveProcessor):
                 )
                 params_list = [ctx_param] + params_list
             extra_params = []
-            if "output" not in existing:
+            if allow_output_params and "output" not in existing:
                 extra_params.append(
                     inspect.Parameter("output", inspect.Parameter.KEYWORD_ONLY, default=None)
                 )
-            if "write_mode" not in existing:
+            if allow_output_params and "write_mode" not in existing:
                 extra_params.append(
                     inspect.Parameter("write_mode", inspect.Parameter.KEYWORD_ONLY, default=None)
                 )
@@ -123,9 +126,9 @@ class ToolsDirective(DirectiveProcessor):
         annotations = dict(getattr(original_func, "__annotations__", {}) or {})
         if not original_takes_ctx:
             annotations["ctx"] = RunContext
-        if "output" not in annotations:
+        if allow_output_params and "output" not in annotations:
             annotations["output"] = Optional[str]
-        if "write_mode" not in annotations:
+        if allow_output_params and "write_mode" not in annotations:
             annotations["write_mode"] = Optional[str]
         wrapper.__annotations__ = annotations
 
@@ -147,9 +150,13 @@ class ToolsDirective(DirectiveProcessor):
         vault_path: str,
         week_start_day: int,
         buffer_store=None,
+        buffer_store_registry=None,
     ):
+        if tool_name == "buffer_ops":
+            return result
         hard_output = params.get("output")
         output_target = hard_output or output_value
+        scope_value = params.get("scope")
         if output_target is None:
             return result
 
@@ -190,12 +197,18 @@ class ToolsDirective(DirectiveProcessor):
             )
             return manifest
 
+        default_scope = "run"
+        if buffer_store_registry and "session" in buffer_store_registry and "run" not in buffer_store_registry:
+            default_scope = "session"
         write_result = write_output(
             target=parsed_target,
             content=content,
             write_mode=write_mode,
             buffer_store=buffer_store,
+            buffer_store_registry=buffer_store_registry,
             vault_path=vault_path,
+            buffer_scope=scope_value,
+            default_scope=default_scope,
         )
         destination = ""
         if write_result.get("type") == "buffer":
@@ -282,7 +295,7 @@ class ToolsDirective(DirectiveProcessor):
         for token in tokens:
             base, params = DirectiveValueParser.parse_value_with_parameters(
                 token,
-                allowed_parameters={"output", "write-mode", "write_mode"},
+                allowed_parameters={"output", "write-mode", "write_mode", "scope"},
             )
             if not base:
                 continue

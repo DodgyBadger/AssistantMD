@@ -6,7 +6,7 @@ for scheduler, workflow loader, and related components.
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -16,6 +16,7 @@ from core.workflow.loader import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
+from core.runtime.buffers import BufferStore
 from .config import RuntimeConfig
 
 
@@ -45,6 +46,7 @@ class RuntimeContext:
     boot_id: int
     started_at: datetime
     last_config_reload: Optional[datetime] = None
+    session_buffers: dict[str, BufferStore] = field(default_factory=dict)
 
     async def start(self):
         """

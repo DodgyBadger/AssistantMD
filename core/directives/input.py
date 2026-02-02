@@ -11,6 +11,7 @@ from core.utils.patterns import PatternUtilities
 from .parser import DirectiveValueParser
 from core.utils.file_state import hash_file_content
 from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
+from core.runtime.buffers import get_buffer_store_for_scope
 from core.logger import UnifiedLogger
 
 logger = UnifiedLogger(tag="directive-input")
@@ -125,7 +126,7 @@ class InputFileDirective(DirectiveProcessor):
         # Parse base value and parameters
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode"},
+            allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode", "scope"},
         )
 
         if not base_value:
@@ -147,7 +148,7 @@ class InputFileDirective(DirectiveProcessor):
         # Validate parameters
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {'required', 'refs_only', 'refs-only', 'output', 'write-mode', 'write_mode'}:
+            if param_name not in {'required', 'refs_only', 'refs-only', 'output', 'write-mode', 'write_mode', 'scope'}:
                 return False
             if param_name in {'required', 'refs_only', 'refs-only'}:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
@@ -165,7 +166,7 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse required parameter if present
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode"}
+            value, allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode", "scope"}
         )
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
         refs_only = (
@@ -174,10 +175,16 @@ class InputFileDirective(DirectiveProcessor):
         )
         output_target_value = parameters.get('output')
         write_mode_param = parameters.get('write-mode') or parameters.get('write_mode')
+        scope_value = parameters.get('scope')
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
-            buffer_store = context.get("buffer_store")
+            buffer_store = get_buffer_store_for_scope(
+                scope=scope_value,
+                default_scope=context.get("buffer_scope", "run"),
+                buffer_store=context.get("buffer_store"),
+                buffer_store_registry=context.get("buffer_store_registry"),
+            )
             display_name = f"variable: {variable_name}"
             if buffer_store is None:
                 if required:
@@ -227,6 +234,7 @@ class InputFileDirective(DirectiveProcessor):
                     vault_path,
                     context,
                     refs_only=refs_only,
+                    scope_value=scope_value,
                 )
             return results
 
@@ -280,6 +288,7 @@ class InputFileDirective(DirectiveProcessor):
                 vault_path,
                 context,
                 refs_only=refs_only,
+                scope_value=scope_value,
             )
 
         return result_files
@@ -292,6 +301,7 @@ class InputFileDirective(DirectiveProcessor):
         vault_path: str,
         context: Dict[str, Any],
         refs_only: bool,
+        scope_value: Optional[str],
     ) -> List[Dict[str, Any]]:
         parsed_target = parse_output_target(
             output_target_value,
@@ -333,7 +343,10 @@ class InputFileDirective(DirectiveProcessor):
             content=combined_content,
             write_mode=write_mode,
             buffer_store=context.get("buffer_store"),
+            buffer_store_registry=context.get("buffer_store_registry"),
             vault_path=vault_path,
+            buffer_scope=scope_value,
+            default_scope=context.get("buffer_scope", "run"),
         )
 
         destination = ""
