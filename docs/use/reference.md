@@ -5,8 +5,8 @@
 
 | Name | Description | Applies To | Example | Notes |
 | --- | --- | --- | --- | --- |
-| `@output` | Write step output to a specific file or buffer. | Workflow | `@output file: reports/{today}` | Auto-adds `.md` if missing. Avoid mixing with `file_ops_safe` in the same step. |
-| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` | Supports `(required)`, `(refs-only)` and routing parameters. |
+| `@output` | Write step output to a specific file or buffer. | Workflow | `@output file: reports/{today}` | Auto-adds `.md` if missing. Avoid mixing with `file_ops_safe` in the same step. Variable targets support optional `scope=`. |
+| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. |
 | `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Use `@model none` to skip LLM execution for the step/section. |
 | `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default), `replace`, or `new` (numbered files). |
@@ -49,11 +49,18 @@
 
 ## Buffers
 
-Buffers are run-scoped in-memory variables addressed with the `variable:` scheme. They can be used anywhere file inputs/outputs are supported.
+Buffers are in-memory variables addressed with the `variable:` scheme. They can be used anywhere file inputs/outputs are supported.
+
+Scopes:
+- **run** (default for workflows and context templates): buffer lives for the current run only.
+- **session** (default for chat agent tools): buffer persists across chat turns for the same session.
+
+Use `scope=session` or `scope=run` with variable targets to override defaults where supported.
 
 Examples:
 - `@output variable: summary_buffer`
 - `@input variable: summary_buffer`
+- `@output variable: summary_buffer (scope=session)`
 
 ## Routing
 
@@ -80,3 +87,6 @@ Examples:
 - `@tools file_ops_safe(output=variable: tool_buffer)`
 - `@tools file_ops_safe(output=file: tool-outputs/listing, write-mode=replace)`
 - `@tools file_ops_safe(output=inline)`
+Notes:
+- Use `scope=session|run` with variable destinations to control buffer scope.
+- Some tools may not accept output routing parameters (e.g. read-only tools).

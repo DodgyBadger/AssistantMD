@@ -4,6 +4,7 @@ When you first run the app, a new `AssistantMD` folder will be added to each of 
 - `AssistantMD/Workflows` holds your workflow definitions
 - `AssistantMD/Chat_Sessions` holds markdown files containing your chat history
 - `AssistantMD/Import` is where you place files you want to import as markdown into your vault
+- `AssistantMD/ContextTemplates` holds context manager templates
 
 Once setup is complete, open the web app at `http://localhost:8000/` (or the host/port you configured).
 
@@ -16,7 +17,8 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 - **file_ops_unsafe**: full edit, move, delete
 - **documentation_access**: lets the assistant reference these docs (great in workflow creation mode)
 - **code_execution**: run code via Piston (public or self-hosted)
-- **import_url**: convert a webpage to markdown and save it in your vault
+- **tavily_extract**: extract content from specific URLs
+- **tavily_crawl**: crawl and extract content from multiple pages
 
 **Security note**: The app has no built-in auth or TLS. Keep it on a trusted network or add your own security layers.
 

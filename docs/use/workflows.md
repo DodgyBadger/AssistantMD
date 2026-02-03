@@ -50,4 +50,4 @@ Explore detailed documentation for each component:
 
 - **[Reference](reference.md)** - Directives, frontmatter, patterns, buffers, and routing
 
-Note: Workflows now support buffer variables (`variable:` targets) and routing (`output=...`, `write-mode=...`) so steps can redirect inputs and tool outputs without inline prompts. See Reference for syntax.
+Note: Workflows support buffer variables (`variable:` targets) and routing (`output=...`, `write-mode=...`) so steps can redirect inputs and tool outputs without inline prompts. Buffers are run-scoped by default in workflows; `scope=` is available for consistency but typically not needed. See Reference for syntax.

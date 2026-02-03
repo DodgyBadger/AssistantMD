@@ -40,7 +40,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Context Manager | Curated chat context, template loading, history processing, summary persistence | `core/context/`, `core/llm/chat_executor.py` |
 | LLM Interface | Model resolution, agent creation, response generation | `core/llm/`, `core/settings/store.py` |
 | Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
-| Buffers | Run-scoped in-memory variables for `variable:` input/output targets | `core/runtime/buffers.py` |
+| Buffers | Run- and session-scoped in-memory variables for `variable:` input/output targets | `core/runtime/buffers.py`, `core/llm/chat_executor.py`, `core/context/manager.py` |
 | Logging & Activity | Sink-based logging (activity file, Logfire, validation artifacts) | `core/logger.py/`, `system/activity.log`, `validation/runs/*/artifacts/validation_events/` |
 | Validation | Scenario-based end-to-end checks | `validation/` |
 | Ingestion | File import pipeline (PDF text/OCR, markdownify HTML), registry-driven strategies, queued worker | `core/ingestion/`, `api/services.py` |
@@ -55,7 +55,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 ## LLM, Models, and Tools
 
 - Model aliases and provider requirements live in `core/settings/settings.template.yaml` (seeded to `system/settings.yaml`) and are loaded through `core/settings/store.py`. `core/llm/` handles API key  checks, agent creation, and response generation.
-- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write-mode=...`) to route tool results to buffers/files or keep them inline.
+- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write-mode=...`, `scope=...`) to route tool results to buffers/files or keep them inline.
 
 ## Context Manager (Chat)
 
@@ -63,12 +63,14 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - Context templates live under `AssistantMD/ContextTemplates/` in a vault or `system/ContextTemplates/` globally. They are resolved with vault → system priority by `core/context/templates.py`.
 - Templates may define `## Chat Instructions` (passed through as a system instruction to the chat agent) and `## Context Instructions` (used only by the context-manager LLM).
 - Each non-instruction `##` section is treated as an independent context step, processed in order. The manager runs once per section and injects one system message per section output; later sections can incorporate earlier section outputs.
+- If a template contains **no steps** (only chat instructions and/or frontmatter), the context manager skips the LLM and passes through the chat instructions + history.
 - Context manager directives control per-section behavior:
   - `@recent-runs`: How many recent chat runs the manager reads (0 disables that section).
   - `token_threshold` (frontmatter): Skip all context manager steps if total history is under this token estimate.
   - `@recent-summaries`: How many prior managed summaries to feed into the manager prompt.
   - `@tools`: Tools the manager can call while generating the summary.
   - `@model`: Model alias to use for the manager.
+- `@model none` skips the LLM call for that section while still allowing directive side effects (e.g. routing inputs).
 - `passthrough_runs` is a frontmatter setting that controls how many runs the chat agent receives verbatim (`all` keeps full history, 0 yields summary-only when the manager runs).
 
 ## Observability & Validation

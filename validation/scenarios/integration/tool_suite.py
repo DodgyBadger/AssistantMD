@@ -46,7 +46,6 @@ class ToolSuiteScenario(BaseScenario):
             "file_ops_safe",
             "file_ops_unsafe",
             "web_search_duckduckgo",
-            "import_url",
             "code_execution",
         ]:
             self.assert_event_contains(
@@ -117,7 +116,6 @@ You must call the web search tool before responding.
 
 ## IMPORT_URL
 @model gpt-mini
-@tools import_url
 @output file: tool-outputs/import-url
 
 Import the webpage https://example.com.

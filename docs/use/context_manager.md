@@ -12,6 +12,8 @@ Define context templates using markdown in `AssistantMD/ContextTemplates/` (vaul
 
 Only `## Chat Instructions` and `## Context Instructions` are supported. Other headings containing "instructions" are ignored and will not run as steps.
 
+**No steps**: If a template contains no steps (only chat instructions and/or frontmatter), the context manager does not call an LLM and simply passes through chat instructions and history.
+
 The chat agent receives system instructions from the context manager in the following order:
 - Hardcoded system instructions (date, tool descriptions, etc.)
 - User-defined instructions in `## Chat Instructions`
@@ -52,6 +54,11 @@ The chat agent receives system instructions from the context manager in the foll
 **@model**
 - Specifies which AI model to use for this step. If omitted, defaults to the chat model.
 - Same syntax and options as [Reference](reference.md) (including `@model none` to skip the LLM)
+  - When `@model none` is set, the LLM call is skipped but directives (e.g. `@input` routing) still run.
+
+**Buffer scope**
+- Variable targets default to **run** scope inside context templates.
+- Use `scope=session` to explicitly share a variable with the primary chat agent across turns.
 
 **@cache**
 - Caches the output of a step for reuse to avoid another LLM call when it is not needed

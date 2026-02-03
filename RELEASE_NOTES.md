@@ -15,10 +15,9 @@ This release introduces the **Context Manager** as a first-class feature, adds b
   - Observability: managed summaries are persisted to SQLite with template metadata and validation events capture key decisions.
 
 ### Buffers (virtualized I/O)
-- Added a run-scoped buffer store to pass context between steps without file I/O.
-- `@output variable: NAME` writes to a buffer; `@input variable: NAME` reads from it.
-- Extended to workflows so the same buffer semantics work outside the context manager.
-- Validation coverage added for buffer read/write/append/replace and required-missing behavior.
+- Added buffer scopes: run-scoped for workflows/context templates, session-scoped for chat tools.
+- `@output variable: NAME` writes to a buffer; `@input variable: NAME` reads from it. Variable targets accept `scope=run|session`.
+- Added `buffer_ops` tool for read-only buffer inspection (list/info/peek/read/search).
 
 ### Breaking changes
 - **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
@@ -28,6 +27,10 @@ This release introduces the **Context Manager** as a first-class feature, adds b
 ### Documentation
 - Documentation updated to reflect the new directive names and scheme-based targets.
 - Docs folder now includes a library of example context and workflow templates.
+
+### Tools
+- Removed the experimental `import_url` tool from the tool list.
+- Restored `tavily_extract` and `tavily_crawl` in the default tool config.
 
 
 ## 2026-01-24
