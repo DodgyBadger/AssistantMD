@@ -1,70 +1,53 @@
 # AssistantMD
 
-An experimental agent harness for control freaks.
+**An experimental agent harness and chat UI for control freaks.**
 
 - Scheduled workflows
 - Context curation
-- Controlled tool enablement
-- Explicit I/O routing
-- Self-hosted
+- Controlled loading of large content
+- Explicit tool enablement
 - Markdown native
 
 Runs in Docker alongside Obsidian, VSCode, or any markdown editor. Run it locally or deploy to a VPS (you provide the security layer).
 
-**Examples use cases:**
-- Instant read/write to your markdown files in the chat UI. No copying and pasting content.
-- Run a prompt at 6am every day to review the latest meeting notes and summarize actions.
-- Run a prompt monthly to find local events you might like and write them to a note.
-- Run a multi-step workflow (sequence of prompts) to conduct online research for latest trends in your industry, create a weekly briefing note and recommended actions.
-
-**Examples focused on the agent harness:**
-- Curate chat history with a context template so long-running sessions stay on mission.
-- Route tool outputs to buffers/files, then selectively read or summarize those artifacts.
-- Use per-step tool enablement to constrain an agent’s capabilities by workflow stage.
-- Build a “research harness” that separates retrieval, synthesis, and publishing into explicit steps.
-
-⚠️ **Beta software**
+⚠️ **Beta software** ⚠️
 
 ## Requirements
 
 - Docker Engine or Docker Desktop
 - At least one LLM API key
-- Comfort with the terminal 
+- Comfort with the terminal
 
 ## ✨ Features
 
-**🥼 NEW / EXPERIMENTAL: Context Manager**
-- Create markdown files in `AssistantMD/ContextTemplates` to steer your chat sessions
-- Custom system instructions
-- Curate chat history before passing to the primary chat agent
+**🥼 NEW: Context Manager**
+- Steer your chat sessions by curating message history and passing custom system instructions
+- Define templates using markdown in `AssistantMD/ContextTemplates`
 
 **⚡ Scheduled Workflows**
-- Multi-step prompts (called workflows) with per-step model and tool selection
-- Workflows defined as markdown files in `AssistantMD/Workflows/`
-- Recurring schedules using cron expressions or one-time execution
-- Dynamic file patterns: `{today}`, `{this-week}`, `{latest}`, etc.
+- Multi-step, scheduled workflows. Each step can define prompt, model, tools and content routing.
+- Define workslow using markdown in `AssistantMD/Workflows/`
 
 **💬 Chat Interface**
-- Clean, mobile-friendly chat UI
-- Read and write markdown files during conversations
-- Full vault context available to the AI
-- Easy to update models and providers
+- Full access to your markdown notes
+- Chat sessions saved as markdown
 
 **🤖 AI Providers**
 - GPT, Claude, Gemini, Mistral, Grok
 - Any OpenAI-compatible API (Ollama, etc.)
 
 **🔐 Privacy & Control**
-- Self-hosted - your files stay on your infrastructure
+- Self-hosted, single-user design
 - Docker-based deployment
-- Single-user design (bring your own auth layer if needed)
 
+<img src="docs/chat-UI-screenshot.png" alt="Chat UI screenshot" height="700">
 
 ## 📚 Documentation
 
 - **[Installation Guide](docs/setup/installation.md)**
 - **[Basic Usage](docs/use/overview.md)**
 - **[Creating Workflows](docs/use/workflows.md)**
+- **[Context Manager](docs/use/context_manager.md)**
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
 
