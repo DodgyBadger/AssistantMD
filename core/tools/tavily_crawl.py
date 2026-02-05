@@ -30,7 +30,7 @@ class TavilyCrawl(BaseTool):
         client = TavilyClient(api_key=tavily_api_key)
         
         async def tavily_crawl(
-            *args,
+            *,
             url: str,
             instructions: str = "Find comprehensive information and documentation",
             max_depth: int = 1,
@@ -56,12 +56,6 @@ class TavilyCrawl(BaseTool):
             Returns:
                 Formatted content from all crawled pages
             """
-            if args:
-                return (
-                    "Positional arguments are not supported for tavily_crawl. "
-                    "Use named parameters, e.g. "
-                    'tavily_crawl(url="https://example.com", max_depth=1, limit=5).'
-                )
             logger.set_sinks(["validation"]).info(
                 "tool_invoked",
                 data={"tool": "tavily_crawl"},
@@ -173,4 +167,6 @@ IMPORTANT: If you get back only 1 page despite ambitious parameters, the site li
 
 Provide clear instructions about what content you're seeking.
 Example: tavily_crawl(url="https://example.com", max_depth=1, max_breadth=3, limit=5).
-Always use named parameters.""" + WEB_TOOL_SECURITY_NOTICE
+Always use named parameters.
+You may route output with output="variable:NAME" or output="file:PATH" and optional write_mode=append|replace|new.
+output must be a string (no JSON objects or dicts).""" + WEB_TOOL_SECURITY_NOTICE

@@ -30,7 +30,7 @@ class FileOpsSafe(BaseTool):
         """
         
         def file_operations(
-            *args,
+            *,
             operation: str,
             target: str = "",
             content: str = "",
@@ -54,12 +54,6 @@ class FileOpsSafe(BaseTool):
                 Operation result message
             """
             try:
-                if args:
-                    return (
-                        "Positional arguments are not supported for file_ops_safe. "
-                        "Use named parameters, e.g. "
-                        'file_ops_safe(operation="read", target="path/to/file.md").'
-                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={
@@ -133,6 +127,9 @@ BEST PRACTICES:
 
 NOTE:
 - Always use named parameters; positional arguments are not supported.
+- You may route output with output="variable:NAME" or output="file:PATH" and optional write_mode=append|replace|new.
+- output must be a string (no JSON objects or dicts).
+- Example routing: file_ops_safe(operation="read", target="path.md", output="variable:LEASE", write_mode="replace")
 
 """
 

@@ -33,15 +33,30 @@ def normalize_write_mode(value: Optional[str]) -> Optional[str]:
 
 
 def parse_output_target(
-    value: str,
+    value: Any,
     vault_path: str,
     *,
     reference_date=None,
     week_start_day: int = 0,
 ) -> OutputTarget:
-    if not value or not value.strip():
+    if isinstance(value, dict):
+        if value.get("type") == "inline":
+            return OutputTarget(type="inline")
+        if value.get("type") == "discard":
+            return OutputTarget(type="discard")
+        if "buffer" in value:
+            return OutputTarget(type="buffer", name=value.get("buffer"))
+        if "file" in value:
+            return OutputTarget(type="file", path=value.get("file"))
+        if value.get("type") == "buffer":
+            return OutputTarget(type="buffer", name=value.get("name"))
+        if value.get("type") == "file":
+            return OutputTarget(type="file", path=value.get("path"))
+        raise ValueError(f"Unsupported output target dict: {value}")
+
+    if not value or not str(value).strip():
         raise ValueError("Output target cannot be empty")
-    normalized = value.strip()
+    normalized = str(value).strip()
     lowered = normalized.lower()
     if lowered == "inline":
         return OutputTarget(type="inline")

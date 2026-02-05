@@ -44,6 +44,7 @@ class ToolsDirective(DirectiveProcessor):
         params: Dict[str, str],
         vault_path: str,
         week_start_day: int,
+        tool_instructions: str | None = None,
     ):
         original_func = tool.function
         original_takes_ctx = getattr(tool, "takes_ctx", False)
@@ -53,10 +54,14 @@ class ToolsDirective(DirectiveProcessor):
             output_value = kwargs.pop("output", None) if allow_output_params else None
             write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
 
-            if original_takes_ctx:
-                result = await original_func(ctx, *args, **kwargs)
-            else:
-                result = await original_func(*args, **kwargs)
+            try:
+                if original_takes_ctx:
+                    result = await original_func(ctx, *args, **kwargs)
+                else:
+                    result = await original_func(*args, **kwargs)
+            except TypeError as exc:
+                return self._format_tool_type_error(tool_name, exc, tool_instructions)
+
             return self._route_tool_output(
                 result,
                 tool_name=tool_name,
@@ -73,10 +78,14 @@ class ToolsDirective(DirectiveProcessor):
             output_value = kwargs.pop("output", None) if allow_output_params else None
             write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
 
-            if original_takes_ctx:
-                result = original_func(ctx, *args, **kwargs)
-            else:
-                result = original_func(*args, **kwargs)
+            try:
+                if original_takes_ctx:
+                    result = original_func(ctx, *args, **kwargs)
+                else:
+                    result = original_func(*args, **kwargs)
+            except TypeError as exc:
+                return self._format_tool_type_error(tool_name, exc, tool_instructions)
+
             return self._route_tool_output(
                 result,
                 tool_name=tool_name,
@@ -166,12 +175,18 @@ class ToolsDirective(DirectiveProcessor):
         write_mode_param = params.get("write-mode") or params.get("write_mode")
         write_mode = normalize_write_mode(write_mode_param or write_mode_value)
 
-        parsed_target = parse_output_target(
-            output_target,
-            vault_path,
-            reference_date=datetime.now(),
-            week_start_day=week_start_day,
-        )
+        try:
+            parsed_target = parse_output_target(
+                output_target,
+                vault_path,
+                reference_date=datetime.now(),
+                week_start_day=week_start_day,
+            )
+        except Exception as exc:
+            return (
+                f"Invalid output target: {exc}. "
+                'Use output="variable:NAME" or output="file:PATH".'
+            )
 
         if parsed_target.type == "inline":
             return result
@@ -235,6 +250,16 @@ class ToolsDirective(DirectiveProcessor):
             },
         )
         return manifest
+
+    @staticmethod
+    def _format_tool_type_error(tool_name: str, exc: Exception, instructions: str | None) -> str:
+        prefix = (
+            f"Invalid parameters for tool '{tool_name}': {exc}. "
+            "Use named parameters only."
+        )
+        if instructions:
+            return f"{prefix}\n\n{instructions}"
+        return prefix
 
     def get_directive_name(self) -> str:
         return "tools"
@@ -405,6 +430,7 @@ class ToolsDirective(DirectiveProcessor):
                     params=tool_params_by_name.get(tool_name, {}),
                     vault_path=vault_path,
                     week_start_day=week_start_day,
+                    tool_instructions=tool_class.get_instructions(),
                 )
                 tool_functions.append(wrapped_tool)
                 tool_specs.append(

@@ -32,7 +32,7 @@ class FileOpsUnsafe(BaseTool):
         """
 
         def file_ops_unsafe(
-            *args,
+            *,
             operation: str,
             path: str = "",
             line_number: int = 0,
@@ -60,12 +60,6 @@ class FileOpsUnsafe(BaseTool):
                 Operation result message
             """
             try:
-                if args:
-                    return (
-                        "Positional arguments are not supported for file_ops_unsafe. "
-                        "Use named parameters, e.g. "
-                        'file_ops_unsafe(operation="delete", path="x.md", confirm_path="x.md").'
-                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={
@@ -146,6 +140,9 @@ TRUNCATE (clear all file contents):
 
 NOTE:
 - Always use named parameters; positional arguments are not supported.
+- You may route output with output="variable:NAME" or output="file:PATH" and optional write_mode=append|replace|new.
+- output must be a string (no JSON objects or dicts).
+- Example routing: file_ops_unsafe(operation="replace_text", path="a.md", old_content="x", new_content="y", output="variable:RESULT", write_mode="replace")
 
 """
 

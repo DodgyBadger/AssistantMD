@@ -144,7 +144,7 @@ class CodeExecutionPiston(BaseTool):
         client = PistonClient(base_url=base_url, api_key=api_key)
 
         async def execute_code(
-            *args,
+            *,
             code: str,
             language: str = "python",
             stdin: Optional[str] = None,
@@ -158,12 +158,6 @@ class CodeExecutionPiston(BaseTool):
                 stdin: Optional stdin content to pass to the program.
             """
             try:
-                if args:
-                    return (
-                        "Positional arguments are not supported for execute_code. "
-                        "Use named parameters, e.g. "
-                        'execute_code(code="print(1)", language="python").'
-                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={"tool": "code_execution"},
@@ -215,5 +209,8 @@ class CodeExecutionPiston(BaseTool):
             "pass language or language@version (e.g., python@3.10.0). "
             "Optional stdin is supported. Example: "
             "execute_code(code=\"print('hi')\", language=\"python\", stdin=\"\"). "
-            "Always use named parameters."
+            "Always use named parameters. "
+            "You may route output with output=\"variable:NAME\" or output=\"file:PATH\" "
+            "and optional write_mode=append|replace|new. "
+            "output must be a string (no JSON objects or dicts)."
         )

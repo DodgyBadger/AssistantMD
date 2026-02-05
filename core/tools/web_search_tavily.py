@@ -26,7 +26,7 @@ class WebSearchTavily(BaseTool):
         if not tavily_api_key:
             raise ValueError("Secret 'TAVILY_API_KEY' is required for Tavily web search.")
 
-        def search_web(*args, query: str) -> str:
+        def search_web(*, query: str) -> str:
             """Search Tavily for information on the given query.
 
             Args:
@@ -36,11 +36,6 @@ class WebSearchTavily(BaseTool):
                 Search results formatted as text
             """
             try:
-                if args:
-                    return (
-                        "Positional arguments are not supported for search_web_tavily. "
-                        'Use named parameters, e.g. search_web_tavily(query="...").'
-                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={"tool": "web_search_tavily"},
@@ -86,5 +81,8 @@ class WebSearchTavily(BaseTool):
         return (
             "Web search using Tavily API: Use when you need current information or to research topics "
             "(premium service). Example: search_web_tavily(query=\"latest fastapi release\"). "
-            "Always use named parameters."
+            "Always use named parameters. "
+            "You may route output with output=\"variable:NAME\" or output=\"file:PATH\" "
+            "and optional write_mode=append|replace|new. "
+            "output must be a string (no JSON objects or dicts)."
         ) + WEB_TOOL_SECURITY_NOTICE

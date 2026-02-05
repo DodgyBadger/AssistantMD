@@ -30,7 +30,7 @@ class TavilyExtract(BaseTool):
         client = TavilyClient(api_key=tavily_api_key)
         
         async def tavily_extract(
-            *args,
+            *,
             urls: Union[str, List[str]],
             extract_depth: Literal['basic', 'advanced'] = 'basic',
             include_images: bool = False
@@ -48,12 +48,6 @@ class TavilyExtract(BaseTool):
             Returns:
                 Extracted content as formatted text
             """
-            if args:
-                return (
-                    "Positional arguments are not supported for tavily_extract. "
-                    "Use named parameters, e.g. "
-                    'tavily_extract(urls="https://example.com", extract_depth="basic").'
-                )
             logger.set_sinks(["validation"]).info(
                 "tool_invoked",
                 data={"tool": "tavily_extract"},
@@ -151,4 +145,6 @@ OPERATE CONSERVATIVELY:
 
 Always specify the exact URL(s) you want to extract content from.
 Example: tavily_extract(urls="https://example.com/docs", extract_depth="basic").
-Always use named parameters.""" + WEB_TOOL_SECURITY_NOTICE
+Always use named parameters.
+You may route output with output="variable:NAME" or output="file:PATH" and optional write_mode=append|replace|new.
+output must be a string (no JSON objects or dicts).""" + WEB_TOOL_SECURITY_NOTICE

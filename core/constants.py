@@ -79,10 +79,6 @@ Format your responses using markdown for visual clarity:
 - Use lists for steps or multiple items
 - Use > blockquotes for important notes or warnings
 
-Tool output routing (all tools):
-- Route tool results with output=... (e.g. output=variable:NAME or output=file:PATH)
-- Optional write_mode=append|replace|new can be used when routing
-
 Tool calls (all tools):
 - Always use named parameters (keyword arguments); positional arguments and args arrays are not supported.
 - Do not use dotted method calls like tool.operation(...); use tool(operation="...", ...).

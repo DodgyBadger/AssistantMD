@@ -22,7 +22,7 @@ class WebSearchDuckDuckGo(BaseTool):
     def get_tool(cls, vault_path: str = None):
         """Get the Pydantic AI tool for DuckDuckGo web search."""
 
-        def search_web(*args, query: str) -> str:
+        def search_web(*, query: str) -> str:
             """Search DuckDuckGo for information on the given query.
 
             Args:
@@ -32,11 +32,6 @@ class WebSearchDuckDuckGo(BaseTool):
                 Search results formatted as text
             """
             try:
-                if args:
-                    return (
-                        "Positional arguments are not supported for search_web_duckduckgo. "
-                        'Use named parameters, e.g. search_web_duckduckgo(query="...").'
-                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={"tool": "web_search_duckduckgo"},
@@ -72,5 +67,8 @@ class WebSearchDuckDuckGo(BaseTool):
         return (
             "Web search using DuckDuckGo: Use when you need current information or to research topics "
             "(free service). Example: search_web_duckduckgo(query=\"latest postgres release notes\"). "
-            "Always use named parameters."
+            "Always use named parameters. "
+            "You may route output with output=\"variable:NAME\" or output=\"file:PATH\" "
+            "and optional write_mode=append|replace|new. "
+            "output must be a string (no JSON objects or dicts)."
         ) + WEB_TOOL_SECURITY_NOTICE
