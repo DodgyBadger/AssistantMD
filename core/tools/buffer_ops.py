@@ -33,7 +33,7 @@ class BufferOps(BaseTool):
 
         def buffer_operations(
             ctx: RunContext,
-            *,
+            *args,
             operation: str,
             target: str = "",
             query: str = "",
@@ -59,6 +59,12 @@ class BufferOps(BaseTool):
                 max_chars: Maximum characters for peek
             """
             try:
+                if args:
+                    return (
+                        "Positional arguments are not supported for buffer_ops. "
+                        "Use named parameters, e.g. "
+                        'buffer_ops(operation="info", target="LEASE_RAW").'
+                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={"tool": "buffer_ops"},

@@ -27,6 +27,7 @@ class DocumentationAccessTool(BaseTool):
         """Return the Pydantic AI tool for documentation access."""
         async def read_documentation(
             ctx: RunContext,
+            *args,
             path: str | None = Field(
                 default=None,
                 description="Documentation path (e.g., 'use/workflows'). Leave empty to get a summary of the docs layout."
@@ -41,6 +42,12 @@ class DocumentationAccessTool(BaseTool):
             Returns:
                 Documentation content
             """
+            if args:
+                return (
+                    "Positional arguments are not supported for documentation_access. "
+                    "Use named parameters, e.g. "
+                    'documentation_access(path="use/workflows").'
+                )
             logger.set_sinks(["validation"]).info(
                 "tool_invoked",
                 data={"tool": "documentation_access"},
@@ -55,6 +62,7 @@ class DocumentationAccessTool(BaseTool):
         """Return instructions for using the documentation access tool."""
         instructions = """
 Use this tool to read AssistantMD documentation. Call it with no arguments to receive a quick guide describing what lives under /docs and explore as needed.
+Example: documentation_access(path="use/workflows"). Always use named parameters.
 
         """.strip()
         return instructions.strip()

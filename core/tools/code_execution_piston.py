@@ -144,7 +144,10 @@ class CodeExecutionPiston(BaseTool):
         client = PistonClient(base_url=base_url, api_key=api_key)
 
         async def execute_code(
-            code: str, language: str = "python", stdin: Optional[str] = None
+            *args,
+            code: str,
+            language: str = "python",
+            stdin: Optional[str] = None,
         ) -> str:
             """Execute code with the Piston multi-language sandbox.
 
@@ -155,6 +158,12 @@ class CodeExecutionPiston(BaseTool):
                 stdin: Optional stdin content to pass to the program.
             """
             try:
+                if args:
+                    return (
+                        "Positional arguments are not supported for execute_code. "
+                        "Use named parameters, e.g. "
+                        'execute_code(code="print(1)", language="python").'
+                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={"tool": "code_execution"},
@@ -204,5 +213,7 @@ class CodeExecutionPiston(BaseTool):
             "Code execution using the Piston API (public endpoint by default, "
             "set PISTON_BASE_URL for self-hosted). Supports many languages; "
             "pass language or language@version (e.g., python@3.10.0). "
-            "Optional stdin is supported."
+            "Optional stdin is supported. Example: "
+            "execute_code(code=\"print('hi')\", language=\"python\", stdin=\"\"). "
+            "Always use named parameters."
         )

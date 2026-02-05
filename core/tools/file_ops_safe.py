@@ -29,7 +29,16 @@ class FileOpsSafe(BaseTool):
             vault_path: Path to vault for file operations scope
         """
         
-        def file_operations(operation: str, target: str = "", content: str = "", destination: str = "", include_all: bool = False, recursive: bool = False, scope: str = "") -> str:
+        def file_operations(
+            *args,
+            operation: str,
+            target: str = "",
+            content: str = "",
+            destination: str = "",
+            include_all: bool = False,
+            recursive: bool = False,
+            scope: str = "",
+        ) -> str:
             """Perform file operations within vault boundaries.
 
             Args:
@@ -45,6 +54,12 @@ class FileOpsSafe(BaseTool):
                 Operation result message
             """
             try:
+                if args:
+                    return (
+                        "Positional arguments are not supported for file_ops_safe. "
+                        "Use named parameters, e.g. "
+                        'file_ops_safe(operation="read", target="path/to/file.md").'
+                    )
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={
@@ -84,17 +99,17 @@ class FileOpsSafe(BaseTool):
         return """SAFE file operations within vault boundaries - MARKDOWN FILES ONLY:
 
 DISCOVERY - Start narrow, expand as needed:
-- file_operations('list'): List top-level directories and .md files (START HERE)
-- file_operations('list', target='FolderName'): List .md files inside a folder (non-recursive)
-- file_operations('list', target='FolderName', recursive=True): Recursive listing (use sparingly - capped at 200 results)
-- file_operations('list', target='FolderName/*', include_all=True): Include non-md/hidden files
-- file_operations('list', target='notes/**/*.md', recursive=True): Explicit glob pattern for recursive match
+- file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)
+- file_ops_safe(operation="list", target="FolderName"): List .md files inside a folder (non-recursive)
+- file_ops_safe(operation="list", target="FolderName", recursive=True): Recursive listing (use sparingly - capped at 200 results)
+- file_ops_safe(operation="list", target="FolderName/*", include_all=True): Include non-md/hidden files
+- file_ops_safe(operation="list", target="notes/**/*.md", recursive=True): Explicit glob pattern for recursive match
 
 SEARCH - Find content within files:
-- file_operations('search', target='search-term'): Search for text in all markdown files
-- file_operations('search', target='TODO', scope='projects'): Limit search to a folder (folder path adds an implicit '*.md')
-- file_operations('search', target='regex-pattern'): Use regex patterns for advanced search
-- file_operations('search', target='TODO', scope='notes/*.md'): Scope using a glob
+- file_ops_safe(operation="search", target="search-term"): Search for text in all markdown files
+- file_ops_safe(operation="search", target="TODO", scope="projects"): Limit search to a folder (folder path adds an implicit '*.md')
+- file_ops_safe(operation="search", target="regex-pattern"): Use regex patterns for advanced search
+- file_ops_safe(operation="search", target="TODO", scope="notes/*.md"): Scope using a glob
 - Results show: filename:line_number:matching_line_content
 - Limit: 100 results max to avoid context overflow
 
@@ -102,19 +117,22 @@ SEARCH - Find content within files:
 Instead, explore the vault structure first, then target specific folders or file types.
 
 READING & WRITING:
-- file_operations('read', 'path/to/file.md'): Read file content
-- file_operations('write', 'path/to/file.md', content='text'): Create NEW file (fails if exists)
-- file_operations('append', 'path/to/file.md', content='text'): Append to EXISTING file (fails if not exists)
-- file_operations('move', 'old/path.md', destination='new/path.md'): Move files (fails if destination exists)
-- file_operations('mkdir', 'path/to/directory'): Create directories
+- file_ops_safe(operation="read", target="path/to/file.md"): Read file content
+- file_ops_safe(operation="write", target="path/to/file.md", content="text"): Create NEW file (fails if exists)
+- file_ops_safe(operation="append", target="path/to/file.md", content="text"): Append to EXISTING file (fails if not exists)
+- file_ops_safe(operation="move", target="old/path.md", destination="new/path.md"): Move files (fails if destination exists)
+- file_ops_safe(operation="mkdir", target="path/to/directory"): Create directories
 
 BEST PRACTICES:
-1. Start exploration with file_operations('list') to see vault structure
+1. Start exploration with file_ops_safe(operation="list") to see vault structure
 2. Use 'search' to find content across files efficiently
 3. Navigate into relevant directories before doing recursive searches
 4. Read only files relevant to the user's request
 5. All files must use .md extension
 6. All operations are SAFE - no overwriting or data loss
+
+NOTE:
+- Always use named parameters; positional arguments are not supported.
 
 """
 
