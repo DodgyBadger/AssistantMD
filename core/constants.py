@@ -85,6 +85,12 @@ Tool calls (all tools):
 - Example: tool_name(operation="read", target="path.md")
 """
 
+# Workflow system instruction appended to all workflow runs
+WORKFLOW_SYSTEM_INSTRUCTION = """
+You are running in an automated workflow. Carry out the instructions provided to the best of your ability.
+Do not ask clarifying questions - you do not have direct access to the user.
+"""
+
 # Optional context manager agent.instruction
 CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
 You are part of the context management system which guides the primary chat agent.

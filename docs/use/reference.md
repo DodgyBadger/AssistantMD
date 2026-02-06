@@ -5,8 +5,8 @@
 
 | Name | Description | Applies To | Examples | Notes |
 | --- | --- | --- | --- | --- |
-| `@output` | Route step output to one or more destinations (file, buffer or context). | Workflow, Context Template | `@output file: reports/{today}` | Auto-adds `.md` if missing. Variable targets support optional `scope=`. Use `@output context` to inject into the chat agent history (context templates only). Multiple `@output` directives are allowed. |
-| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. |
+| `@output` | Route step output to one or more destinations (file, buffer or context). | Workflow, Context Template | `@output file: reports/{today}` <br> `@output variable: foo` | Auto-adds `.md` if missing. Variable targets support optional `scope=`. Use `@output context` to inject into the chat agent history (context templates only). Multiple `@output` directives are allowed. |
+| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` <br> `@input variable: foo` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. |
 | `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Use `@model none` to skip LLM execution for the step/section. |
 | `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default), `replace`, or `new` (numbered files). |
@@ -72,7 +72,6 @@ Routing redirects directive or tool outputs to a destination instead of inlining
 - `variable: NAME`
 - `file: PATH`
 - `context` (context templates only)
-- `discard`
 
 ### @input routing
 Attach `output=...` to `@input` to route the resolved content (or references when `refs-only` is set).

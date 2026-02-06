@@ -5,6 +5,7 @@ from typing import Dict
 from types import SimpleNamespace
 
 from core.logger import UnifiedLogger
+from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
 from core.core_services import CoreServices
 from core.runtime.buffers import BufferStore
 from core.utils.routing import OutputTarget, format_input_files_block, write_output
@@ -245,10 +246,13 @@ async def create_step_agent(processed_step, workflow_instructions: str, services
     tool_functions, tool_instructions, _ = _resolve_tools_result(tools_result)
 
     # Compose instructions using Pydantic AI's list support for clean composition
+    base_instructions = workflow_instructions or "You are a helpful assistant."
+    workflow_instructions_with_system = f"{base_instructions}\n\n{WORKFLOW_SYSTEM_INSTRUCTION}".strip()
+
     if tool_instructions:
-        instructions_stack = [workflow_instructions, tool_instructions]
+        instructions_stack = [workflow_instructions_with_system, tool_instructions]
     else:
-        instructions_stack = [workflow_instructions]
+        instructions_stack = [workflow_instructions_with_system]
 
     agent = await services.create_agent(model_instance, tool_functions)
     for inst in instructions_stack:

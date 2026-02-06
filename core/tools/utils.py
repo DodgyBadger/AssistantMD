@@ -73,5 +73,5 @@ def get_tool_instructions(tool_classes):
 
     instructions = ["You have access to the following capabilities:"]
     for tool_class in tool_classes:
-        instructions.append(f"## {tool_class.get_instructions()}")
+        instructions.append(tool_class.get_instructions())
     return "\n\n".join(instructions)
