@@ -3,34 +3,24 @@
 
 ## 2026-01-30
 
-This release introduces the **Context Manager** as a first-class feature, adds buffer-backed context passing, and then refines the directive model with a deliberate breaking change to improve semantics and future extensibility.
+### Feature: Context manager
+This release introduces the **Context Manager** which allows you to shape what the chat agent sees, from simple system‑prompt injection to multi‑step context assembly. It applies the lessons learned by research on long‑running agents: curated working sets, structured summaries and explicit attention budgeting beat dumping full transcripts into ever‑larger contexts.
 
-### Context manager (new feature)
-- **Purpose**: curate a compact, task-relevant working context instead of appending full chat history, improving stability for long-running sessions.
-- **Architecture**:
-  - Template-driven: templates live in `AssistantMD/ContextTemplates/` (vault) or `system/ContextTemplates/` (global), with vault → system resolution.
-  - Step-based: each `##` section (non-instructions) is a step that can include directives; steps run in order and inject system summaries.
-  - Controlled history: `@recent-runs`, `@recent-summaries`, `passthrough_runs`, and `token_threshold` gate how much history is passed through or summarized.
-  - Caching: optional `@cache` directive supports session/daily/weekly/duration reuse; cache is keyed by template + section and invalidated on template changes.
-  - Observability: managed summaries are persisted to SQLite with template metadata and validation events capture key decisions.
+It is template‑driven and step‑based, with explicit controls for how history is curated and optional caching/observability; see the docs for full details on directives, gating, and persistence.
 
-### Buffers (virtualized I/O)
-- Added buffer scopes: run-scoped for workflows/context templates, session-scoped for chat tools.
-- `@output variable: NAME` writes to a buffer; `@input variable: NAME` reads from it. Variable targets accept `scope=run|session`.
-- Added `buffer_ops` tool for read-only buffer inspection (list/info/peek/read/search).
+### Feature: Buffer (virtualized I/O)
+The buffer is an in-memory key-value store that the chat UI, context templates and workflows can use to temporarily store data. Entries in the buffer are called variables. The buffer is useful for passing data between steps in a context or workflow template, or to avoid blowing up the context window with large content.
+
+A new `buffer_ops` tool allows the LLM to access buffer variables systematically. This feature is the first step toward enabling a robust [RLM-style approach](https://alexzhang13.github.io/blog/2025/rlm/) to context management.
 
 ### Breaking changes
 - **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
 - **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file: ` / `variable: `).
 - **Parameter rename**: `paths-only` → `refs-only` for `@input` (no backward compatibility).
+- **Tool deprecation**: Removed `import_url` and `documentation_access` tools (assisted template creation is now handled as a skill using the context manager).
 
 ### Documentation
-- Documentation updated to reflect the new directive names and scheme-based targets.
 - Docs folder now includes a library of example context and workflow templates.
-
-### Tools
-- Removed the experimental `import_url` tool from the tool list.
-- Restored `tavily_extract` and `tavily_crawl` in the default tool config.
 
 
 ## 2026-01-24

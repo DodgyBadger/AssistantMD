@@ -312,6 +312,16 @@ def get_default_api_timeout() -> float:
         return 120.0
 
 
+def get_default_max_output_tokens() -> int:
+    """Return the configured max output tokens, falling back to 0 (provider default)."""
+    entry = get_general_settings().get("max_output_tokens")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def get_web_tool_max_tokens() -> int:
     """Return the configured web tool token limit, falling back to 50000 tokens."""
     entry = get_general_settings().get("web_tool_max_tokens")

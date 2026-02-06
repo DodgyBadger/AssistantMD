@@ -167,6 +167,7 @@ description: Validation template for context manager events.
 @recent-summaries 0
 @input file: notes/seed
 @output variable: summary_buffer
+@output context
 @model gpt-mini
 
 Summarize the seed-note haiku and the latest input in 2 bullets.
@@ -176,6 +177,7 @@ Call out any imagery or mood from the haiku.
 @recent-runs 2
 @recent-summaries 1
 @input variable: summary_buffer
+@output context
 @model gpt-mini
 
 Restate the current topic in one sentence, referencing the haiku theme.

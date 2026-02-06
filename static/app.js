@@ -330,6 +330,7 @@ function populateSelectors() {
             !checkbox.disabled &&
             (
                 tool.name === 'file_ops_safe' ||
+                tool.name === 'buffer_ops' ||
                 (preferredWebTool && tool.name === preferredWebTool)
             )
         ) {
@@ -350,6 +351,7 @@ function populateSelectors() {
         'web_search_tavily',
         'file_ops_safe',
         'file_ops_unsafe',
+        'buffer_ops',
         'documentation_access',
         'tavily_extract',
         'tavily_crawl',
@@ -370,7 +372,6 @@ function populateSelectors() {
         chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
     });
 
-    applyModeToolPreferences();
 }
 
 // Fetch system status

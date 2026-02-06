@@ -578,10 +578,6 @@ def build_context_manager_history_processor(
                     elif isinstance(part, ToolCallPart):
                         tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
                         rendered_parts.append(f"[{tool_name}] (tool call)")
-                    if managed_output is None:
-                        part_content = getattr(part, "content", None)
-                        if isinstance(part_content, str):
-                            rendered_parts.append(part_content)
                 if rendered_parts:
                     if has_system_part and role == "user":
                         return "system", "\n".join(rendered_parts)
@@ -669,44 +665,59 @@ def build_context_manager_history_processor(
                 model_directive_value = model_values[-1]
                 if model_directive_value.strip().lower() == "none":
                     skip_llm = True
-            output_target = None
+            output_targets: List[Any] = []
             output_values = section_directives.get("output", [])
             if output_values:
-                try:
-                    output_result = registry.process_directive(
-                        "output",
-                        output_values[-1],
-                        vault_path,
-                        reference_date=datetime.now(),
-                        week_start_day=week_start_day,
-                    )
-                    if output_result.success:
-                        output_target = output_result.processed_value
-                        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-                            logger.info(
-                                "Context output target resolved (buffer)",
-                                data={
-                                    "session_id": session_id,
-                                    "vault_name": vault_name,
-                                    "section_name": section.name,
-                                    "variable": output_target.get("name"),
-                                },
-                            )
-                        elif isinstance(output_target, str):
-                            logger.info(
-                                "Context output target resolved (file)",
-                                data={
-                                    "session_id": session_id,
-                                    "vault_name": vault_name,
-                                    "section_name": section.name,
-                                    "output_file": output_target,
-                                },
-                            )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to process context manager output directive",
-                        metadata={"error": str(exc)},
-                    )
+                for output_value in output_values:
+                    try:
+                        output_result = registry.process_directive(
+                            "output",
+                            output_value,
+                            vault_path,
+                            reference_date=datetime.now(),
+                            week_start_day=week_start_day,
+                        )
+                        if output_result.success:
+                            output_target = output_result.processed_value
+                            output_targets.append(output_target)
+                            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                                logger.info(
+                                    "Context output target resolved (buffer)",
+                                    data={
+                                        "session_id": session_id,
+                                        "vault_name": vault_name,
+                                        "section_name": section.name,
+                                        "variable": output_target.get("name"),
+                                    },
+                                )
+                            elif isinstance(output_target, dict) and output_target.get("type") == "context":
+                                logger.info(
+                                    "Context output target resolved (context)",
+                                    data={
+                                        "session_id": session_id,
+                                        "vault_name": vault_name,
+                                        "section_name": section.name,
+                                    },
+                                )
+                            elif isinstance(output_target, str):
+                                logger.info(
+                                    "Context output target resolved (file)",
+                                    data={
+                                        "session_id": session_id,
+                                        "vault_name": vault_name,
+                                        "section_name": section.name,
+                                        "output_file": output_target,
+                                    },
+                                )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to process context manager output directive",
+                            metadata={"error": str(exc)},
+                        )
+            emit_context = any(
+                isinstance(target, dict) and target.get("type") == "context"
+                for target in output_targets
+            )
             header_value = None
             header_values = section_directives.get("header", [])
             if header_values:
@@ -1092,15 +1103,20 @@ def build_context_manager_history_processor(
                 summary_text = managed_output or "N/A"
                 if skip_llm and managed_output == "":
                     summary_text = ""
-                if output_target and not skip_llm:
-                    if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-                        target = OutputTarget(type="buffer", name=output_target.get("name"))
-                    elif isinstance(output_target, str):
-                        target = OutputTarget(type="file", path=output_target)
-                    else:
-                        target = None
+                if output_targets and not skip_llm:
+                    for output_target in output_targets:
+                        if isinstance(output_target, dict) and output_target.get("type") == "context":
+                            continue
+                        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                            target = OutputTarget(type="buffer", name=output_target.get("name"))
+                        elif isinstance(output_target, str):
+                            target = OutputTarget(type="file", path=output_target)
+                        else:
+                            target = None
 
-                    if target is not None:
+                        if target is None:
+                            continue
+
                         try:
                             write_result = write_output(
                                 target=target,
@@ -1165,7 +1181,7 @@ def build_context_manager_history_processor(
                         "cache_mode": cache_mode,
                     },
                 )
-                if not skip_llm:
+                if not skip_llm and emit_context:
                     section_name = section.name or "Template"
                     summary_title = f"Context summary (managed: {section_name})"
                     summary_messages.append(

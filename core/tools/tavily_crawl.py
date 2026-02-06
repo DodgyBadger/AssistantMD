@@ -110,7 +110,7 @@ class TavilyCrawl(BaseTool):
             token_count = estimate_token_count(final_content)
             max_tokens = get_web_tool_max_tokens()
 
-            if token_count > max_tokens:
+            if max_tokens > 0 and token_count > max_tokens:
                 pages_crawled = len(result['results'])
 
                 return f"""❌ Crawl Error: Content exceeds context window limit
@@ -136,7 +136,8 @@ Suggested alternatives:
      - Reduce 'max_breadth' to 3-5 for more focused crawling
   2. Use web_search to get summarized information instead
   3. Use tavily_extract on specific known URLs rather than crawling
-  4. Ask the user which specific pages they want, then extract those individually"""
+  4. Ask the user which specific pages they want, then extract those individually
+  5. Route tool output to a buffer (e.g. @tools tavily_crawl(output=variable: web_buffer)) and explore it with buffer_ops"""
 
             return final_content
         

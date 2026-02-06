@@ -294,8 +294,14 @@ async def process_workflow_step(
         buffer_store=context.get("buffer_store"),
     )
 
-    # Get output target from processed step (optional)
-    output_target = processed_step.get_directive_value('output')
+    # Get output targets from processed step (optional, may be multiple)
+    output_target_value = processed_step.get_directive_value('output')
+    if isinstance(output_target_value, list):
+        output_targets = output_target_value
+    elif output_target_value:
+        output_targets = [output_target_value]
+    else:
+        output_targets = []
 
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
@@ -345,10 +351,17 @@ async def process_workflow_step(
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
     output_target_label = None
-    if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-        output_target_label = f"variable:{output_target.get('name')}"
-    elif output_target:
-        output_target_label = f"file:{output_target}"
+    if output_targets:
+        labels = []
+        for output_target in output_targets:
+            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                labels.append(f"variable:{output_target.get('name')}")
+            elif isinstance(output_target, dict) and output_target.get("type") == "context":
+                labels.append("context")
+            elif output_target:
+                labels.append(f"file:{output_target}")
+        if labels:
+            output_target_label = ", ".join(labels)
     logger.set_sinks(["validation"]).info(
         "workflow_step_prompt",
         data={
@@ -360,40 +373,57 @@ async def process_workflow_step(
 
     # Generate AI content
     chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
-    deps = SimpleNamespace(buffer_store=context.get("buffer_store"))
+    buffer_store = context.get("buffer_store")
+    deps = SimpleNamespace(
+        buffer_store=buffer_store,
+        buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
+    )
     step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
 
-    # Write AI-generated content to output target (if @output specified)
-    if output_target:
+    # Write AI-generated content to output targets (if @output specified)
+    if output_targets:
         write_mode = processed_step.get_directive_value('write_mode')
         header_value = processed_step.get_directive_value('header')
-        if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-            target = OutputTarget(type="buffer", name=output_target.get("name"))
-        else:
-            target = OutputTarget(type="file", path=output_target)
-        write_result = write_output(
-            target=target,
-            content=step_content,
-            write_mode=write_mode,
-            buffer_store=context.get("buffer_store"),
-            vault_path=services.vault_path,
-            header=header_value,
-            buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
-            default_scope="run",
-            metadata={
-                "source": "workflow_step",
-                "origin_id": services.workflow_id,
-                "origin_name": step_name,
-                "origin_type": "workflow_step",
-                "write_mode": write_mode or "append",
-                "size_chars": len(step_content or ""),
-            },
-        )
-        if write_result.get("type") == "file" and write_result.get("path"):
-            context['created_files'].add(write_result.get("path"))
+        wrote_output = False
+        for output_target in output_targets:
+            if isinstance(output_target, dict) and output_target.get("type") == "context":
+                logger.info(
+                    "Workflow output target ignored (context not supported)",
+                    data={
+                        "vault": services.workflow_id,
+                        "step_name": step_name,
+                    },
+                )
+                continue
+            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                target = OutputTarget(type="buffer", name=output_target.get("name"))
+            else:
+                target = OutputTarget(type="file", path=output_target)
+            write_result = write_output(
+                target=target,
+                content=step_content,
+                write_mode=write_mode,
+                buffer_store=context.get("buffer_store"),
+                vault_path=services.vault_path,
+                header=header_value,
+                buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
+                default_scope="run",
+                metadata={
+                    "source": "workflow_step",
+                    "origin_id": services.workflow_id,
+                    "origin_name": step_name,
+                    "origin_type": "workflow_step",
+                    "write_mode": write_mode or "append",
+                    "size_chars": len(step_content or ""),
+                },
+            )
+            wrote_output = True
+            if write_result.get("type") == "file" and write_result.get("path"):
+                context['created_files'].add(write_result.get("path"))
+        # Update state manager for any pending patterns used
         context['state_manager'].update_from_processed_step(processed_step)
     else:
-        # No output file - step executed for side effects only (e.g., tool calls)
+        # No output target - step executed for side effects only (e.g., tool calls)
         # Still update state manager for any pending patterns used
         context['state_manager'].update_from_processed_step(processed_step)
 

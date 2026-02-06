@@ -40,6 +40,9 @@ class OutputFileDirective(DirectiveProcessor):
     
     Note: {pending} and multi-file patterns like {latest:3} are not supported
     for output targets as they don't make sense in this context.
+
+    Special Targets:
+        context          - Emit output into the chat agent context (context manager only)
     """
     
     def __init__(self):
@@ -63,7 +66,10 @@ class OutputFileDirective(DirectiveProcessor):
         if not base_value:
             return False
 
-        if base_value.startswith("file:"):
+        if base_value == "context":
+            if parameters:
+                return False
+        elif base_value.startswith("file:"):
             file_path = base_value[len("file:"):].strip()
             if not file_path:
                 return False
@@ -90,6 +96,11 @@ class OutputFileDirective(DirectiveProcessor):
         )
         if parameters and "scope" not in parameters:
             raise ValueError("Output target does not accept parameters")
+
+        if base_value == "context":
+            if parameters:
+                raise ValueError("Context output does not accept parameters")
+            return {"type": "context"}
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()

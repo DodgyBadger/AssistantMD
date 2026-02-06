@@ -3,9 +3,9 @@
 
 ## Directives
 
-| Name | Description | Applies To | Example | Notes |
+| Name | Description | Applies To | Examples | Notes |
 | --- | --- | --- | --- | --- |
-| `@output` | Write step output to a specific file or buffer. | Workflow | `@output file: reports/{today}` | Auto-adds `.md` if missing. Avoid mixing with `file_ops_safe` in the same step. Variable targets support optional `scope=`. |
+| `@output` | Route step output to one or more destinations (file, buffer or context). | Workflow, Context Template | `@output file: reports/{today}` | Auto-adds `.md` if missing. Variable targets support optional `scope=`. Use `@output context` to inject into the chat agent history (context templates only). Multiple `@output` directives are allowed. |
 | `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. |
 | `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Use `@model none` to skip LLM execution for the step/section. |
@@ -18,7 +18,7 @@
 
 ## Frontmatter
 
-| Name | Description | Applies To | Example | Notes |
+| Name | Description | Applies To | Examples | Notes |
 | --- | --- | --- | --- | --- |
 | `workflow_engine` | Select the workflow engine. | Workflow | `workflow_engine: step` | Required for workflows. Currently only `step`. |
 | `schedule` | Define when the workflow runs. | Workflow | `schedule: "cron: 0 9 * * *"` | Omit for manual-only. Supports `cron:` and `once:`. |
@@ -31,7 +31,7 @@
 
 ## Patterns
 
-| Name | Description | Applies To | Example | Notes |
+| Name | Description | Applies To | Examples | Notes |
 | --- | --- | --- | --- | --- |
 | `{today}` | Current date (YYYY-MM-DD). | `@input`, `@output`, `@header` | `@output file: daily/{today}` | Time-based pattern. |
 | `{yesterday}` | Previous day date. | `@input`, `@output`, `@header` | `@output file: daily/{yesterday}` | Time-based pattern. |
@@ -59,6 +59,7 @@ Use `scope=session` or `scope=run` with variable targets to override defaults wh
 
 Examples:
 - `@output variable: summary_buffer`
+- `@output context`
 - `@input variable: summary_buffer`
 - `@output variable: summary_buffer (scope=session)`
 
@@ -70,6 +71,7 @@ Routing redirects directive or tool outputs to a destination instead of inlining
 - `inline` (default)
 - `variable: NAME`
 - `file: PATH`
+- `context` (context templates only)
 - `discard`
 
 ### @input routing

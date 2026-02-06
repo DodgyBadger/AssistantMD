@@ -80,7 +80,7 @@ Format your responses using markdown for visual clarity:
 - Use > blockquotes for important notes or warnings
 
 Tool calls (all tools):
-- Always use named parameters (keyword arguments); positional arguments and args arrays are not supported.
+- Always use named parameters (keyword arguments); **positional arguments and args arrays are not supported.**
 - Do not use dotted method calls like tool.operation(...); use tool(operation="...", ...).
 - Example: tool_name(operation="read", target="path.md")
 """

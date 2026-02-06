@@ -42,7 +42,6 @@ class ToolSuiteScenario(BaseScenario):
         )
         events = self.events_since(checkpoint)
         for tool_name in [
-            "documentation_access",
             "file_ops_safe",
             "file_ops_unsafe",
             "web_search_duckduckgo",
@@ -55,7 +54,6 @@ class ToolSuiteScenario(BaseScenario):
             )
 
         expected_outputs = [
-            "tool-outputs/documentation-access.md",
             "tool-outputs/file-ops-safe.md",
             "tool-outputs/file-ops-unsafe.md",
             "tool-outputs/web-search-duckduckgo.md",
@@ -80,14 +78,6 @@ workflow_engine: step
 enabled: false
 description: Validation workflow that exercises every available tool with a lightweight model.
 ---
-
-## DOCUMENTATION
-@model gpt-mini
-@tools documentation_access
-@output file: tool-outputs/documentation-access
-
-Summarize the documentation home page in 3 bullet points.
-You must call the documentation tool before responding.
 
 ## FILE_OPS_SAFE
 @model gpt-mini

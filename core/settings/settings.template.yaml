@@ -16,9 +16,13 @@ settings:
     value: 120
     description: "Default timeout (seconds) for external API calls."
     restart_required: false
+  max_output_tokens:
+    value: 0
+    description: "Maximum output tokens for model responses (0 = provider default)."
+    restart_required: false
   web_tool_max_tokens:
-    value: 50000
-    description: "Maximum token limit for web extraction tools (tavily_extract, tavily_crawl) to prevent context overflow."
+    value: 0
+    description: "Maximum token limit for web extraction tools (tavily_extract, tavily_crawl) to prevent context overflow (0 = no limit)."
     restart_required: false
   debug:
     value: false
