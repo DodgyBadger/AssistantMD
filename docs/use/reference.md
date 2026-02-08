@@ -6,7 +6,7 @@
 | Name | Description | Applies To | Examples | Notes |
 | --- | --- | --- | --- | --- |
 | `@output` | Route step output to one or more destinations (file, buffer or context). | Workflow, Context Template | `@output file: reports/{today}` <br> `@output variable: foo` | Auto-adds `.md` if missing. Variable targets support optional `scope=`. Use `@output context` to inject into the chat agent history (context templates only). Multiple `@output` directives are allowed. |
-| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` <br> `@input variable: foo` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. |
+| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` <br> `@input variable: foo` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. In context templates, `output=context` routes inputs directly into chat context. |
 | `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Use `@model none` to skip LLM execution for the step/section. |
 | `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default), `replace`, or `new` (numbered files). |

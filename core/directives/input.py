@@ -317,11 +317,59 @@ class InputFileDirective(DirectiveProcessor):
         parsed_target = parse_output_target(
             output_target_value,
             vault_path,
+            allow_context=bool(context.get("allow_context_output")),
             reference_date=context.get("reference_date"),
             week_start_day=context.get("week_start_day", 0),
         )
         if parsed_target.type == "inline":
             return result_files
+        if parsed_target.type == "context":
+            found_files = [
+                file_data for file_data in result_files
+                if isinstance(file_data, dict) and file_data.get("found", True)
+            ]
+            if refs_only:
+                contents = [
+                    file_data.get("filepath", "")
+                    for file_data in found_files
+                    if isinstance(file_data.get("filepath", ""), str)
+                ]
+                combined_content = "\n".join([c for c in contents if c])
+            else:
+                contents = [
+                    file_data.get("content", "")
+                    for file_data in found_files
+                    if isinstance(file_data.get("content", ""), str)
+                ]
+                combined_content = "\n\n".join([c for c in contents if c])
+
+            manifest = build_manifest(
+                source="input",
+                destination="context",
+                item_count=len(found_files),
+                total_chars=len(combined_content),
+                paths=[
+                    file_data.get("filepath")
+                    for file_data in found_files
+                    if file_data.get("filepath")
+                ] or None,
+            )
+            routed_results: List[Dict[str, Any]] = []
+            for file_data in result_files:
+                if isinstance(file_data, dict):
+                    file_data["refs_only"] = True
+                    file_data["content"] = ""
+                    file_data["routed_to"] = "context"
+                routed_results.append(file_data)
+
+            routed_results.append(
+                {
+                    "context_output": combined_content,
+                    "manifest": manifest,
+                    "found": True,
+                }
+            )
+            return routed_results
 
         found_files = [
             file_data for file_data in result_files

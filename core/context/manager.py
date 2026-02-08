@@ -813,6 +813,7 @@ def build_context_manager_history_processor(
                 input_file_values = section_directives.get("input", [])
                 empty_input_file_directive = _has_empty_input_file_directive(section.content)
                 input_file_data = None
+                context_input_outputs: List[str] = []
                 if input_file_values:
                     processed_values: List[Any] = []
                     for value in input_file_values:
@@ -828,6 +829,7 @@ def build_context_manager_history_processor(
                                 buffer_store=run_buffer_store,
                                 buffer_store_registry=buffer_store_registry,
                                 buffer_scope="run",
+                                allow_context_output=True,
                             )
                         except Exception as exc:
                             logger.warning(
@@ -854,6 +856,11 @@ def build_context_manager_history_processor(
                                     metadata={"section": section.name},
                                 )
                                 break
+                            for item in result.processed_value:
+                                if isinstance(item, dict) and item.get("context_output"):
+                                    context_input_outputs.append(
+                                        item.get("context_output", "")
+                                    )
                         processed_values.append(result.processed_value)
                     if processed_values:
                         input_file_data = processed_values[0] if len(processed_values) == 1 else processed_values
@@ -1181,6 +1188,19 @@ def build_context_manager_history_processor(
                         "cache_mode": cache_mode,
                     },
                 )
+                if context_input_outputs:
+                    section_name = section.name or "Template"
+                    combined = "\n\n".join([c for c in context_input_outputs if c])
+                    if combined:
+                        summary_messages.append(
+                            ModelRequest(parts=[SystemPromptPart(content=combined)])
+                        )
+                        persisted_sections.append(
+                            {
+                                "name": section_name,
+                                "output": combined,
+                            }
+                        )
                 if not skip_llm and emit_context:
                     section_name = section.name or "Template"
                     summary_title = f"Context summary (managed: {section_name})"

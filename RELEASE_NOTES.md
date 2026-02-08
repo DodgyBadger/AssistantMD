@@ -9,7 +9,7 @@ This release introduces the **Context Manager** which allows you to shape what t
 It is template‑driven and step‑based, with explicit controls for how history is curated and optional caching/observability; see the docs for full details on directives, gating, and persistence.
 
 ### Feature: Buffer (virtualized I/O)
-The buffer is an in-memory key-value store that the chat UI, context templates and workflows can use to temporarily store data. Entries in the buffer are called variables. The buffer is useful for passing data between steps in a context or workflow template, or to avoid blowing up the context window with large content.
+The buffer is an in-memory key-value store that the chat UI, context templates and workflows can use to temporarily store data. Entries in the buffer are called variables. The buffer is useful for passing data between steps in a context or workflow template, or to avoid blowing up the context window with huge tool outputs.
 
 A new `buffer_ops` tool allows the LLM to access buffer variables systematically. This feature is the first step toward enabling a robust [RLM-style approach](https://alexzhang13.github.io/blog/2025/rlm/) to context management.
 
@@ -17,10 +17,11 @@ A new `buffer_ops` tool allows the LLM to access buffer variables systematically
 - **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
 - **Scheme-based targets**: `@input` / `@output` now require explicit targets (`file: ` / `variable: `).
 - **Parameter rename**: `paths-only` → `refs-only` for `@input` (no backward compatibility).
-- **Tool deprecation**: Removed `import_url` and `documentation_access` tools (assisted template creation is now handled as a skill using the context manager).
+- **Tool deprecation**: Removed `import_url` and `documentation_access` tools (assisted template creation is now handled using the context manager).
 
 ### Documentation
 - Docs folder now includes a library of example context and workflow templates.
+- Documentation can be accessed with file_ops_safe using a new virtual path `__virtual_docs__/`.
 
 
 ## 2026-01-24

@@ -36,6 +36,7 @@ def parse_output_target(
     value: Any,
     vault_path: str,
     *,
+    allow_context: bool = False,
     reference_date=None,
     week_start_day: int = 0,
 ) -> OutputTarget:
@@ -62,6 +63,8 @@ def parse_output_target(
         return OutputTarget(type="inline")
     if lowered == "discard":
         return OutputTarget(type="discard")
+    if allow_context and lowered == "context":
+        return OutputTarget(type="context")
 
     directive = OutputFileDirective()
     result = directive.process_value(
