@@ -4,7 +4,7 @@ Pydantic models for API request and response schemas.
 
 from __future__ import annotations
 
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -85,6 +85,7 @@ class ConfigurationStatusInfo(BaseModel):
     issues: List[ConfigurationIssueInfo] = Field(default_factory=list, description="Configuration issues discovered during validation")
     tool_availability: Dict[str, bool] = Field(default_factory=dict, description="Tool availability keyed by tool name")
     model_availability: Dict[str, bool] = Field(default_factory=dict, description="Model availability keyed by model name")
+    default_model: Optional[str] = Field(None, description="Default model alias from settings")
 
 
 class StatusResponse(BaseModel):
@@ -180,6 +181,10 @@ class MetadataResponse(BaseModel):
     vaults: List[str] = Field(..., description="Available vault names")
     models: List[ModelInfo] = Field(..., description="Available models")
     tools: List[ToolInfo] = Field(..., description="Available tools")
+    settings: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Selected settings values for UI hints.",
+    )
     default_context_template: Optional[str] = Field(
         None,
         description="Default context template name for chat sessions.",

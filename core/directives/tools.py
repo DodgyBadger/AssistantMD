@@ -17,7 +17,7 @@ from core.settings.store import get_tools_config, ToolConfig
 from core.tools.utils import get_tool_instructions
 from core.tools.base import BaseTool
 from core.settings.secrets_store import secret_has_value
-from core.settings import get_auto_buffer_max_tokens
+from core.settings import get_auto_buffer_max_tokens, get_routing_allowed_tools
 from core.tools.utils import estimate_token_count
 from core.utils.routing import (
     build_manifest,
@@ -59,7 +59,11 @@ class ToolsDirective(DirectiveProcessor):
             return tool
         original_func = tool.function
         original_takes_ctx = getattr(tool, "takes_ctx", False)
-        allow_output_params = getattr(tool_class, "allow_routing", True) if tool_class else tool_name != "buffer_ops"
+        allowed_tools = get_routing_allowed_tools()
+        allow_output_params = (
+            tool_name in allowed_tools
+            and getattr(tool_class, "allow_routing", True)
+        )
 
         async def _call_async(ctx: RunContext, **kwargs):
             output_value = kwargs.pop("output", None) if allow_output_params else None
@@ -200,6 +204,10 @@ class ToolsDirective(DirectiveProcessor):
                             metadata={"auto_buffered": True, "token_count": token_count},
                         )
                         destination = f"variable: {write_result.get('name')}"
+                        preview_limit = 1200
+                        preview = content[:preview_limit]
+                        if len(content) > preview_limit:
+                            preview += "\n… [truncated]"
                         manifest = build_manifest(
                             source=tool_name,
                             destination=destination,
@@ -207,7 +215,8 @@ class ToolsDirective(DirectiveProcessor):
                             total_chars=len(content),
                             note=(
                                 f"Auto-buffered output ({token_count} tokens > {auto_limit}). "
-                                f"Read with buffer_ops, e.g. buffer_ops(operation=\"peek\", "
+                                f"Preview (first {preview_limit} chars):\n{preview}\n\n"
+                                f"Read full content with buffer_ops, e.g. buffer_ops(operation=\"peek\", "
                                 f"target=\"{write_result.get('name')}\", max_chars=1000)."
                             ),
                         )
@@ -454,6 +463,10 @@ class ToolsDirective(DirectiveProcessor):
                     tool_names.append(name)
                 if params:
                     tool_params_by_name[name] = params
+
+        auto_buffer_limit = get_auto_buffer_max_tokens()
+        if auto_buffer_limit and auto_buffer_limit > 0 and "buffer_ops" not in tool_names:
+            tool_names.append("buffer_ops")
         
         configs = self._get_tool_configs()
 

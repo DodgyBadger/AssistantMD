@@ -24,6 +24,10 @@ settings:
     value: 10000
     description: "Automatically route tool output to a buffer when it exceeds this token count (0 = disabled)."
     restart_required: false
+  routing_allowed_tools:
+    value: []
+    description: "List of tool names that may accept output routing in chat (e.g., file_ops_safe)."
+    restart_required: false
   debug:
     value: false
     description: "Enable verbose API error responses. Restart required."

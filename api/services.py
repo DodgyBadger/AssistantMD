@@ -419,6 +419,14 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         # Get configuration errors and overall configuration health
         configuration_errors = get_configuration_errors()
         configuration_status_snapshot = validate_settings()
+        default_model_value = None
+        try:
+            default_entry = get_general_settings().get("default_model")
+            if default_entry and getattr(default_entry, "value", None):
+                default_model_value = str(default_entry.value).strip() or None
+        except Exception:
+            default_model_value = None
+
         configuration_status = ConfigurationStatusInfo(
             issues=[
                 ConfigurationIssueInfo(
@@ -430,6 +438,7 @@ async def get_system_status(scheduler=None) -> StatusResponse:
             ],
             tool_availability=dict(configuration_status_snapshot.tool_availability),
             model_availability=dict(configuration_status_snapshot.model_availability),
+            default_model=default_model_value,
         )
 
         status_response = StatusResponse(
@@ -1277,5 +1286,10 @@ async def get_metadata() -> MetadataResponse:
         vaults=vaults,
         models=models,
         tools=tools,
+        settings={
+            "auto_buffer_max_tokens": getattr(
+                get_general_settings().get("auto_buffer_max_tokens"), "value", 0
+            )
+        },
         default_context_template=default_context_template,
     )

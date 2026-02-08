@@ -341,6 +341,19 @@ function populateSelectors() {
         label.htmlFor = `tool-${tool.name}`;
         label.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
 
+        const description = tool.description ? String(tool.description).trim() : '';
+        if (description) {
+            label.title = description;
+        }
+
+        if (tool.name === 'buffer_ops' && state.metadata.settings?.auto_buffer_max_tokens > 0) {
+            checkbox.checked = true;
+            checkbox.disabled = true;
+            label.title = description
+                ? `${description} Auto-enabled because auto_buffer_max_tokens is set.`
+                : 'Auto-enabled because auto_buffer_max_tokens is set.';
+        }
+
         wrapper.appendChild(checkbox);
         wrapper.appendChild(label);
         return wrapper;
@@ -381,6 +394,18 @@ async function fetchSystemStatus() {
         if (!response.ok) throw new Error('Failed to fetch status');
 
         state.systemStatus = await response.json();
+        const envDefaultModel = state.systemStatus && state.systemStatus.configuration_status
+            ? state.systemStatus.configuration_status.default_model
+            : null;
+        if (envDefaultModel && state.metadata && chatElements.modelSelector) {
+            const availableModels = state.metadata.models.filter(m => m.available !== false);
+            const firstAvailableModel = availableModels.length ? availableModels[0].name : null;
+            const currentValue = chatElements.modelSelector.value;
+            const hasEnvDefault = availableModels.some(m => m.name === envDefaultModel);
+            if (hasEnvDefault && (!currentValue || currentValue === firstAvailableModel)) {
+                chatElements.modelSelector.value = envDefaultModel;
+            }
+        }
         syncRestartFlagWithStorage();
         displaySystemStatus();
         populateWorkflowSelector();
