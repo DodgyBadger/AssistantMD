@@ -26,6 +26,7 @@ logger = UnifiedLogger(tag="buffer-ops-tool")
 
 class BufferOps(BaseTool):
     """Read-only buffer operations within run-scoped buffer store."""
+    allow_routing = False
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None):

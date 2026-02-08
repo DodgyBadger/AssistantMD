@@ -53,20 +53,23 @@ class ToolsDirective(DirectiveProcessor):
         vault_path: str,
         week_start_day: int,
         tool_instructions: str | None = None,
+        tool_class: Type | None = None,
     ):
+        if tool_name == "buffer_ops":
+            return tool
         original_func = tool.function
         original_takes_ctx = getattr(tool, "takes_ctx", False)
-        allow_output_params = tool_name != "buffer_ops"
+        allow_output_params = getattr(tool_class, "allow_routing", True) if tool_class else tool_name != "buffer_ops"
 
-        async def _call_async(ctx: RunContext, *args, **kwargs):
+        async def _call_async(ctx: RunContext, **kwargs):
             output_value = kwargs.pop("output", None) if allow_output_params else None
             write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
 
             try:
                 if original_takes_ctx:
-                    result = await original_func(ctx, *args, **kwargs)
+                    result = await original_func(ctx, **kwargs)
                 else:
-                    result = await original_func(*args, **kwargs)
+                    result = await original_func(**kwargs)
             except TypeError as exc:
                 return self._format_tool_type_error(tool_name, exc, tool_instructions)
 
@@ -82,15 +85,15 @@ class ToolsDirective(DirectiveProcessor):
                 buffer_store_registry=getattr(ctx, "deps", None) and ctx.deps.buffer_store_registry,
             )
 
-        def _call_sync(ctx: RunContext, *args, **kwargs):
+        def _call_sync(ctx: RunContext, **kwargs):
             output_value = kwargs.pop("output", None) if allow_output_params else None
             write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
 
             try:
                 if original_takes_ctx:
-                    result = original_func(ctx, *args, **kwargs)
+                    result = original_func(ctx, **kwargs)
                 else:
-                    result = original_func(*args, **kwargs)
+                    result = original_func(**kwargs)
             except TypeError as exc:
                 return self._format_tool_type_error(tool_name, exc, tool_instructions)
 
@@ -134,7 +137,7 @@ class ToolsDirective(DirectiveProcessor):
                     params_list = params_list[:-1] + extra_params + [params_list[-1]]
                 else:
                     params_list.extend(extra_params)
-                wrapper.__signature__ = sig.replace(parameters=params_list)
+            wrapper.__signature__ = sig.replace(parameters=params_list)
         except (ValueError, TypeError):
             pass
 
@@ -202,7 +205,11 @@ class ToolsDirective(DirectiveProcessor):
                             destination=destination,
                             item_count=1,
                             total_chars=len(content),
-                            note=f"Auto-buffered output ({token_count} tokens > {auto_limit}).",
+                            note=(
+                                f"Auto-buffered output ({token_count} tokens > {auto_limit}). "
+                                f"Read with buffer_ops, e.g. buffer_ops(operation=\"peek\", "
+                                f"target=\"{write_result.get('name')}\", max_chars=1000)."
+                            ),
                         )
                         logger.set_sinks(["validation"]).info(
                             "tool_output_routed",
@@ -483,6 +490,7 @@ class ToolsDirective(DirectiveProcessor):
                     vault_path=vault_path,
                     week_start_day=week_start_day,
                     tool_instructions=tool_class.get_instructions(),
+                    tool_class=tool_class,
                 )
                 tool_functions.append(wrapped_tool)
                 tool_specs.append(
