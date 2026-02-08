@@ -59,8 +59,6 @@ VIRTUAL_MOUNTS = {
     },
 }
 
-# Backwards-compatible alias for current virtual docs prefix
-VIRTUAL_DOCS_PREFIX = "__virtual_docs__"
 
 # ==============================================================================
 # LLM Prompts and Instructions

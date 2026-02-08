@@ -7,7 +7,7 @@ Provides security validation and path resolution for all file operations.
 import os
 from pathlib import Path
 import tiktoken
-from core.constants import VIRTUAL_DOCS_PREFIX, VIRTUAL_MOUNTS
+from core.constants import VIRTUAL_MOUNTS
 
 
 def _normalize_virtual_path(path: str) -> str:
@@ -27,7 +27,7 @@ def get_virtual_mount_key(path: str) -> str | None:
 
 def is_virtual_docs_path(path: str) -> bool:
     """Return True if the path targets the virtual docs mount."""
-    return get_virtual_mount_key(path) == VIRTUAL_DOCS_PREFIX
+    return get_virtual_mount_key(path) == "__virtual_docs__"
 
 
 def resolve_virtual_path(path: str) -> tuple[str, dict]:

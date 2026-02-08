@@ -14,7 +14,6 @@ from core.logger import UnifiedLogger
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
-    VIRTUAL_DOCS_PREFIX,
     resolve_virtual_path,
     get_virtual_mount_key,
 )
@@ -393,7 +392,7 @@ VIRTUAL DOCS (read-only):
 
     @classmethod
     def _deny_virtual_write(cls, target: str, operation: str) -> str:
-        mount_key = get_virtual_mount_key(target) or VIRTUAL_DOCS_PREFIX
+        mount_key = get_virtual_mount_key(target) or "__virtual_docs__"
         return f"{operation} not allowed for '{mount_key}' (read-only virtual mount)"
 
     @classmethod
