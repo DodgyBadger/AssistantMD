@@ -19,7 +19,6 @@ from core.runtime.state import (
 # Default roots for container environments
 DEFAULT_DATA_ROOT = Path("/app/data")
 DEFAULT_SYSTEM_ROOT = Path("/app/system")
-DEFAULT_DOCS_ROOT = Path(os.getenv("DOCS_ROOT", "/app/docs"))
 
 _bootstrap_data_root: Optional[Path] = None
 _bootstrap_system_root: Optional[Path] = None
@@ -82,7 +81,3 @@ def get_system_root() -> Path:
         context_root = Path(get_runtime_context().config.system_root)
     return _require_root("system_root", context_root, _bootstrap_system_root)
 
-
-def get_docs_root() -> Path:
-    """Return the docs root."""
-    return DEFAULT_DOCS_ROOT

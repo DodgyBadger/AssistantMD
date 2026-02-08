@@ -48,6 +48,9 @@ class InputParamsScenario(BaseScenario):
         assert "INLINE_CONTENT" in prompt, (
             "Inline file content should be present in prompt"
         )
+        assert "Workflow Guide" in prompt, (
+            "Virtual docs file should be resolvable via @input and inlined by default"
+        )
         assert "- notes/with (parens)" in prompt, (
             "Path-only file should be listed in prompt"
         )
@@ -73,6 +76,7 @@ description: Directive-level validation for input params
 ## PATHS_ONLY
 @model test
 @input file: notes/inline
+@input file: __virtual_docs__/use/workflows
 @input file: notes/with (parens) (refs_only)
 
 Summarize the files.

@@ -50,6 +50,18 @@ BUFFER_READ_MAX_CHARS = 8000
 BUFFER_SEARCH_MAX_MATCHES = 100
 BUFFER_SEARCH_CONTEXT_CHARS = 0
 
+# Virtual mounts registry (reserved path prefixes)
+# root values are absolute paths inside the container
+VIRTUAL_MOUNTS = {
+    "__virtual_docs__": {
+        "root": "/app/docs",
+        "read_only": True,
+    },
+}
+
+# Backwards-compatible alias for current virtual docs prefix
+VIRTUAL_DOCS_PREFIX = "__virtual_docs__"
+
 # ==============================================================================
 # LLM Prompts and Instructions
 # ==============================================================================

@@ -13,6 +13,7 @@ from core.utils.file_state import hash_file_content
 from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
 from core.runtime.buffers import get_buffer_store_for_scope
 from core.logger import UnifiedLogger
+from core.tools.utils import get_virtual_mount_key, resolve_virtual_path
 
 logger = UnifiedLogger(tag="directive-input")
 
@@ -30,7 +31,9 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
     
     try:
         # Construct absolute path if needed
-        if not os.path.isabs(file_path):
+        if get_virtual_mount_key(normalized_path):
+            full_path, _mount = resolve_virtual_path(normalized_path)
+        elif not os.path.isabs(file_path):
             full_path = os.path.join(vault_root, normalized_path)
         else:
             full_path = file_path
@@ -55,6 +58,14 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
             "error": f"File not found: {filename}"
         }
     except Exception as e:
+        if get_virtual_mount_key(normalized_path):
+            return {
+                "filepath": filepath_without_ext,
+                "filename": filename,
+                "content": "",
+                "found": False,
+                "error": f"Error reading virtual mount file: {str(e)}"
+            }
         return {
             "filepath": filepath_without_ext,
             "filename": filename,

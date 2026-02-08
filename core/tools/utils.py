@@ -5,7 +5,59 @@ Provides security validation and path resolution for all file operations.
 """
 
 import os
+from pathlib import Path
 import tiktoken
+from core.constants import VIRTUAL_DOCS_PREFIX, VIRTUAL_MOUNTS
+
+
+def _normalize_virtual_path(path: str) -> str:
+    return path.strip().lstrip("./")
+
+
+def get_virtual_mount_key(path: str) -> str | None:
+    """Return virtual mount key if path targets a virtual mount."""
+    if not path:
+        return None
+    normalized = _normalize_virtual_path(path)
+    prefix = normalized.split("/", 1)[0]
+    if prefix in VIRTUAL_MOUNTS:
+        return prefix
+    return None
+
+
+def is_virtual_docs_path(path: str) -> bool:
+    """Return True if the path targets the virtual docs mount."""
+    return get_virtual_mount_key(path) == VIRTUAL_DOCS_PREFIX
+
+
+def resolve_virtual_path(path: str) -> tuple[str, dict]:
+    """Resolve a virtual mount path to an absolute path and mount metadata."""
+    mount_key = get_virtual_mount_key(path)
+    if not mount_key:
+        raise ValueError("Not a virtual mount path")
+
+    mount = VIRTUAL_MOUNTS[mount_key]
+    root = Path(mount["root"]).resolve()
+
+    normalized = _normalize_virtual_path(path)
+    rel = normalized[len(mount_key):].lstrip("/")
+
+    if ".." in rel.split(os.sep):
+        raise ValueError("Path traversal not allowed in virtual mount path")
+
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Virtual mount path escapes root") from exc
+
+    return str(candidate), mount
+
+
+def resolve_virtual_docs_path(path: str) -> str:
+    """Resolve a virtual docs path to an absolute path under the docs root."""
+    resolved, _ = resolve_virtual_path(path)
+    return resolved
 
 
 def validate_and_resolve_path(path: str, vault_path: str) -> str:
@@ -22,6 +74,9 @@ def validate_and_resolve_path(path: str, vault_path: str) -> str:
         ValueError: If path fails security validation
     """
     # Security validations
+    mount_key = get_virtual_mount_key(path)
+    if mount_key:
+        raise ValueError(f"'{mount_key}' is reserved for a virtual mount")
     if '..' in path:
         raise ValueError("Path traversal not allowed - '..' found in path")
 

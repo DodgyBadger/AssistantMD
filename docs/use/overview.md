@@ -15,7 +15,7 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 - **web_search** (default): duckduckgo (free) or tavily (paid/free tier)
 - **file_ops_safe** (default, required): search, read, create, append in your vault
 - **file_ops_unsafe**: full edit, move, delete
-- **documentation_access**: lets the assistant reference these docs (great in workflow creation mode)
+- Documentation is bundled with the app and can be read with `file_ops_safe` via the virtual path prefix `__virtual_docs__/` (great in workflow creation mode).
 - **code_execution**: run code via Piston (public or self-hosted)
 - **tavily_extract**: extract content from specific URLs
 - **tavily_crawl**: crawl and extract content from multiple pages
