@@ -91,8 +91,11 @@ Format your responses using markdown for visual clarity:
 
 Tool calls (all tools):
 - Always use named parameters (keyword arguments); **positional arguments and args arrays are not supported.**
-- Do not use dotted method calls like tool.operation(...); use tool(operation="...", ...).
-- Example: tool_name(operation="read", target="path.md")
+- Most tools support routing the output to a variable or file. Only use this action when explicitly asked by the user.
+- If the tool output is very large, the system may automatically route to a variable and pass you the name of the variable. You can then explore the content systematically using the buffer_ops tool.
+- If the user explicitly asks you to route the tool results, use `output="variable:NAME" or output="file:PATH"` and optional write_mode=append|replace|new.
+- Example routing: file_ops_safe(operation="read", target="path.md", output="variable:LEASE", write_mode="replace")
+
 """
 
 # Workflow system instruction appended to all workflow runs
