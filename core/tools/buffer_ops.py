@@ -44,19 +44,17 @@ class BufferOps(BaseTool):
             end_line: int = 0,
             max_chars: int = 0,
         ) -> str:
-            """
-            Perform read-only buffer operations.
+            """Perform read-only buffer operations.
 
-            Args:
-                operation: list | info | peek | read | search
-                target: Buffer name (required for most ops)
-                query: Regex pattern for search
-                scope: Optional buffer name for search (alias for target)
-                offset: Character offset for peek/read
-                length: Character length for read
-                start_line: 1-based start line for read
-                end_line: 1-based end line for read (inclusive)
-                max_chars: Maximum characters for peek
+            :param operation: Operation name (list, info, peek, read, search)
+            :param target: Buffer name (no variable: prefix)
+            :param query: Regex pattern for search
+            :param scope: Buffer name for search (alias for target)
+            :param offset: Character offset for peek/read
+            :param length: Character length for read
+            :param start_line: 1-based start line for read
+            :param end_line: 1-based end line for read (inclusive)
+            :param max_chars: Maximum characters for peek
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -87,8 +85,8 @@ class BufferOps(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for buffer operations."""
-        return """Read-only buffer operations (buffer variables):
-
+        return """
+      
 DISCOVERY:
 - buffer_ops(operation="list")
 - buffer_ops(operation="info", target="buffer_name")
@@ -106,7 +104,7 @@ NOTES:
 - All reads are capped to keep outputs small.
 - Use search + read ranges instead of trying to read full buffers.
 - For large buffers: start with info/preview, then search for anchors, then read nearby line ranges.
-- Always pass named parameters (keyword arguments); positional arguments are not supported.
+- Target is the buffer name only (no 'variable:' prefix).
 """
 
     @staticmethod

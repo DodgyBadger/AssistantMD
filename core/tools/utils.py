@@ -126,7 +126,13 @@ def get_tool_instructions(tool_classes):
     if not tool_classes:
         return ""
 
-    instructions = ["You have access to the following capabilities:"]
+    instructions = [
+        "You have access to the following capabilities:",
+        "",
+        "Routing policy:",
+        "- Default to inline tool output unless the user explicitly asks to save or route it.",
+        "- Large outputs may be auto-buffered based on system settings.",
+    ]
     for tool_class in tool_classes:
         instructions.append(tool_class.get_instructions())
     return "\n\n".join(instructions)

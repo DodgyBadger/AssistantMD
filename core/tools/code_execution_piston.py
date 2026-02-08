@@ -149,13 +149,11 @@ class CodeExecutionPiston(BaseTool):
             language: str = "python",
             stdin: Optional[str] = None,
         ) -> str:
-            """Execute code with the Piston multi-language sandbox.
+            """Execute code in the Piston sandbox.
 
-            Args:
-                code: Code to run.
-                language: Language name (supports aliases). Use language@version to
-                    pin a specific runtime (e.g., python@3.10.0).
-                stdin: Optional stdin content to pass to the program.
+            :param code: Code to run
+            :param language: Language name (supports aliases; language@version allowed)
+            :param stdin: Optional stdin content to pass to the program
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -203,14 +201,9 @@ class CodeExecutionPiston(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Piston code execution."""
-        return (
-            "Code execution using the Piston API (public endpoint by default, "
-            "set PISTON_BASE_URL for self-hosted). Supports many languages; "
-            "pass language or language@version (e.g., python@3.10.0). "
-            "Optional stdin is supported. Example: "
-            "execute_code(code=\"print('hi')\", language=\"python\", stdin=\"\"). "
-            "Always use named parameters. "
-            "You may route output with output=\"variable:NAME\" or output=\"file:PATH\" "
-            "and optional write_mode=append|replace|new. "
-            "output must be a string (no JSON objects or dicts)."
-        )
+        return """
+
+Supports many languages, pass language or language@version (e.g., python@3.10.0).
+Optional stdin is supported.
+Example: execute_code(code="print('hi')", language="python", stdin="").
+"""

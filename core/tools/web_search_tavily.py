@@ -27,13 +27,9 @@ class WebSearchTavily(BaseTool):
             raise ValueError("Secret 'TAVILY_API_KEY' is required for Tavily web search.")
 
         def search_web(*, query: str) -> str:
-            """Search Tavily for information on the given query.
+            """Web search using Tavily.
 
-            Args:
-                query: The search query to look up
-
-            Returns:
-                Search results formatted as text
+            :param query: Search query to look up
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -78,11 +74,6 @@ class WebSearchTavily(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily web search."""
-        return (
-            "Web search using Tavily API: Use when you need current information or to research topics "
-            "(premium service). Example: search_web_tavily(query=\"latest fastapi release\"). "
-            "Always use named parameters. "
-            "You may route output with output=\"variable:NAME\" or output=\"file:PATH\" "
-            "and optional write_mode=append|replace|new. "
-            "output must be a string (no JSON objects or dicts)."
-        ) + WEB_TOOL_SECURITY_NOTICE
+        return """
+Example: search_web_tavily(query="latest fastapi release").
+""" + WEB_TOOL_SECURITY_NOTICE

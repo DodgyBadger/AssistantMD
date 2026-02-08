@@ -27,8 +27,7 @@ class FileOpsUnsafe(BaseTool):
     def get_tool(cls, vault_path: str = None):
         """Get the Pydantic AI tool for unsafe file operations.
 
-        Args:
-            vault_path: Path to vault for file operations scope
+        :param vault_path: Path to vault for file operations scope
         """
 
         def file_ops_unsafe(
@@ -42,22 +41,16 @@ class FileOpsUnsafe(BaseTool):
             count: int = 1,
             destination: str = "",
         ) -> str:
-            """Perform UNSAFE file operations within vault boundaries.
+            """Perform unsafe file operations within vault boundaries.
 
-            ⚠️ WARNING: These operations can permanently modify or delete files.
-
-            Args:
-                operation: Operation to perform (edit_line, delete, replace_text, move_overwrite, truncate)
-                path: File path relative to vault
-                line_number: Line number for edit_line (1-indexed)
-                old_content: Expected content for edit_line (must match exactly)
-                new_content: New content for edit_line or replace_text
-                confirm_path: Path confirmation for delete/truncate operations (must match path)
-                count: Number of replacements for replace_text (default 1)
-                destination: Destination path for move_overwrite
-
-            Returns:
-                Operation result message
+            :param operation: Operation name (edit_line, delete, replace_text, move_overwrite, truncate)
+            :param path: File path relative to vault
+            :param line_number: Line number for edit_line (1-indexed)
+            :param old_content: Expected content for edit_line
+            :param new_content: New content for edit_line or replace_text
+            :param confirm_path: Path confirmation for delete/truncate
+            :param count: Number of replacements for replace_text
+            :param destination: Destination path for move_overwrite
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -92,15 +85,17 @@ class FileOpsUnsafe(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for unsafe file operations."""
-        return """⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
+        return """
 
-⚠️ CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).
+⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
+
+CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).
 Before performing ANY file operations, you MUST:
 1. Check if file_ops_safe is also enabled
-2. If NOT enabled, immediately notify the user: "I need file_ops_safe enabled to read and verify files. Please add it: @tools file_ops_safe, file_ops_unsafe"
+2. If NOT enabled, immediately notify the user: "I need file_ops_safe enabled to read and verify files. Please add it.
 3. Do NOT proceed with any operations until file_ops_safe is available
 
-**DESTRUCTIVE OPERATIONS - USE WITH EXTREME CAUTION:**
+**DESTRUCTIVE OPERATIONS - USE WITH CAUTION:**
 
 EDIT LINE (modify specific line in file):
 - file_ops_unsafe(operation="edit_line", path="path/to/file.md", line_number=5, old_content="expected line", new_content="new line")
@@ -137,13 +132,6 @@ TRUNCATE (clear all file contents):
 4. Edit operations require exact content match
 5. NO UNDO - changes are permanent
 6. Double-check paths before destructive operations
-
-NOTE:
-- Always use named parameters; positional arguments are not supported.
-- You may route output with output="variable:NAME" or output="file:PATH" and optional write_mode=append|replace|new.
-- output must be a string (no JSON objects or dicts).
-- Example routing: file_ops_unsafe(operation="replace_text", path="a.md", old_content="x", new_content="y", output="variable:RESULT", write_mode="replace")
-
 """
 
     @classmethod

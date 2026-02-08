@@ -28,9 +28,8 @@ class FileOpsSafe(BaseTool):
     @classmethod
     def get_tool(cls, vault_path: str = None):
         """Get the Pydantic AI tool for file operations.
-        
-        Args:
-            vault_path: Path to vault for file operations scope
+
+        :param vault_path: Path to vault for file operations scope
         """
         
         def file_operations(
@@ -43,19 +42,15 @@ class FileOpsSafe(BaseTool):
             recursive: bool = False,
             scope: str = "",
         ) -> str:
-            """Perform file operations within vault boundaries.
+            """Read/write/list/search markdown files in a vault or virtual mount.
 
-            Args:
-                operation: Operation to perform (read, write, move, list, mkdir, search)
-                target: File, directory, or glob pattern relative to vault (search term for 'search')
-                content: Content for write operations
-                destination: Destination path for move operations
-                include_all: When True, include non-markdown and hidden files in listings
-                recursive: When True, recurse through subdirectories for listings
-                scope: Optional folder or glob to limit search (applies to 'search' only)
-
-            Returns:
-                Operation result message
+            :param operation: Operation name
+            :param target: File, directory, or glob pattern
+            :param content: Content for write/append
+            :param destination: Destination path for move
+            :param include_all: Include non-markdown/hidden files in listings
+            :param recursive: Recurse through subdirectories for listings
+            :param scope: Folder or glob to limit search
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -106,8 +101,8 @@ class FileOpsSafe(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for file operations."""
-        return """SAFE file operations within vault boundaries - MARKDOWN FILES ONLY:
-
+        return """
+        
 DISCOVERY - Start narrow, expand as needed:
 - file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)
 - file_ops_safe(operation="list", target="FolderName"): List .md files inside a folder (non-recursive)
@@ -140,18 +135,6 @@ BEST PRACTICES:
 4. Read only files relevant to the user's request
 5. All files must use .md extension
 6. All operations are SAFE - no overwriting or data loss
-
-NOTE:
-- Always use named parameters; positional arguments are not supported.
-- You may route output with output="variable:NAME" or output="file:PATH" and optional write_mode=append|replace|new.
-- output must be a string (no JSON objects or dicts).
-- Example routing: file_ops_safe(operation="read", target="path.md", output="variable:LEASE", write_mode="replace")
-
-VIRTUAL DOCS (read-only):
-- Use the reserved prefix `__virtual_docs__/` to read bundled documentation.
-- Example: file_ops_safe(operation="read", target="__virtual_docs__/use/workflows.md")
-- This prefix is read-only and cannot be used with write/append/move/mkdir.
-
 """
 
 

@@ -20,9 +20,9 @@ settings:
     value: 0
     description: "Maximum output tokens for model responses (0 = provider default)."
     restart_required: false
-  web_tool_max_tokens:
-    value: 0
-    description: "Maximum token limit for web extraction tools (tavily_extract, tavily_crawl) to prevent context overflow (0 = no limit)."
+  auto_buffer_max_tokens:
+    value: 10000
+    description: "Automatically route tool output to a buffer when it exceeds this token count (0 = disabled)."
     restart_required: false
   debug:
     value: false

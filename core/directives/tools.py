@@ -17,7 +17,15 @@ from core.settings.store import get_tools_config, ToolConfig
 from core.tools.utils import get_tool_instructions
 from core.tools.base import BaseTool
 from core.settings.secrets_store import secret_has_value
-from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
+from core.settings import get_auto_buffer_max_tokens
+from core.tools.utils import estimate_token_count
+from core.utils.routing import (
+    build_manifest,
+    normalize_write_mode,
+    parse_output_target,
+    write_output,
+    OutputTarget,
+)
 from .base import DirectiveProcessor
 from .parser import DirectiveValueParser
 
@@ -167,6 +175,50 @@ class ToolsDirective(DirectiveProcessor):
         output_target = hard_output or output_value
         scope_value = params.get("scope")
         if output_target is None:
+            auto_limit = get_auto_buffer_max_tokens()
+            if auto_limit and auto_limit > 0:
+                content = "" if result is None else (result if isinstance(result, str) else str(result))
+                if content:
+                    token_count = estimate_token_count(content)
+                    if token_count > auto_limit:
+                        default_scope = "run"
+                        if buffer_store_registry and "session" in buffer_store_registry and "run" not in buffer_store_registry:
+                            default_scope = "session"
+                        auto_name = f"{tool_name}_output"
+                        write_result = write_output(
+                            target=OutputTarget(type="buffer", name=auto_name),
+                            content=content,
+                            write_mode="new",
+                            buffer_store=buffer_store,
+                            buffer_store_registry=buffer_store_registry,
+                            vault_path=vault_path,
+                            buffer_scope=scope_value,
+                            default_scope=default_scope,
+                            metadata={"auto_buffered": True, "token_count": token_count},
+                        )
+                        destination = f"variable: {write_result.get('name')}"
+                        manifest = build_manifest(
+                            source=tool_name,
+                            destination=destination,
+                            item_count=1,
+                            total_chars=len(content),
+                            note=f"Auto-buffered output ({token_count} tokens > {auto_limit}).",
+                        )
+                        logger.set_sinks(["validation"]).info(
+                            "tool_output_routed",
+                            data={
+                                "event": "tool_output_routed",
+                                "tool": tool_name,
+                                "destination": destination,
+                                "write_mode": write_result.get("write_mode", "append"),
+                                "output_chars": len(content),
+                                "forced": True,
+                                "auto_buffered": True,
+                                "token_count": token_count,
+                                "token_limit": auto_limit,
+                            },
+                        )
+                        return manifest
             return result
 
         if hard_output is not None and hard_output.strip().lower() == "inline":

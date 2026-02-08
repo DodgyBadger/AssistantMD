@@ -322,11 +322,11 @@ def get_default_max_output_tokens() -> int:
         return 0
 
 
-def get_web_tool_max_tokens() -> int:
-    """Return the configured web tool token limit, falling back to 50000 tokens."""
-    entry = get_general_settings().get("web_tool_max_tokens")
+def get_auto_buffer_max_tokens() -> int:
+    """Return the configured auto-buffer token limit, falling back to 0 (disabled)."""
+    entry = get_general_settings().get("auto_buffer_max_tokens")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
         return int(value)
     except (TypeError, ValueError):
-        return 50000
+        return 0

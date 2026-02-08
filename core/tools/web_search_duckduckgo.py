@@ -25,11 +25,7 @@ class WebSearchDuckDuckGo(BaseTool):
         def search_web(*, query: str) -> str:
             """Search DuckDuckGo for information on the given query.
 
-            Args:
-                query: The search query to look up
-
-            Returns:
-                Search results formatted as text
+            :param query: Search query to look up
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -64,11 +60,6 @@ class WebSearchDuckDuckGo(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for DuckDuckGo web search."""
-        return (
-            "Web search using DuckDuckGo: Use when you need current information or to research topics "
-            "(free service). Example: search_web_duckduckgo(query=\"latest postgres release notes\"). "
-            "Always use named parameters. "
-            "You may route output with output=\"variable:NAME\" or output=\"file:PATH\" "
-            "and optional write_mode=append|replace|new. "
-            "output must be a string (no JSON objects or dicts)."
-        ) + WEB_TOOL_SECURITY_NOTICE
+        return """
+Example: search_web_duckduckgo(query="latest postgres release notes").
+""" + WEB_TOOL_SECURITY_NOTICE
