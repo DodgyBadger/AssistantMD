@@ -15,7 +15,6 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 - **web_search** (default): duckduckgo (free) or tavily (paid/free tier)
 - **file_ops_safe** (default, required): search, read, create, append in your vault
 - **file_ops_unsafe**: full edit, move, delete
-- Documentation is bundled with the app and can be read with `file_ops_safe` via the virtual path prefix `__virtual_docs__/` (great in workflow creation mode).
 - **code_execution**: run code via Piston (public or self-hosted)
 - **tavily_extract**: extract content from specific URLs
 - **tavily_crawl**: crawl and extract content from multiple pages
@@ -52,16 +51,6 @@ Import PDFs and URLs into your vault as markdown. Drop files into `AssistantMD/I
 Use the **Configuration** tab in the web UI to configure providers (e.g. OpenAI, Anthropic) and models, and manage secrets (API keys). Models are aliases that map to provider model strings so you can update to the latest LLMs without editing every workflow. Adjust general settings here too (timeouts, tool settings, etc.).
 
 
-### Tips for building workflows
+### Best practices
 
-🔶 Use the Chat UI in `Workflow Creation` mode to help you build workflows and refine the prompts.
-
-🔶 Start with worflows disabled and test by running manually from the Workflow tab in the web UI. Enable and rescan when you are happy with the outputs.
-
-🔶 Start simple, test and refine. One step with a compound prompt might do the trick. If not, split the prompt into two or more steps. Remember that each step can define a different `@model`, allowing for fine grained cost control.
-
-🔶 Context is not passed automatically between steps. Use the `@output` of a previous step as `@input` in later steps to pass context. Nothing is assumed - you are always in control. You can have steps that build goals or checklists for later steps to process, allowing dynamic behaviour.
-
-🔶 If using Obsidian, set up a base (Obsidian v1.9 or later) to view and manage all your workflow files and frontmatter properties in one place, making it easy to enable/disable or update schedules.
-
-🔶 If using Obsidian, enabled `Use [[Wikilinks]]` and set `New link format` to `Absolute path in vault` in `Settings > Files & Links`. This will allow you to drag-and-drop from the Obsidian file explorer into input and output directives. AssistantMD will simply ignore the square brackets (`[[filename]]`).
+See [Best Practices](best_practices.md) for workflow and chat tips.

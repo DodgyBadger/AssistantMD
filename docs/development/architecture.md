@@ -39,8 +39,8 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 | Directive System | Parse/process `@directives`, pattern resolution, file state | `core/directives/`, `core/workflow/parser.py` |
 | Context Manager | Curated chat context, template loading, history processing, summary persistence | `core/context/`, `core/llm/chat_executor.py` |
 | LLM Interface | Model resolution, agent creation, response generation | `core/llm/`, `core/settings/store.py` |
-| Tools & Models | Tool backends, configuration-driven lookup | `core/tools/`, `core/settings/settings.template.yaml` (seed) |
-| Buffers | Run- and session-scoped in-memory variables for `variable:` input/output targets | `core/runtime/buffers.py`, `core/llm/chat_executor.py`, `core/context/manager.py` |
+| Tools & Models | Tool backends, configuration-driven lookup; tool output routing policies | `core/tools/`, `core/settings/settings.template.yaml` (seed), `core/directives/tools.py` |
+| Buffers | Run- and session-scoped in-memory variables for `variable:` input/output targets; auto-buffering of large tool output | `core/runtime/buffers.py`, `core/llm/chat_executor.py`, `core/context/manager.py` |
 | Logging & Activity | Sink-based logging (activity file, Logfire, validation artifacts) | `core/logger.py/`, `system/activity.log`, `validation/runs/*/artifacts/validation_events/` |
 | Validation | Scenario-based end-to-end checks | `validation/` |
 | Ingestion | File import pipeline (PDF text/OCR, markdownify HTML), registry-driven strategies, queued worker | `core/ingestion/`, `api/services.py` |
@@ -55,7 +55,7 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 ## LLM, Models, and Tools
 
 - Model aliases and provider requirements live in `core/settings/settings.template.yaml` (seeded to `system/settings.yaml`) and are loaded through `core/settings/store.py`. `core/llm/` handles API key  checks, agent creation, and response generation.
-- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write-mode=...`, `scope=...`) to route tool results to buffers/files or keep them inline.
+- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write-mode=...`, `scope=...`) to route tool results to buffers/files or keep them inline in workflows/context templates. Chat-time routing is allowlist-based, and large tool outputs can be auto-buffered via `auto_buffer_max_tokens`.
 
 ## Context Manager (Chat)
 

@@ -6,7 +6,7 @@
 settings:
   default_model:
     value: sonnet
-    description: "Fallback model alias when @model is omitted."
+    description: "UI default model and fallback when @model is omitted in workflow and context templates."
     restart_required: false
   default_context_template:
     value: "default.md"
@@ -22,7 +22,7 @@ settings:
     restart_required: false
   auto_buffer_max_tokens:
     value: 10000
-    description: "Automatically route tool output to a buffer when it exceeds this token count (0 = disabled)."
+    description: "Automatically route tool output to a buffer when it exceeds this token count (0 = disabled). Caution: very low value will use more tokens through needless tool churn. This setting is intended to protect your context window from massive tool outputs (e.g. extracting a huge wikipedia page)."
     restart_required: false
   routing_allowed_tools:
     value: []
