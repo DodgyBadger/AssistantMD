@@ -1,31 +1,23 @@
 ---
 passthrough_runs: all
-description: Index skills and select the best one for the current chat.
+description: Pass summary of available skills to the chat agent.
 ---
 
 ## Chat Instructions
-Use the selected skill to guide your response.
+The following skills are available to help you fulfill the user's request. Select what seems most appropriate and then read the full skill at the path provided.
 
 ## Skill Index
 @recent-runs 0
 @recent-summaries 0
-@input file: skills/*.md
+@input file: AssistantMD/Skills/*.md
 @output context
+@header Available skills
 @model gpt-mini
+@cache 1d
 
-Create a concise list of the available skills with:
-- skill name
-- one-line purpose
-- file path
+Create a concise list of the available skills in the following format:
 
-## Skill Selection
-@recent-runs 5
-@recent-summaries 2
-@input file: skills/*.md
-@output context
-@model gpt-mini
+**Skill name**
+One or two sentences describing the skill's purpose.
+Read full details at: file_path
 
-Pick the single best skill that will help the chat agent complete the user's task or mission.
-Output only the skill content to be injected into the chat agent.
-If there is no clear task or mission, output: "skill: not required".
-If there is a clear task but no clear matching skill, output: "skill: no matching".

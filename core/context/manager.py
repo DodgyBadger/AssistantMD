@@ -64,6 +64,13 @@ class ContextManagerResult:
     model_alias: str
 
 
+@dataclass
+class ContextManagerDeps:
+    """Dependencies for context manager tool execution."""
+    buffer_store: BufferStore
+    buffer_store_registry: dict[str, BufferStore]
+
+
 def _normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any]]]:
     if not input_file_data:
         return []
@@ -328,6 +335,7 @@ async def manage_context(
     instructions_override: Optional[str] = None,
     tools: Optional[List[Any]] = None,
     model_override: Optional[str] = None,
+    deps: Optional[ContextManagerDeps] = None,
 ) -> ContextManagerResult:
     """
     Manage a concise working context using the provided template and model.
@@ -406,7 +414,7 @@ async def manage_context(
     agent.instructions(lambda _ctx, text=manager_instruction: text)
     if context_instructions:
         agent.instructions(lambda _ctx, text=context_instructions: text)
-    result = await agent.run(prompt)
+    result = await agent.run(prompt, deps=deps)
     result_output = getattr(result, "output", None)
 
     raw_output = str(result_output)
@@ -1080,6 +1088,10 @@ def build_context_manager_history_processor(
                             instructions_override=manager_instruction,
                             tools=tools_for_manager,
                             model_override=model_directive_value,
+                            deps=ContextManagerDeps(
+                                buffer_store=run_buffer_store,
+                                buffer_store_registry=buffer_store_registry,
+                            ),
                         )
                         managed_output = managed_obj.raw_output
                         managed_model_alias = managed_obj.model_alias
@@ -1203,7 +1215,7 @@ def build_context_manager_history_processor(
                         )
                 if not skip_llm and emit_context:
                     section_name = section.name or "Template"
-                    summary_title = f"Context summary (managed: {section_name})"
+                    summary_title = header_value or section_name
                     summary_messages.append(
                         ModelRequest(parts=[SystemPromptPart(content=f"{summary_title}:\n{summary_text}")])
                     )

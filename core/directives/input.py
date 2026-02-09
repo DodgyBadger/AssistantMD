@@ -137,7 +137,15 @@ class InputFileDirective(DirectiveProcessor):
         # Parse base value and parameters
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode", "scope"},
+            allowed_parameters={
+                "required",
+                "refs_only",
+                "refs-only",
+                "output",
+                "write-mode",
+                "write_mode",
+                "scope",
+            },
         )
 
         if not base_value:
@@ -159,7 +167,15 @@ class InputFileDirective(DirectiveProcessor):
         # Validate parameters
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {'required', 'refs_only', 'refs-only', 'output', 'write-mode', 'write_mode', 'scope'}:
+            if param_name not in {
+                'required',
+                'refs_only',
+                'refs-only',
+                'output',
+                'write-mode',
+                'write_mode',
+                'scope',
+            }:
                 return False
             if param_name in {'required', 'refs_only', 'refs-only'}:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
@@ -243,10 +259,10 @@ class InputFileDirective(DirectiveProcessor):
                     output_target_value,
                     write_mode_param,
                     vault_path,
-                    context,
-                    refs_only=refs_only,
-                    scope_value=scope_value,
-                )
+                context,
+                refs_only=refs_only,
+                scope_value=scope_value,
+            )
             return results
 
         if base_value.startswith("file:"):
@@ -375,6 +391,79 @@ class InputFileDirective(DirectiveProcessor):
             file_data for file_data in result_files
             if isinstance(file_data, dict) and file_data.get("found", True)
         ]
+        write_mode = normalize_write_mode(write_mode_param)
+        if write_mode == "new" and len(found_files) > 1:
+            routed_results: List[Dict[str, Any]] = []
+            manifest_entries: List[Dict[str, Any]] = []
+            routed_destinations: Dict[int, str] = {}
+
+            for file_data in found_files:
+                filepath = file_data.get("filepath") or file_data.get("filename") or "unknown"
+                content_value = "" if refs_only else (file_data.get("content", "") or "")
+                content_with_header = f"--- FILE: {filepath} ---\n{content_value}"
+                write_result = write_output(
+                    target=parsed_target,
+                    content=content_with_header,
+                    write_mode="new",
+                    buffer_store=context.get("buffer_store"),
+                    buffer_store_registry=context.get("buffer_store_registry"),
+                    vault_path=vault_path,
+                    buffer_scope=scope_value,
+                    default_scope=context.get("buffer_scope", "run"),
+                )
+
+                destination = ""
+                if write_result.get("type") == "buffer":
+                    destination = f"variable: {write_result.get('name')}"
+                elif write_result.get("type") == "file":
+                    destination = f"file: {write_result.get('path')}"
+                else:
+                    destination = parsed_target.type
+
+                routed_destinations[id(file_data)] = destination
+                manifest_entries.append(
+                    {
+                        "manifest": build_manifest(
+                            source="input",
+                            destination=destination,
+                            item_count=1,
+                            total_chars=len(content_with_header),
+                            paths=[filepath],
+                    note="per-file routing (write-mode=new)",
+                ),
+                "found": True,
+            }
+                )
+
+            logger.set_sinks(["validation"]).info(
+                "input_routed",
+                data={
+                    "event": "input_routed",
+                    "destination": f"{parsed_target.type} (per-file, write-mode=new)",
+                    "refs_only": refs_only,
+                    "item_count": len(found_files),
+                    "total_chars": sum(
+                        len(
+                            f"--- FILE: {file_data.get('filepath') or file_data.get('filename') or 'unknown'} ---\n"
+                            + ("" if refs_only else (file_data.get("content", "") or ""))
+                        )
+                        for file_data in found_files
+                    ),
+                },
+            )
+
+            for file_data in result_files:
+                if isinstance(file_data, dict):
+                    file_data["refs_only"] = True
+                    file_data["content"] = ""
+                    destination = routed_destinations.get(id(file_data))
+                    if destination:
+                        file_data["routed_to"] = destination
+                routed_results.append(file_data)
+
+            routed_results.extend(manifest_entries)
+            return routed_results
+
         if refs_only:
             contents = [
                 file_data.get("filepath", "")
@@ -396,7 +485,6 @@ class InputFileDirective(DirectiveProcessor):
             if file_data.get("filepath")
         ]
 
-        write_mode = normalize_write_mode(write_mode_param)
         write_result = write_output(
             target=parsed_target,
             content=combined_content,
