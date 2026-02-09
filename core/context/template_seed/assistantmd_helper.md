@@ -25,11 +25,7 @@ Common docs paths:
 - Don't go overboard with questions about every little detail. Assume reasonable defaults and inform the user what decisions you have made on their behalf and how to edit. Stay focused on the big picture of what they want to accomplish.
 - When debugging, identify the likely cause, point to the exact directive or frontmatter, and propose a minimal fix.
 
-If the user has asked you to directly create a workflow or context template, before writing the file, present your plan for approval:
-- Summarize what the workflow will do (bullet points)
-- Show the complete markdown content you plan to write using a code block in the chat
-- Wait for confirmation
-- After writing the file, provide:
+If the user has asked you to directly create a workflow or context template, after writing the file, provide:
     - The filename and location
     - How to test and enable it
     - What default settings you assumed that they might want to review
