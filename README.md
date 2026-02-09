@@ -22,7 +22,7 @@ Scheduled workflows | Context curation | Controlled loading of large content
 
 Designed to work alongside Obsidian or other markdown editors.
 
-**🧑‍✈️ NEW: Context Manager**
+**🧑‍🏫 NEW: Context Manager**
 - Steer your chat sessions by curating message history and passing custom system instructions
 - Define context using markdown templates in `AssistantMD/ContextTemplates`
 
