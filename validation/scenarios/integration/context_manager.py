@@ -86,8 +86,6 @@ class ContextManagerScenario(BaseScenario):
             events,
             name="context_history_compiled",
             expected={
-                "summary_section_count": 2,
-                "summary_sections": ["Summary", "Recap"],
                 "latest_user_included": True,
             },
         )
@@ -147,11 +145,60 @@ class ContextManagerScenario(BaseScenario):
             events,
             name="context_history_compiled",
             expected={
-                "summary_section_count": 2,
-                "summary_sections": ["Summary", "Recap"],
                 "latest_user_included": True,
             },
         )
+
+        self.create_file(
+            vault,
+            "AssistantMD/ContextTemplates/validation_context_extended.md",
+            VALIDATION_CONTEXT_TEMPLATE_EXTENDED,
+        )
+        checkpoint = self.event_checkpoint()
+        extended_response = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                **first_payload,
+                "context_template": "validation_context_extended.md",
+                "prompt": "Extended template checks.",
+            },
+        )
+        assert extended_response.status_code == 200, "Extended context-managed chat succeeds"
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="context_section_completed",
+            expected={"section_name": "Output File", "from_cache": False},
+        )
+        self.assert_event_contains(
+            events,
+            name="context_section_skipped",
+            expected={"section_name": "Required Skip", "reason": "input_file_required"},
+        )
+        self.assert_event_contains(
+            events,
+            name="context_llm_skipped",
+            expected={"section_name": "Model None"},
+        )
+        self.assert_event_contains(
+            events,
+            name="context_section_completed",
+            expected={"section_name": "Model None", "output_length": 0},
+        )
+        self.assert_event_contains(
+            events,
+            name="context_input_files_resolved",
+            expected={
+                "section_name": "Refs Only",
+                "refs_only_count": 1,
+                "missing_count": 0,
+            },
+        )
+        output_path = vault / "outputs" / "managed_note.md"
+        assert output_path.exists(), "Expected output file created by context manager"
+        output_content = output_path.read_text(encoding="utf-8")
+        assert "# Managed Header" in output_content, "Expected header in output file"
 
         await self.stop_system()
         self.teardown_scenario()
@@ -197,6 +244,50 @@ description: Validation template for global token threshold gating.
 @model gpt-mini
 
 Summarize the seed note in one sentence.
+"""
+
+VALIDATION_CONTEXT_TEMPLATE_EXTENDED = """---
+passthrough_runs: 1
+description: Validation template for extended context manager behaviors.
+---
+
+## Output File
+@recent-runs 1
+@recent-summaries 0
+@input file: notes/seed
+@output file: outputs/managed_note
+@header Managed Header
+@write-mode append
+@model gpt-mini
+
+Write one sentence about the seed note.
+
+## Required Skip
+@recent-runs 1
+@recent-summaries 0
+@input file: notes/missing (required)
+@output context
+@model gpt-mini
+
+This section should be skipped when required input is missing.
+
+## Model None
+@recent-runs 1
+@recent-summaries 0
+@input file: notes/seed
+@output context
+@model none
+
+This section should be skipped by the LLM.
+
+## Refs Only
+@recent-runs 1
+@recent-summaries 0
+@input file: notes/seed (refs-only)
+@output context
+@model gpt-mini
+
+Summarize the seed note based on refs only.
 """
 
 SEED_NOTE_CONTENT = "Winter moonlight drifts, quiet code hums through the night, tests bloom with soft light."

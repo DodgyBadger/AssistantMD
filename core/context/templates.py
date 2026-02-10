@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, CONTEXT_TEMPLATE_DIR
-from core.directives.parser import ParsedDirectives, parse_directives
+from core.directives.parser import parse_directives
 from core.runtime.paths import get_system_root
 from core.logger import UnifiedLogger
 from core.workflow.parser import parse_frontmatter, parse_markdown_sections
@@ -67,7 +67,6 @@ def _extract_schema_block(content: str) -> Optional[str]:
     """
     lines = content.splitlines()
     in_block = False
-    block_lang = None
     block_lines: List[str] = []
 
     for line in lines:
@@ -77,7 +76,6 @@ def _extract_schema_block(content: str) -> Optional[str]:
                 lang = stripped[3:].strip()
                 if lang in ("yaml", "json", ""):
                     in_block = True
-                    block_lang = lang or None
                     block_lines = []
             continue
 
