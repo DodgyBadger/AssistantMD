@@ -2,7 +2,8 @@
 
 **An experimental agent harness and chat UI for control freaks.**
 
-Scheduled workflows | Context curation | Controlled loading of large content
+You compose behaviour directly through markdown templates:   
+scheduled workflows | context curation | control directives | substitution patterns | buffer variables
 
 ## Design philosophy
 
