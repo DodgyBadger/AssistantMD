@@ -25,33 +25,101 @@ class PatternUtilities:
             except ValueError:
                 return pattern, None
         return pattern, None
+
+    @staticmethod
+    def parse_pattern_with_optional_format(pattern: str) -> Tuple[str, Optional[str]]:
+        """Parse pattern like 'today:YYYYMMDD' into ('today', 'YYYYMMDD')."""
+        if ':' not in pattern:
+            return pattern, None
+        base, fmt = pattern.split(':', 1)
+        if not base or not fmt:
+            return pattern, None
+        return base, fmt
+
+    @staticmethod
+    def format_datetime_custom(dt: datetime, fmt: Optional[str], default_fmt: str) -> str:
+        """Format datetime using custom tokens with a centralized default."""
+        fmt_to_use = fmt or default_fmt
+        return PatternUtilities._apply_format_tokens(dt, fmt_to_use)
+
+    @staticmethod
+    def _apply_format_tokens(dt: datetime, fmt: str) -> str:
+        """Apply custom token formatting to a datetime."""
+        replacements = [
+            ("YYYY", f"{dt.year:04d}"),
+            ("MMMM", dt.strftime("%B")),
+            ("MMM", dt.strftime("%b")),
+            ("dddd", dt.strftime("%A")),
+            ("ddd", dt.strftime("%a")),
+            ("YY", f"{dt.year % 100:02d}"),
+            ("MM", f"{dt.month:02d}"),
+            ("DD", f"{dt.day:02d}"),
+            ("HH", f"{dt.hour:02d}"),
+            ("mm", f"{dt.minute:02d}"),
+            ("ss", f"{dt.second:02d}"),
+            ("M", str(dt.month)),
+            ("D", str(dt.day)),
+        ]
+        output = fmt
+        for token, value in replacements:
+            output = output.replace(token, value)
+        return output
     
     @staticmethod
     def resolve_date_pattern(pattern: str, reference_date: datetime, week_start_day: int = 0) -> str:
-        """Resolve date patterns to YYYY-MM-DD strings."""
-        base_pattern, _ = PatternUtilities.parse_pattern_with_count(pattern)
+        """Resolve date patterns to strings using custom formatting defaults."""
+        base_pattern, fmt = PatternUtilities.parse_pattern_with_optional_format(pattern)
         
         if base_pattern == 'today':
-            return reference_date.strftime('%Y-%m-%d')
+            return PatternUtilities.format_datetime_custom(
+                reference_date, fmt, default_fmt="YYYY-MM-DD"
+            )
         elif base_pattern == 'yesterday':
-            return (reference_date - timedelta(days=1)).strftime('%Y-%m-%d')
+            return PatternUtilities.format_datetime_custom(
+                reference_date - timedelta(days=1), fmt, default_fmt="YYYY-MM-DD"
+            )
         elif base_pattern == 'tomorrow':
-            return (reference_date + timedelta(days=1)).strftime('%Y-%m-%d')
+            return PatternUtilities.format_datetime_custom(
+                reference_date + timedelta(days=1), fmt, default_fmt="YYYY-MM-DD"
+            )
         elif base_pattern == 'this-week':
-            return PatternUtilities._get_week_start_date(reference_date, week_start_day, 0).strftime('%Y-%m-%d')
+            week_start = PatternUtilities._get_week_start_date(reference_date, week_start_day, 0)
+            return PatternUtilities.format_datetime_custom(
+                week_start, fmt, default_fmt="YYYY-MM-DD"
+            )
         elif base_pattern == 'last-week':
-            return PatternUtilities._get_week_start_date(reference_date, week_start_day, -1).strftime('%Y-%m-%d')
+            week_start = PatternUtilities._get_week_start_date(reference_date, week_start_day, -1)
+            return PatternUtilities.format_datetime_custom(
+                week_start, fmt, default_fmt="YYYY-MM-DD"
+            )
         elif base_pattern == 'next-week':
-            return PatternUtilities._get_week_start_date(reference_date, week_start_day, 1).strftime('%Y-%m-%d')
+            week_start = PatternUtilities._get_week_start_date(reference_date, week_start_day, 1)
+            return PatternUtilities.format_datetime_custom(
+                week_start, fmt, default_fmt="YYYY-MM-DD"
+            )
         elif base_pattern == 'this-month':
-            return reference_date.strftime('%Y-%m')
+            month_start = reference_date.replace(day=1)
+            if fmt is None:
+                return PatternUtilities.format_datetime_custom(
+                    month_start, fmt, default_fmt="YYYY-MM"
+                )
+            return PatternUtilities.format_datetime_custom(
+                month_start, fmt, default_fmt="YYYY-MM"
+            )
         elif base_pattern == 'last-month':
             last_month = reference_date.replace(day=1) - timedelta(days=1)
-            return last_month.strftime('%Y-%m')
+            month_start = last_month.replace(day=1)
+            return PatternUtilities.format_datetime_custom(
+                month_start, fmt, default_fmt="YYYY-MM"
+            )
         elif base_pattern == 'day-name':
-            return reference_date.strftime('%A')  # Full day name (e.g., Monday)
+            return PatternUtilities.format_datetime_custom(
+                reference_date, fmt, default_fmt="dddd"
+            )
         elif base_pattern == 'month-name':
-            return reference_date.strftime('%B')  # Full month name (e.g., January)
+            return PatternUtilities.format_datetime_custom(
+                reference_date, fmt, default_fmt="MMMM"
+            )
         else:
             return pattern
     

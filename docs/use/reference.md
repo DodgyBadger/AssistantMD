@@ -43,9 +43,29 @@
 | `{last-month}` | Previous month (YYYY-MM). | `@input`, `@output`, `@header` | `@output file: archive/{last-month}` | Time-based pattern. |
 | `{day-name}` | Current day name. | `@input`, `@output`, `@header` | `@header {day-name} Review` | Name-based pattern. |
 | `{month-name}` | Current month name. | `@input`, `@output`, `@header` | `@header {month-name} Plan` | Name-based pattern. |
+| `{pattern:FORMAT}` | Optional format suffix for time/name patterns. | `@input`, `@output`, `@header` | `{today:YYYYMMDD}` <br> `{this-week:YYYY-MM-DD}` <br> `{day-name:ddd}` | Applies to time/name patterns above. Defaults remain unchanged when omitted. |
 | `{latest}` | Most recent file or folder by date in name. | `@input` | `@input file: journal/{latest}` | Use `{latest:N}` for N most recent files. |
 | `{pending}` | Unprocessed files for a workflow pattern. | `@input` | `@input file: tasks/{pending:5}` | Per-workflow tracking; files re-queue on edits. |
 | Glob patterns | Match files by wildcard. | `@input` | `@input file: notes/*.md` | Recursive `**` and parent `..` are not allowed. |
+
+### Format Tokens
+Supported tokens for `FORMAT` (custom, not strftime). Example date: `2026-02-10` (Tuesday), time `07:05:09`.
+
+| Token | Meaning | Example Output |
+| --- | --- | --- |
+| `YYYY` | 4-digit year | `2026` |
+| `YY` | 2-digit year | `26` |
+| `MM` | 2-digit month | `02` |
+| `M` | Month number | `2` |
+| `DD` | 2-digit day | `10` |
+| `D` | Day number | `10` |
+| `MMMM` | Full month name | `February` |
+| `MMM` | Short month name | `Feb` |
+| `dddd` | Full weekday name | `Tuesday` |
+| `ddd` | Short weekday name | `Tue` |
+| `HH` | 24-hour | `07` |
+| `mm` | Minutes | `05` |
+| `ss` | Seconds | `09` |
 
 ## Buffers
 

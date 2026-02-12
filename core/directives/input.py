@@ -565,12 +565,16 @@ class InputFileDirective(DirectiveProcessor):
         
         pattern = brace_patterns[0]
         base_pattern, count = self.pattern_utils.parse_pattern_with_count(pattern)
+        fmt = None
+        if count is None:
+            base_pattern, fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
         
         # Extract directory path from parameter value
         pattern_start = value.find(f"{{{pattern}}}")
         pattern_end = pattern_start + len(pattern) + 2
         is_dir_mode = (
             base_pattern == 'latest'
+            and fmt is None
             and pattern_end < len(value)
             and value[pattern_end] == '/'
         )
@@ -583,7 +587,7 @@ class InputFileDirective(DirectiveProcessor):
             search_directory = vault_path
         
         # Handle {pending} pattern with state management
-        if base_pattern == 'pending':
+        if base_pattern == 'pending' and fmt is None:
             return self._resolve_pending_pattern(value, search_directory, vault_path, count, context.get('state_manager'))
         
         # Handle time-based patterns
@@ -595,7 +599,7 @@ class InputFileDirective(DirectiveProcessor):
                 pattern_end,
                 count,
             )
-        elif count is not None or base_pattern == 'latest':
+        elif count is not None or (base_pattern == 'latest' and fmt is None):
             # Multi-file patterns like {latest:3} (or {latest} -> {latest:1})
             resolved_count = count if count is not None else 1
             return self._resolve_time_based_multi_pattern(

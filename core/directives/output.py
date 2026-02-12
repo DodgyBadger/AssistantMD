@@ -135,6 +135,8 @@ class OutputFileDirective(DirectiveProcessor):
         resolved_path = value
         for pattern in brace_patterns:
             base_pattern, count = self.pattern_utils.parse_pattern_with_count(pattern)
+            if count is None:
+                base_pattern, _fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
             
             # Validate pattern is appropriate for output files
             if base_pattern == 'pending':
@@ -143,21 +145,25 @@ class OutputFileDirective(DirectiveProcessor):
                 raise ValueError(f"Multi-file pattern '{pattern}' not supported in @output directive")
             
             # Resolve the pattern to a date string
-            resolved_value = self._resolve_output_pattern(base_pattern, reference_date, week_start_day, vault_path)
+            resolved_value = self._resolve_output_pattern(pattern, reference_date, week_start_day, vault_path)
             resolved_path = resolved_path.replace(f'{{{pattern}}}', resolved_value)
         
         # Normalize extension after pattern resolution
         return self._normalize_markdown_extension(resolved_path)
     
-    def _resolve_output_pattern(self, pattern: str, reference_date: datetime, 
+    def _resolve_output_pattern(self, pattern: str, reference_date: datetime,
                               week_start_day: int, vault_path: str) -> str:
         """Resolve patterns specific to output directive needs (single paths)."""
-        
-        if pattern in ['today', 'yesterday', 'tomorrow', 'this-week', 'last-week', 
-                      'next-week', 'this-month', 'last-month']:
+
+        base_pattern, fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
+
+        if base_pattern in ['today', 'yesterday', 'tomorrow', 'this-week', 'last-week',
+                            'next-week', 'this-month', 'last-month', 'day-name', 'month-name']:
             return self.pattern_utils.resolve_date_pattern(pattern, reference_date, week_start_day)
-        
-        elif pattern == 'latest':
+
+        elif base_pattern == 'latest':
+            if fmt is not None:
+                return pattern
             # For output files, {latest} means "most recent file date" or today
             return self._find_latest_file_date(vault_path, reference_date)
         
