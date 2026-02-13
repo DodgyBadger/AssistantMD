@@ -58,6 +58,18 @@ settings:
     value: "Imported/"
     description: "Vault-relative folder where ingestion artifacts are written."
     restart_required: false
+  ingestion_url_fetch_backend:
+    value: "curl"
+    description: "URL ingestion fetch backend. Currently supported: curl."
+    restart_required: false
+  ingestion_url_connect_timeout_seconds:
+    value: 10
+    description: "Connect timeout in seconds for URL ingestion HTTP requests."
+    restart_required: false
+  ingestion_url_read_timeout_seconds:
+    value: 20
+    description: "Read timeout in seconds for URL ingestion HTTP requests."
+    restart_required: false
   ingestion_worker_interval_seconds:
     value: 120
     description: "How often the ingestion worker runs (seconds)."
