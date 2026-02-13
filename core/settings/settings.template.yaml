@@ -225,3 +225,8 @@ tools:
     description: "Compiler-only: fetch recent compiled context snapshots for self-correction"
     requires_secrets: []
     user_editable: false
+  workflow_run:
+    module: core.tools.workflow_run
+    description: "List and run workflows in the current vault"
+    requires_secrets: []
+    user_editable: false

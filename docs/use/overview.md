@@ -16,6 +16,7 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 - **file_ops_safe** (default, required): search, read, create, append in your vault
 - **file_ops_unsafe**: full edit, move, delete
 - **code_execution**: run code via Piston (public or self-hosted)
+- **workflow_run**: list workflows and run a workflow in the current vault
 - **tavily_extract**: extract content from specific URLs
 - **tavily_crawl**: crawl and extract content from multiple pages
 

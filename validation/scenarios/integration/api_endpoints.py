@@ -21,18 +21,7 @@ class ApiEndpointsScenario(BaseScenario):
         self.create_file(
             vault,
             "AssistantMD/Workflows/status_probe.md",
-            """---
-workflow_engine: step
-enabled: false
-description: Validation helper workflow
----
-
-## STEP1
-@output file: logs/{today}
-@model gpt-mini
-
-Summarize the validation run context.
-""",
+            STATUS_PROBE_WORKFLOW,
         )
 
         # Health prior to runtime bootstrap should indicate startup state
@@ -174,6 +163,11 @@ Summarize the validation run context.
         # Chat execution, metadata, history transforms
         chat_metadata = self.call_api("/api/metadata")
         assert chat_metadata.status_code == 200, "Metadata endpoint available"
+        metadata_payload = chat_metadata.json()
+        assert any(
+            tool.get("name") == "workflow_run"
+            for tool in metadata_payload.get("tools", [])
+        ), "workflow_run tool is exposed in metadata"
 
         chat_payload = {
             "vault_name": vault.name,
@@ -196,6 +190,44 @@ Summarize the validation run context.
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
 
+        # Exercise workflow-run tool through chat endpoint
+        checkpoint = self.event_checkpoint()
+        workflow_tool_chat = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                "vault_name": vault.name,
+                "prompt": (
+                    "Use workflow_run to list workflows, then run workflow "
+                    "'status_probe'. You must call the tool before responding."
+                ),
+                "tools": ["workflow_run"],
+                "model": "gpt-mini",
+            },
+        )
+        assert workflow_tool_chat.status_code == 200, "Chat tool invocation succeeds"
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="tool_invoked",
+            expected={"tool": "workflow_run"},
+        )
+
         await self.stop_system()
         self.teardown_scenario()
 
+
+# === WORKFLOW TEMPLATES ===
+
+STATUS_PROBE_WORKFLOW = """---
+workflow_engine: step
+enabled: false
+description: Validation helper workflow
+---
+
+## STEP1
+@output file: logs/{today}
+@model gpt-mini
+
+Summarize the validation run context.
+"""

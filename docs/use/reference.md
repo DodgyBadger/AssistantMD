@@ -11,7 +11,7 @@
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Use `@model none` to skip LLM execution for the step/section. |
 | `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default), `replace`, or `new` (numbered files). |
 | `@run-on` | Limit which days a step runs. | Workflow | `@run-on monday, friday` | Works with scheduled workflows; `daily` and `never` supported. |
-| `@tools` | Enable tools for a step. | Workflow, Context Template | `@tools file_ops_safe` | Names must match tool IDs from the UI. Per-tool params are supported (see Routing). |
+| `@tools` | Enable tools for a step. | Workflow, Context Template | `@tools file_ops_safe` <br> `@tools workflow_run` | Names must match tool IDs from the UI. Per-tool params are supported (see Routing). |
 | `@cache` | Cache a context step output for reuse. | Context Template | `@cache 24h` | Values: `session`, `daily`, `weekly`, or duration `30s/10m/2h/1d`. Invalidates on template edit. Gating directives override cache. |
 | `@recent-runs` | Control how many recent runs are available to the step. | Context Template | `@recent-runs 3` | Use `all` for full history, `0` for none. |
 | `@recent-summaries` | Control how many prior context manager outputs are available. | Context Template | `@recent-summaries 1` | Use `all` for all prior outputs. |

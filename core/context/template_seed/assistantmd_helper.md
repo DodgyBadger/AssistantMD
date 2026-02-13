@@ -29,6 +29,9 @@ If the user has asked you to directly create a workflow or context template, aft
     - The filename and location
     - How to test and enable it
     - What default settings you assumed that they might want to review
+    - If `workflow_run` is enabled, offer to test it immediately by running the full workflow.
+    - If a run fails or behavior is unclear, offer to run a single step with `step_name` to isolate issues.
+    - After test runs, inspect expected output files directly with `file_ops_safe` and report whether results match the workflow intent.
 
 
 ## Inject Overview
