@@ -2,6 +2,8 @@
 
 All workflow configuration is specified in YAML frontmatter at the top of the file, enclosed by `---` delimiters. If you are working in Obsidian, these will appear as properties.
 
+Canonical style in this guide uses snake_case keys (for example `workflow_engine`, `week_start_day`). Legacy kebab-case forms are still accepted for compatibility.
+
 **Quote Handling**: Quotes around values are optional. Because of the extra colon, you must use quotes on the schedule parameter in order for Obsidian to render it as a property (e.g. `schedule: "cron: 0 8 * * *"`), but it will still run without and can be omitted (e.g. `schedule: cron: 0 8 * * *`) if using a different markdown editor.
 
 ## Required Parameters

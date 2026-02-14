@@ -54,10 +54,10 @@ def _parse_passthrough_runs(value: str) -> int:
 
 
 class RecentRunsDirective(DirectiveProcessor):
-    """Processor for @recent-runs directive."""
+    """Processor for @recent_runs directive."""
 
     def get_directive_name(self) -> str:
-        return "recent-runs"
+        return "recent_runs"
 
     def validate_value(self, value: str) -> bool:
         try:
@@ -71,10 +71,10 @@ class RecentRunsDirective(DirectiveProcessor):
 
 
 class PassthroughRunsDirective(DirectiveProcessor):
-    """Processor for @passthrough-runs directive."""
+    """Processor for @passthrough_runs directive."""
 
     def get_directive_name(self) -> str:
-        return "passthrough-runs"
+        return "passthrough_runs"
 
     def validate_value(self, value: str) -> bool:
         try:
@@ -88,10 +88,10 @@ class PassthroughRunsDirective(DirectiveProcessor):
 
 
 class RecentSummariesDirective(DirectiveProcessor):
-    """Processor for @recent-summaries directive."""
+    """Processor for @recent_summaries directive."""
 
     def get_directive_name(self) -> str:
-        return "recent-summaries"
+        return "recent_summaries"
 
     def validate_value(self, value: str) -> bool:
         try:

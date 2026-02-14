@@ -80,7 +80,7 @@ class WorkflowRun(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for workflow execution."""
         return """
-Run existing workflows in the current vault.
+## workflow_run usage instructions
 
 Discovery:
 - workflow_run(operation="list")

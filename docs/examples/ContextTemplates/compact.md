@@ -16,7 +16,7 @@ Rules:
 - If a field is not applicable, output "N/A".
 
 ## Compact Summary
-@recent-runs all
+@recent_runs all
 @model gpt-mini
 
 Summarize the conversation so the chat agent can continue smoothly.

@@ -93,6 +93,8 @@ class TavilyExtract(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Extract."""
         return """
+## tavily_extract usage instructions
+
 Use when you need to extract full content from specific web pages, documentation, articles, or blog posts.
 - Extracting documentation from specific pages
 - Getting full article content for analysis

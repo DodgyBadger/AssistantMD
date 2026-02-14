@@ -61,6 +61,11 @@ class ParameterRegistry:
     def __init__(self):
         """Initialize an empty parameter registry."""
         self._processors: Dict[str, DirectiveProcessor] = {}
+
+    @staticmethod
+    def _normalize_directive_name(directive_name: str) -> str:
+        """Normalize user-provided directive names for resilient lookup."""
+        return (directive_name or "").strip().lower().replace("-", "_")
     
     def register_directive(self, processor: DirectiveProcessor) -> None:
         """Register a directive processor.
@@ -89,7 +94,8 @@ class ParameterRegistry:
         Returns:
             True if the directive is registered, False otherwise
         """
-        return directive_name in self._processors
+        normalized_name = self._normalize_directive_name(directive_name)
+        return normalized_name in self._processors
     
     def get_processor(self, directive_name: str) -> DirectiveProcessor:
         """Get the processor for a directive.
@@ -103,13 +109,14 @@ class ParameterRegistry:
         Raises:
             InvalidDirectiveError: If the directive is not registered
         """
-        if directive_name not in self._processors:
+        normalized_name = self._normalize_directive_name(directive_name)
+        if normalized_name not in self._processors:
             raise InvalidDirectiveError(
                 f"Unknown directive: '{directive_name}'. "
                 f"Registered directives: {list(self._processors.keys())}"
             )
-        
-        return self._processors[directive_name]
+
+        return self._processors[normalized_name]
     
     def get_registered_directives(self) -> List[str]:
         """Get a list of all registered directive names.
@@ -138,7 +145,8 @@ class ParameterRegistry:
             InvalidDirectiveError: If the directive is not registered
             ValueError: If the value is invalid or cannot be processed
         """
-        processor = self.get_processor(directive_name)
+        normalized_name = self._normalize_directive_name(directive_name)
+        processor = self.get_processor(normalized_name)
         
         # Validate the value first
         if not processor.validate_value(value):
@@ -149,13 +157,13 @@ class ParameterRegistry:
         try:
             processed_value = processor.process_value(value, vault_path, **context)
             return DirectiveProcessingResult(
-                directive_name=directive_name,
+                directive_name=normalized_name,
                 processed_value=processed_value,
                 success=True
             )
         except Exception as e:
             return DirectiveProcessingResult(
-                directive_name=directive_name,
+                directive_name=normalized_name,
                 processed_value=None,
                 success=False,
                 error_message=str(e)
@@ -173,10 +181,11 @@ class ParameterRegistry:
         Raises:
             InvalidDirectiveError: If the directive is not registered
         """
-        processor = self.get_processor(directive_name)
+        normalized_name = self._normalize_directive_name(directive_name)
+        processor = self.get_processor(normalized_name)
         
         return {
-            "name": directive_name,
+            "name": normalized_name,
             "processor": processor.__class__.__name__
         }
     

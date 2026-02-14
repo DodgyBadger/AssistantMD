@@ -50,12 +50,12 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - The system currently ships with the **step** workflow engine (`workflow_engines/step/`), which discovers all `##` headings (e.g. `## STEP 1`, `## STEP 2`, etc.), processes directives with `CoreServices.process_step`, and executes them sequentially.
 - Additional workflow engines can be added under `workflow_engines/<name>/` as long as they expose an `async def run_workflow(job_args: dict, **kwargs)` entry point.
 - Directives are resolved centrally by `core/directives/` and the helper functions in `core/workflow/parser.py`. Each directive processor validates input, resolves patterns, and returns structured data. Workflows decide how to use that data while keeping directive logic decoupled from workflow behavior. Features like `{pending}` tracking are implemented via `WorkflowFileStateManager`, but the workflow determines when state updates occur.
-- `@input` / `@output` support scheme-based targets (`file:` / `variable:`) and optional routing parameters (e.g. `output=...`, `write-mode=...`) so inputs and tool outputs can be redirected to buffers or files.
+- `@input` / `@output` support scheme-based targets (`file:` / `variable:`) and optional routing parameters (e.g. `output=...`, `write_mode=...`) so inputs and tool outputs can be redirected to buffers or files.
 
 ## LLM, Models, and Tools
 
 - Model aliases and provider requirements live in `core/settings/settings.template.yaml` (seeded to `system/settings.yaml`) and are loaded through `core/settings/store.py`. `core/llm/` handles API key  checks, agent creation, and response generation.
-- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write-mode=...`, `scope=...`) to route tool results to buffers/files or keep them inline in workflows/context templates. Chat-time routing is allowlist-based, and large tool outputs can be auto-buffered via `auto_buffer_max_tokens`.
+- Tools are configured alongside models in `core/settings/settings.template.yaml`. The `@tools` directive loads the referenced classes from `core/tools/`, injects vault context, and augments agent instructions. Tool tokens can include per-tool parameters (e.g. `output=...`, `write_mode=...`, `scope=...`) to route tool results to buffers/files or keep them inline in workflows/context templates. Chat-time routing is allowlist-based, and large tool outputs can be auto-buffered via `auto_buffer_max_tokens`.
 
 ## Context Manager (Chat)
 
@@ -65,9 +65,9 @@ The browser-based chat UI (served from `static/`) talks to the API layer, which 
 - Each non-instruction `##` section is treated as an independent context step, processed in order. The manager runs once per section and injects one system message per section output only when `@output context` is present; later sections can incorporate earlier section outputs.
 - If a template contains **no steps** (only chat instructions and/or frontmatter), the context manager skips the LLM and passes through the chat instructions + history.
 - Context manager directives control per-section behavior:
-  - `@recent-runs`: How many recent chat runs the manager reads (0 disables that section).
+  - `@recent_runs`: How many recent chat runs the manager reads (0 disables that section).
   - `token_threshold` (frontmatter): Skip all context manager steps if total history is under this token estimate.
-  - `@recent-summaries`: How many prior managed summaries to feed into the manager prompt.
+  - `@recent_summaries`: How many prior managed summaries to feed into the manager prompt.
   - `@tools`: Tools the manager can call while generating the summary.
   - `@model`: Model alias to use for the manager.
 - `@model none` skips the LLM call for that section while still allowing directive side effects (e.g. routing inputs).

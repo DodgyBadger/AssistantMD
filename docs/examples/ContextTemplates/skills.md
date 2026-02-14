@@ -7,8 +7,8 @@ description: Pass summary of available skills to the chat agent.
 The following skills are available to help you fulfill the user's request. Select what seems most appropriate and then read the full skill at the path provided.
 
 ## Skill Index
-@recent-runs 0
-@recent-summaries 0
+@recent_runs 0
+@recent_summaries 0
 @input file: AssistantMD/Skills/*.md
 @output context
 @header Available skills

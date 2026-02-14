@@ -58,8 +58,8 @@ Summarize the recent conversation using the extraction template below.
 - If a field or instruction in the extraction template is not relevant, you must still include the field but with a value "N/A".
 
 ## Summary
-@recent-runs 3
-@recent-summaries 1
+@recent_runs 3
+@recent_summaries 1
 @output context
 @model gpt-mini
 

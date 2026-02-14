@@ -266,8 +266,9 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
         ValueError: If validation fails or required fields are missing
     """
     try:
+        normalized_config = normalize_workflow_config_keys(config)
         # Use Pydantic schema for validation
-        validated_config = WorkflowConfigSchema(**config)
+        validated_config = WorkflowConfigSchema(**normalized_config)
         
         # Convert back to dictionary format expected by callers
         return validated_config.model_dump()
@@ -287,6 +288,38 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
         )
         
         raise ValueError(error_msg) from e
+
+
+def normalize_workflow_config_keys(config: dict) -> dict:
+    """Normalize workflow frontmatter keys to canonical snake_case."""
+    normalized = dict(config or {})
+    alias_pairs = (
+        ("workflow_engine", "workflow-engine"),
+        ("week_start_day", "week-start-day"),
+    )
+
+    for canonical_key, alias_key in alias_pairs:
+        canonical_present = canonical_key in normalized
+        alias_present = alias_key in normalized
+        if not alias_present:
+            continue
+
+        if canonical_present and normalized[canonical_key] != normalized[alias_key]:
+            logger.warning(
+                "Conflicting frontmatter keys; preferring canonical key",
+                metadata={
+                    "canonical_key": canonical_key,
+                    "alias_key": alias_key,
+                    "canonical_value": normalized[canonical_key],
+                    "alias_value": normalized[alias_key],
+                },
+            )
+            continue
+
+        if not canonical_present:
+            normalized[canonical_key] = normalized[alias_key]
+
+    return normalized
 
 
 #######################################################################

@@ -211,6 +211,38 @@ def has_empty_input_file_directive(content: str) -> bool:
     return False
 
 
+def _frontmatter_value_with_alias(
+    frontmatter: Optional[Dict[str, Any]],
+    canonical_key: str,
+    alias_key: str,
+) -> Any:
+    """Get a frontmatter value supporting both canonical and alias keys."""
+    if not frontmatter:
+        return None
+
+    canonical_present = canonical_key in frontmatter
+    alias_present = alias_key in frontmatter
+    canonical_value = frontmatter.get(canonical_key)
+    alias_value = frontmatter.get(alias_key)
+
+    if canonical_present and alias_present and canonical_value != alias_value:
+        logger.warning(
+            "Conflicting frontmatter keys; preferring canonical key",
+            metadata={
+                "canonical_key": canonical_key,
+                "alias_key": alias_key,
+                "canonical_value": canonical_value,
+                "alias_value": alias_value,
+            },
+        )
+
+    if canonical_present:
+        return canonical_value
+    if alias_present:
+        return alias_value
+    return None
+
+
 def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
     """
     Resolve week_start_day from template frontmatter.
@@ -219,7 +251,7 @@ def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
     """
     if not frontmatter:
         return 0
-    raw_value = frontmatter.get("week_start_day")
+    raw_value = _frontmatter_value_with_alias(frontmatter, "week_start_day", "week-start-day")
     if raw_value is None:
         return 0
     if isinstance(raw_value, int) and 0 <= raw_value <= 6:
@@ -289,9 +321,7 @@ def cache_entry_is_valid(
 def resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
     if not frontmatter:
         return default
-    raw_value = frontmatter.get("passthrough_runs")
-    if raw_value is None:
-        raw_value = frontmatter.get("passthrough-runs")
+    raw_value = _frontmatter_value_with_alias(frontmatter, "passthrough_runs", "passthrough-runs")
     if raw_value is None:
         return default
     if isinstance(raw_value, int):
@@ -321,9 +351,7 @@ def resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: int
 def resolve_token_threshold(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
     if not frontmatter:
         return default
-    raw_value = frontmatter.get("token_threshold")
-    if raw_value is None:
-        raw_value = frontmatter.get("token-threshold")
+    raw_value = _frontmatter_value_with_alias(frontmatter, "token_threshold", "token-threshold")
     if raw_value is None:
         return default
     if isinstance(raw_value, int):
@@ -455,6 +483,10 @@ def resolve_section_int(
     default: int = 0,
 ) -> int:
     values = section_directives.get(directive_key, [])
+    if not values and "_" in directive_key:
+        values = section_directives.get(directive_key.replace("_", "-"), [])
+    if not values and "-" in directive_key:
+        values = section_directives.get(directive_key.replace("-", "_"), [])
     if values:
         try:
             result = registry.process_directive(
@@ -505,12 +537,14 @@ def resolve_section_write_mode(
     section_directives: Dict[str, List[str]],
     vault_path: str,
 ) -> Optional[str]:
-    write_mode_values = section_directives.get("write-mode", [])
+    write_mode_values = section_directives.get("write_mode", [])
+    if not write_mode_values:
+        write_mode_values = section_directives.get("write-mode", [])
     if not write_mode_values:
         return None
     try:
         write_mode_result = registry.process_directive(
-            "write-mode",
+            "write_mode",
             write_mode_values[-1],
             vault_path,
         )
@@ -518,7 +552,7 @@ def resolve_section_write_mode(
             return write_mode_result.processed_value
     except Exception as exc:
         logger.warning(
-            "Failed to process context manager write-mode directive",
+            "Failed to process context manager write_mode directive",
             metadata={"error": str(exc)},
         )
     return None
@@ -991,14 +1025,14 @@ async def run_context_section(
 
     section_recent_runs = resolve_section_int(
         registry=exec_ctx.registry,
-        directive_key="recent-runs",
+        directive_key="recent_runs",
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
         default=exec_ctx.manager_runs,
     )
     section_recent_summaries = resolve_section_int(
         registry=exec_ctx.registry,
-        directive_key="recent-summaries",
+        directive_key="recent_summaries",
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
         default=exec_ctx.recent_summaries_default,

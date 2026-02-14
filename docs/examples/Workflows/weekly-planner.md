@@ -47,7 +47,7 @@ You have been provided with my annual goals and last week's planning journal. Pl
 3. Follow any notes or instructions I leave for you in this section.
 
 ## Weekly summary
-@run-on saturday
+@run_on saturday
 @model gpt
 @input file: Planner/Journal/{this-week}
 @output file: Planner/Journal/{this-week}

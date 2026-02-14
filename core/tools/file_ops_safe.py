@@ -102,6 +102,7 @@ class FileOpsSafe(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for file operations."""
         return """
+## file_ops_safe usage instructions
         
 DISCOVERY - Start narrow, expand as needed:
 - file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)

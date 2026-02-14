@@ -110,6 +110,8 @@ class TavilyCrawl(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Crawl."""
         return """
+## tavily_crawl usage instructions
+
 Use when you need to comprehensively explore a website and extract content from multiple related pages.
 - Crawling documentation sites for complete guides
 - Exploring knowledge bases and help centers

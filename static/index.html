@@ -194,6 +194,19 @@
         .message-footer-right {
             justify-content: flex-end;
         }
+        .message-footer-has-tools {
+            align-items: flex-start;
+        }
+        .message-footer-has-tools .message-footer-content {
+            display: flex;
+            flex: 1;
+            min-width: 0;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .message-footer-has-tools .message-footer-actions {
+            padding-top: 0.1rem;
+        }
         .message-footer-content {
             display: flex;
             flex-wrap: wrap;
@@ -390,6 +403,22 @@
             flex-direction: column;
             gap: 0.5rem;
             margin-top: 0.75rem;
+        }
+        .tool-calls-section {
+            margin-top: 0.75rem;
+            border: 1px solid rgb(var(--border-primary) / 0.6);
+            border-radius: 0.6rem;
+            background: rgb(var(--bg-elevated) / 0.5);
+            overflow: hidden;
+        }
+        .message-footer .tool-calls-section {
+            margin-top: 0;
+            width: 100%;
+        }
+        .tool-calls-section .tool-status-list {
+            margin: 0;
+            padding: 0.65rem 0.75rem 0.75rem;
+            border-top: 1px solid rgb(var(--border-primary) / 0.45);
         }
         .tool-status {
             margin: 0;

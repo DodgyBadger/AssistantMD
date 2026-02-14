@@ -86,7 +86,8 @@ class FileOpsUnsafe(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for unsafe file operations."""
         return """
-
+## file_ops_unsafe usage instructions
+        
 ⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
 
 CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).

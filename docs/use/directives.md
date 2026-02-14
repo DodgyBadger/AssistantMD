@@ -30,7 +30,8 @@ You may use time patterns in the output directive to generate files dynamically.
 - Path resolution: All paths are relative to the vault root
 - Automatic .md extension: The system automatically adds `.md` extension if not present
 - When the optional parameter `(required)` or `(required=true)` is specified, the step will be skipped if no files are found for this @input directive. Useful for workflows that should only run when input data is available (e.g., only generate invoices when there are billable hours to process).
-- When the optional parameter `(refs-only)` / `(refs_only)` is specified, the directive passes only file paths into the prompt (listed as bullet points) and does not inline file contents. Use this when you want the model or tools to open the files one-by-one instead of loading large contexts directly.
+- When the optional parameter `(refs_only)` is specified, the directive passes only file paths into the prompt (listed as bullet points) and does not inline file contents. Use this when you want the model or tools to open the files one-by-one instead of loading large contexts directly.
+- Legacy compatibility: `(refs-only)` is also accepted, but prefer `(refs_only)` in new files.
 
 Examples:
 - `file: goals.md` or `file: projects/notes.md` - Specific file
@@ -72,18 +73,18 @@ Examples:
 
 ---
 
-**@write-mode** (string, optional)
+**@write_mode** (string, optional)
 - Controls how content is written to the output file
-- Format: `@write-mode append`
+- Format: `@write_mode append`
 - Available modes:
 - `append`: Default. Append content to the end of the file
 - `new`: Create new numbered files for each run (e.g., planning_001.md, planning_002.md)
 
 ---
 
-**@run-on** (string, optional)
+**@run_on** (string, optional)
 - Controls which days of the week a step should execute
-- Format: `@run-on monday, friday` or `@run-on daily` or `@run-on never`
+- Format: `@run_on monday, friday` or `@run_on daily` or `@run_on never`
 - Default behavior: If omitted, step runs every day the workflow is scheduled
 - **Use case**: Allows different steps to run on different days within a single workflow, avoiding the need to create multiple workflow files with different schedules
 - Supports comma or space separation between days
@@ -94,7 +95,7 @@ Examples:
 - Case insensitive: `Monday`, `MONDAY`, and `monday` are all valid
 
 **How it works with schedule:**
-The `schedule` in YAML frontmatter determines when the workflow runs. The `@run-on` directive determines which steps execute during that run. For example, an workflow scheduled daily at 8am can have steps that only run on specific days - weekly planning on Mondays, daily tasks on weekdays, and weekly reviews on Fridays - all in one workflow file.
+The `schedule` in YAML frontmatter determines when the workflow runs. The `@run_on` directive determines which steps execute during that run. For example, an workflow scheduled daily at 8am can have steps that only run on specific days - weekly planning on Mondays, daily tasks on weekdays, and weekly reviews on Fridays - all in one workflow file.
 
 ---
 

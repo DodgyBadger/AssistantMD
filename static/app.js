@@ -12,11 +12,11 @@ const TYPING_DOTS_HTML = `
     <span class="typing-dot"></span>
 `.trim();
 
-const STATUS_ICONS = {
-    success: '✓',
-    error: '⚠️',
-    tool: '🛠️',
-    running: '…'
+const STATUS_EMOJIS = {
+    thinking: '💬',
+    tools: '🛠️',
+    done: '✅',
+    error: '⚠️'
 };
 
 // State management
@@ -774,7 +774,7 @@ async function sendMessage() {
                         renderAssistantMarkdown(assistantMessage);
                     }
                     assistantMessage.errorMessages.push(errorDelta || 'Unknown streaming error.');
-                    setAssistantStatus(assistantMessage, 'Something went wrong.', 'error');
+                    setAssistantStatus(assistantMessage, 'Something went wrong', 'error');
                 }
             }
         }
@@ -936,7 +936,7 @@ function createAssistantStreamingMessage() {
 
     const statusText = document.createElement('span');
     statusText.className = 'stream-status-text';
-    statusText.textContent = 'Assistant is responding…';
+    statusText.textContent = 'Assistant is responding 💬';
 
     progressDiv.appendChild(indicator);
     progressDiv.appendChild(statusText);
@@ -946,10 +946,9 @@ function createAssistantStreamingMessage() {
 
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'message-body prose prose-sm max-w-none';
-    bodyDiv.innerHTML = '<p class="text-sm text-txt-secondary">Preparing response…</p>';
+    bodyDiv.innerHTML = '';
 
     contentDiv.appendChild(progressDiv);
-    contentDiv.appendChild(toolList);
     contentDiv.appendChild(bodyDiv);
     messageDiv.appendChild(contentDiv);
 
@@ -969,6 +968,8 @@ function createAssistantStreamingMessage() {
         statusText,
         bodyDiv,
         toolList,
+        toolCallsSection: null,
+        toolCallsSummaryTitle: null,
         toolStatusMap: new Map(),
         fullText: '',
         errorMessages: [],
@@ -977,9 +978,52 @@ function createAssistantStreamingMessage() {
     };
 }
 
+function ensureToolCallsSection(context) {
+    if (context.toolCallsSection) {
+        return context.toolCallsSection;
+    }
+
+    const section = document.createElement('details');
+    section.className = 'tool-calls-section';
+
+    const summary = document.createElement('summary');
+    summary.className = 'tool-status-summary';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'tool-status-chevron';
+    chevron.textContent = '▸';
+
+    const title = document.createElement('span');
+    title.className = 'tool-status-title';
+    title.textContent = 'Tool calls (0)';
+
+    summary.appendChild(chevron);
+    summary.appendChild(title);
+
+    section.appendChild(summary);
+    section.appendChild(context.toolList);
+    context.contentDiv.appendChild(section);
+    section.addEventListener('toggle', () => {
+        chevron.textContent = section.open ? '▾' : '▸';
+    });
+
+    context.toolCallsSection = section;
+    context.toolCallsSummaryTitle = title;
+    return section;
+}
+
+function updateToolCallsSummary(context) {
+    if (!context || !context.toolCallsSummaryTitle) {
+        return;
+    }
+
+    const total = context.toolStatusMap.size;
+    context.toolCallsSummaryTitle.textContent = `Tool calls (${total})`;
+}
+
 function renderAssistantMarkdown(context) {
     if (!context.fullText.trim()) {
-        context.bodyDiv.innerHTML = '<p class="text-sm text-txt-secondary">Thinking…</p>';
+        context.bodyDiv.innerHTML = '';
     } else {
         context.bodyDiv.innerHTML = marked.parse(context.fullText);
         attachCodeCopyButtons(context.bodyDiv);
@@ -989,21 +1033,10 @@ function renderAssistantMarkdown(context) {
 }
 
 function setAssistantStatus(context, label, state = 'thinking') {
-    context.statusText.textContent = label;
-
-    if (state === 'done') {
-        context.indicator.className = 'stream-status-indicator success';
-        context.indicator.textContent = STATUS_ICONS.success;
-    } else if (state === 'error') {
-        context.indicator.className = 'stream-status-indicator error';
-        context.indicator.textContent = STATUS_ICONS.error;
-    } else if (state === 'tools') {
-        context.indicator.className = 'stream-status-indicator tool';
-        context.indicator.textContent = STATUS_ICONS.tool;
-    } else {
-        context.indicator.className = 'stream-status-indicator typing';
-        context.indicator.innerHTML = TYPING_DOTS_HTML;
-    }
+    const emoji = STATUS_EMOJIS[state] || STATUS_EMOJIS.thinking;
+    context.statusText.textContent = `${label} ${emoji}`;
+    context.indicator.className = 'stream-status-indicator typing';
+    context.indicator.innerHTML = TYPING_DOTS_HTML;
 }
 
 function handleToolEvent(context, payload) {
@@ -1013,17 +1046,18 @@ function handleToolEvent(context, payload) {
     let entry = context.toolStatusMap.get(toolId);
 
     if (payload.event === 'tool_call_started' || !entry) {
+        ensureToolCallsSection(context);
         entry = createToolStatusEntry(context, toolId, payload);
         context.hasTools = true;
         if (payload.event === 'tool_call_started') {
-            setAssistantStatus(context, 'Running tools…', 'tools');
+            setAssistantStatus(context, 'Running tools', 'tools');
         }
     }
 
     if (payload.event === 'tool_call_finished') {
         entry.container.classList.remove('tool-status-running');
         entry.container.classList.add('tool-status-complete');
-        if (payload.result) {
+        if (payload.result !== undefined && payload.result !== null) {
             entry.result = payload.result;
         }
         updateToolDetail(entry);
@@ -1032,12 +1066,13 @@ function handleToolEvent(context, payload) {
         const hasRunning = Array.from(context.toolStatusMap.values())
             .some(item => item.container.classList.contains('tool-status-running'));
         if (!hasRunning) {
-            setAssistantStatus(context, 'Continuing response…', 'thinking');
+            setAssistantStatus(context, 'Continuing response', 'thinking');
         }
     } else if (payload.event === 'tool_call_started' && payload.arguments) {
         entry.args = payload.arguments;
         updateToolDetail(entry);
     }
+    updateToolCallsSummary(context);
 }
 
 function createToolStatusEntry(context, toolId, payload) {
@@ -1094,7 +1129,7 @@ function finalizeAssistantMessage(context, metadata) {
     const endedEarly = metadata.status && metadata.status !== 'done' && !hasError;
 
     if (hasError || endedEarly) {
-        const finalLabel = hasError ? 'Completed with issues.' : 'Response ended early.';
+        const finalLabel = hasError ? 'Completed with issues' : 'Response ended early';
         setAssistantStatus(context, finalLabel, 'error');
     } else if (context.progressDiv && context.progressDiv.parentNode) {
         context.progressDiv.parentNode.removeChild(context.progressDiv);
@@ -1105,30 +1140,22 @@ function finalizeAssistantMessage(context, metadata) {
 
     const footerContent = document.createElement('div');
     footerContent.className = 'message-footer-content';
+    const hasToolSection = Boolean(context.toolCallsSection && context.toolStatusMap.size > 0);
 
-    const metaEntries = [];
-    if (metadata.sessionId) {
-        metaEntries.push({ label: 'Session', value: metadata.sessionId });
+    if (hasToolSection && context.toolCallsSection) {
+        footerDiv.classList.add('message-footer-has-tools');
+        footerContent.appendChild(context.toolCallsSection);
     }
-    if (metadata.messageCount) {
-        metaEntries.push({ label: 'Messages', value: metadata.messageCount });
-    }
-    if (metadata.toolCount) {
-        metaEntries.push({ label: 'Tools', value: metadata.toolCount });
-    }
+
     if (endedEarly && !hasError) {
-        metaEntries.push({ label: 'Status', value: 'Partial output' });
-    }
-
-    if (metaEntries.length === 0) {
-        metaEntries.push({ label: 'Status', value: hasError ? 'Needs review' : 'Ready' });
-    }
-
-    metaEntries.forEach(({ label, value }) => {
         const span = document.createElement('span');
-        span.textContent = `${label}: ${value}`;
+        span.textContent = 'Status: Partial output';
         footerContent.appendChild(span);
-    });
+    } else if (hasError) {
+        const span = document.createElement('span');
+        span.textContent = 'Status: Needs review';
+        footerContent.appendChild(span);
+    }
 
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'message-footer-actions';
@@ -1136,7 +1163,11 @@ function finalizeAssistantMessage(context, metadata) {
     const copyButton = createCopyButton(() => getCopyableText(context.bodyDiv), 'message-copy-button');
     actionsDiv.appendChild(copyButton);
 
-    footerDiv.appendChild(footerContent);
+    if (footerContent.childElementCount > 0) {
+        footerDiv.appendChild(footerContent);
+    } else {
+        footerDiv.classList.add('message-footer-right');
+    }
     footerDiv.appendChild(actionsDiv);
     context.contentDiv.appendChild(footerDiv);
 

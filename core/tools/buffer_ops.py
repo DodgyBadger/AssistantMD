@@ -87,7 +87,8 @@ class BufferOps(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for buffer operations."""
         return """
-      
+## buffer_ops usage instructions
+        
 DISCOVERY:
 - buffer_ops(operation="list")
 - buffer_ops(operation="info", target="buffer_name")

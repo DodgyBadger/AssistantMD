@@ -202,7 +202,8 @@ class CodeExecutionPiston(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Piston code execution."""
         return """
-
+## code_execution usage instructions
+        
 Supports many languages, pass language or language@version (e.g., python@3.10.0).
 Optional stdin is supported.
 Example: execute_code(code="print('hi')", language="python", stdin="").

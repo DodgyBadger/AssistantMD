@@ -22,7 +22,7 @@ class WebSearchDuckDuckGo(BaseTool):
     def get_tool(cls, vault_path: str = None):
         """Get the Pydantic AI tool for DuckDuckGo web search."""
 
-        def search_web(*, query: str) -> str:
+        def web_search(*, query: str) -> str:
             """Search DuckDuckGo for information on the given query.
 
             :param query: Search query to look up
@@ -55,11 +55,13 @@ class WebSearchDuckDuckGo(BaseTool):
             except Exception as e:
                 return f"DuckDuckGo search error: {str(e)}"
 
-        return Tool(search_web, name="search_web_duckduckgo")
+        return Tool(web_search, name="web_search_duckduckgo")
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for DuckDuckGo web search."""
         return """
-Example: search_web_duckduckgo(query="latest postgres release notes").
+## web_search_duckduckgo usage instructions
+
+Example: web_search_duckduckgo(query="latest postgres release notes").
 """ + WEB_TOOL_SECURITY_NOTICE

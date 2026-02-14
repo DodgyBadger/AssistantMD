@@ -6,15 +6,15 @@
 | Name | Description | Applies To | Examples | Notes |
 | --- | --- | --- | --- | --- |
 | `@output` | Route step output to one or more destinations (file, buffer or context). | Workflow, Context Template | `@output file: reports/{today}` <br> `@output variable: foo` | Auto-adds `.md` if missing. Variable targets support optional `scope=`. Use `@output context` to inject into the chat agent history (context templates only). Multiple `@output` directives are allowed. |
-| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` <br> `@input variable: foo` | Supports `(required)`, `(refs-only)` and routing parameters. Variable targets support optional `scope=`. In context templates, `output=context` routes inputs directly into chat context. |
+| `@input` | Inline file content or buffer content as additional context. | Workflow, Context Template | `@input file: notes/*.md` <br> `@input variable: foo` | Supports `(required)`, `(refs_only)` and routing parameters. Variable targets support optional `scope=`. In context templates, `output=context` routes inputs directly into chat context. |
 | `@header` | Prepend a level-1 heading to the output file. | Workflow | `@header Weekly Review` | Only used when `@output` is present. Supports patterns. |
 | `@model` | Override the model for a step. | Workflow, Context Template | `@model gpt-mini` | Use `@model none` to skip LLM execution for the step/section. |
-| `@write-mode` | Control how output files are written. | Workflow | `@write-mode append` | `append` (default), `replace`, or `new` (numbered files). |
-| `@run-on` | Limit which days a step runs. | Workflow | `@run-on monday, friday` | Works with scheduled workflows; `daily` and `never` supported. |
+| `@write_mode` | Control how output files are written. | Workflow | `@write_mode append` | `append` (default), `replace`, or `new` (numbered files). |
+| `@run_on` | Limit which days a step runs. | Workflow | `@run_on monday, friday` | Works with scheduled workflows; `daily` and `never` supported. |
 | `@tools` | Enable tools for a step. | Workflow, Context Template | `@tools file_ops_safe` <br> `@tools workflow_run` | Names must match tool IDs from the UI. Per-tool params are supported (see Routing). |
 | `@cache` | Cache a context step output for reuse. | Context Template | `@cache 24h` | Values: `session`, `daily`, `weekly`, or duration `30s/10m/2h/1d`. Invalidates on template edit. Gating directives override cache. |
-| `@recent-runs` | Control how many recent runs are available to the step. | Context Template | `@recent-runs 3` | Use `all` for full history, `0` for none. |
-| `@recent-summaries` | Control how many prior context manager outputs are available. | Context Template | `@recent-summaries 1` | Use `all` for all prior outputs. |
+| `@recent_runs` | Control how many recent runs are available to the step. | Context Template | `@recent_runs 3` | Use `all` for full history, `0` for none. |
+| `@recent_summaries` | Control how many prior context manager outputs are available. | Context Template | `@recent_summaries 1` | Use `all` for all prior outputs. |
 
 ## Frontmatter
 
@@ -94,19 +94,19 @@ Routing redirects directive or tool outputs to a destination instead of inlining
 - `context` (context templates only)
 
 ### @input routing
-Attach `output=...` to `@input` to route the resolved content (or references when `refs-only` is set).
+Attach `output=...` to `@input` to route the resolved content (or references when `refs_only` is set).
 
 Examples:
 - `@input file: notes/*.md (output=variable: notes_buffer)`
-- `@input file: notes/*.md (refs-only, output=variable: notes_refs)`
+- `@input file: notes/*.md (refs_only, output=variable: notes_refs)`
 - `@input variable: notes_buffer (output=file: exports/notes)`
 
 ### Tool routing
-Attach `output=...` per tool token in `@tools`. Optional `write-mode=append|replace|new` is supported.
+Attach `output=...` per tool token in `@tools`. Optional `write_mode=append|replace|new` is supported.
 
 Examples:
 - `@tools file_ops_safe(output=variable: tool_buffer)`
-- `@tools file_ops_safe(output=file: tool-outputs/listing, write-mode=replace)`
+- `@tools file_ops_safe(output=file: tool-outputs/listing, write_mode=replace)`
 - `@tools file_ops_safe(output=inline)`
 Notes:
 - Use `scope=session|run` with variable destinations to control buffer scope.
