@@ -1,17 +1,17 @@
 # AssistantMD
 
-**An experimental agent harness and chat UI for control freaks.**
+AssistantMD is a markdown-native agent harness for automating research and knowledge workflows. It works alongside Obsidian (or any markdown editor). Bring information into markdown, organize and automate with workflows and reason through it in a steerable chat UI where your data stays plain text and owned by you.
 
-You compose behaviour directly through markdown templates:   
-scheduled workflows | context curation | control directives | substitution patterns | buffer variables
+**What this is:** a focused workspace for markdown-first automation and knowledge work.  
+**What this isn't:** a general purpose agent platform for managing your email or booking flights.
 
 ## Design philosophy
 
 **Data ownership:** Wherever possible, AssistantMD uses markdown files so data remains accessible and can be version controlled. For functionality requiring a database, SQLite maintains the file-first approach. Even chat sessions are automatically saved as markdown in your vault.
 
-**Explicit / minimal magic:** Every instruction and step is explicitly declared in markdown templates. Defaults and implicit behaviour are kept to a minimum. This makes control templates a bit verbose, but also very flexible and traceable.
+**Explicit / minimal magic:** Plain-text control primitives let you compose a wide range of behaviours. Hidden defaults and magic behaviour are kept to a minimum. This makes templates a bit verbose, but also very flexible and traceable.
 
-**Security:** The focus is safe, local automation on your markdown files. Prompt‑injection is a core concern, so AssistantMD takes a very cautious approach to accessing public, untrusted data and APIs. MCP and broader integrations are intentionally deferred until stronger sanitization for untrusted inputs exists.
+**Security:** The focus is safe, local automation on your markdown files. Prompt-injection is a core concern, so AssistantMD takes a cautious approach to untrusted web content and keeps external integrations intentionally narrow.
 
 ## Requirements
 
@@ -23,25 +23,31 @@ scheduled workflows | context curation | control directives | substitution patte
 
 Designed to work alongside Obsidian or other markdown editors.
 
-**🧑‍🏫 NEW: Context Manager**
-- Steer your chat sessions by curating message history and passing custom system instructions
-- Define context using markdown templates in `AssistantMD/ContextTemplates`
+**📥 Import Pipeline**
+- Import PDFs and URLs into markdown and build a searchable project/research library in your vault.
+- Keep source material in plain text for downstream workflows and chat.
 
 **👷‍♂️ Scheduled Workflows**
 - Multi-step, scheduled workflows. Each step can define prompt, model, tools and content routing.
 - Define workflows using markdown templates in `AssistantMD/Workflows/`
 
-**💬 Chat Interface**
-- Full access to your markdown notes
-- Chat sessions saved as markdown
+**💬 Steerable Chat + Context Manager**
+- Reason over your vault with controllable context, custom instructions, tools, and buffers.
+- Define context templates in `AssistantMD/ContextTemplates`.
+
+**🔐 Plain-Text Ownership & Control**
+- Self-hosted, single-user design with markdown-first storage.
+- Docker-based deployment, with data remaining local and inspectable.
 
 **🤖 AI Providers**
 - GPT, Claude, Gemini, Mistral, Grok
 - Any OpenAI-compatible API (Ollama, etc.)
 
-**🔐 Privacy & Control**
-- Self-hosted, single-user design
-- Docker-based deployment
+## Typical use cases
+
+- Build a research library from PDFs and web pages, then work through it systematically in chat.
+- Automate recurring knowledge workflows (planning, synthesis, note organization) on a schedule.
+- Prototype prompt/workflow behavior before implementing full custom agents.
 
 <img src="docs/chat-UI-screenshot.png" alt="Chat UI screenshot" height="700">
 

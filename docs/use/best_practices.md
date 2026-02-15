@@ -16,5 +16,5 @@ Guidance for using AssistantMD effectively.
 - Context is not passed automatically between steps. Use `@output variable:foo` + `@input variable:foo` to pass context (or file:name if you want greater observability).
 - Each step can define a different `@model`, allowing for fine grained cost control. Prefer smaller models for lightweight steps and reserve larger models for critical reasoning.
 - For large tool outputs, prefer `@input variable:NAME` in later steps instead of additional tool calls.
-
+- Using both the `@output` directive AND `file_ops_safe` tool in the same step can cause duplicate file create. Make sure your prompt clearly distinguishes tool use vs LLM response.
 
