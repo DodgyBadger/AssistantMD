@@ -2,11 +2,7 @@
 
 ## Philosophy
 
-AssistantMD is designed as a **single-user application** running on your local machine or private server. There is no cross-user contamination or shared data.
-
-**Primary security concerns:**
-- User error when configuring workflows
-- Exposure risks if you make the API or chat UI publicly accessible on the internet
+AssistantMD is designed as a **single-user application** running on your local machine or private server.
 
 
 ## Application Exposure
@@ -37,17 +33,16 @@ When AI models process web content using tools like search, extract or crawl, ma
 - This successfully innoculated the smaller models which had previously failed testing.
 
 **2. Tavily reduces exposure to hidden content**
-- Current testing suggests Tavily omits or sanitizes hidden CSS text, meta tags, and JSON-LD payloads before the model sees them
-- Treat this as an additional layer, not a guarantee—future tool changes or alternate fetch paths may surface the payloads
+- Web searches, page extractions and site crawls that use Tavily are further protected by Tavily's firewall that blocks PII leakage, prompt injection, and malicious sources.
 
 **3. No data exfiltration possible**
-- The `code_execution` tool uses Piston (public endpoint by default). The public instance is sandboxed for untrusted code, and you can self-host Piston for stricter network isolation if needed.
 - No workflow tool can send data to external servers or download additional content beyond their providers.
-- Even if a model is compromised, your data stays local
+- The `code_execution` tool uses Piston (public endpoint by default). The public instance is sandboxed for untrusted code, and you can self-host Piston for stricter network isolation if needed.
+- Even if a model is compromised, your data stays local.
 
 ### Best Practices
 
-- Review outputs from workflows that process web content
+- Review outputs from workflows and context templates that process web content
 - Use `file_ops_safe` tool by default - only enable `file_ops_unsafe` when you need write/delete capabilities
 - Be cautious when combining `file_ops_unsafe` with web tools on untrusted websites, and test your runs
 - Keep backups of important vault data

@@ -1,23 +1,33 @@
 # Context Manager
 
-**⚠️ This is an experimental feature and may change significantly in the future!!**
-
 The Context Manager allows you to shape what the chat agent sees, from simple system‑prompt injection to multi‑step context assembly. It applies the lessons learned by research on long‑running agents: curated working sets, structured summaries and explicit attention budgeting beat dumping full transcripts into ever‑larger contexts.
 
 Define context templates using markdown in `AssistantMD/ContextTemplates/` (vault scoped) or `system/ContextTemplates/` (global). Select the template you wish to use in the Chat UI. Set your default template in **Configuration → Application Settings**.
 
 ## Structure
-- YAML frontmatter between `---` delimiters. Settings that apply to the whole template.
-- `## Chat Instructions`: Custom system instructions passed through, unmodified, to the chat agent.
-- `## Context Instructions`: System instructions for the context manager LLM when it runs.
-- `## Step`: Any other `##` heading that does not include the word "instructions" is treated as a context manager step. Steps can be configured to output directly to the chat agent's context, generate information for later steps or write files to your vault. Steps can be cached to minimize LLM calls.
+YAML frontmatter between `---` delimiters. Settings that apply to the whole template.
+
+`## Chat Instructions`: Custom system instructions passed through, unmodified, to the chat agent.
+
+`## Context Instructions`: System instructions for the context manager LLM when it runs.
+
+`## Step`: Any other `##` heading that does not include the word "instructions" is treated as a context manager step.
+- Steps execute in the order they appear.
+- Steps can be configured to output to the chat agent's context, generate information for later steps or write files to your vault.
+- A step only outputs to the chat agent context if you include `@output context`.
+- Context is not passed automatically between steps. Use `@output variable:foo` + `@input variable:foo` to pass context (or `file:name` if you want greater observability).
+- Steps can be cached to minimize LLM calls.
 
 The chat agent receives system instructions from the context manager in the following order:
 - Hardcoded system instructions (date, tool descriptions, etc.)
 - User-defined instructions in `## Chat Instructions`
 - The output of each `## Step` section that includes `@output context`, in the order they appear
 
-See [reference](reference.md) for details on which YAML frontmatter parameters and directives are scoped to the context template.
+See [reference](reference.md) for details on all the control primitives available for context templates.
+
+Following are complete, valid context manager templates. Copy the text into `AssistantMD/ContextTemplates/` inside any vault, change the model as needed, rescan your vaults and then start a new chat to test the results.
+
+**NOTE**: Context templates must include only the text below, not embedded inside a markdown code block. If you are pasting into a new note in Obsidian, use `ctrl-shift-v` (or right-click `Paste as plain text`) to avoid pasting the code block. The top section should immediately render as Obsidian Properties.
 
 ## Example: Custom system instructions only
 
