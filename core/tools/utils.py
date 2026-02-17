@@ -89,12 +89,13 @@ def validate_and_resolve_path(path: str, vault_path: str) -> str:
         if not path.endswith('.md'):
             raise ValueError("Only .md files are allowed. Please use '.md' extension for all files.")
 
-    # Resolve to full path
+    # Resolve to full path.
+    # Use realpath to collapse symlinks before boundary checks.
     full_path = os.path.join(vault_path, path)
-    resolved_path = os.path.abspath(full_path)
+    resolved_path = os.path.realpath(full_path)
+    vault_abs = os.path.realpath(vault_path)
 
-    # Ensure the resolved path is within vault boundaries
-    vault_abs = os.path.abspath(vault_path)
+    # Ensure the resolved path is within vault boundaries after symlink resolution.
     if not resolved_path.startswith(vault_abs + os.sep) and resolved_path != vault_abs:
         raise ValueError("Path escapes vault boundaries")
 
