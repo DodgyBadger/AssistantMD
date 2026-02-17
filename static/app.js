@@ -846,6 +846,15 @@ function removeLoadingMessage(messageDiv) {
     }
 }
 
+function enforceExternalLinkBehavior(container) {
+    if (!container) return;
+    const links = container.querySelectorAll('a[href]');
+    links.forEach(link => {
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
+    });
+}
+
 // Add message to chat with copy controls
 function addMessage(role, content, options = {}) {
     const messageDiv = document.createElement('div');
@@ -865,6 +874,7 @@ function addMessage(role, content, options = {}) {
 
     if (role === 'assistant') {
         bodyDiv.innerHTML = marked.parse(content);
+        enforceExternalLinkBehavior(bodyDiv);
     } else {
         const escapedContent = content
             .replace(/&/g, '&amp;')
@@ -1026,6 +1036,7 @@ function renderAssistantMarkdown(context) {
         context.bodyDiv.innerHTML = '';
     } else {
         context.bodyDiv.innerHTML = marked.parse(context.fullText);
+        enforceExternalLinkBehavior(context.bodyDiv);
         attachCodeCopyButtons(context.bodyDiv);
     }
 
