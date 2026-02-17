@@ -61,6 +61,9 @@ AssistantMD can be used as a practical prototyping harness for building speciali
 - **[Basic Usage](docs/use/overview.md)**
 - **[Context Manager](docs/use/context_manager.md)**
 - **[Workflows](docs/use/workflows.md)**
+- **[Architecture Overview](docs/architecture/overview.md)**
+- **[Extending AssistantMD](docs/architecture/extending.md)**
+- **[Validation Framework](docs/architecture/validation.md)**
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
 

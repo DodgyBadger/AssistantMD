@@ -62,6 +62,14 @@ async def run_workflow(job_args: dict, **kwargs):
 - Reuse `CoreServices` and directive parsing where possible.
 - Add only the minimum behavior needed for your specialized execution pattern.
 
+### About CoreServices
+
+`CoreServices` is a convenience wrapper, not a required framework layer.
+
+- It bundles common workflow helpers (section loading, directive processing, agent creation, response generation, and path/state helpers) behind one interface.
+- You can use it to move faster when prototyping engines.
+- You can bypass it and call lower-level modules directly if your engine needs tighter control.
+
 ### Notes
 
 - `step` is currently the only built-in engine.
@@ -180,4 +188,4 @@ Registering options:
 
 ## Testing
 
-For any engine, tool, or directive extension, add validation scenarios under `validation/scenarios/` to verify behavior and prevent regressions; see `docs/development/validation.md`.
+For any engine, tool, or directive extension, add validation scenarios under `validation/scenarios/` to verify behavior and prevent regressions; see `docs/architecture/validation.md`.

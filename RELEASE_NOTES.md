@@ -20,6 +20,7 @@ A new `buffer_ops` tool allows the LLM to access buffer variables systematically
 - **Tool deprecation**: Removed `import_url` and `documentation_access` tools (assisted template creation is now handled using the context manager).
 
 ### Documentation
+- Significant documentation updates, including huge expansion of architectural docs.
 - Docs folder now includes a library of example context and workflow templates.
 - Documentation can be accessed with file_ops_safe using a new virtual path `__virtual_docs__/`.
 
