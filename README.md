@@ -5,16 +5,16 @@ AssistantMD is a markdown-native agent harness for automating research and knowl
 ## Typical use cases
 
 **Deep research in the chat UI**  
-Give AssistantMD a topic, focus and constraints, then let it run: search the web, open pages, pull key details and keep digging through follow-up searches. It can stash text in a buffer so the chat stays usable while it works through lots of material. You can keep asking follow-up questions as it goes, and have it write summary reports straight to your vault whenever you want.
+Give AssistantMD a topic, focus and constraints, then let it run: search the web, open pages, pull key details and keep digging through follow-up searches. It can stash text in a buffer so the chat stays usable while it works through lots of material. Have it write summary reports straight to your vault whenever you want.
 
 **Project-aware chat**  
 After building a research library, you can create a context template that loads the key project facts into each new chat. That way you can continue the work without re-explaining background details every time. It makes follow-on analysis, drafting and decision support much faster while staying grounded in your vault content.
 
 **Scheduled workflows for planning and follow-through**
-Set up workflows that run on a schedule and keep your notes up to date. For example, a weekly planner can scan your master task list, carry forward unfinished items from last week, integrate longer-term goals and draft a weekly plan. You can interact with the workflow agent through the notes. The result is a repeatable loop that is grounded in your markdown files and adapts as your notes change.
+Set up workflows that run on a schedule and keep your notes up to date. For example, a weekly planner can scan your master task list, carry forward unfinished items from last week, integrate longer-term goals and draft a weekly plan. The result is a repeatable loop that is grounded in your markdown files and adapts as your notes change.
 
 **Prototype prompts and workflows**  
-AssistantMD can be used as a practical prototyping harness for building specialized agents. Draft or adjust a workflow, run it from chat with `workflow_run`, inspect the outputs in your vault and iterate on prompts, tools, models and step structure. The workflow engine architecture is extensible, so you can also mock up specialized engines beyond the built-in `step` engine when you need a different execution pattern.
+AssistantMD can be used to rapidly prototype prompts, workflows and context architecture for specialized agents. Draft or adjust a workflow, run it from chat with `workflow_run`, inspect the outputs in your vault and iterate. The architecture is extensible, so you can also mock up specialized workflow engines when you need a different pattern.
 
 
 ## Design philosophy
@@ -61,9 +61,6 @@ AssistantMD can be used as a practical prototyping harness for building speciali
 - **[Basic Usage](docs/use/overview.md)**
 - **[Context Manager](docs/use/context_manager.md)**
 - **[Workflows](docs/use/workflows.md)**
-- **[Architecture Overview](docs/architecture/overview.md)**
-- **[Extending AssistantMD](docs/architecture/extending.md)**
-- **[Validation Framework](docs/architecture/validation.md)**
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
 
