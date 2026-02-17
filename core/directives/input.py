@@ -4,12 +4,14 @@ Input directive processor with directive-owned pattern resolution.
 
 import os
 import re
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from .base import DirectiveProcessor
 from core.utils.patterns import PatternUtilities
 from .parser import DirectiveValueParser
 from core.utils.file_state import hash_file_content
+from core.utils.frontmatter import parse_simple_frontmatter
 from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
 from core.runtime.buffers import get_buffer_store_for_scope
 from core.logger import UnifiedLogger
@@ -31,14 +33,22 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
     
     try:
         # Construct absolute path if needed
-        if get_virtual_mount_key(normalized_path):
+        is_virtual_mount = bool(get_virtual_mount_key(normalized_path))
+        if is_virtual_mount:
             full_path, _mount = resolve_virtual_path(normalized_path)
         elif not os.path.isabs(file_path):
             full_path = os.path.join(vault_root, normalized_path)
         else:
             full_path = file_path
-        
-        with open(full_path, 'r', encoding='utf-8') as file:
+
+        # Resolve symlinks before enforcing vault boundaries.
+        resolved_path = os.path.realpath(full_path)
+        if not is_virtual_mount:
+            vault_abs = os.path.realpath(vault_root)
+            if not resolved_path.startswith(vault_abs + os.sep) and resolved_path != vault_abs:
+                raise ValueError("Path escapes vault boundaries")
+
+        with open(resolved_path, 'r', encoding='utf-8') as file:
             content = file.read()
         
         return {
@@ -129,24 +139,102 @@ class InputFileDirective(DirectiveProcessor):
     
     def get_directive_name(self) -> str:
         return "input"
+
+    def _parse_input_target_and_parameters(self, value: str) -> tuple[str, Dict[str, str]]:
+        allowed_parameters = {
+            "required",
+            "refs_only",
+            "refs-only",
+            "head",
+            "properties",
+            "output",
+            "write-mode",
+            "write_mode",
+            "scope",
+        }
+        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
+            value.strip(),
+            allowed_parameters=allowed_parameters,
+        )
+
+        # Fallback parser for properties list syntax like:
+        # (properties=key1, key2)
+        if (
+            "properties" in value
+            and value.rstrip().endswith(")")
+            and "properties" not in {k.lower() for k in parameters.keys()}
+        ):
+            parsed = self._parse_input_target_and_parameters_fallback(value, allowed_parameters)
+            if parsed is not None:
+                base_value, parameters = parsed
+
+        return base_value, {k.lower(): v for k, v in parameters.items()}
+
+    def _parse_input_target_and_parameters_fallback(
+        self,
+        value: str,
+        allowed_parameters: set[str],
+    ) -> Optional[tuple[str, Dict[str, str]]]:
+        stripped = value.rstrip()
+        if not stripped.endswith(")"):
+            return None
+
+        depth = 0
+        open_idx: Optional[int] = None
+        for idx in range(len(stripped) - 1, -1, -1):
+            char = stripped[idx]
+            if char == ")":
+                depth += 1
+            elif char == "(":
+                depth -= 1
+                if depth == 0:
+                    open_idx = idx
+                    break
+
+        if open_idx is None or depth != 0:
+            return None
+
+        base_value = stripped[:open_idx].rstrip()
+        params_section = stripped[open_idx + 1 : -1].strip()
+        if not base_value or not params_section:
+            return None
+
+        tokens = [token.strip() for token in params_section.split(",") if token.strip()]
+        if not tokens:
+            return base_value, {}
+
+        parameters: Dict[str, str] = {}
+        current_key: Optional[str] = None
+        for token in tokens:
+            if "=" in token:
+                key, val = token.split("=", 1)
+                key = key.strip().lower()
+                val = val.strip()
+                if key not in allowed_parameters:
+                    return None
+                parameters[key] = val
+                current_key = key
+                continue
+
+            if current_key == "properties":
+                previous = parameters.get("properties", "")
+                parameters["properties"] = f"{previous}, {token}".strip(", ")
+                continue
+
+            key = token.lower()
+            if key not in allowed_parameters:
+                return None
+            parameters[key] = "true"
+            current_key = key
+
+        return base_value, parameters
     
     def validate_value(self, value: str) -> bool:
         if not value or not value.strip():
             return False
 
         # Parse base value and parameters
-        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value.strip(),
-            allowed_parameters={
-                "required",
-                "refs_only",
-                "refs-only",
-                "output",
-                "write-mode",
-                "write_mode",
-                "scope",
-            },
-        )
+        base_value, parameters = self._parse_input_target_and_parameters(value.strip())
 
         if not base_value:
             return False
@@ -171,6 +259,8 @@ class InputFileDirective(DirectiveProcessor):
                 'required',
                 'refs_only',
                 'refs-only',
+                'head',
+                'properties',
                 'output',
                 'write-mode',
                 'write_mode',
@@ -179,6 +269,22 @@ class InputFileDirective(DirectiveProcessor):
                 return False
             if param_name in {'required', 'refs_only', 'refs-only'}:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
+                    return False
+            if param_name == 'head':
+                try:
+                    if int(param_value) <= 0:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            if param_name == 'properties':
+                raw = (param_value or "").strip()
+                if not raw:
+                    continue
+                lowered = raw.lower()
+                if lowered in {'true', 'false', 'yes', 'no', '1', '0'}:
+                    continue
+                keys = [k.strip() for k in raw.split(",") if k.strip()]
+                if not keys:
                     return False
 
         return True
@@ -191,15 +297,15 @@ class InputFileDirective(DirectiveProcessor):
         """
         value = value.strip()
 
-        # Parse required parameter if present
-        base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
-            value, allowed_parameters={"required", "refs_only", "refs-only", "output", "write-mode", "write_mode", "scope"}
-        )
+        # Parse optional parameters
+        base_value, parameters = self._parse_input_target_and_parameters(value)
         required = parameters.get('required', '').lower() in ['true', 'yes', '1']
         refs_only = (
             parameters.get('refs_only', parameters.get('refs-only', '')).lower()
             in ['true', 'yes', '1']
         )
+        head_chars = self._parse_head_chars(parameters.get('head'))
+        properties_enabled, properties_keys = self._parse_properties_mode(parameters.get('properties'))
         output_target_value = parameters.get('output')
         write_mode_param = parameters.get('write-mode') or parameters.get('write_mode')
         scope_value = parameters.get('scope')
@@ -252,6 +358,11 @@ class InputFileDirective(DirectiveProcessor):
             }
             if refs_only:
                 result["refs_only"] = True
+            else:
+                if properties_enabled:
+                    result = self._apply_properties_mode(result, properties_keys)
+                if head_chars is not None:
+                    result = self._truncate_result_content(result, head_chars)
             results = [result]
             if output_target_value:
                 return self._route_input_results(
@@ -306,6 +417,19 @@ class InputFileDirective(DirectiveProcessor):
                 if isinstance(file_data, dict):
                     file_data['refs_only'] = True
                     file_data['content'] = ""
+        else:
+            if properties_enabled:
+                result_files = [
+                    self._apply_properties_mode(file_data, properties_keys)
+                    if isinstance(file_data, dict) else file_data
+                    for file_data in result_files
+                ]
+            if head_chars is not None:
+                result_files = [
+                    self._truncate_result_content(file_data, head_chars)
+                    if isinstance(file_data, dict) else file_data
+                    for file_data in result_files
+                ]
 
         if output_target_value:
             return self._route_input_results(
@@ -319,6 +443,90 @@ class InputFileDirective(DirectiveProcessor):
             )
 
         return result_files
+
+    def _parse_head_chars(self, head_value: Optional[str]) -> Optional[int]:
+        if head_value is None or str(head_value).strip() == "":
+            return None
+        try:
+            parsed = int(head_value)
+        except (TypeError, ValueError):
+            raise ValueError("head must be a positive integer") from None
+        if parsed <= 0:
+            raise ValueError("head must be a positive integer")
+        return parsed
+
+    def _parse_properties_mode(self, properties_value: Optional[str]) -> tuple[bool, Optional[List[str]]]:
+        if properties_value is None:
+            return False, None
+        raw = str(properties_value).strip()
+        if not raw:
+            return True, None
+        lowered = raw.lower()
+        if lowered in {"true", "yes", "1"}:
+            return True, None
+        if lowered in {"false", "no", "0"}:
+            return False, None
+        keys = [key.strip() for key in raw.split(",") if key.strip()]
+        if not keys:
+            raise ValueError("properties must be true/false or a comma-separated key list")
+        return True, keys
+
+    def _apply_properties_mode(
+        self,
+        file_data: Dict[str, Any],
+        requested_keys: Optional[List[str]],
+    ) -> Dict[str, Any]:
+        if not file_data.get("found", True):
+            return file_data
+        content = file_data.get("content")
+        if not isinstance(content, str):
+            return file_data
+
+        try:
+            props, _remaining = parse_simple_frontmatter(content, require_frontmatter=False)
+        except ValueError:
+            props = {}
+
+        if requested_keys is None:
+            selected = dict(props)
+        else:
+            selected = {key: props[key] for key in requested_keys if key in props}
+
+        if not selected:
+            file_data["refs_only"] = True
+            file_data["content"] = ""
+            file_data["properties_extracted"] = False
+            file_data["properties_keys"] = requested_keys or []
+            return file_data
+
+        lines = [f"{key}: {self._format_property_value(value)}" for key, value in selected.items()]
+        file_data["content"] = "\n".join(lines)
+        file_data["properties_extracted"] = True
+        file_data["properties_keys"] = list(selected.keys())
+        return file_data
+
+    def _format_property_value(self, value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    def _truncate_result_content(self, file_data: Dict[str, Any], head_chars: int) -> Dict[str, Any]:
+        if not file_data.get("found", True):
+            return file_data
+        if file_data.get("refs_only"):
+            return file_data
+        content = file_data.get("content")
+        if not isinstance(content, str):
+            return file_data
+        original_chars = len(content)
+        file_data["head"] = head_chars
+        file_data["content_original_chars"] = original_chars
+        if original_chars <= head_chars:
+            file_data["content_truncated"] = False
+            return file_data
+        file_data["content"] = content[:head_chars]
+        file_data["content_truncated"] = True
+        return file_data
 
     def _route_input_results(
         self,
@@ -609,6 +817,8 @@ class InputFileDirective(DirectiveProcessor):
                 vault_path,
                 value,
                 pattern,
+                context.get('reference_date'),
+                context.get('week_start_day', 0),
             )
         else:
             # Single file patterns like {today}
@@ -707,15 +917,42 @@ class InputFileDirective(DirectiveProcessor):
     
     def _resolve_time_based_multi_pattern(self, base_pattern: str, count: int, 
                                         search_directory: str, vault_path: str,
-                                        original_value: str, pattern: str) -> List[Dict[str, Any]]:
+                                        original_value: str, pattern: str,
+                                        reference_date: Optional[datetime],
+                                        week_start_day: int) -> List[Dict[str, Any]]:
         """Handle time-based multi-file patterns like {latest:3}."""
+        if count < 1:
+            return []
+
         all_files = self.pattern_utils.get_directory_files(search_directory)
         
         if base_pattern == 'latest':
             matched_files = self.pattern_utils.get_latest_files(all_files, count)
+        elif base_pattern == 'yesterday':
+            now = reference_date or datetime.now()
+            end_date = (now - timedelta(days=1)).date()
+            start_date = (now - timedelta(days=count)).date()
+            matched_files = self._select_files_in_date_range(
+                all_files,
+                start_date,
+                end_date,
+                limit=None,
+            )
+        elif base_pattern in {'this-week', 'last-week'}:
+            now = reference_date or datetime.now()
+            week_offset = 0 if base_pattern == 'this-week' else -1
+            week_start = self.pattern_utils._get_week_start_date(now, week_start_day, week_offset).date()
+            week_end = week_start + timedelta(days=6)
+            matched_files = self._select_files_in_date_range(
+                all_files,
+                week_start,
+                week_end,
+                limit=count,
+            )
         else:
-            # For other patterns, use simple approach for now
-            matched_files = all_files[:count]
+            raise ValueError(
+                f"Counted pattern '{{{base_pattern}:{count}}}' is not supported for @input"
+            )
         
         # Load content from matched files
         result_files = []
@@ -728,6 +965,30 @@ class InputFileDirective(DirectiveProcessor):
             result_files.append(file_data)
         
         return result_files
+
+    def _select_files_in_date_range(
+        self,
+        all_files: List[str],
+        start_date,
+        end_date,
+        limit: Optional[int],
+    ) -> List[str]:
+        """Return files with date-bearing filenames in [start_date, end_date]."""
+        dated_matches = []
+        for filepath in all_files:
+            file_date = self.pattern_utils.extract_date_from_filename(filepath)
+            if not file_date:
+                continue
+            file_day = file_date.date()
+            if start_date <= file_day <= end_date:
+                dated_matches.append((file_date, filepath))
+
+        # Most recent first for predictable recency-oriented selection.
+        dated_matches.sort(key=lambda x: x[0], reverse=True)
+        matched_files = [filepath for _, filepath in dated_matches]
+        if limit is not None:
+            matched_files = matched_files[:limit]
+        return matched_files
     
     def _resolve_single_time_pattern(self, value: str, vault_path: str, **context) -> List[Dict[str, Any]]:
         """Handle single time patterns like {today}."""

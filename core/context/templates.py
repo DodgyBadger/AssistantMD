@@ -9,7 +9,8 @@ from core.constants import ASSISTANTMD_ROOT_DIR, CONTEXT_TEMPLATE_DIR
 from core.directives.parser import parse_directives
 from core.runtime.paths import get_system_root
 from core.logger import UnifiedLogger
-from core.workflow.parser import parse_frontmatter, parse_markdown_sections
+from core.workflow.parser import parse_markdown_sections
+from core.utils.frontmatter import parse_simple_frontmatter
 from core.utils.hash import hash_file_content
 
 logger = UnifiedLogger(tag="context-templates")
@@ -93,7 +94,11 @@ def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str
     """Parse optional frontmatter and markdown sections for templates."""
     stripped = content.lstrip()
     if stripped.startswith("---"):
-        frontmatter, remaining = parse_frontmatter(content)
+        frontmatter, remaining = parse_simple_frontmatter(
+            content,
+            require_frontmatter=True,
+            missing_error="Template file must start with YAML frontmatter (---)",
+        )
     else:
         frontmatter = {}
         remaining = content

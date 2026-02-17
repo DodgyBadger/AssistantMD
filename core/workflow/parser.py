@@ -16,6 +16,7 @@ from core.scheduling.parser import parse_schedule_syntax, ScheduleParsingError
 from core.directives.parser import parse_directives
 from core.directives.bootstrap import ensure_builtin_directives_registered
 from core.directives.registry import get_global_registry, InvalidDirectiveError
+from core.utils.frontmatter import parse_simple_frontmatter
 
 
 # Create module logger
@@ -74,78 +75,12 @@ class WorkflowConfigSchema(BaseModel):
 #######################################################################
 
 def parse_frontmatter(content: str) -> Tuple[dict, str]:
-    """Extract frontmatter key-value pairs and remaining content.
-
-    Parses frontmatter as simple key: value pairs without YAML interpretation.
-    This avoids YAML syntax restrictions and allows any characters in values.
-
-    Args:
-        content: Full file content starting with frontmatter
-
-    Returns:
-        Tuple of (config_dict, remaining_content)
-
-    Raises:
-        ValueError: If frontmatter format is invalid
-    """
-    content = content.strip()
-
-    if not content.startswith('---'):
-        raise ValueError("Workflow file must start with YAML frontmatter (---)")
-
-    lines = content.split('\n')
-    if len(lines) < 3:
-        raise ValueError("Invalid frontmatter format: file too short")
-
-    # Find closing ---
-    end_idx = None
-    for i, line in enumerate(lines[1:], 1):
-        if line.strip() == '---':
-            end_idx = i
-            break
-
-    if end_idx is None:
-        raise ValueError("Frontmatter not properly closed with ---")
-
-    # Parse key-value pairs (split on first colon only)
-    config = {}
-    for line_num, line in enumerate(lines[1:end_idx], 2):
-        line = line.strip()
-
-        # Skip empty lines and comments
-        if not line or line.startswith('#'):
-            continue
-
-        # Must contain colon
-        if ':' not in line:
-            raise ValueError(f"Line {line_num}: Invalid format, expected 'key: value'")
-
-        # Split on first colon only - everything after is the value
-        key, value = line.split(':', 1)
-        key = key.strip()
-        value = value.strip()
-
-        if not key:
-            raise ValueError(f"Line {line_num}: Empty key not allowed")
-
-        # Strip matching quotes (Obsidian adds these automatically)
-        if len(value) >= 2:
-            if (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'"):
-                value = value[1:-1]
-
-        # Convert common boolean strings
-        if value.lower() in ('true', 'yes', 'on'):
-            config[key] = True
-        elif value.lower() in ('false', 'no', 'off'):
-            config[key] = False
-        else:
-            # Keep as string (Pydantic will handle type conversion)
-            config[key] = value
-
-    # Extract remaining content
-    remaining_content = '\n'.join(lines[end_idx + 1:])
-
-    return config, remaining_content
+    """Extract frontmatter key-value pairs and remaining content."""
+    return parse_simple_frontmatter(
+        content,
+        require_frontmatter=True,
+        missing_error="Workflow file must start with YAML frontmatter (---)",
+    )
 
 
 #######################################################################
