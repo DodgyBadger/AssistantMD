@@ -156,28 +156,28 @@ class InputFileDirective(DirectiveProcessor):
             value.strip(),
             allowed_parameters=allowed_parameters,
         )
-
-        # Fallback parser for properties list syntax like:
-        # (properties=key1, key2)
-        if (
-            "properties" in value
-            and value.rstrip().endswith(")")
-            and "properties" not in {k.lower() for k in parameters.keys()}
+        if self._has_unparsed_known_param_assignment(
+            value=value,
+            allowed_parameters=allowed_parameters,
+            parsed_parameters={k.lower() for k in parameters.keys()},
         ):
-            parsed = self._parse_input_target_and_parameters_fallback(value, allowed_parameters)
-            if parsed is not None:
-                base_value, parameters = parsed
+            raise ValueError(
+                "Malformed parameter block. If a value contains commas, wrap it in quotes "
+                '(e.g. properties="name,description").'
+            )
 
         return base_value, {k.lower(): v for k, v in parameters.items()}
 
-    def _parse_input_target_and_parameters_fallback(
+    def _has_unparsed_known_param_assignment(
         self,
+        *,
         value: str,
         allowed_parameters: set[str],
-    ) -> Optional[tuple[str, Dict[str, str]]]:
+        parsed_parameters: set[str],
+    ) -> bool:
         stripped = value.rstrip()
         if not stripped.endswith(")"):
-            return None
+            return False
 
         depth = 0
         open_idx: Optional[int] = None
@@ -190,51 +190,26 @@ class InputFileDirective(DirectiveProcessor):
                 if depth == 0:
                     open_idx = idx
                     break
-
         if open_idx is None or depth != 0:
-            return None
+            return False
 
-        base_value = stripped[:open_idx].rstrip()
-        params_section = stripped[open_idx + 1 : -1].strip()
-        if not base_value or not params_section:
-            return None
-
-        tokens = [token.strip() for token in params_section.split(",") if token.strip()]
-        if not tokens:
-            return base_value, {}
-
-        parameters: Dict[str, str] = {}
-        current_key: Optional[str] = None
-        for token in tokens:
-            if "=" in token:
-                key, val = token.split("=", 1)
-                key = key.strip().lower()
-                val = val.strip()
-                if key not in allowed_parameters:
-                    return None
-                parameters[key] = val
-                current_key = key
-                continue
-
-            if current_key == "properties":
-                previous = parameters.get("properties", "")
-                parameters["properties"] = f"{previous}, {token}".strip(", ")
-                continue
-
-            key = token.lower()
-            if key not in allowed_parameters:
-                return None
-            parameters[key] = "true"
-            current_key = key
-
-        return base_value, parameters
+        params_section = stripped[open_idx + 1 : -1]
+        assignment_keys = {
+            key.lower()
+            for key in re.findall(r"([A-Za-z_][A-Za-z0-9_-]*)\s*=", params_section)
+        }
+        known_assignment_keys = assignment_keys.intersection(allowed_parameters)
+        return bool(known_assignment_keys - parsed_parameters)
     
     def validate_value(self, value: str) -> bool:
         if not value or not value.strip():
             return False
 
         # Parse base value and parameters
-        base_value, parameters = self._parse_input_target_and_parameters(value.strip())
+        try:
+            base_value, parameters = self._parse_input_target_and_parameters(value.strip())
+        except ValueError:
+            return False
 
         if not base_value:
             return False

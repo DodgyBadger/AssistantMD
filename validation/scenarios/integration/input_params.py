@@ -121,7 +121,7 @@ Summarize the files.
 
 ## PROPERTIES
 @model test
-@input file: notes/with_props (properties=status, owner)
+@input file: notes/with_props (properties="status,owner")
 @input file: notes/no_props (properties)
 
 Summarize the properties.

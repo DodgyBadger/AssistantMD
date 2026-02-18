@@ -63,7 +63,7 @@ Pass references only instead of full content - file path or variable name.
 `head=N`  
 Inline only the first `N` characters per resolved input (file or variable).
 
-`properties` or `properties=KEY1, KEY2`  
+`properties` or `properties="KEY1,KEY2"`  
 Inline frontmatter properties only. With no value, includes all properties. With keys, includes only matching properties.
 
 `output=DEST`  
@@ -81,13 +81,14 @@ E.g. `@input variable:foo (scope=session)` reads foo from  session scope. This c
 - In context templates, `@input file:myfile (output=context)` will route the file contents immediately into chat agent context, bypassing the LLM.  
 - Precedence is `refs_only` > `properties` > `head`.
 - If `properties` is enabled and no frontmatter properties are found, input falls back to refs-only for that item.
+- If a parameter value contains commas (for example `properties` key lists), wrap the value in quotes.
 
 ### Examples:
 - `@input file: notes/*.md`
 - `@input variable: foo`
 - `@input file: inbox/{pending:5} (required, refs_only)`
 - `@input file: notes/large.md (head=2000)`
-- `@input file: Projects/Plan (properties=status, owner)`
+- `@input file: Projects/Plan (properties="status,owner")`
 - `@input file: inbox/{pending:3} (output=variable: batch, write_mode=new)`
 
 </details>
@@ -786,5 +787,4 @@ Same as above, but with `write_mode=new`, each file in folder `notes` is written
 
 `@tools web_search_duckduckgo (output=variable:search_result, write_mode=new)`  
 All `web_search_duckduckgo` tool output is written to a variable, same sequential numbering pattern as above.
-
 
