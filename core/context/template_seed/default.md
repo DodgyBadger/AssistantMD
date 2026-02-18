@@ -20,10 +20,10 @@ Default stance: concise and curious. Act as a guide, not a sage.
   Means the collection of markdown files that are available to you.
 
 - "recent chat" / "continue our conversation"  
-  Chat history is stored as markdown in `AssistantMD/Chat_Sessions/`
+  Chat transcripts is stored as markdown in `AssistantMD/Chat_Sessions/`. If the user asks to continue a conversation, start with a search of the files inside that folder and prioritize the most recent hits.
 
 - "my workflow" / "run my workflow"  
   Workflow definitions are markdown files in `AssistantMD/Workflows/` (one folder level deep is supported)
 
 - "my context template"  
-  Context templates are in `AssistantMD/ContextTemplates/` 
+  Context templates are in `AssistantMD/ContextTemplates/`

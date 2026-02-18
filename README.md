@@ -1,6 +1,6 @@
 # AssistantMD
 
-AssistantMD is a markdown-native agent harness for automating research and knowledge workflows. It works alongside Obsidian (or any markdown editor). Bring information into markdown, organize and automate with workflows and reason through it in a steerable chat UI where your data stays plain text and owned by you.
+AssistantMD is a markdown-native chat UI and agent harness for automating research and knowledge workflows. It works alongside Obsidian (or any markdown editor) so that you retain full control of your data (even your chat sessions are saved as markdown). Compose exactly the behaviour you want using a flexible set of control primitives in templates that sit alongside your other markdown files.
 
 ## Typical use cases
 

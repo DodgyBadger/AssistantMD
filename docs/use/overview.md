@@ -8,6 +8,8 @@ When you first run the app, a new `AssistantMD` folder will be added to each of 
 
 Once setup is complete, open the web app at `http://localhost:8000/` (or the host/port you configured).
 
+**Security note**: The app has no built-in auth or TLS. Keep it on a trusted network or add your own [security layers](../setup/security.md).
+
 ### Chat
 
 Chat works like other AI chats but with access to your markdown files. Open **Chat Settings**, pick a vault and model, then toggle tools as needed:
@@ -20,7 +22,8 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 - **tavily_extract**: extract content from specific URLs (API required, free tier available)
 - **tavily_crawl**: crawl and extract content from multiple pages (API required, free tier available)
 
-**Security note**: The app has no built-in auth or TLS. Keep it on a trusted network or add your own [security layers](../setup/security.md).
+**A note about chat sessions**: Unlike most chat apps, you will not find a list of sessions in the chat UI. A transcript of each session is saved as a markdown file in `AssistantMD/Chat_Sessions`. Since these are just files in your vault, the chat agent has full access to them. If you want to continue a conversation, just ask the chat agent to load it. The default context template includes instructions that make this really easy - just type something like "Let's continue our conversation about quantum entanglement". You can also set up more sophisticated memory systems by combining scheduled workflows and context templates. [See this example](../examples/ContextTemplates/weekly-memory.md)
+
 
 ### Context Manager
 
