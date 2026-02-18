@@ -8,10 +8,13 @@ from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
 from core.context.templates import load_template
 from core.logger import UnifiedLogger
-from core.constants import CONTEXT_MANAGER_SYSTEM_INSTRUCTION
+from core.constants import (
+    CONTEXT_MANAGER_SYSTEM_INSTRUCTION,
+    CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION,
+)
 from core.directives.bootstrap import ensure_builtin_directives_registered
 from core.directives.registry import get_global_registry
-from pydantic_ai.messages import ModelMessage, SystemPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
 from core.tools.utils import estimate_token_count
 from core.context.store import add_context_summary, upsert_session
 from core.runtime.buffers import BufferStore
@@ -23,6 +26,7 @@ from core.context.manager_helpers import (
     run_slice,
 )
 from core.context.manager_types import (
+    ContextTemplateError,
     ContextManagerDeps,
     ContextManagerInput,
     ContextManagerResult,
@@ -146,9 +150,37 @@ def build_context_manager_history_processor(
 
     ensure_builtin_directives_registered()
     registry = get_global_registry()
-    template = load_template(template_name, Path(vault_path))
+    try:
+        template = load_template(template_name, Path(vault_path))
+        runtime = prepare_template_runtime(template, passthrough_runs, token_threshold_default=0)
+    except Exception as exc:
+        template_error = ContextTemplateError(
+            f"Failed to load/parse context template '{template_name}': {exc}",
+            template_pointer="Template frontmatter and ## section headings",
+            section_name=None,
+            phase="template_load",
+        )
+        logger.warning(
+            "Context template load failed; falling back to passthrough history",
+            metadata={
+                "error": str(template_error),
+                "phase": template_error.phase,
+                "template_pointer": template_error.template_pointer,
+            },
+        )
+
+        async def processor(_run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
+            warning = (
+                CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
+                + 
+                f"phase={template_error.phase}; "
+                f"template_pointer={template_error.template_pointer}; "
+                f"message={template_error}"
+            )
+            return [ModelRequest(parts=[SystemPromptPart(content=warning)])] + list(messages)
+
+        return processor
     recent_summaries = 0
-    runtime = prepare_template_runtime(template, passthrough_runs, token_threshold_default=0)
     default_sections = runtime.sections
     week_start_day = runtime.week_start_day
     passthrough_runs = runtime.passthrough_runs
@@ -288,8 +320,30 @@ def build_context_manager_history_processor(
                     manage_context_fn=manage_context,
                 )
             except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("Context management failed in history processor", metadata={"error": str(exc)})
-                return list(messages)
+                phase = getattr(exc, "phase", "section_execution")
+                section_name = getattr(exc, "section_name", section.name)
+                template_pointer = getattr(exc, "template_pointer", f"## {section.name}")
+                logger.warning(
+                    "Context management failed in history processor",
+                    metadata={
+                        "error": str(exc),
+                        "phase": phase,
+                        "section_name": section_name,
+                        "template_pointer": template_pointer,
+                    },
+                )
+                warning = (
+                    CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
+                    +
+                    f"section={section_name}; "
+                    f"phase={phase}; "
+                    f"template_pointer={template_pointer}; "
+                    f"message={exc}"
+                )
+                summary_messages.append(
+                    ModelRequest(parts=[SystemPromptPart(content=warning)])
+                )
+                continue
             summary_messages.extend(result.summary_messages)
             persisted_sections.extend(result.persisted_sections)
 

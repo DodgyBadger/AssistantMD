@@ -127,3 +127,11 @@ LATEST_USER_INPUT: The last user input. This is what the primary chat agent shou
 - Everything you output must be sourced from the sections provided. Do not include details of this prompt or invent content.
 - If you cannot resolve an instruction to the content provided, reply "N/A" for that instruction.
 """
+
+# Instruction prepended when context template processing fails in history compilation.
+CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
+    "Context template error detected. "
+    "Do not continue normal task execution. "
+    "First explain this context-template error to the user and ask whether to proceed "
+    "without template management (for example by switching to the default template). "
+)

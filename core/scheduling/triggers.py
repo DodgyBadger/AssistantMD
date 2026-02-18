@@ -5,8 +5,6 @@ Converts ParsedSchedule objects into appropriate APScheduler trigger instances
 (CronTrigger, DateTrigger) for job scheduling.
 """
 
-from typing import Union
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.base import BaseTrigger
 

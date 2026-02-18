@@ -4,6 +4,7 @@ Workflow run tool for vault-scoped workflow discovery and execution.
 
 from __future__ import annotations
 
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -65,8 +66,11 @@ class WorkflowRun(BaseTool):
 
                     global_id = f"{vault_name}/{name}"
                     single_step = (step_name or "").strip() or None
-                    result = await cls._execute_workflow(global_id, single_step)
-                    return cls._format_run_result(result)
+                    try:
+                        result = await cls._execute_workflow(global_id, single_step)
+                        return cls._format_run_result(result)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        return cls._format_run_error(global_id, single_step, exc)
 
                 return "Unknown operation. Available: list, run"
             except RuntimeStateError as exc:
@@ -104,12 +108,13 @@ Notes:
 
         try:
             relative = vault.relative_to(root)
-            if relative.parts:
-                return relative.parts[0]
-        except ValueError:
-            pass
+        except ValueError as exc:
+            raise ValueError("vault_path must be inside configured data_root") from exc
 
-        return vault.name
+        if not relative.parts:
+            raise ValueError("vault_path must point to a vault directory under data_root")
+
+        return relative.parts[0]
 
     @staticmethod
     def _is_invalid_workflow_name(name: str) -> bool:
@@ -148,13 +153,74 @@ Notes:
         )
 
     @staticmethod
+    def _format_run_error(global_id: str, step_name: str | None, exc: Exception) -> str:
+        tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        tail = "".join(tb_lines).strip().splitlines()[-12:]
+        failed_step = getattr(exc, "step_name", None) or step_name or ""
+        template_pointer = getattr(exc, "template_pointer", "")
+        phase = getattr(exc, "phase", "")
+        lines = [
+            "success: False",
+            f"global_id: {global_id}",
+            f"step_name: {failed_step}",
+            f"error_type: {type(exc).__name__}",
+            f"phase: {phase}",
+            f"template_pointer: {template_pointer}",
+            f"message: {exc}",
+        ]
+        if tail:
+            lines.append("traceback_tail:")
+            lines.extend([f"  {line}" for line in tail])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_load_errors(loader, global_id: str) -> str:
+        if "/" not in global_id:
+            return ""
+
+        vault, name = global_id.split("/", 1)
+        matches = [
+            error
+            for error in loader.get_configuration_errors()
+            if error.vault == vault and (error.workflow_name == name or error.workflow_name is None)
+        ]
+        if not matches:
+            return ""
+
+        deduped = []
+        seen = set()
+        for error in matches:
+            key = (error.error_type, error.error_message, error.file_path)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(error)
+
+        lines = ["workflow_configuration_errors:"]
+        for error in deduped[:5]:
+            lines.append(
+                f"- [{error.error_type}] {error.error_message} (file: {error.file_path})"
+            )
+        if len(deduped) > 5:
+            lines.append(f"- ... and {len(deduped) - 5} more")
+        return "\n".join(lines)
+
+    @staticmethod
     async def _execute_workflow(global_id: str, step_name: str | None) -> dict:
         if "/" not in global_id:
             raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
 
         runtime = get_runtime_context()
         loader = runtime.workflow_loader
-        loaded = await loader.load_workflows(force_reload=True, target_global_id=global_id)
+        try:
+            loaded = await loader.load_workflows(force_reload=True, target_global_id=global_id)
+        except Exception as exc:
+            load_errors = WorkflowRun._format_load_errors(loader, global_id)
+            if load_errors:
+                raise ValueError(
+                    f"Workflow load failed for '{global_id}': {exc}\n{load_errors}"
+                ) from exc
+            raise
         if not loaded:
             raise ValueError(f"Workflow not found: {global_id}")
 

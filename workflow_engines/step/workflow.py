@@ -15,6 +15,40 @@ from core.directives.tools import ToolsDirective
 logger = UnifiedLogger(tag="step-workflow")
 
 
+class WorkflowTemplateError(ValueError):
+    """Workflow error with template-facing context for user/LLM debugging."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        template_pointer: str,
+        step_name: str | None = None,
+        phase: str | None = None,
+    ):
+        super().__init__(message)
+        self.template_pointer = template_pointer
+        self.step_name = step_name
+        self.phase = phase
+
+
+def _to_template_error(
+    exc: Exception,
+    *,
+    template_pointer: str,
+    step_name: str | None = None,
+    phase: str | None = None,
+) -> WorkflowTemplateError:
+    if isinstance(exc, WorkflowTemplateError):
+        return exc
+    return WorkflowTemplateError(
+        str(exc),
+        template_pointer=template_pointer,
+        step_name=step_name,
+        phase=phase,
+    )
+
+
 ########################################################################
 ## Workflow entry. All workflow modules must implement run_workflow.
 ########################################################################
@@ -79,7 +113,15 @@ async def run_workflow(job_args: dict, **kwargs):
         ## 1: LOAD AND VALIDATE ASSISTANT CONFIGURATION
         #######################################################################
         
-        config = await load_and_validate_config(services, step_name)
+        try:
+            config = await load_and_validate_config(services, step_name)
+        except Exception as exc:
+            raise _to_template_error(
+                exc,
+                template_pointer="YAML frontmatter and workflow section headings (## ...)",
+                step_name=step_name or None,
+                phase="workflow_parse",
+            ) from exc
         workflow_sections = config['workflow_sections']
         workflow_instructions = config['workflow_instructions']
         workflow_steps = config['workflow_steps']
@@ -96,15 +138,23 @@ async def run_workflow(job_args: dict, **kwargs):
         
         for i, current_step in enumerate(workflow_steps):
             raw_step_content = workflow_sections[current_step]
-            await process_workflow_step(
-                current_step,
-                raw_step_content,
-                workflow_instructions,
-                services,
-                i,
-                step_name,
-                context,
-            )
+            try:
+                await process_workflow_step(
+                    current_step,
+                    raw_step_content,
+                    workflow_instructions,
+                    services,
+                    i,
+                    step_name,
+                    context,
+                )
+            except Exception as exc:
+                raise _to_template_error(
+                    exc,
+                    template_pointer=f"## {current_step}",
+                    step_name=current_step,
+                    phase="step_execution",
+                ) from exc
         
         #######################################################################
         ## 4: WORKFLOW COMPLETION
@@ -133,12 +183,18 @@ async def run_workflow(job_args: dict, **kwargs):
         
     except Exception as e:
         # Log workflow failure with context
+        template_pointer = getattr(e, "template_pointer", "")
+        failed_step_name = getattr(e, "step_name", "")
+        phase = getattr(e, "phase", "")
         logger.error(
             "Workflow execution failed",
             data={
                 "vault": services.workflow_id,
                 "error_message": str(e),
                 "steps_attempted": len(workflow_steps),
+                "template_pointer": template_pointer,
+                "step_name": failed_step_name,
+                "phase": phase,
             },
         )
         raise
@@ -292,11 +348,19 @@ async def process_workflow_step(
     today = context['today']
 
     # Process all directives with current context (single parse operation)
-    processed_step = services.process_step(
-        raw_step_content,
-        reference_date=today,
-        buffer_store=context.get("buffer_store"),
-    )
+    try:
+        processed_step = services.process_step(
+            raw_step_content,
+            reference_date=today,
+            buffer_store=context.get("buffer_store"),
+        )
+    except Exception as exc:
+        raise _to_template_error(
+            exc,
+            template_pointer=f"## {step_name} (directive block at top of this step)",
+            step_name=step_name,
+            phase="directive_parse",
+        ) from exc
 
     # Get output targets from processed step (optional, may be multiple)
     output_target_value = processed_step.get_directive_value('output')
@@ -376,19 +440,34 @@ async def process_workflow_step(
     )
 
     # Generate AI content
-    chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
+    try:
+        chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
+    except Exception as exc:
+        raise _to_template_error(
+            exc,
+            template_pointer=f"## {step_name} (@model/@tools setup in this step)",
+            step_name=step_name,
+            phase="agent_setup",
+        ) from exc
     buffer_store = context.get("buffer_store")
     deps = SimpleNamespace(
         buffer_store=buffer_store,
         buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
     )
-    step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
+    try:
+        step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
+    except Exception as exc:
+        raise _to_template_error(
+            exc,
+            template_pointer=f"## {step_name} (step prompt/model execution)",
+            step_name=step_name,
+            phase="model_run",
+        ) from exc
 
     # Write AI-generated content to output targets (if @output specified)
     if output_targets:
         write_mode = processed_step.get_directive_value('write_mode')
         header_value = processed_step.get_directive_value('header')
-        wrote_output = False
         for output_target in output_targets:
             if isinstance(output_target, dict) and output_target.get("type") == "context":
                 logger.info(
@@ -403,25 +482,32 @@ async def process_workflow_step(
                 target = OutputTarget(type="buffer", name=output_target.get("name"))
             else:
                 target = OutputTarget(type="file", path=output_target)
-            write_result = write_output(
-                target=target,
-                content=step_content,
-                write_mode=write_mode,
-                buffer_store=context.get("buffer_store"),
-                vault_path=services.vault_path,
-                header=header_value,
-                buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
-                default_scope="run",
-                metadata={
-                    "source": "workflow_step",
-                    "origin_id": services.workflow_id,
-                    "origin_name": step_name,
-                    "origin_type": "workflow_step",
-                    "write_mode": write_mode or "append",
-                    "size_chars": len(step_content or ""),
-                },
-            )
-            wrote_output = True
+            try:
+                write_result = write_output(
+                    target=target,
+                    content=step_content,
+                    write_mode=write_mode,
+                    buffer_store=context.get("buffer_store"),
+                    vault_path=services.vault_path,
+                    header=header_value,
+                    buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
+                    default_scope="run",
+                    metadata={
+                        "source": "workflow_step",
+                        "origin_id": services.workflow_id,
+                        "origin_name": step_name,
+                        "origin_type": "workflow_step",
+                        "write_mode": write_mode or "append",
+                        "size_chars": len(step_content or ""),
+                    },
+                )
+            except Exception as exc:
+                raise _to_template_error(
+                    exc,
+                    template_pointer=f"## {step_name} (@output/@write_mode/@header in this step)",
+                    step_name=step_name,
+                    phase="output_write",
+                ) from exc
             if write_result.get("type") == "file" and write_result.get("path"):
                 context['created_files'].add(write_result.get("path"))
         # Update state manager for any pending patterns used

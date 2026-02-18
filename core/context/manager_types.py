@@ -10,6 +10,23 @@ from core.context.templates import TemplateRecord, TemplateSection
 from core.runtime.buffers import BufferStore
 
 
+class ContextTemplateError(ValueError):
+    """Template-facing context manager error with section/pointer metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        template_pointer: str,
+        section_name: Optional[str] = None,
+        phase: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.template_pointer = template_pointer
+        self.section_name = section_name
+        self.phase = phase
+
+
 @dataclass
 class ContextManagerInput:
     """Minimal inputs needed to manage/curate a working context."""

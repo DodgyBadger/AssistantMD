@@ -36,6 +36,7 @@ from core.context.manager_types import (
     ContextManagerInput,
     ContextManagerResult,
     CacheDecision,
+    ContextTemplateError,
     InputResolutionResult,
     OutputRoutingResult,
     SectionExecutionContext,
@@ -43,6 +44,32 @@ from core.context.manager_types import (
 )
 
 logger = UnifiedLogger(tag="context-manager")
+
+
+def _raise_context_template_error(
+    *,
+    message: str,
+    section_name: str,
+    phase: str,
+    pointer_suffix: str,
+    cause: Exception | None = None,
+) -> None:
+    if isinstance(cause, ContextTemplateError):
+        raise cause
+    pointer = f"## {section_name} ({pointer_suffix})"
+    if cause is not None:
+        raise ContextTemplateError(
+            message,
+            template_pointer=pointer,
+            section_name=section_name,
+            phase=phase,
+        ) from cause
+    raise ContextTemplateError(
+        message,
+        template_pointer=pointer,
+        section_name=section_name,
+        phase=phase,
+    )
 
 
 @dataclass
@@ -480,6 +507,7 @@ def resolve_section_int(
     directive_key: str,
     section_directives: Dict[str, List[str]],
     vault_path: str,
+    section_name: str,
     default: int = 0,
 ) -> int:
     values = section_directives.get(directive_key, [])
@@ -494,11 +522,21 @@ def resolve_section_int(
                 values[-1],
                 vault_path,
             )
+            if not result.success:
+                _raise_context_template_error(
+                    message=f"Invalid @{directive_key} value: {result.error_message}",
+                    section_name=section_name,
+                    phase="directive_parse",
+                    pointer_suffix=f"@{directive_key} directive",
+                )
             return int(result.processed_value)
         except Exception as exc:
-            logger.warning(
-                "Failed to process context manager directive; falling back to defaults",
-                metadata={"directive": directive_key, "error": str(exc)},
+            _raise_context_template_error(
+                message=f"Failed to process @{directive_key}: {exc}",
+                section_name=section_name,
+                phase="directive_parse",
+                pointer_suffix=f"@{directive_key} directive",
+                cause=exc,
             )
     return default
 
@@ -509,6 +547,7 @@ def resolve_section_header(
     section_directives: Dict[str, List[str]],
     vault_path: str,
     week_start_day: int,
+    section_name: str,
 ) -> Optional[str]:
     header_values = section_directives.get("header", [])
     if not header_values:
@@ -523,10 +562,19 @@ def resolve_section_header(
         )
         if header_result.success:
             return header_result.processed_value
+        _raise_context_template_error(
+            message=f"Invalid @header value: {header_result.error_message}",
+            section_name=section_name,
+            phase="directive_parse",
+            pointer_suffix="@header directive",
+        )
     except Exception as exc:
-        logger.warning(
-            "Failed to process context manager header directive",
-            metadata={"error": str(exc)},
+        _raise_context_template_error(
+            message=f"Failed to process @header: {exc}",
+            section_name=section_name,
+            phase="directive_parse",
+            pointer_suffix="@header directive",
+            cause=exc,
         )
     return None
 
@@ -536,6 +584,7 @@ def resolve_section_write_mode(
     registry: Any,
     section_directives: Dict[str, List[str]],
     vault_path: str,
+    section_name: str,
 ) -> Optional[str]:
     write_mode_values = section_directives.get("write_mode", [])
     if not write_mode_values:
@@ -550,10 +599,19 @@ def resolve_section_write_mode(
         )
         if write_mode_result.success:
             return write_mode_result.processed_value
+        _raise_context_template_error(
+            message=f"Invalid @write_mode value: {write_mode_result.error_message}",
+            section_name=section_name,
+            phase="directive_parse",
+            pointer_suffix="@write_mode directive",
+        )
     except Exception as exc:
-        logger.warning(
-            "Failed to process context manager write_mode directive",
-            metadata={"error": str(exc)},
+        _raise_context_template_error(
+            message=f"Failed to process @write_mode: {exc}",
+            section_name=section_name,
+            phase="directive_parse",
+            pointer_suffix="@write_mode directive",
+            cause=exc,
         )
     return None
 
@@ -614,9 +672,12 @@ def resolve_section_outputs(
                         },
                     )
         except Exception as exc:
-            logger.warning(
-                "Failed to process context manager output directive",
-                metadata={"error": str(exc)},
+            _raise_context_template_error(
+                message=f"Failed to process @output '{output_value}': {exc}",
+                section_name=section_name,
+                phase="directive_parse",
+                pointer_suffix="@output directive",
+                cause=exc,
             )
     return output_targets
 
@@ -626,6 +687,7 @@ def resolve_section_cache_config(
     registry: Any,
     section_directives: Dict[str, List[str]],
     vault_path: str,
+    section_name: str,
 ) -> Optional[Dict[str, Any]]:
     cache_values = section_directives.get("cache", [])
     if not cache_values:
@@ -636,11 +698,21 @@ def resolve_section_cache_config(
             cache_values[-1],
             vault_path,
         )
+        if not result.success:
+            _raise_context_template_error(
+                message=f"Invalid @cache value: {result.error_message}",
+                section_name=section_name,
+                phase="directive_parse",
+                pointer_suffix="@cache directive",
+            )
         return result.processed_value
     except Exception as exc:
-        logger.warning(
-            "Failed to process context manager cache directive",
-            metadata={"error": str(exc)},
+        _raise_context_template_error(
+            message=f"Failed to process @cache: {exc}",
+            section_name=section_name,
+            phase="directive_parse",
+            pointer_suffix="@cache directive",
+            cause=exc,
         )
     return None
 
@@ -649,6 +721,7 @@ def resolve_section_tools(
     *,
     section_directives: Dict[str, List[str]],
     vault_path: str,
+    section_name: str,
 ) -> Tuple[Optional[List[Any]], str]:
     tools_values = section_directives.get("tools", [])
     if not tools_values:
@@ -662,11 +735,14 @@ def resolve_section_tools(
         tools_for_manager, tool_instructions, _ = ToolsDirective.merge_results(tools_results)
         return tools_for_manager, tool_instructions or ""
     except Exception as exc:
-        logger.warning(
-            "Failed to process context manager tools directive",
-            metadata={"error": str(exc)},
+        _raise_context_template_error(
+            message=f"Failed to process @tools: {exc}",
+            section_name=section_name,
+            phase="directive_parse",
+            pointer_suffix="@tools directive",
+            cause=exc,
         )
-        return None, ""
+    return None, ""
 
 
 def resolve_section_inputs(
@@ -680,6 +756,7 @@ def resolve_section_inputs(
     session_id: str,
     vault_name: str,
     section_key: str,
+    section_name: str,
 ) -> InputResolutionResult:
     section_directives = section.directives or {}
     input_file_values = section_directives.get("input", [])
@@ -705,17 +782,20 @@ def resolve_section_inputs(
                     allow_context_output=True,
                 )
             except Exception as exc:
-                logger.warning(
-                    "Failed to process context manager input directive",
-                    metadata={"error": str(exc)},
+                _raise_context_template_error(
+                    message=f"Failed to process @input '{value}': {exc}",
+                    section_name=section_name,
+                    phase="directive_parse",
+                    pointer_suffix="@input directive",
+                    cause=exc,
                 )
-                continue
             if not result.success:
-                logger.warning(
-                    "Context manager input directive returned an error",
-                    metadata={"error": result.error_message},
+                _raise_context_template_error(
+                    message=f"Invalid @input value: {result.error_message}",
+                    section_name=section_name,
+                    phase="directive_parse",
+                    pointer_suffix="@input directive",
                 )
-                continue
             if isinstance(result.processed_value, list):
                 if any(
                     item.get("_workflow_signal") == "skip_step"
@@ -970,9 +1050,12 @@ def route_section_outputs(
                         },
                     )
             except Exception as exc:
-                logger.warning(
-                    "Failed to write context manager output file",
-                    metadata={"error": str(exc)},
+                _raise_context_template_error(
+                    message=f"Failed to write section output: {exc}",
+                    section_name=section_name,
+                    phase="output_write",
+                    pointer_suffix="@output/@write_mode/@header directives",
+                    cause=exc,
                 )
     return OutputRoutingResult(
         written_buffers=[name for name in written_buffers if name],
@@ -1016,11 +1099,13 @@ async def run_context_section(
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
         week_start_day=exec_ctx.week_start_day,
+        section_name=section.name,
     )
     write_mode = resolve_section_write_mode(
         registry=exec_ctx.registry,
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
+        section_name=section.name,
     )
 
     section_recent_runs = resolve_section_int(
@@ -1028,6 +1113,7 @@ async def run_context_section(
         directive_key="recent_runs",
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
+        section_name=section.name,
         default=exec_ctx.manager_runs,
     )
     section_recent_summaries = resolve_section_int(
@@ -1035,6 +1121,7 @@ async def run_context_section(
         directive_key="recent_summaries",
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
+        section_name=section.name,
         default=exec_ctx.recent_summaries_default,
     )
     summaries_limit = None if section_recent_summaries < 0 else section_recent_summaries
@@ -1064,6 +1151,7 @@ async def run_context_section(
         session_id=exec_ctx.session_id,
         vault_name=exec_ctx.vault_name,
         section_key=section_key,
+        section_name=section.name,
     )
     if input_resolution.skip_required:
         return SectionExecutionResult(summary_messages=[], persisted_sections=[])
@@ -1072,6 +1160,7 @@ async def run_context_section(
         registry=exec_ctx.registry,
         section_directives=section_directives,
         vault_path=exec_ctx.vault_path,
+        section_name=section.name,
     )
     cache_decision = resolve_cache_decision(
         section=section,
@@ -1126,10 +1215,19 @@ async def run_context_section(
                         ).strip() or None
                 except Exception:
                     previous_summary_text = None
+                    logger.warning(
+                        "Failed to load recent context summaries",
+                        metadata={
+                            "section_name": section.name,
+                            "template_pointer": f"## {section.name} (@recent_summaries directive)",
+                            "phase": "summary_fetch",
+                        },
+                    )
 
             tools_for_manager, tool_instructions = resolve_section_tools(
                 section_directives=section_directives,
                 vault_path=exec_ctx.vault_path,
+                section_name=section.name,
             )
 
             manager_input = ContextManagerInput(
@@ -1162,16 +1260,25 @@ async def run_context_section(
                     "cache_mode": cache_mode,
                 },
             )
-            managed_obj: ContextManagerResult = await manage_context_fn(
-                manager_input,
-                instructions_override=manager_instruction,
-                tools=tools_for_manager,
-                model_override=model_directive_value,
-                deps=ContextManagerDeps(
-                    buffer_store=exec_ctx.run_buffer_store,
-                    buffer_store_registry=exec_ctx.buffer_store_registry,
-                ),
-            )
+            try:
+                managed_obj: ContextManagerResult = await manage_context_fn(
+                    manager_input,
+                    instructions_override=manager_instruction,
+                    tools=tools_for_manager,
+                    model_override=model_directive_value,
+                    deps=ContextManagerDeps(
+                        buffer_store=exec_ctx.run_buffer_store,
+                        buffer_store_registry=exec_ctx.buffer_store_registry,
+                    ),
+                )
+            except Exception as exc:
+                _raise_context_template_error(
+                    message=f"Context manager run failed: {exc}",
+                    section_name=section.name,
+                    phase="manager_run",
+                    pointer_suffix="section content and @model/@tools directives",
+                    cause=exc,
+                )
             managed_output = managed_obj.raw_output
             managed_model_alias = managed_obj.model_alias
             section_cache_entry = {

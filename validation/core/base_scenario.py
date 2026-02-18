@@ -7,7 +7,7 @@ real user workflows with readable, high-level operations.
 
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from abc import ABC, abstractmethod
 

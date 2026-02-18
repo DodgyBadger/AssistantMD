@@ -17,6 +17,7 @@ from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
 from core.runtime.buffers import BufferStore
+from . import state as runtime_state
 from .config import RuntimeConfig
 
 
@@ -121,6 +122,3 @@ class RuntimeContext:
             "features": self.config.features,
             "log_level": self.config.log_level
         }
-
-
-from . import state as runtime_state

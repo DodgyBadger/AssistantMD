@@ -8,7 +8,6 @@ Supports:
 Uses APScheduler's CronTrigger and explicit datetime parsing via python-dateutil.
 """
 
-import re
 from datetime import datetime
 from typing import Dict, Any
 from dataclasses import dataclass
@@ -193,7 +192,7 @@ def _parse_explicit_datetime(datetime_str: str) -> datetime:
 
         return dt
 
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError):
         raise ScheduleParsingError(
             f"Could not parse datetime: '{datetime_str}'\n"
             f"Use explicit formats like '2025-12-25 10:00' or 'December 25, 2025 at 10am'"

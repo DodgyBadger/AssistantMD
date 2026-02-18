@@ -4,11 +4,9 @@ Storage helpers for writing rendered artifacts to vaults.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Dict, List
 
-from core.constants import ASSISTANTMD_ROOT_DIR
 from core.ingestion.models import RenderOptions
 from core.runtime.paths import get_data_root
 
