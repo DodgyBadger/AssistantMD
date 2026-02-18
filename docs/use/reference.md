@@ -6,7 +6,10 @@
 
 Syntax: `@directive value (optional params)` or `@directive: value (optional params)`  
 Directives must be at the start of a step/section, before normal prompt text.  
-File paths are vault-relative. For `file:` targets, `.md` is auto-added if missing.
+File paths are vault-relative. For `file:` targets, `.md` is auto-added if missing.  
+Parameters are comma-separated. If a parameter value contains commas, wrap that value in quotes.  
+Bare parameters are treated as booleans, e.g. `required` is equivalent to `required=true`.  
+Paths with special characters can be quoted or written as Obsidian wikilinks (`[[...]]`).  
 
 <details>
 <summary>@output</summary>
@@ -81,7 +84,6 @@ E.g. `@input variable:foo (scope=session)` reads foo from  session scope. This c
 - In context templates, `@input file:myfile (output=context)` will route the file contents immediately into chat agent context, bypassing the LLM.  
 - Precedence is `refs_only` > `properties` > `head`.
 - If `properties` is enabled and no frontmatter properties are found, input falls back to refs-only for that item.
-- If a parameter value contains commas (for example `properties` key lists), wrap the value in quotes.
 
 ### Examples:
 - `@input file: notes/*.md`
@@ -328,8 +330,10 @@ No optional parameters.
 ## Frontmatter
 
 Syntax: `key: value`  
-Frontmatter is YAML between `---` delimiters.  
-Canonical style uses snake_case keys.  
+Place frontmatter at the very top of the file with opening and closing `---` delimiters.  
+Use flat `key: value` pairs (no nested objects/lists).  
+Unknown/custom fields are allowed and ignored by runtime unless a specific field is consumed.  
+Use explicit booleans (`true` / `false`) for boolean-like fields.  
 Quotes are optional but recommended to avoid display issues in Obsidian. E.g. `schedule: "cron: 0 8 * * *"`
 
 <details>
@@ -524,7 +528,8 @@ Ignored by runtime.
 ## Patterns
 
 Syntax: `{pattern}` or `{pattern:FORMAT}`  
-Patterns substitute text in supported directive values.
+Patterns substitute text in supported directive values.  
+Pattern support is directive-specific; check `Applies to` for each pattern.  
 
 <details>
 <summary>{today}</summary>
@@ -787,4 +792,3 @@ Same as above, but with `write_mode=new`, each file in folder `notes` is written
 
 `@tools web_search_duckduckgo (output=variable:search_result, write_mode=new)`  
 All `web_search_duckduckgo` tool output is written to a variable, same sequential numbering pattern as above.
-
