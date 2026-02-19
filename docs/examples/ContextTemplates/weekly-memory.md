@@ -17,6 +17,6 @@ Use it as lightweight memory, not as ground truth.
 - Some transcripts may contain pointers to earlier transcripts (i.e. the user has restarted a conversation). Ask the user's permission before following these links.
 
 ## Weekly Chat Memory
-@model none
-@input file: AssistantMD/Memory/Weekly/{this-week} (output=context)
-@input file: AssistantMD/Memory/Weekly/{last-week} (output=context)
+@model none  
+@input file: AssistantMD/Memory/Weekly/{this-week} (output=context)  
+@input file: AssistantMD/Memory/Weekly/{last-week} (output=context)  

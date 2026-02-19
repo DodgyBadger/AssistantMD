@@ -18,16 +18,16 @@ Rules:
 
 Output format (repeat per transcript):
 - transcript: <vault-relative path>
-  summary: <1-3 bullets>
-  decisions: <bullets or N/A>
-  open_loops: <bullets or N/A>
-  preferences_facts: <bullets or N/A>
+- summary: <1-3 bullets>
+- decisions: <bullets or N/A>
+- open_loops: <bullets or N/A>
+- preferences_facts: <bullets or N/A>
 
 ## Summarize yesterday chats
-@model gpt-mini
-@input file: AssistantMD/Chat_Sessions/*_{yesterday:YYYYMMDD}_*.md (required)
-@output file: AssistantMD/Memory/Weekly/{this-week}
-@write_mode append
-@header Chat Memory — {yesterday}
+@model gpt-mini  
+@input file: AssistantMD/Chat_Sessions/*_{yesterday:YYYYMMDD}_*.md (required)  
+@output file: AssistantMD/Memory/Weekly/{this-week}  
+@write_mode append  
+@header Chat Memory — {yesterday}  
 
 For each transcript provided, write one entry following the output format.
