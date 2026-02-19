@@ -4,6 +4,12 @@ The Context Manager allows you to shape what the chat agent sees, from simple sy
 
 Define context templates using markdown in `AssistantMD/ContextTemplates/` (vault scoped) or `system/ContextTemplates/` (global). Select the template you wish to use in the Chat UI. Set your default template in **Configuration → Application Settings**.
 
+Template discovery matches workflow discovery rules:
+- `*.md` files directly inside `ContextTemplates/` are loaded.
+- `*.md` files one level deep in subfolders are loaded (for example `ContextTemplates/planning/daily.md`).
+- Subfolders whose name starts with `_` are ignored.
+- Discovery is not recursive beyond one subfolder level.
+
 ## Structure
 YAML frontmatter between `---` delimiters. Settings that apply to the whole template.
 

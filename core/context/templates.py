@@ -61,6 +61,39 @@ def _hash_content(content: str) -> str:
     return hash_file_content(content, length=None)
 
 
+def _discover_template_files(template_dir: Path) -> List[Path]:
+    """
+    Discover template files with workflow-like rules:
+    - Include *.md directly under the template root
+    - Include *.md one level deep in subfolders not prefixed with underscore
+    - Do not recurse deeper
+    """
+    if not template_dir.exists() or not template_dir.is_dir():
+        return []
+
+    template_files: List[Path] = []
+    for item in sorted(template_dir.iterdir()):
+        if item.is_file() and item.suffix.lower() == ".md":
+            template_files.append(item)
+            continue
+        if item.is_dir() and not item.name.startswith("_"):
+            for subitem in sorted(item.iterdir()):
+                if subitem.is_file() and subitem.suffix.lower() == ".md":
+                    template_files.append(subitem)
+
+    return template_files
+
+
+def _resolve_template_path(template_dir: Path, normalized_name: str) -> Optional[Path]:
+    """Resolve a template path within one-level discovery scope."""
+    normalized_key = normalized_name.replace("\\", "/")
+    for path in _discover_template_files(template_dir):
+        rel_key = path.relative_to(template_dir).as_posix()
+        if rel_key == normalized_key:
+            return path
+    return None
+
+
 def _extract_schema_block(content: str) -> Optional[str]:
     """
     Extract first fenced block labeled yaml or json from the template.
@@ -212,13 +245,13 @@ def load_template(
 
     # Try vault-scoped template
     if vault_path:
-        vault_template = (
+        vault_template_dir = (
             Path(vault_path)
             / ASSISTANTMD_ROOT_DIR
             / VAULT_TEMPLATE_SUBDIR
-            / normalized
         )
-        if vault_template.exists():
+        vault_template = _resolve_template_path(vault_template_dir, normalized)
+        if vault_template is not None:
             logger.info(f"Using vault template: {vault_template}")
             return _read_template(vault_template, normalized, source="vault")
 
@@ -230,10 +263,9 @@ def load_template(
         system_root = None
 
     if system_root:
-        system_template = (
-            Path(system_root) / SYSTEM_TEMPLATE_SUBDIR / normalized
-        )
-        if system_template.exists():
+        system_template_dir = Path(system_root) / SYSTEM_TEMPLATE_SUBDIR
+        system_template = _resolve_template_path(system_template_dir, normalized)
+        if system_template is not None:
             logger.info(f"Using system template: {system_template}")
             return _read_template(system_template, normalized, source="system")
 
@@ -254,9 +286,10 @@ def list_templates(
     if normalized_root:
         vault_dir = normalized_root / ASSISTANTMD_ROOT_DIR / VAULT_TEMPLATE_SUBDIR
         if vault_dir.exists():
-            for path in sorted(vault_dir.glob("*.md")):
+            for path in _discover_template_files(vault_dir):
                 try:
-                    records.append(_read_template(path, path.name, "vault"))
+                    name = path.relative_to(vault_dir).as_posix()
+                    records.append(_read_template(path, name, "vault"))
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning(f"Failed to read vault template {path}: {exc}")
 
@@ -270,9 +303,10 @@ def list_templates(
     if sys_root:
         system_dir = Path(sys_root) / SYSTEM_TEMPLATE_SUBDIR
         if system_dir.exists():
-            for path in sorted(system_dir.glob("*.md")):
+            for path in _discover_template_files(system_dir):
                 try:
-                    records.append(_read_template(path, path.name, "system"))
+                    name = path.relative_to(system_dir).as_posix()
+                    records.append(_read_template(path, name, "system"))
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning(f"Failed to read system template {path}: {exc}")
 
