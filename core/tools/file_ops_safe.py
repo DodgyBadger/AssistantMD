@@ -11,6 +11,7 @@ import subprocess
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
+from core.settings import get_file_search_timeout_seconds
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
@@ -116,8 +117,10 @@ SEARCH - Find content within files:
 - file_ops_safe(operation="search", target="TODO", scope="projects"): Limit search to a folder (folder path adds an implicit '*.md')
 - file_ops_safe(operation="search", target="regex-pattern"): Use regex patterns for advanced search
 - file_ops_safe(operation="search", target="TODO", scope="notes/*.md"): Scope using a glob
+- Search is case-insensitive and trims leading/trailing spaces in target
+- If a scoped search unexpectedly returns no matches, run list on that scope first to verify directory/glob shape
 - Results show: filename:line_number:matching_line_content
-- Limit: 100 results max to avoid context overflow
+- Search returns all matches (very large outputs may be auto-buffered by routing settings)
 
 ⚠️ CONTEXT WINDOW WARNING: Avoid broad searches and recursive lists.
 Instead, explore the vault structure first, then target specific folders or file types.
@@ -389,8 +392,11 @@ BEST PRACTICES:
     @classmethod
     def _search_files(cls, query: str, scope: str, vault_path: str) -> str:
         """Search for text within markdown files using ripgrep."""
+        query = query.strip()
         if not query:
             return "Search requires a search pattern in 'target' parameter"
+
+        vault_abs = os.path.realpath(vault_path)
 
         # Build ripgrep command
         rg_cmd = [
@@ -399,10 +405,13 @@ BEST PRACTICES:
             '--line-number',
             '--color',
             'never',
+            '--ignore-case',
         ]
 
         glob_pattern = "*.md"
-        search_root = vault_path
+        search_root = vault_abs
+        result_base_root = vault_abs
+        result_prefix = ""
 
         scope = scope.strip()
         if scope:
@@ -412,23 +421,36 @@ BEST PRACTICES:
             mount_key = get_virtual_mount_key(scope)
             if mount_key:
                 root, _mount = resolve_virtual_path(mount_key)
+                root_abs = os.path.realpath(root)
                 rel = scope.strip().lstrip("./")[len(mount_key):].lstrip("/")
                 if rel:
-                    abs_scope = os.path.join(root, rel)
+                    abs_scope = os.path.realpath(os.path.join(root_abs, rel))
                 else:
-                    abs_scope = root
+                    abs_scope = root_abs
 
                 if os.path.isdir(abs_scope):
+                    if (
+                        not abs_scope.startswith(root_abs + os.sep)
+                        and abs_scope != root_abs
+                    ):
+                        return "Scope escapes virtual mount boundaries"
                     search_root = abs_scope
                     glob_pattern = "*.md"
                 else:
                     # Treat rel as a glob relative to docs root
-                    search_root = root
+                    search_root = root_abs
                     glob_pattern = rel
+                result_base_root = root_abs
+                result_prefix = mount_key
             else:
                 # If scope is a directory, search within it with markdown filter
-                abs_scope = os.path.join(vault_path, scope)
+                abs_scope = os.path.realpath(os.path.join(vault_abs, scope))
                 if os.path.isdir(abs_scope):
+                    if (
+                        not abs_scope.startswith(vault_abs + os.sep)
+                        and abs_scope != vault_abs
+                    ):
+                        return "Scope escapes vault boundaries"
                     search_root = abs_scope
                     glob_pattern = "*.md"
                 else:
@@ -451,15 +473,36 @@ BEST PRACTICES:
                 rg_cmd,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=get_file_search_timeout_seconds(),
             )
 
             if result.returncode == 0:
-                # Parse output and make it readable
-                lines = result.stdout.strip().split('\n')
-                if len(lines) > 100:
-                    return f"Found {len(lines)} matches (showing first 100):\n\n" + '\n'.join(lines[:100]) + f"\n\n... {len(lines) - 100} more matches truncated"
-                return f"Found {len(lines)} matches:\n\n{result.stdout}"
+                # Normalize paths so the model sees logical (root-relative) paths.
+                # ripgrep output is file_path:line_number:line_content
+                lines = []
+                for raw_line in result.stdout.splitlines():
+                    file_path, sep, remainder = raw_line.partition(':')
+                    if not sep:
+                        lines.append(raw_line)
+                        continue
+                    line_no, sep2, line_content = remainder.partition(':')
+                    if not sep2:
+                        lines.append(raw_line)
+                        continue
+
+                    file_abs = os.path.realpath(file_path)
+                    try:
+                        rel_path = os.path.relpath(file_abs, result_base_root)
+                    except ValueError:
+                        # Fallback for unexpected path formats.
+                        rel_path = file_path
+                    if rel_path == ".":
+                        rel_path = os.path.basename(file_path)
+                    if result_prefix:
+                        rel_path = f"{result_prefix}/{rel_path}"
+                    lines.append(f"{rel_path}:{line_no}:{line_content}")
+
+                return f"Found {len(lines)} matches:\n\n" + '\n'.join(lines)
             elif result.returncode == 1:
                 # No matches found
                 return f"No matches found for '{query}' in markdown files"
@@ -469,6 +512,7 @@ BEST PRACTICES:
         except FileNotFoundError:
             return "Error: ripgrep (rg) not found. Please install ripgrep to use search functionality."
         except subprocess.TimeoutExpired:
-            return "Search timed out (>10 seconds). Try narrowing your search."
+            timeout_seconds = get_file_search_timeout_seconds()
+            return f"Search timed out (>{timeout_seconds:g} seconds). Try narrowing your search."
         except Exception as e:
             return f"Search error: {str(e)}"

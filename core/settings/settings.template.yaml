@@ -24,6 +24,10 @@ settings:
     value: 10000
     description: "Automatically route tool output to a buffer variable when it exceeds this token count. 0 = disabled. Caution: very low values will increase tool churn and token usage. This setting is used to protect context window from massive tool outputs. buffer_ops tool is automatically enabled if this setting > 0."
     restart_required: false
+  file_search_timeout_seconds:
+    value: 10
+    description: "Timeout in seconds for file_ops_safe search operations."
+    restart_required: false
   routing_allowed_tools:
     value: []
     description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"

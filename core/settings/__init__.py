@@ -332,6 +332,17 @@ def get_auto_buffer_max_tokens() -> int:
         return 0
 
 
+def get_file_search_timeout_seconds() -> float:
+    """Return file search timeout seconds, falling back to 10 seconds."""
+    entry = get_general_settings().get("file_search_timeout_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 10.0
+    return timeout if timeout > 0 else 10.0
+
+
 def get_routing_allowed_tools() -> list[str]:
     """Return list of tool names allowed to accept routing in chat."""
     entry = get_general_settings().get("routing_allowed_tools")
