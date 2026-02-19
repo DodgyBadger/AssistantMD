@@ -87,6 +87,16 @@ function handleChatScroll() {
     state.shouldAutoScroll = isChatNearBottom(container);
 }
 
+function syncChatControlLocks() {
+    if (!chatElements.vaultSelector) return;
+
+    const lockVaultSelector = state.isLoading || Boolean(state.sessionId);
+    chatElements.vaultSelector.disabled = lockVaultSelector;
+    chatElements.vaultSelector.title = lockVaultSelector
+        ? 'Vault is locked for this chat session. Click "New Session" to switch vaults.'
+        : '';
+}
+
 // Tab management
 const tabs = {
     chat: {
@@ -385,6 +395,7 @@ function populateSelectors() {
         chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
     });
 
+    syncChatControlLocks();
 }
 
 // Fetch system status
@@ -602,6 +613,8 @@ function setupEventListeners() {
     if (chatElements.vaultSelector) {
         chatElements.vaultSelector.addEventListener('change', handleVaultChange);
     }
+
+    syncChatControlLocks();
 }
 
 function handleVaultChange() {
@@ -680,6 +693,7 @@ async function sendMessage() {
     chatElements.chatInput.value = '';
     state.isLoading = true;
     chatElements.sendBtn.disabled = true;
+    syncChatControlLocks();
 
     const selectedTools = Array.from(chatElements.toolsCheckboxes.querySelectorAll('input:checked'))
         .map(cb => cb.value);
@@ -717,6 +731,7 @@ async function sendMessage() {
         const sessionId = response.headers.get('X-Session-ID');
         if (sessionId) {
             state.sessionId = sessionId;
+            syncChatControlLocks();
         }
 
         // Fallback for environments that do not support streaming
@@ -810,6 +825,7 @@ async function sendMessage() {
     } finally {
         state.isLoading = false;
         chatElements.sendBtn.disabled = false;
+        syncChatControlLocks();
         chatElements.chatInput.focus();
     }
 }
@@ -1356,6 +1372,7 @@ async function clearSession() {
 
     state.sessionId = null;
     chatElements.chatMessages.innerHTML = '<div class="text-center text-txt-secondary text-sm">Start a conversation...</div>';
+    syncChatControlLocks();
     updateStatus();
 }
 
