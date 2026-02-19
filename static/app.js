@@ -275,6 +275,14 @@ async function fetchMetadata() {
 
 // Populate selectors with metadata
 function populateSelectors() {
+    const previousVault = chatElements.vaultSelector?.value || '';
+    const previousModel = chatElements.modelSelector?.value || '';
+    const previousTemplate = chatElements.templateSelector?.value || '';
+    const previousTools = new Set(
+        Array.from(chatElements.toolsCheckboxes?.querySelectorAll('input:checked') || [])
+            .map((input) => input.value)
+    );
+
     chatElements.vaultSelector.innerHTML = '<option value="">Select vault...</option>';
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
     chatElements.toolsCheckboxes.innerHTML = '';
@@ -289,6 +297,10 @@ function populateSelectors() {
         option.textContent = vault;
         chatElements.vaultSelector.appendChild(option);
     });
+
+    if (previousVault && state.metadata.vaults.includes(previousVault)) {
+        chatElements.vaultSelector.value = previousVault;
+    }
 
     let firstAvailableModel = null;
     const envDefaultModel = state.systemStatus && state.systemStatus.configuration_status
@@ -308,7 +320,12 @@ function populateSelectors() {
         }
     });
 
-    if (envDefaultModel && state.metadata.models.some(m => m.name === envDefaultModel && m.available)) {
+    if (
+        previousModel &&
+        state.metadata.models.some(m => m.name === previousModel && m.available !== false)
+    ) {
+        chatElements.modelSelector.value = previousModel;
+    } else if (envDefaultModel && state.metadata.models.some(m => m.name === envDefaultModel && m.available)) {
         chatElements.modelSelector.value = envDefaultModel;
     } else if (firstAvailableModel) {
         chatElements.modelSelector.value = firstAvailableModel;
@@ -316,7 +333,7 @@ function populateSelectors() {
 
     // Trigger template fetch if a vault is already selected (e.g., persisted UI state in future)
     if (chatElements.vaultSelector && chatElements.vaultSelector.value) {
-        fetchTemplates(chatElements.vaultSelector.value);
+        fetchTemplates(chatElements.vaultSelector.value, previousTemplate);
     }
 
     const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
@@ -336,15 +353,16 @@ function populateSelectors() {
         checkbox.value = tool.name;
         checkbox.disabled = tool.available === false;
 
-        if (
-            !checkbox.disabled &&
-            (
+        if (!checkbox.disabled) {
+            if (previousTools.size > 0) {
+                checkbox.checked = previousTools.has(tool.name);
+            } else if (
                 tool.name === 'file_ops_safe' ||
                 tool.name === 'buffer_ops' ||
                 (preferredWebTool && tool.name === preferredWebTool)
-            )
-        ) {
-            checkbox.checked = true;
+            ) {
+                checkbox.checked = true;
+            }
         }
 
         const label = document.createElement('label');
@@ -625,7 +643,7 @@ function handleVaultChange() {
     }
 }
 
-function populateTemplates(templates) {
+function populateTemplates(templates, preferredTemplate = '') {
     if (!chatElements.templateSelector) return;
     chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
     if (!templates || templates.length === 0) {
@@ -638,11 +656,11 @@ function populateTemplates(templates) {
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
-    const preferredTemplate = state.metadata?.default_context_template || 'default.md';
-    const defaultTemplate = Array.from(chatElements.templateSelector.options)
-        .find((option) => option.value === preferredTemplate);
-    if (defaultTemplate) {
-        chatElements.templateSelector.value = defaultTemplate.value;
+    const templateToUse = preferredTemplate || state.metadata?.default_context_template || 'default.md';
+    const selectedTemplate = Array.from(chatElements.templateSelector.options)
+        .find((option) => option.value === templateToUse);
+    if (selectedTemplate) {
+        chatElements.templateSelector.value = selectedTemplate.value;
     } else {
         const fallbackTemplate = Array.from(chatElements.templateSelector.options)
             .find((option) => option.value === 'default.md');
@@ -653,9 +671,9 @@ function populateTemplates(templates) {
     chatElements.templateSelector.disabled = false;
 }
 
-async function fetchTemplates(vault) {
+async function fetchTemplates(vault, preferredTemplate = '') {
     if (!vault) {
-        populateTemplates([]);
+        populateTemplates([], preferredTemplate);
         return;
     }
     try {
@@ -664,10 +682,10 @@ async function fetchTemplates(vault) {
             throw new Error('Failed to fetch templates');
         }
         const templates = await response.json();
-        populateTemplates(templates);
+        populateTemplates(templates, preferredTemplate);
     } catch (error) {
         console.error('Error fetching templates:', error);
-        populateTemplates([]);
+        populateTemplates([], preferredTemplate);
     }
 }
 
