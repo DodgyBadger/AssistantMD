@@ -93,7 +93,7 @@ function syncChatControlLocks() {
     const lockVaultSelector = state.isLoading || Boolean(state.sessionId);
     chatElements.vaultSelector.disabled = lockVaultSelector;
     chatElements.vaultSelector.title = lockVaultSelector
-        ? 'Vault is locked for this chat session. Click "New Session" to switch vaults.'
+        ? 'Vault is locked for this chat session. Start a new session (+) to switch vaults.'
         : '';
 }
 
