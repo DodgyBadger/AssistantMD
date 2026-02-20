@@ -48,15 +48,15 @@ Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. 
 
 <a href="docs/chat-UI-screenshot1.png">
   <img src="docs/chat-UI-screenshot1.png" alt="Chat UI screenshot" width="400">
-</a>
+</a><br>
 
 <a href="docs/chat-UI-screenshot2.png">
   <img src="docs/chat-UI-screenshot2.png" alt="Chat UI screenshot" width="400">
-</a>
+</a><br>
 
 <a href="docs/chat-UI-screenshot3.png">
   <img src="docs/chat-UI-screenshot3.png" alt="Chat UI screenshot" width="400">
-</a>
+</a><br>
 
 ## Features
 
