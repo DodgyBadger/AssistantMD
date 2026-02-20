@@ -1,17 +1,22 @@
 # Release Notes
 
 
-## 2026-01-30
+## 2026-02-20
 
 ### Feature: Context manager
 This release introduces the **Context Manager** which allows you to shape what the chat agent sees, from simple system‑prompt injection to multi‑step context assembly. It applies the lessons learned by research on long‑running agents: curated working sets, structured summaries and explicit attention budgeting beat dumping full transcripts into ever‑larger contexts.
 
-It is template‑driven and step‑based, with explicit controls for how history is curated and optional caching/observability; see the docs for full details on directives, gating, and persistence.
+It is template‑driven and step‑based, with explicit controls for how history is curated and optional caching/observability; see the docs for full details on directives, gating and persistence.
 
 ### Feature: Buffer (virtualized I/O)
 The buffer is an in-memory key-value store that the chat UI, context templates and workflows can use to temporarily store data. Entries in the buffer are called variables. The buffer is useful for passing data between steps in a context or workflow template, or to avoid blowing up the context window with huge tool outputs.
 
 A new `buffer_ops` tool allows the LLM to access buffer variables systematically. This feature is the first step toward enabling a robust [RLM-style approach](https://alexzhang13.github.io/blog/2025/rlm/) to context management.
+
+### Additional features
+- Added `@input (...properties...)` mode to inject frontmatter properties instead of full file content.
+- Added formatted time patterns for directives.
+- Added `workflow_run` tool support in chat to list and execute workflows from the active vault.
 
 ### Breaking changes
 - **Directive rename**: `@input-file` → `@input`, `@output-file` → `@output` (no backward compatibility).
@@ -20,9 +25,23 @@ A new `buffer_ops` tool allows the LLM to access buffer variables systematically
 - **Tool deprecation**: Removed `import_url` and `documentation_access` tools (assisted template creation is now handled using the context manager).
 
 ### Documentation
-- Significant documentation updates, including huge expansion of architectural docs.
-- Docs folder now includes a library of example context and workflow templates.
-- Documentation can be accessed with file_ops_safe using a new virtual path `__virtual_docs__/`.
+- Significant documentation updates.
+- New library of example context and workflow templates.
+- LLM can read documentation with file_ops_safe using virtual path root `__virtual_docs__/`.
+
+### Chores
+- Upgraded `pydantic-ai` to `1.60.0` and refreshed the lockfile.
+- Hardened release workflow trigger logic and removed changelog dependency from CI release flow.
+- Enforced lint/tooling hygiene and cleanup across context/template execution paths.
+
+### Bugs / Fixes
+- Chat UI now preserves selected vault/model/template/tools across metadata refreshes.
+- Vault selector is locked to the active chat session to prevent mid-session vault switches, with clearer tooltip guidance.
+- Assistant message links now open in a new tab to avoid disrupting current session.
+- Hardened `file_ops_safe` search: configurable timeout, case-insensitive matching, safer scope boundary checks, and normalized result paths.
+- Hardened vault path validation against symlink-based escape paths.
+- Improved template-facing error surfacing in context manager/workflow execution.
+- Standardized quoted-comma directive parameter handling to reduce parsing edge-case failures.
 
 
 ## 2026-01-24

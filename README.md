@@ -31,6 +31,7 @@ Templates are plain markdown files that live inside your vault. Behaviour is com
 - `@model` - choose a model per step
 - `{today}` or `{this-week}` - read or write files based on date
 
+See a [lightweight chat memory implementation](docs/examples/ContextTemplates/weekly-memory.md?plain=1) in the example library.  
 See [docs/use/reference.md](docs/use/reference.md) for the full directive reference.
 
 
@@ -72,7 +73,7 @@ Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. 
 ## Documentation
 
 - **[Installation Guide](docs/setup/installation.md)**
-- **[Basic Usage](docs/use/overview.md)**
+- **[Basic Usage](docs/use/README.md)**
 - **[Context Manager](docs/use/context_manager.md)**
 - **[Workflows](docs/use/workflows.md)**
 - **[Security Considerations](docs/setup/security.md)**

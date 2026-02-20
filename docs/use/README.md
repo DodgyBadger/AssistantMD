@@ -1,5 +1,7 @@
 ## How to use AssistantMD
 
+If you have not set up the app yet, start with the [Installation Guide](../setup/installation.md).
+
 When you first run the app, a new `AssistantMD` folder will be added to each of your vaults. This is where files live that are unique to how AssistantMD runs.
 - `AssistantMD/Workflows` holds your workflow definitions
 - `AssistantMD/Chat_Sessions` holds markdown files containing your chat history
@@ -55,4 +57,4 @@ Use the **Configuration** tab in the web UI to configure providers (e.g. OpenAI,
 
 ### Example Library
 
-[See here](../examples/) for a growing library of example workflow and context templates. PRs accepted if you would like to submit your own for possible inclusion in the library. All submissions will be reviewed carefully to ensure no duplication or malicious instructions.
+[See here](../examples/README.md) for a growing library of example workflow and context templates. PRs accepted if you would like to submit your own for possible inclusion in the library. All submissions will be reviewed carefully to ensure no duplication or malicious instructions.
