@@ -46,8 +46,16 @@ Stop repeating yourself. Set up a focused working set (notes, summaries, reporti
 ### Scheduled workflows for planning and follow-through
 Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. every morning, scan new notes and copy actions and follow-ups into a master task list).
 
-<a href="docs/chat-UI-screenshot.png">
-  <img src="docs/chat-UI-screenshot.png" alt="Chat UI screenshot" width="600">
+<a href="docs/chat-UI-screenshot1.png">
+  <img src="docs/chat-UI-screenshot1.png" alt="Chat UI screenshot" width="400">
+</a>
+
+<a href="docs/chat-UI-screenshot2.png">
+  <img src="docs/chat-UI-screenshot2.png" alt="Chat UI screenshot" width="400">
+</a>
+
+<a href="docs/chat-UI-screenshot3.png">
+  <img src="docs/chat-UI-screenshot3.png" alt="Chat UI screenshot" width="400">
 </a>
 
 ## Features
