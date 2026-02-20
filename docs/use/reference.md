@@ -776,6 +776,7 @@ Routing redirects directive or tool outputs to an alternate destination instead 
 - Use `write_mode=append|replace|new` when routed output is written to `file:` or `variable:` destinations.
 - Use `scope=session|run` with `variable:` destinations to select buffer scope.
 - Some tools may not accept routing parameters.
+- If a tool output is > `auto_buffer_max_tokens` setting, output is automatically routed to a buffer variable to protect the context window and the agent is provided a pointer.
 
 ### Examples:
 `@input variable: notes (output=file: exports/notes)`  
