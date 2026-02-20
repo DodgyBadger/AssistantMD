@@ -1,28 +1,29 @@
-from typing import AsyncIterator, Optional, List
+from typing import AsyncIterator, Optional, List, Any
 import json
 from datetime import datetime
 
 from pydantic_ai.agent import Agent
-
-# Create system logger for agent operations
-from core.logger import UnifiedLogger
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.directives.model import ModelDirective
 from core.settings.store import get_general_settings
 
-logger = UnifiedLogger(tag="agents")
-
-
-async def create_agent(instructions: str, model=None, tools: Optional[List] = None, retries: Optional[int] = None) -> Agent:
+async def create_agent(
+    model=None,
+    tools: Optional[List] = None,
+    retries: Optional[int] = None,
+    output_type: Optional[Any] = None,
+    history_processors: Optional[List] = None,
+) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
     Pure composition function that assembles pre-configured model and tools into a Pydantic AI Agent.
 
     Args:
-        instructions: System instructions for the agent
         model: Pre-configured Pydantic AI model instance, or None to use default model
         tools: Optional list of tool functions (extracted from BaseTool classes by directives)
         retries: Number of retries for tool validation errors (defaults to DEFAULT_TOOL_RETRIES)
+        output_type: Optional structured output specification for the agent
+        history_processors: Optional list of history processors to apply
 
     Returns:
         Configured Pydantic AI Agent ready for use
@@ -47,18 +48,18 @@ async def create_agent(instructions: str, model=None, tools: Optional[List] = No
     # Pure composition - assemble the pre-configured pieces
     agent_kwargs = {
         'model': model,
-        'instructions': instructions,
         'retries': retries if retries is not None else DEFAULT_TOOL_RETRIES
     }
-
+    if history_processors:
+        agent_kwargs['history_processors'] = history_processors
     if tools:
         agent_kwargs['tools'] = tools
+    if output_type is not None:
+        agent_kwargs['output_type'] = output_type
 
     agent = Agent(**agent_kwargs)
 
-    @agent.instructions
-    def get_date() -> str:
-        return f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}."
+    agent.instructions(lambda _: f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}.")
 
     return agent
 
@@ -91,15 +92,16 @@ async def generate_stream(agent, prompt, message_history) -> AsyncIterator[str]:
         raise
 
 
-async def generate_response(agent, prompt, message_history=None):
+async def generate_response(agent, prompt, message_history=None, deps=None):
     try:
         if message_history:
             result = await agent.run(
                 prompt,
-                message_history=message_history
+                message_history=message_history,
+                deps=deps,
             )
         else:
-            result = await agent.run(prompt)
+            result = await agent.run(prompt, deps=deps)
             
         return result.output
 

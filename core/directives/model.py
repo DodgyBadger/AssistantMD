@@ -6,7 +6,11 @@ Handles @model directive for per-step model selection using user-friendly model 
 
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
-from pydantic_ai.models.openai import OpenAIModel, OpenAIResponsesModelSettings
+from pydantic_ai.models.openai import (
+    OpenAIModel,
+    OpenAIResponsesModel,
+    OpenAIResponsesModelSettings,
+)
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -20,7 +24,7 @@ from pydantic_ai.settings import ModelSettings
 from .base import DirectiveProcessor
 from .parser import DirectiveValueParser
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
-from core.settings import get_default_api_timeout
+from core.settings import get_default_api_timeout, get_default_max_output_tokens
 from core.settings.secrets_store import get_secret_value
 
 
@@ -102,6 +106,9 @@ class ModelDirective(DirectiveProcessor):
         # Create models with provider-specific settings
         if provider == 'google':
             settings_kwargs = {"timeout": get_default_api_timeout()}
+            max_output_tokens = get_default_max_output_tokens()
+            if max_output_tokens > 0:
+                settings_kwargs["max_tokens"] = max_output_tokens
             # Keep thinking toggles disabled by default; callers can opt-in once configs stabilize.
             api_key = get_secret_value('GOOGLE_API_KEY')
             return GoogleModel(
@@ -112,6 +119,9 @@ class ModelDirective(DirectiveProcessor):
 
         elif provider == 'anthropic':
             settings_kwargs = {"timeout": get_default_api_timeout()}
+            max_output_tokens = get_default_max_output_tokens()
+            if max_output_tokens > 0:
+                settings_kwargs["max_tokens"] = max_output_tokens
             if enable_thinking:
                 settings_kwargs["anthropic_thinking"] = {
                     "type": "enabled",
@@ -126,6 +136,9 @@ class ModelDirective(DirectiveProcessor):
 
         elif provider == 'openai':
             settings_kwargs = {"timeout": get_default_api_timeout()}
+            max_output_tokens = get_default_max_output_tokens()
+            if max_output_tokens > 0:
+                settings_kwargs["max_tokens"] = max_output_tokens
             # if not enable_thinking:
             #     # OpenAI reasoning models always use reasoning, set to minimum effort
             #     # settings_kwargs["openai_reasoning_effort"] = "minimal"
@@ -135,14 +148,17 @@ class ModelDirective(DirectiveProcessor):
             #     settings_kwargs["openai_reasoning_effort"] = "high"
             #     settings_kwargs["openai_reasoning_summary"] = "auto"
             api_key = get_secret_value('OPENAI_API_KEY')
-            return OpenAIModel(
+            return OpenAIResponsesModel(
                 model_string,
                 provider=OpenAIProvider(api_key=api_key),
-                settings=OpenAIResponsesModelSettings(**settings_kwargs)
+                settings=OpenAIResponsesModelSettings(**settings_kwargs),
             )
 
         elif provider == 'grok':
             settings_kwargs = {"timeout": get_default_api_timeout()}
+            max_output_tokens = get_default_max_output_tokens()
+            if max_output_tokens > 0:
+                settings_kwargs["max_tokens"] = max_output_tokens
             api_key = get_secret_value('GROK_API_KEY')
             return OpenAIModel(
                 model_string,
@@ -152,6 +168,9 @@ class ModelDirective(DirectiveProcessor):
 
         elif provider == 'mistral':
             settings_kwargs = {"timeout": get_default_api_timeout()}
+            max_output_tokens = get_default_max_output_tokens()
+            if max_output_tokens > 0:
+                settings_kwargs["max_tokens"] = max_output_tokens
             api_key = get_secret_value('MISTRAL_API_KEY')
             return MistralModel(
                 model_string,
@@ -175,6 +194,9 @@ class ModelDirective(DirectiveProcessor):
             base_url = get_secret_value(base_url_config) or base_url_config
 
             settings_kwargs = {"timeout": get_default_api_timeout()}
+            max_output_tokens = get_default_max_output_tokens()
+            if max_output_tokens > 0:
+                settings_kwargs["max_tokens"] = max_output_tokens
             return OpenAIModel(
                 model_string,
                 provider=OllamaProvider(base_url=base_url),

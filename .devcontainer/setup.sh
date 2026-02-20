@@ -29,7 +29,7 @@ if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.loc
     cd "${REPO_DIR}/docker"
     UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_CACHE_DIR=/tmp/uv-cache \
-    uv sync --no-install-project || echo "WARNING: uv sync failed; continuing"
+    uv sync --extra dev --no-install-project || echo "WARNING: uv sync failed; continuing"
   )
 else
   echo "WARNING: docker/pyproject.toml or docker/uv.lock not found; skipping uv sync."

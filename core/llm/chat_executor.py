@@ -6,7 +6,8 @@ Persists chat history to markdown files for auditability and testing.
 """
 
 import json
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any
 from pathlib import Path
@@ -26,7 +27,12 @@ from core.constants import (
 )
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
+from core.context.manager import build_context_manager_history_processor
+from core.context.templates import load_template
+from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
+from core.runtime.state import get_runtime_context, has_runtime_context
+from core.runtime.buffers import BufferStore, get_session_buffer_store
 
 
 logger = UnifiedLogger(tag="chat-executor")
@@ -43,6 +49,19 @@ def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
     if len(value) <= limit:
         return value
     return value[: limit - 1] + "…"
+
+
+def _sanitize_session_id(session_id: str) -> str:
+    """
+    Constrain session ids to a safe filename segment.
+
+    Replaces disallowed characters (including path separators) with underscores.
+    """
+    if not session_id:
+        return "session"
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", session_id)
+    safe = safe.strip("._-")
+    return safe or "session"
 
 
 def _normalize_tool_args(args: Any) -> Optional[str]:
@@ -75,13 +94,78 @@ def _normalize_tool_result(result: Any) -> Optional[str]:
         return _truncate_preview(str(result), limit=240)
 
 
+def _get_default_context_template() -> Optional[str]:
+    """
+    Return the configured default context template name, if set.
+    """
+    try:
+        entry = get_general_settings().get("default_context_template")
+        if entry and entry.value:
+            return str(entry.value).strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_context_template_name(vault_path: str, context_template: Optional[str]) -> str:
+    """
+    Resolve a context template name with vault overrides and fallback to unmanaged chat.
+    """
+    fallback = "default.md"
+    candidate = context_template or _get_default_context_template() or fallback
+    try:
+        load_template(candidate, Path(vault_path))
+        return candidate
+    except FileNotFoundError:
+        if candidate != fallback:
+            try:
+                load_template(fallback, Path(vault_path))
+            except Exception:
+                return fallback
+            return fallback
+        return fallback
+    except Exception:
+        return fallback
+
+
 @dataclass
 class ChatExecutionResult:
     """Result of chat prompt execution."""
     response: str
     session_id: str
     message_count: int
+    compiled_context_path: Optional[str] = None
     history_file: Optional[str] = None  # Path to saved chat history file
+
+
+@dataclass
+class ChatRunDeps:
+    """Per-run dependencies/caches for chat agents."""
+    context_manager_cache: dict[str, Any] = field(default_factory=dict)
+    context_manager_now: Optional[datetime] = None
+    buffer_store: BufferStore = field(default_factory=BufferStore)
+    buffer_store_registry: dict[str, BufferStore] = field(default_factory=dict)
+
+
+def _resolve_context_manager_now() -> Optional[datetime]:
+    if not has_runtime_context():
+        return None
+    try:
+        runtime = get_runtime_context()
+    except Exception:
+        return None
+    features = runtime.config.features or {}
+    raw_value = features.get("context_manager_now")
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return datetime.fromisoformat(raw_value)
+        except ValueError:
+            return None
+    return None
 
 
 def save_chat_history(vault_path: str, session_id: str, prompt: str, response: str):
@@ -93,7 +177,12 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
     sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
-    history_file = sessions_dir / f"{session_id}.md"
+    safe_session_id = _sanitize_session_id(session_id)
+    history_file = sessions_dir / f"{safe_session_id}.md"
+    resolved_history = history_file.resolve()
+    resolved_sessions = sessions_dir.resolve()
+    if resolved_sessions not in resolved_history.parents:
+        raise ValueError("Resolved chat history path is outside the chat sessions directory.")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Create file with header if it doesn't exist
@@ -121,7 +210,7 @@ def _prepare_agent_config(
     Prepare agent configuration (shared between streaming and non-streaming).
 
     Returns:
-        Tuple of (final_instructions, model_instance, tool_functions)
+        Tuple of (base_instructions, tool_instructions, model_instance, tool_functions)
     """
     # Select base instructions
     if instructions:
@@ -136,22 +225,16 @@ def _prepare_agent_config(
     if tools:  # Only process if tools list is not empty
         tools_directive = ToolsDirective()
         tools_value = ", ".join(tools)  # Convert list to comma-separated string
-        tool_functions, tool_instructions = tools_directive.process_value(
+        tool_functions, tool_instructions, _ = tools_directive.process_value(
             tools_value,
             vault_path=vault_path
         )
-
-    # Compose instructions using Pydantic AI's list support for clean composition
-    if tool_functions and tool_instructions:
-        final_instructions = [base_instructions, tool_instructions]
-    else:
-        final_instructions = base_instructions
 
     # Process model directive to get Pydantic AI model instance
     model_directive = ModelDirective()
     model_instance = model_directive.process_value(model, f"{vault_name}/chat")
 
-    return final_instructions, model_instance, tool_functions
+    return base_instructions, tool_instructions, model_instance, tool_functions
 
 
 async def execute_chat_prompt(
@@ -161,9 +244,9 @@ async def execute_chat_prompt(
     session_id: str,
     tools: List[str],
     model: str,
-    use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
+    context_template: Optional[str] = None,    
 ) -> ChatExecutionResult:
     """
     Execute chat prompt with user-selected tools and model.
@@ -175,7 +258,6 @@ async def execute_chat_prompt(
         session_id: Session identifier for conversation tracking
         tools: List of tool names selected by user
         model: Model name selected by user
-        use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults to regular chat instructions)
 
@@ -183,28 +265,49 @@ async def execute_chat_prompt(
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
-    final_instructions, model_instance, tool_functions = _prepare_agent_config(
+    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model, instructions
     )
 
+    resolved_template = _resolve_context_template_name(vault_path, context_template)
+    history_processors = [
+        build_context_manager_history_processor(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            model_alias=model,
+            template_name=resolved_template,
+        )
+    ]
+
     # Create agent with user-selected configuration
     agent = await create_agent(
-        instructions=final_instructions,
         model=model_instance,
-        tools=tool_functions if tool_functions else None
+        tools=tool_functions if tool_functions else None,
+        history_processors=history_processors,
+    )
+    for inst in [base_instructions, tool_instructions]:
+        if inst:
+            agent.instructions(lambda _ctx, text=inst: text)
+
+    # Get message history (always tracked now)
+    message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
+
+    # Run agent
+    session_buffer_store = get_session_buffer_store(session_id)
+    run_deps = ChatRunDeps(
+        context_manager_now=_resolve_context_manager_now(),
+        buffer_store=session_buffer_store,
+        buffer_store_registry={"session": session_buffer_store},
+    )
+    result = await agent.run(
+        prompt,
+        message_history=message_history,
+        deps=run_deps,
     )
 
-    # Get message history if conversation mode enabled
-    message_history: Optional[List[ModelMessage]] = None
-    if use_conversation_history:
-        message_history = session_manager.get_history(session_id, vault_name)
-
-    # Run agent with message history
-    result = await agent.run(prompt, message_history=message_history)
-
-    # Store new messages in session for next turn if conversation mode enabled
-    if use_conversation_history:
-        session_manager.add_messages(session_id, vault_name, result.new_messages())
+    # Store new messages in session for next turn
+    session_manager.add_messages(session_id, vault_name, result.new_messages())
 
     # Save chat history to markdown file
     history_file = save_chat_history(vault_path, session_id, prompt, result.output)
@@ -215,7 +318,6 @@ async def execute_chat_prompt(
             "session_id": session_id,
             "model": model,
             "tools_count": len(tools),
-            "use_history": use_conversation_history,
             "prompt_length": len(prompt),
             "history_file": history_file,
         },
@@ -226,7 +328,7 @@ async def execute_chat_prompt(
         session_id=session_id,
         message_count=len(result.all_messages()),
         history_file=history_file
-    )
+        )
 
 
 async def execute_chat_prompt_stream(
@@ -236,9 +338,9 @@ async def execute_chat_prompt_stream(
     session_id: str,
     tools: List[str],
     model: str,
-    use_conversation_history: bool,
     session_manager: SessionManager,
     instructions: Optional[str] = None,
+    context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
     Execute chat prompt with streaming response.
@@ -252,7 +354,6 @@ async def execute_chat_prompt_stream(
         session_id: Session identifier for conversation tracking
         tools: List of tool names selected by user
         model: Model name selected by user
-        use_conversation_history: Whether to maintain conversation state
         session_manager: Session manager instance for history storage
         instructions: Optional system instructions (defaults to regular chat instructions)
 
@@ -260,31 +361,53 @@ async def execute_chat_prompt_stream(
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
-    final_instructions, model_instance, tool_functions = _prepare_agent_config(
+    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model, instructions
     )
 
+    resolved_template = _resolve_context_template_name(vault_path, context_template)
+    history_processors = [
+        build_context_manager_history_processor(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            model_alias=model,
+            template_name=resolved_template,
+        )
+    ]
+
     # Create agent with user-selected configuration
     agent = await create_agent(
-        instructions=final_instructions,
         model=model_instance,
-        tools=tool_functions if tool_functions else None
+        tools=tool_functions if tool_functions else None,
+        history_processors=history_processors,
     )
+    for inst in [base_instructions, tool_instructions]:
+        if inst:
+            agent.instructions(lambda _ctx, text=inst: text)
 
-    # Get message history if conversation mode enabled
-    message_history: Optional[List[ModelMessage]] = None
-    if use_conversation_history:
-        message_history = session_manager.get_history(session_id, vault_name)
+    # Get message history
+    message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
     # Stream response and capture final result for history storage
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
+    session_buffer_store = get_session_buffer_store(session_id)
+    run_deps = ChatRunDeps(
+        context_manager_now=_resolve_context_manager_now(),
+        buffer_store=session_buffer_store,
+        buffer_store_registry={"session": session_buffer_store},
+    )
 
     try:
         # Use run_stream_events() to properly handle tool calls
         # This runs the agent graph to completion and streams all events
-        async for event in agent.run_stream_events(prompt, message_history=message_history):
+        async for event in agent.run_stream_events(
+            prompt,
+            message_history=message_history,
+            deps=run_deps,
+        ):
             if isinstance(event, PartStartEvent):
                 # Initial text part - send as first chunk
                 if hasattr(event.part, 'content') and event.part.content:
@@ -394,8 +517,8 @@ async def execute_chat_prompt_stream(
         yield f"data: {json.dumps(error_chunk)}\n\n"
         raise
 
-    # Store new messages in session if conversation mode enabled
-    if use_conversation_history and final_result:
+    # Store new messages in session (including tool results captured during stream)
+    if final_result:
         session_manager.add_messages(session_id, vault_name, final_result.new_messages())
 
     # Save chat history to markdown file

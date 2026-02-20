@@ -9,7 +9,6 @@ from typing import Optional
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, JSON
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
 from core.database import Base, create_engine_from_system_db, create_session_factory
 from core.ingestion.models import JobStatus

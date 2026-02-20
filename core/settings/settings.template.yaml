@@ -6,15 +6,31 @@
 settings:
   default_model:
     value: sonnet
-    description: "Fallback model alias when @model is omitted."
+    description: "Default model alias used in the chat UI and as fallback when @model is omitted in workflow and context templates."
+    restart_required: false
+  default_context_template:
+    value: "default.md"
+    description: "Default context template name for chat sessions (vault templates override system templates by name)."
     restart_required: false
   default_api_timeout:
     value: 120
-    description: "Default timeout (seconds) for external API calls."
+    description: "Default timeout in seconds for external API calls."
     restart_required: false
-  web_tool_max_tokens:
-    value: 50000
-    description: "Maximum token limit for web extraction tools (tavily_extract, tavily_crawl) to prevent context overflow."
+  max_output_tokens:
+    value: 0
+    description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
+    restart_required: false
+  auto_buffer_max_tokens:
+    value: 10000
+    description: "Automatically route tool output to a buffer variable when it exceeds this token count. 0 = disabled. Caution: very low values will increase tool churn and token usage. This setting is used to protect context window from massive tool outputs. buffer_ops tool is automatically enabled if this setting > 0."
+    restart_required: false
+  file_search_timeout_seconds:
+    value: 10
+    description: "Timeout in seconds for file_ops_safe search operations."
+    restart_required: false
+  routing_allowed_tools:
+    value: []
+    description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"
     restart_required: false
   debug:
     value: false
@@ -26,13 +42,13 @@ settings:
     restart_required: false
   piston_base_url:
     value: "https://emkc.org/api/v2/piston"
-    description: "Piston API base URL (public default; override for self-hosted or proxied endpoints)."
+    description: "Piston API base URL. Default value is the free public endpoint. Override for self-hosted or proxied endpoints."
     restart_required: false
   ingestion_pdf_default_strategies:
     value:
       - pdf_text
       - pdf_ocr
-    description: "Default strategy order for PDF ingestion; remove pdf_ocr to disable OCR or reorder as needed."
+    description: "Available strategies and priority for PDF ingestion. JSON array. Remove value to disable or reorder as needed. E.g. [\"pdf_ocr\"] will force all imports through OCR."
     restart_required: false
   ingestion_pdf_ocr_model:
     value: "mistral-ocr-latest"
@@ -44,7 +60,19 @@ settings:
     restart_required: false
   ingestion_output_path_pattern:
     value: "Imported/"
-    description: "Vault-relative folder where ingestion artifacts are written."
+    description: "Vault-relative path where imports are written."
+    restart_required: false
+  ingestion_url_fetch_backend:
+    value: "curl"
+    description: "URL ingestion backend. Currently only curl is supported. DO NOT CHANGE."
+    restart_required: false
+  ingestion_url_connect_timeout_seconds:
+    value: 10
+    description: "Connection timeout in seconds for URL ingestion HTTP requests. Increase if you get timeout errors on large URL imports."
+    restart_required: false
+  ingestion_url_read_timeout_seconds:
+    value: 20
+    description: "Read timeout in seconds for URL ingestion HTTP requests. Increase if you get timeout errors on large URL imports."
     restart_required: false
   ingestion_worker_interval_seconds:
     value: 120
@@ -170,7 +198,7 @@ providers:
 tools:
   web_search_tavily:
     module: core.tools.web_search_tavily
-    description: "Web search using Tavily"
+    description: "Web search using Tavily. API key required."
     requires_secrets:
       - TAVILY_API_KEY
     user_editable: false
@@ -184,23 +212,35 @@ tools:
     description: "Read, write, append, list, search"
     requires_secrets: []
     user_editable: false
+  buffer_ops:
+    module: core.tools.buffer_ops
+    description: "Read-only buffer inspection (list, info, peek, read, search)"
+    requires_secrets: []
+    user_editable: false
   file_ops_unsafe:
     module: core.tools.file_ops_unsafe
     description: "Edit, delete, move/overwrite (use with caution)"
     requires_secrets: []
     user_editable: false
-  import_url:
-    module: core.tools.import_url
-    description: "Import a single URL into a vault via the ingestion pipeline"
-    requires_secrets: []
+  tavily_extract:
+    module: core.tools.tavily_extract
+    description: "Extract content from specific URLs. API key required."
+    requires_secrets:
+      - TAVILY_API_KEY
     user_editable: false
-  documentation_access:
-    module: core.tools.documentation_access
-    description: "Create workflows via chat"
-    requires_secrets: []
+  tavily_crawl:
+    module: core.tools.tavily_crawl
+    description: "Crawl and extract content from multiple pages. API key required."
+    requires_secrets:
+      - TAVILY_API_KEY
     user_editable: false
   code_execution:
     module: core.tools.code_execution_piston
     description: "Multi-language code execution via Piston API"
+    requires_secrets: []
+    user_editable: false
+  workflow_run:
+    module: core.tools.workflow_run
+    description: "List and run workflows in the current vault"
     requires_secrets: []
     user_editable: false

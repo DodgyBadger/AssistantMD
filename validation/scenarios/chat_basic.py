@@ -28,7 +28,6 @@ class TestChatBasicScenario(BaseScenario):
                 "session_id": session_id,
                 "tools": [],
                 "model": "sonnet",
-                "use_conversation_history": False,
                 "stream": False,
             },
         )

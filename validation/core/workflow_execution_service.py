@@ -5,7 +5,6 @@ Provides isolated workflow execution with complete path redirection and environm
 """
 
 import sys
-import os
 import importlib
 from pathlib import Path
 from typing import Any, List, Optional

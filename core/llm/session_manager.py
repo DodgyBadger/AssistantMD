@@ -5,6 +5,7 @@ Stores Pydantic AI ModelMessage objects for stateful chat execution.
 """
 
 from typing import Optional
+from typing import Callable
 from pydantic_ai.messages import ModelMessage
 
 
@@ -31,6 +32,54 @@ class SessionManager:
         Returns None if no history exists (first message in conversation).
         """
         return self._sessions.get(session_id)
+
+    def get_recent(
+        self,
+        session_id: str,
+        vault_name: str,  # Kept for backward compatibility, not used
+        limit: int
+    ) -> list[ModelMessage]:
+        """
+        Get the last N messages for a session.
+
+        Returns an empty list if no history exists or limit <= 0.
+        Always returns a new list (safe to mutate).
+        """
+        history = self._sessions.get(session_id)
+        if not history or limit <= 0:
+            return []
+        return list(history[-limit:])
+
+    def get_recent_matching(
+        self,
+        session_id: str,
+        vault_name: str,  # Kept for backward compatibility, not used
+        limit: int,
+        predicate: Callable[[ModelMessage], bool],
+    ) -> list[ModelMessage]:
+        """
+        Get up to N most recent messages matching a predicate.
+
+        Iterates from the end and stops once limit matches are found.
+        Returns in chronological order (oldest to newest of the matched set).
+        """
+        if limit <= 0:
+            return []
+        history = self._sessions.get(session_id)
+        if not history:
+            return []
+
+        matched: list[ModelMessage] = []
+        for msg in reversed(history):
+            try:
+                if predicate(msg):
+                    matched.append(msg)
+                    if len(matched) >= limit:
+                        break
+            except Exception:
+                continue
+        matched.reverse()
+        return matched
 
     def add_messages(
         self,

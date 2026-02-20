@@ -2,7 +2,7 @@
 Agentic Workflow scenario - tests autonomous task execution capabilities.
 
 Tests how "agentic" the step workflow can be when given:
-- No explicit @output-file directive
+- No explicit @output directive
 - Full file operation tools (safe + unsafe)
 - A goal with minimal instruction on HOW to accomplish it
 

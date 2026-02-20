@@ -4,7 +4,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 
 from core.runtime.paths import (
     resolve_bootstrap_data_root,

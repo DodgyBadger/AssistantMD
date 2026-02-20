@@ -8,10 +8,9 @@ from typing import Literal
 from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
-from .utils import estimate_token_count
 from core.logger import UnifiedLogger
 from core.constants import WEB_TOOL_SECURITY_NOTICE
-from core.settings import get_default_api_timeout, get_web_tool_max_tokens
+from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
 
 logger = UnifiedLogger(tag="tavily-crawl")
@@ -30,6 +29,7 @@ class TavilyCrawl(BaseTool):
         client = TavilyClient(api_key=tavily_api_key)
         
         async def tavily_crawl(
+            *,
             url: str,
             instructions: str = "Find comprehensive information and documentation",
             max_depth: int = 1,
@@ -38,22 +38,15 @@ class TavilyCrawl(BaseTool):
             extract_depth: Literal['basic', 'advanced'] = 'basic',
             allow_external: bool = False
         ) -> str:
-            """Crawl a website intelligently to extract comprehensive content.
+            """Crawl a website and extract content from multiple pages.
 
-            Perfect for gathering documentation, exploring knowledge bases, or conducting
-            comprehensive research on structured websites.
-
-            Args:
-                url: Starting URL to begin crawling from
-                instructions: Natural language description of what content to find
-                max_depth: Maximum crawl depth (1=nearby pages, 2-3=thorough exploration)
-                max_breadth: Links to follow per page (5=focused, 15-20=comprehensive)
-                limit: Total maximum pages to crawl (1-50)
-                extract_depth: 'basic' for speed, 'advanced' for comprehensive extraction
-                allow_external: Whether to follow links to external domains
-
-            Returns:
-                Formatted content from all crawled pages
+            :param url: Starting URL to begin crawling from
+            :param instructions: Natural language description of what content to find
+            :param max_depth: Maximum crawl depth
+            :param max_breadth: Links to follow per page
+            :param limit: Total maximum pages to crawl
+            :param extract_depth: 'basic' or 'advanced'
+            :param allow_external: Whether to follow links to external domains
             """
             logger.set_sinks(["validation"]).info(
                 "tool_invoked",
@@ -105,38 +98,6 @@ class TavilyCrawl(BaseTool):
 
             final_content = "\n".join(crawled_content)
 
-            # Check token count to prevent context window overflow
-            token_count = estimate_token_count(final_content)
-            max_tokens = get_web_tool_max_tokens()
-
-            if token_count > max_tokens:
-                pages_crawled = len(result['results'])
-
-                return f"""❌ Crawl Error: Content exceeds context window limit
-
-The crawled content from {pages_crawled} page(s) is too large to process:
-  - Extracted: {token_count:,} tokens
-  - Maximum: {max_tokens:,} tokens
-  - Size: {len(final_content):,} characters
-
-Base URL: {url}
-
-The crawl gathered too much content, likely due to:
-  - Too many pages crawled (limit={limit})
-  - Pages with extensive citations/navigation (like Wikipedia)
-  - Deep crawl depth (max_depth={max_depth}) or wide breadth (max_breadth={max_breadth})
-
-Please inform the user that this crawl cannot be processed due to size constraints.
-
-Suggested alternatives:
-  1. Reduce the crawl scope:
-     - Lower the 'limit' parameter (try {max(1, limit // 2)} instead of {limit})
-     - Reduce 'max_depth' to 1 if currently higher
-     - Reduce 'max_breadth' to 3-5 for more focused crawling
-  2. Use web_search to get summarized information instead
-  3. Use tavily_extract on specific known URLs rather than crawling
-  4. Ask the user which specific pages they want, then extract those individually"""
-
             return final_content
         
         return Tool(
@@ -148,7 +109,10 @@ Suggested alternatives:
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Crawl."""
-        return """Website Crawling: Use when you need to comprehensively explore a website and extract content from multiple related pages. Perfect for:
+        return """
+## tavily_crawl usage instructions
+
+Use when you need to comprehensively explore a website and extract content from multiple related pages.
 - Crawling documentation sites for complete guides
 - Exploring knowledge bases and help centers
 - Conducting thorough research on company websites
@@ -164,4 +128,6 @@ If you need richer content from the pages returned, re-run with `extract_depth='
 
 IMPORTANT: If you get back only 1 page despite ambitious parameters, the site likely uses JavaScript navigation, is a single-page application, or has anti-crawling measures. In this case, inform the user that crawling isn't suitable for this site and recommend using multiple targeted extract operations on specific URLs instead.
 
-Provide clear instructions about what content you're seeking.""" + WEB_TOOL_SECURITY_NOTICE
+Provide clear instructions about what content you're seeking.
+Example: tavily_crawl(url="https://example.com", max_depth=1, max_breadth=3, limit=5).
+""" + WEB_TOOL_SECURITY_NOTICE

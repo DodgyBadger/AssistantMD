@@ -16,6 +16,7 @@ from core.scheduling.parser import parse_schedule_syntax, ScheduleParsingError
 from core.directives.parser import parse_directives
 from core.directives.bootstrap import ensure_builtin_directives_registered
 from core.directives.registry import get_global_registry, InvalidDirectiveError
+from core.utils.frontmatter import parse_simple_frontmatter
 
 
 # Create module logger
@@ -74,78 +75,12 @@ class WorkflowConfigSchema(BaseModel):
 #######################################################################
 
 def parse_frontmatter(content: str) -> Tuple[dict, str]:
-    """Extract frontmatter key-value pairs and remaining content.
-
-    Parses frontmatter as simple key: value pairs without YAML interpretation.
-    This avoids YAML syntax restrictions and allows any characters in values.
-
-    Args:
-        content: Full file content starting with frontmatter
-
-    Returns:
-        Tuple of (config_dict, remaining_content)
-
-    Raises:
-        ValueError: If frontmatter format is invalid
-    """
-    content = content.strip()
-
-    if not content.startswith('---'):
-        raise ValueError("Workflow file must start with YAML frontmatter (---)")
-
-    lines = content.split('\n')
-    if len(lines) < 3:
-        raise ValueError("Invalid frontmatter format: file too short")
-
-    # Find closing ---
-    end_idx = None
-    for i, line in enumerate(lines[1:], 1):
-        if line.strip() == '---':
-            end_idx = i
-            break
-
-    if end_idx is None:
-        raise ValueError("Frontmatter not properly closed with ---")
-
-    # Parse key-value pairs (split on first colon only)
-    config = {}
-    for line_num, line in enumerate(lines[1:end_idx], 2):
-        line = line.strip()
-
-        # Skip empty lines and comments
-        if not line or line.startswith('#'):
-            continue
-
-        # Must contain colon
-        if ':' not in line:
-            raise ValueError(f"Line {line_num}: Invalid format, expected 'key: value'")
-
-        # Split on first colon only - everything after is the value
-        key, value = line.split(':', 1)
-        key = key.strip()
-        value = value.strip()
-
-        if not key:
-            raise ValueError(f"Line {line_num}: Empty key not allowed")
-
-        # Strip matching quotes (Obsidian adds these automatically)
-        if len(value) >= 2:
-            if (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'"):
-                value = value[1:-1]
-
-        # Convert common boolean strings
-        if value.lower() in ('true', 'yes', 'on'):
-            config[key] = True
-        elif value.lower() in ('false', 'no', 'off'):
-            config[key] = False
-        else:
-            # Keep as string (Pydantic will handle type conversion)
-            config[key] = value
-
-    # Extract remaining content
-    remaining_content = '\n'.join(lines[end_idx + 1:])
-
-    return config, remaining_content
+    """Extract frontmatter key-value pairs and remaining content."""
+    return parse_simple_frontmatter(
+        content,
+        require_frontmatter=True,
+        missing_error="Workflow file must start with YAML frontmatter (---)",
+    )
 
 
 #######################################################################
@@ -181,7 +116,11 @@ def parse_markdown_sections(content: str, delimiter: str = "##") -> Dict[str, st
     return sections
 
 
-def parse_workflow_file(file_path: str, context_id: str = None) -> Dict[str, str]:
+def parse_workflow_file(
+    file_path: str,
+    context_id: str = None,
+    require_frontmatter: bool = True,
+) -> Dict[str, str]:
     """Parse workflow definition file with YAML frontmatter format.
     
     Reads workflow file with frontmatter configuration and markdown sections.
@@ -204,7 +143,14 @@ def parse_workflow_file(file_path: str, context_id: str = None) -> Dict[str, str
             content = file.read()
         
         # Extract frontmatter configuration and remaining content
-        frontmatter_config, remaining_content = parse_frontmatter(content)
+        if require_frontmatter:
+            frontmatter_config, remaining_content = parse_frontmatter(content)
+        else:
+            if content.strip().startswith('---'):
+                frontmatter_config, remaining_content = parse_frontmatter(content)
+            else:
+                frontmatter_config = {}
+                remaining_content = content
         
         # Parse remaining content into sections
         sections = parse_markdown_sections(remaining_content, "##")
@@ -255,8 +201,9 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
         ValueError: If validation fails or required fields are missing
     """
     try:
+        normalized_config = normalize_workflow_config_keys(config)
         # Use Pydantic schema for validation
-        validated_config = WorkflowConfigSchema(**config)
+        validated_config = WorkflowConfigSchema(**normalized_config)
         
         # Convert back to dictionary format expected by callers
         return validated_config.model_dump()
@@ -276,6 +223,38 @@ def validate_config(config: dict, vault: str, name: str) -> dict:
         )
         
         raise ValueError(error_msg) from e
+
+
+def normalize_workflow_config_keys(config: dict) -> dict:
+    """Normalize workflow frontmatter keys to canonical snake_case."""
+    normalized = dict(config or {})
+    alias_pairs = (
+        ("workflow_engine", "workflow-engine"),
+        ("week_start_day", "week-start-day"),
+    )
+
+    for canonical_key, alias_key in alias_pairs:
+        canonical_present = canonical_key in normalized
+        alias_present = alias_key in normalized
+        if not alias_present:
+            continue
+
+        if canonical_present and normalized[canonical_key] != normalized[alias_key]:
+            logger.warning(
+                "Conflicting frontmatter keys; preferring canonical key",
+                metadata={
+                    "canonical_key": canonical_key,
+                    "alias_key": alias_key,
+                    "canonical_value": normalized[canonical_key],
+                    "alias_value": normalized[alias_key],
+                },
+            )
+            continue
+
+        if not canonical_present:
+            normalized[canonical_key] = normalized[alias_key]
+
+    return normalized
 
 
 #######################################################################
@@ -303,8 +282,8 @@ class ProcessedStep:
             The processed directive value, or default if not found
             
         Examples:
-            result.get_directive_value('output_file')  # for @output-file
-            result.get_directive_value('input_file', [])  # for @input-file
+            result.get_directive_value('output')  # for @output
+            result.get_directive_value('input', [])  # for @input
         """
         return self.directive_config.get(directive_name, default)
 
@@ -318,7 +297,8 @@ def process_step_content(
     vault_path: str, 
     reference_date: Optional[datetime] = None,
     week_start_day: int = 0,
-    state_manager=None
+    state_manager=None,
+    buffer_store=None,
 ) -> ProcessedStep:
     """Process workflow step content by extracting and processing directives.
     
@@ -367,7 +347,8 @@ def process_step_content(
                         vault_path, 
                         reference_date=reference_date,
                         week_start_day=week_start_day,
-                        state_manager=state_manager
+                        state_manager=state_manager,
+                        buffer_store=buffer_store,
                     )
                     if not result.success:
                         raise ValueError(f"Failed to process directive '{directive_name}': {result.error_message}")

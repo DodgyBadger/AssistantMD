@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 
 from .base import DirectiveProcessor
-from .pattern_utilities import PatternUtilities
+from core.utils.patterns import PatternUtilities
 
 
 class HeaderDirective(DirectiveProcessor):
@@ -14,7 +14,7 @@ class HeaderDirective(DirectiveProcessor):
     Header directive processor for customizing step output headers.
     
     Allows specification of headers using literal text and pattern variables.
-    Supports the same time-based patterns as output-file directive for consistency.
+    Supports the same time-based patterns as output directive for consistency.
     
     Supported Patterns:
         {today}           - Current date (YYYY-MM-DD)
@@ -66,6 +66,8 @@ class HeaderDirective(DirectiveProcessor):
         resolved_header = value
         for pattern in brace_patterns:
             base_pattern, count = self.pattern_utils.parse_pattern_with_count(pattern)
+            if count is None:
+                base_pattern, _fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
             
             # Validate pattern is appropriate for headers
             if base_pattern == 'pending':
@@ -74,16 +76,18 @@ class HeaderDirective(DirectiveProcessor):
                 raise ValueError(f"Multi-file pattern '{pattern}' not supported in @header directive")
             
             # Resolve the pattern to a string
-            resolved_value = self._resolve_header_pattern(base_pattern, reference_date, week_start_day)
+            resolved_value = self._resolve_header_pattern(pattern, reference_date, week_start_day)
             resolved_header = resolved_header.replace(f'{{{pattern}}}', resolved_value)
         
         return resolved_header
     
     def _resolve_header_pattern(self, pattern: str, reference_date: datetime, week_start_day: int) -> str:
         """Resolve patterns specific to header directive needs."""
-        
-        if pattern in ['today', 'yesterday', 'tomorrow', 'this-week', 'last-week', 
-                      'next-week', 'this-month', 'last-month', 'day-name', 'month-name']:
+
+        base_pattern, _fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
+
+        if base_pattern in ['today', 'yesterday', 'tomorrow', 'this-week', 'last-week',
+                           'next-week', 'this-month', 'last-month', 'day-name', 'month-name']:
             return self.pattern_utils.resolve_date_pattern(pattern, reference_date, week_start_day)
         
         else:

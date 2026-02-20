@@ -312,11 +312,43 @@ def get_default_api_timeout() -> float:
         return 120.0
 
 
-def get_web_tool_max_tokens() -> int:
-    """Return the configured web tool token limit, falling back to 50000 tokens."""
-    entry = get_general_settings().get("web_tool_max_tokens")
+def get_default_max_output_tokens() -> int:
+    """Return the configured max output tokens, falling back to 0 (provider default)."""
+    entry = get_general_settings().get("max_output_tokens")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
         return int(value)
     except (TypeError, ValueError):
-        return 50000
+        return 0
+
+
+def get_auto_buffer_max_tokens() -> int:
+    """Return the configured auto-buffer token limit, falling back to 0 (disabled)."""
+    entry = get_general_settings().get("auto_buffer_max_tokens")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_file_search_timeout_seconds() -> float:
+    """Return file search timeout seconds, falling back to 10 seconds."""
+    entry = get_general_settings().get("file_search_timeout_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 10.0
+    return timeout if timeout > 0 else 10.0
+
+
+def get_routing_allowed_tools() -> list[str]:
+    """Return list of tool names allowed to accept routing in chat."""
+    entry = get_general_settings().get("routing_allowed_tools")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, list):
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip().lower() for item in value.split(",") if item.strip()]
+    return []

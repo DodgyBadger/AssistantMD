@@ -194,6 +194,19 @@
         .message-footer-right {
             justify-content: flex-end;
         }
+        .message-footer-has-tools {
+            align-items: flex-start;
+        }
+        .message-footer-has-tools .message-footer-content {
+            display: flex;
+            flex: 1;
+            min-width: 0;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .message-footer-has-tools .message-footer-actions {
+            padding-top: 0.1rem;
+        }
         .message-footer-content {
             display: flex;
             flex-wrap: wrap;
@@ -390,6 +403,22 @@
             flex-direction: column;
             gap: 0.5rem;
             margin-top: 0.75rem;
+        }
+        .tool-calls-section {
+            margin-top: 0.75rem;
+            border: 1px solid rgb(var(--border-primary) / 0.6);
+            border-radius: 0.6rem;
+            background: rgb(var(--bg-elevated) / 0.5);
+            overflow: hidden;
+        }
+        .message-footer .tool-calls-section {
+            margin-top: 0;
+            width: 100%;
+        }
+        .tool-calls-section .tool-status-list {
+            margin: 0;
+            padding: 0.65rem 0.75rem 0.75rem;
+            border-top: 1px solid rgb(var(--border-primary) / 0.45);
         }
         .tool-status {
             margin: 0;
@@ -656,11 +685,12 @@
                             <option value="">Select model...</option>
                         </select>
                     </div>
-                    <!-- Mode -->
-                    <select id="mode-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                        <option value="regular">Regular Chat</option>
-                        <option value="workflow_creation">Workflow Creation</option>
-                    </select>
+                    <!-- Context Template -->
+                    <div class="grid grid-cols-1 gap-3">
+                        <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="">Select template...</option>
+                        </select>
+                    </div>
                     <!-- Tools -->
                     <div id="tools-checkboxes" class="flex flex-wrap gap-2">
                         <!-- Tool checkboxes will be added here -->

@@ -5,7 +5,6 @@ HTML extractor using markdownify (lightweight HTML→Markdown) with basic cleani
 from __future__ import annotations
 
 import re
-from typing import Any
 
 try:
     from markdownify import markdownify as md

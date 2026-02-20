@@ -7,7 +7,7 @@ real user workflows with readable, high-level operations.
 
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from abc import ABC, abstractmethod
 
@@ -145,6 +145,15 @@ class BaseScenario(ABC):
         """Advance the reference date used for time patterns (does not poke scheduler)."""
         self._log_timeline(f"Advancing time: +{hours}h {minutes}m")
         self._get_time_controller().advance_time(hours=hours, minutes=minutes)
+
+    def set_context_manager_now(self, value: Optional[datetime]):
+        """Override context manager cache clock (validation only)."""
+        if value is None:
+            label = "clearing override"
+        else:
+            label = value.isoformat()
+        self._log_timeline(f"Setting context manager cache time: {label}")
+        self._get_system_controller().set_context_manager_now(value)
     
     async def start_system(self):
         """Start the AssistantMD system."""

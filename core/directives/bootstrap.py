@@ -13,13 +13,19 @@ from core.logger import UnifiedLogger
 
 from .base import DirectiveProcessor
 from .header import HeaderDirective
-from .input_file import InputFileDirective
+from .input import InputFileDirective
 from .model import ModelDirective
-from .output_file import OutputFileDirective
+from .output import OutputFileDirective
 from .registry import get_global_registry
 from .run_on import RunOnDirective
 from .tools import ToolsDirective
 from .write_mode import WriteModeDirective
+from .context_manager import (
+    PassthroughRunsDirective,
+    RecentRunsDirective,
+    RecentSummariesDirective,
+)
+from .cache import CacheDirective
 
 logger = UnifiedLogger(tag="directive-bootstrap")
 
@@ -31,6 +37,10 @@ _BUILTIN_DIRECTIVES: tuple[Type[DirectiveProcessor], ...] = (
     WriteModeDirective,
     ToolsDirective,
     HeaderDirective,
+    CacheDirective,
+    RecentRunsDirective,
+    PassthroughRunsDirective,
+    RecentSummariesDirective,
 )
 
 _builtins_registered: bool = False

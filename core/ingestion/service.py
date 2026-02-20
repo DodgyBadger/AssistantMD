@@ -76,6 +76,7 @@ class IngestionService:
             vault = job.vault
             if not vault:
                 raise ValueError("Job missing vault")
+            ingestion_settings = self._get_ingestion_settings()
 
             data_root = Path(get_data_root())
             import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
@@ -93,7 +94,13 @@ class IngestionService:
                     self.logger.warning(msg, metadata={"job_id": job_id, "source": job.source_uri})
                     self.mark_failed(job_id, msg)
                     return
-                raw_doc = importer_fn(job.source_uri)
+                url_cfg = ingestion_settings.get("url", {}) if isinstance(ingestion_settings, dict) else {}
+                raw_doc = importer_fn(
+                    job.source_uri,
+                    timeout=url_cfg.get("read_timeout_seconds", 10),
+                    connect_timeout=url_cfg.get("connect_timeout_seconds", 10),
+                    backend=url_cfg.get("fetch_backend", "curl"),
+                )
             else:
                 source_path = Path(job.source_uri)
                 if not source_path.is_absolute():
@@ -114,7 +121,6 @@ class IngestionService:
 
                 raw_doc = importer_fn(source_path)
 
-            ingestion_settings = self._get_ingestion_settings()
             suffix = source_path.suffix.lower() if source_path else ""
             strategies = self._get_strategies(job, suffix, ingestion_settings)
             options = job.options if isinstance(job.options, dict) else {}
@@ -156,6 +162,25 @@ class IngestionService:
             update_job_outputs(job_id, outputs)
             self.mark_completed(job_id)
         except Exception as exc:
+            if job.source_type == SourceKind.URL.value:
+                try:
+                    url_cfg = ingestion_settings.get("url", {}) if isinstance(ingestion_settings, dict) else {}
+                except Exception:
+                    url_cfg = {}
+                self.logger.error(
+                    "URL ingestion failed",
+                    metadata={
+                        "job_id": job_id,
+                        "vault": job.vault,
+                        "source_uri": job.source_uri,
+                        "source_type": job.source_type,
+                        "fetch_backend": url_cfg.get("fetch_backend", "curl"),
+                        "connect_timeout_seconds": url_cfg.get("connect_timeout_seconds"),
+                        "read_timeout_seconds": url_cfg.get("read_timeout_seconds"),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
             self.mark_failed(job_id, str(exc))
             raise
 
@@ -200,6 +225,9 @@ class IngestionService:
         pdf_ocr_model = "mistral-ocr-latest"
         pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
         base_output_dir = "Imported/"
+        url_read_timeout_seconds = 10
+        url_connect_timeout_seconds = 10
+        url_fetch_backend = "curl"
         try:
             pdf_default_strategies = list(general_settings.get("ingestion_pdf_default_strategies").value)
         except Exception:
@@ -216,6 +244,18 @@ class IngestionService:
             base_output_dir = str(general_settings.get("ingestion_output_path_pattern").value)
         except Exception:
             base_output_dir = "Imported/"
+        try:
+            url_read_timeout_seconds = int(general_settings.get("ingestion_url_read_timeout_seconds").value)
+        except Exception:
+            url_read_timeout_seconds = 10
+        try:
+            url_connect_timeout_seconds = int(general_settings.get("ingestion_url_connect_timeout_seconds").value)
+        except Exception:
+            url_connect_timeout_seconds = 10
+        try:
+            url_fetch_backend = str(general_settings.get("ingestion_url_fetch_backend").value).strip().lower() or "curl"
+        except Exception:
+            url_fetch_backend = "curl"
 
         return {
             "pdf": {
@@ -224,6 +264,11 @@ class IngestionService:
                 "ocr_endpoint": pdf_ocr_endpoint,
             },
             "output_base_dir": base_output_dir,
+            "url": {
+                "read_timeout_seconds": max(1, url_read_timeout_seconds),
+                "connect_timeout_seconds": max(1, url_connect_timeout_seconds),
+                "fetch_backend": url_fetch_backend,
+            },
         }
 
     def _resolve_extractor(self, mime: str | None):

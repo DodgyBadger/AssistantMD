@@ -7,55 +7,59 @@ from __future__ import annotations
 from typing import Optional
 import re
 
-import requests
-
 from core.ingestion.models import RawDocument, SourceKind
 from core.ingestion.registry import importer_registry
+from core.ingestion.sources.url_fetchers import fetch_url_with_curl
 
 
-_DEFAULT_TIMEOUT = 10
+_DEFAULT_READ_TIMEOUT = 10
+_DEFAULT_CONNECT_TIMEOUT = 10
+_DEFAULT_FETCH_BACKEND = "curl"
 _MAX_BYTES = 5 * 1024 * 1024  # 5 MB guardrail
-_DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) AssistantMD-Ingestion/1.0 Safari/537.36"
-}
+_DEFAULT_HEADERS: dict[str, str] = {}
 
 
-def _read_limited_content(resp: requests.Response, max_bytes: int) -> bytes:
-    """
-    Read response content up to max_bytes to avoid unbounded memory use.
-    """
-    total = 0
-    chunks: list[bytes] = []
-    for chunk in resp.iter_content(chunk_size=8192):
-        if chunk:
-            total += len(chunk)
-            if total > max_bytes:
-                raise RuntimeError(f"Response exceeded {max_bytes} bytes")
-            chunks.append(chunk)
-    return b"".join(chunks)
-
-
-def load_url(source_uri: str, *, timeout: Optional[int] = None, max_bytes: int = _MAX_BYTES) -> RawDocument:
+def load_url(
+    source_uri: str,
+    *,
+    timeout: Optional[int] = None,
+    connect_timeout: Optional[int] = None,
+    backend: Optional[str] = None,
+    max_bytes: int = _MAX_BYTES,
+) -> RawDocument:
     """
     Fetch a single URL and return a RawDocument.
     """
-    to = timeout or _DEFAULT_TIMEOUT
-    resp = requests.get(source_uri, timeout=to, stream=True, headers=_DEFAULT_HEADERS)
-    if resp.status_code in (401, 403, 429):
-        raise RuntimeError(
-            f"Access blocked ({resp.status_code}). Some sites require a browser/session; save as PDF or paste content manually."
-        )
-    resp.raise_for_status()
-    body = _read_limited_content(resp, max_bytes)
+    read_timeout = max(1, int(timeout or _DEFAULT_READ_TIMEOUT))
+    connect_timeout_s = max(1, int(connect_timeout or _DEFAULT_CONNECT_TIMEOUT))
+    selected_backend = (backend or _DEFAULT_FETCH_BACKEND).strip().lower()
 
-    content_type = resp.headers.get("content-type", "") or ""
+    if selected_backend != "curl":
+        raise RuntimeError(f"Unsupported URL fetch backend: {selected_backend}")
+
+    fetched = fetch_url_with_curl(
+        source_uri,
+        connect_timeout_seconds=connect_timeout_s,
+        read_timeout_seconds=read_timeout,
+        max_bytes=max_bytes,
+        headers=_DEFAULT_HEADERS,
+    )
+
+    if fetched.status_code in (401, 403, 429):
+        raise RuntimeError(
+            f"Access blocked ({fetched.status_code}). Some sites require a browser/session; save as PDF or paste content manually."
+        )
+    if fetched.status_code >= 400:
+        raise RuntimeError(f"URL fetch failed with status {fetched.status_code}: {source_uri}")
+
+    content_type = fetched.headers.get("content-type", "") or ""
     mime = content_type.split(";")[0].strip() or None
 
     text: str
     try:
-        text = body.decode(resp.encoding or "utf-8", errors="replace")
+        text = fetched.body.decode("utf-8", errors="replace")
     except Exception:
-        text = body.decode("utf-8", errors="replace")
+        text = fetched.body.decode("utf-8", errors="replace")
 
     title = _extract_title(text) or source_uri
 
@@ -65,7 +69,13 @@ def load_url(source_uri: str, *, timeout: Optional[int] = None, max_bytes: int =
         mime=mime or "text/html",
         payload=text,
         suggested_title=title,
-        meta={"status": resp.status_code, "headers": dict(resp.headers)},
+        meta={
+            "status": fetched.status_code,
+            "headers": dict(fetched.headers),
+            "effective_url": fetched.effective_url,
+            "remote_ip": fetched.remote_ip,
+            "time_total_seconds": fetched.time_total_seconds,
+        },
     )
 
 

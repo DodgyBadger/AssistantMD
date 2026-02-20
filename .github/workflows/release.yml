@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "V*"
   workflow_dispatch:
 
 permissions:
@@ -50,10 +51,3 @@ jobs:
             -t "${IMAGE_NAME}:${IMAGE_TAG}" \
             -t "${IMAGE_NAME}:latest" \
             .
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: changelog.md
-          files: |
-            changelog.md

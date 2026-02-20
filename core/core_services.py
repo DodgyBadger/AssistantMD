@@ -22,7 +22,7 @@ from core.workflow.parser import (
 from core.llm.agents import generate_response, create_agent
 from core.directives.registry import register_directive
 from core.directives.base import DirectiveProcessor
-from core.directives.file_state import WorkflowFileStateManager
+from core.utils.file_state import WorkflowFileStateManager
 
 
 @dataclass
@@ -138,30 +138,30 @@ class CoreServices:
             vault_path=self.vault_path,
             reference_date=reference_date,
             week_start_day=self.week_start_day,
-            state_manager=self._state_manager
+            state_manager=self._state_manager,
+            buffer_store=context.get("buffer_store"),
         )
     
-    async def create_agent(self, instructions: str, model=None, tools=None):
+    async def create_agent(self, model=None, tools=None, history_processors=None):
         """
-        Create a Pydantic AI agent with instructions, model, and tools.
-        
+        Create a Pydantic AI agent with model and tools.
+
         Convenience method that wraps the core create_agent function with
         proper parameter handling for workflow development.
-        
+
         Args:
-            instructions: System instructions for the agent
             model: Optional model instance (from @model directive processing)
             tools: Optional list of tool functions (from @tools directive processing)
-            
+
         Returns:
             Configured Pydantic AI agent instance
-            
+
         Raises:
             Exception: If agent creation fails
         """
-        return await create_agent(instructions, model, tools)
+        return await create_agent(model=model, tools=tools, history_processors=history_processors)
     
-    async def generate_response(self, agent, prompt: str, message_history=None) -> str:
+    async def generate_response(self, agent, prompt: str, message_history=None, deps=None) -> str:
         """
         Generate LLM response using a pre-configured agent.
         
@@ -178,7 +178,7 @@ class CoreServices:
         Raises:
             Exception: If LLM generation fails
         """
-        return await generate_response(agent, prompt, message_history)
+        return await generate_response(agent, prompt, message_history, deps=deps)
     
     def register_directive(self, processor: DirectiveProcessor) -> None:
         """

@@ -1,7 +1,7 @@
 """
 Write-mode directive processor.
 
-Handles @write-mode directive for controlling how content is written to output files.
+Handles @write_mode directive for controlling how content is written to output files.
 Supports 'append' (default) and 'new' modes for different file creation behaviors.
 """
 
@@ -10,12 +10,12 @@ from .parser import DirectiveValueParser
 
 
 class WriteModeDirective(DirectiveProcessor):
-    """Processor for @write-mode directive that controls file writing behavior."""
+    """Processor for @write_mode directive that controls file writing behavior."""
     
-    VALID_MODES = {'append', 'new'}
+    VALID_MODES = {'append', 'new', 'replace'}
     
     def get_directive_name(self) -> str:
-        return "write-mode"
+        return "write_mode"
     
     def validate_value(self, value: str) -> bool:
         """Validate that the write mode value is recognized."""
@@ -26,11 +26,11 @@ class WriteModeDirective(DirectiveProcessor):
         
         Args:
             value: Write mode value (e.g., 'append', 'new')
-            vault_path: Path to vault (not used for write-mode directive)
-            **context: Additional context (not used for write-mode directive)
+            vault_path: Path to vault (not used for write_mode directive)
+            **context: Additional context (not used for write_mode directive)
             
         Returns:
-            Normalized write mode ('append' or 'new')
+            Normalized write mode ('append', 'new', or 'replace')
             
         Raises:
             ValueError: If write mode is not recognized

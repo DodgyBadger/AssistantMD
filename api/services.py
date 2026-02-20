@@ -21,6 +21,7 @@ from core.settings.store import (
     get_providers_config,
     get_active_settings_path,
     SETTINGS_TEMPLATE,
+    get_general_settings,
 )
 from core.runtime.paths import set_bootstrap_roots, resolve_bootstrap_data_root, resolve_bootstrap_system_root
 from core.settings import (
@@ -66,14 +67,15 @@ from .models import (
     SettingUpdateRequest,
     SystemLogResponse,
     SystemSettingsResponse,
+    TemplateInfo,
 )
 from .exceptions import SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
-import os
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
+from core.context.templates import list_templates
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -88,10 +90,39 @@ def _get_workflow_loader():
     return runtime.workflow_loader
 
 
+def _get_vault_path(vault_name: str) -> str:
+    """Return vault path from loader cache."""
+    vault_info = _get_workflow_loader().get_vault_info()
+    if vault_name not in vault_info:
+        raise ValueError(f"Vault '{vault_name}' not found")
+    return vault_info[vault_name].get("path")
+
+
 def set_system_startup_time(startup_time: datetime):
     """Set the system startup time for status reporting."""
     global _system_startup_time
     _system_startup_time = startup_time
+
+
+def list_context_templates(vault_name: str) -> List[TemplateInfo]:
+    """List available context templates for a given vault."""
+    vault_path: Optional[str] = None
+    try:
+        vault_path = _get_vault_path(vault_name)
+    except Exception as exc:
+        logger.warning(f"Vault path lookup failed for '{vault_name}', falling back to system templates only: {exc}")
+
+    templates = list_templates(Path(vault_path) if vault_path else None)
+    results: List[TemplateInfo] = []
+    for tmpl in templates:
+        results.append(
+            TemplateInfo(
+                name=tmpl.name,
+                source=tmpl.source,
+                path=str(tmpl.path) if tmpl.path else None,
+            )
+        )
+    return results
 
 
 async def collect_vault_status() -> List[VaultInfo]:
@@ -387,6 +418,14 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         # Get configuration errors and overall configuration health
         configuration_errors = get_configuration_errors()
         configuration_status_snapshot = validate_settings()
+        default_model_value = None
+        try:
+            default_entry = get_general_settings().get("default_model")
+            if default_entry and getattr(default_entry, "value", None):
+                default_model_value = str(default_entry.value).strip() or None
+        except Exception:
+            default_model_value = None
+
         configuration_status = ConfigurationStatusInfo(
             issues=[
                 ConfigurationIssueInfo(
@@ -398,6 +437,7 @@ async def get_system_status(scheduler=None) -> StatusResponse:
             ],
             tool_availability=dict(configuration_status_snapshot.tool_availability),
             model_availability=dict(configuration_status_snapshot.model_availability),
+            default_model=default_model_value,
         )
 
         status_response = StatusResponse(
@@ -1233,8 +1273,22 @@ async def get_metadata() -> MetadataResponse:
             )
         )
 
+    default_context_template = None
+    try:
+        default_entry = get_general_settings().get("default_context_template")
+        if default_entry and default_entry.value:
+            default_context_template = str(default_entry.value).strip() or None
+    except Exception:
+        default_context_template = None
+
     return MetadataResponse(
         vaults=vaults,
         models=models,
-        tools=tools
+        tools=tools,
+        settings={
+            "auto_buffer_max_tokens": getattr(
+                get_general_settings().get("auto_buffer_max_tokens"), "value", 0
+            )
+        },
+        default_context_template=default_context_template,
     )

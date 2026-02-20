@@ -27,27 +27,30 @@ class FileOpsUnsafe(BaseTool):
     def get_tool(cls, vault_path: str = None):
         """Get the Pydantic AI tool for unsafe file operations.
 
-        Args:
-            vault_path: Path to vault for file operations scope
+        :param vault_path: Path to vault for file operations scope
         """
 
-        def file_ops_unsafe(operation: str, path: str = "", line_number: int = 0, old_content: str = "", new_content: str = "", confirm_path: str = "", count: int = 1, destination: str = "") -> str:
-            """Perform UNSAFE file operations within vault boundaries.
+        def file_ops_unsafe(
+            *,
+            operation: str,
+            path: str = "",
+            line_number: int = 0,
+            old_content: str = "",
+            new_content: str = "",
+            confirm_path: str = "",
+            count: int = 1,
+            destination: str = "",
+        ) -> str:
+            """Perform unsafe file operations within vault boundaries.
 
-            ⚠️ WARNING: These operations can permanently modify or delete files.
-
-            Args:
-                operation: Operation to perform (edit_line, delete, replace_text, move_overwrite, truncate)
-                path: File path relative to vault
-                line_number: Line number for edit_line (1-indexed)
-                old_content: Expected content for edit_line (must match exactly)
-                new_content: New content for edit_line or replace_text
-                confirm_path: Path confirmation for delete/truncate operations (must match path)
-                count: Number of replacements for replace_text (default 1)
-                destination: Destination path for move_overwrite
-
-            Returns:
-                Operation result message
+            :param operation: Operation name (edit_line, delete, replace_text, move_overwrite, truncate)
+            :param path: File path relative to vault
+            :param line_number: Line number for edit_line (1-indexed)
+            :param old_content: Expected content for edit_line
+            :param new_content: New content for edit_line or replace_text
+            :param confirm_path: Path confirmation for delete/truncate
+            :param count: Number of replacements for replace_text
+            :param destination: Destination path for move_overwrite
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -82,40 +85,43 @@ class FileOpsUnsafe(BaseTool):
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for unsafe file operations."""
-        return """⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
+        return """
+## file_ops_unsafe usage instructions
+        
+⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
 
-⚠️ CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).
+CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).
 Before performing ANY file operations, you MUST:
 1. Check if file_ops_safe is also enabled
-2. If NOT enabled, immediately notify the user: "I need file_ops_safe enabled to read and verify files. Please add it: @tools file_ops_safe, file_ops_unsafe"
+2. If NOT enabled, immediately notify the user: "I need file_ops_safe enabled to read and verify files. Please add it.
 3. Do NOT proceed with any operations until file_ops_safe is available
 
-**DESTRUCTIVE OPERATIONS - USE WITH EXTREME CAUTION:**
+**DESTRUCTIVE OPERATIONS - USE WITH CAUTION:**
 
 EDIT LINE (modify specific line in file):
-- file_ops_unsafe('edit_line', 'path/to/file.md', line_number=5, old_content='expected line', new_content='new line')
+- file_ops_unsafe(operation="edit_line", path="path/to/file.md", line_number=5, old_content="expected line", new_content="new line")
 - Line numbers are 1-indexed
 - old_content must match current line EXACTLY or operation fails
 - new_content can contain \\n for multi-line replacements
 - Safety: Fails if old_content doesn't match
 
 DELETE FILE (permanently remove file):
-- file_ops_unsafe('delete', 'path/to/file.md', confirm_path='path/to/file.md')
+- file_ops_unsafe(operation="delete", path="path/to/file.md", confirm_path="path/to/file.md")
 - Requires confirm_path to match path exactly
 - Safety: Requires explicit path confirmation
 
 REPLACE TEXT (search and replace in file):
-- file_ops_unsafe('replace_text', 'path/to/file.md', old_content='find this', new_content='replace with', count=1)
+- file_ops_unsafe(operation="replace_text", path="path/to/file.md", old_content="find this", new_content="replace with", count=1)
 - Replaces up to 'count' occurrences (default 1)
 - Safety: Limited replacement count prevents mass changes
 
 MOVE WITH OVERWRITE (move file, overwriting destination):
-- file_ops_unsafe('move_overwrite', 'source.md', destination='dest.md')
+- file_ops_unsafe(operation="move_overwrite", path="source.md", destination="dest.md")
 - Will overwrite destination if it exists
 - Safety: Operation name clearly indicates overwrite risk
 
 TRUNCATE (clear all file contents):
-- file_ops_unsafe('truncate', 'path/to/file.md', confirm_path='path/to/file.md')
+- file_ops_unsafe(operation="truncate", path="path/to/file.md", confirm_path="path/to/file.md")
 - Empties file completely
 - Requires confirm_path to match path exactly
 - Safety: Requires explicit path confirmation
@@ -127,7 +133,6 @@ TRUNCATE (clear all file contents):
 4. Edit operations require exact content match
 5. NO UNDO - changes are permanent
 6. Double-check paths before destructive operations
-
 """
 
     @classmethod

@@ -1,14 +1,52 @@
 
 from datetime import datetime
-import os
 import re
 from typing import Dict
+from types import SimpleNamespace
 
 from core.logger import UnifiedLogger
+from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
 from core.core_services import CoreServices
+from core.runtime.buffers import BufferStore
+from core.utils.routing import OutputTarget, format_input_files_block, write_output
+from core.directives.tools import ToolsDirective
 
 # Create workflow logger
 logger = UnifiedLogger(tag="step-workflow")
+
+
+class WorkflowTemplateError(ValueError):
+    """Workflow error with template-facing context for user/LLM debugging."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        template_pointer: str,
+        step_name: str | None = None,
+        phase: str | None = None,
+    ):
+        super().__init__(message)
+        self.template_pointer = template_pointer
+        self.step_name = step_name
+        self.phase = phase
+
+
+def _to_template_error(
+    exc: Exception,
+    *,
+    template_pointer: str,
+    step_name: str | None = None,
+    phase: str | None = None,
+) -> WorkflowTemplateError:
+    if isinstance(exc, WorkflowTemplateError):
+        return exc
+    return WorkflowTemplateError(
+        str(exc),
+        template_pointer=template_pointer,
+        step_name=step_name,
+        phase=phase,
+    )
 
 
 ########################################################################
@@ -46,8 +84,8 @@ async def run_workflow(job_args: dict, **kwargs):
     
     CAPABILITIES:
     - Dynamic step discovery (e.g. STEP1, STEP2, STEP3, ...) from workflow file
-    - Flexible output files using @output-file directives with time patterns
-    - File content embedding using @input-file directives  
+    - Flexible output files using @output directives with time patterns
+    - File content embedding using @input directives  
     - Automatic directory creation for nested paths
     - Configurable week start day for time pattern resolution
     - External tool integration (@tools directive) for enhanced AI capabilities
@@ -75,7 +113,15 @@ async def run_workflow(job_args: dict, **kwargs):
         ## 1: LOAD AND VALIDATE ASSISTANT CONFIGURATION
         #######################################################################
         
-        config = await load_and_validate_config(services, step_name)
+        try:
+            config = await load_and_validate_config(services, step_name)
+        except Exception as exc:
+            raise _to_template_error(
+                exc,
+                template_pointer="YAML frontmatter and workflow section headings (## ...)",
+                step_name=step_name or None,
+                phase="workflow_parse",
+            ) from exc
         workflow_sections = config['workflow_sections']
         workflow_instructions = config['workflow_instructions']
         workflow_steps = config['workflow_steps']
@@ -92,15 +138,23 @@ async def run_workflow(job_args: dict, **kwargs):
         
         for i, current_step in enumerate(workflow_steps):
             raw_step_content = workflow_sections[current_step]
-            await process_workflow_step(
-                current_step,
-                raw_step_content,
-                workflow_instructions,
-                services,
-                i,
-                step_name,
-                context,
-            )
+            try:
+                await process_workflow_step(
+                    current_step,
+                    raw_step_content,
+                    workflow_instructions,
+                    services,
+                    i,
+                    step_name,
+                    context,
+                )
+            except Exception as exc:
+                raise _to_template_error(
+                    exc,
+                    template_pointer=f"## {current_step}",
+                    step_name=current_step,
+                    phase="step_execution",
+                ) from exc
         
         #######################################################################
         ## 4: WORKFLOW COMPLETION
@@ -129,12 +183,18 @@ async def run_workflow(job_args: dict, **kwargs):
         
     except Exception as e:
         # Log workflow failure with context
+        template_pointer = getattr(e, "template_pointer", "")
+        failed_step_name = getattr(e, "step_name", "")
+        phase = getattr(e, "phase", "")
         logger.error(
             "Workflow execution failed",
             data={
                 "vault": services.workflow_id,
                 "error_message": str(e),
                 "steps_attempted": len(workflow_steps),
+                "template_pointer": template_pointer,
+                "step_name": failed_step_name,
+                "phase": phase,
             },
         )
         raise
@@ -144,58 +204,6 @@ async def run_workflow(job_args: dict, **kwargs):
 ########################################################################
 ## Helper Functions
 ########################################################################
-
-def generate_numbered_file_path(full_file_path: str, vault_path: str) -> str:
-    """Generate a numbered file path for new write mode.
-    
-    Args:
-        full_file_path: Full path to the file (e.g., '/vault/journal/2025-08-19.md')
-        vault_path: Root path of the vault
-        
-    Returns:
-        Numbered file path (e.g., '/vault/journal/2025-08-19_0.md')
-    """
-    # Extract the relative path within the vault
-    if full_file_path.startswith(vault_path + '/'):
-        relative_path = full_file_path[len(vault_path) + 1:]
-    else:
-        relative_path = full_file_path
-    
-    # Remove .md extension to get base path
-    if relative_path.endswith('.md'):
-        base_path = relative_path[:-3]
-    else:
-        base_path = relative_path
-    
-    # Find next available number
-    directory = os.path.dirname(base_path) if os.path.dirname(base_path) else '.'
-    basename = os.path.basename(base_path)
-    
-    # Full directory path in vault
-    full_directory = os.path.join(vault_path, directory)
-    
-    existing_numbers = set()
-    if os.path.exists(full_directory):
-        for filename in os.listdir(full_directory):
-            if filename.startswith(f"{basename}_") and filename.endswith('.md'):
-                # Extract number from filename (supports both old format _N and new format _NNN)
-                number_part = filename[len(basename) + 1:-3]  # Remove prefix_ and .md
-                try:
-                    number = int(number_part)
-                    existing_numbers.add(number)
-                except ValueError:
-                    # Skip files with non-numeric suffixes
-                    continue
-    
-    # Find the lowest available number starting from 0
-    next_number = 0
-    while next_number in existing_numbers:
-        next_number += 1
-    
-    # Return full path with zero-padded 3-digit number for proper sorting
-    numbered_relative_path = f"{base_path}_{next_number:03d}.md"
-    return f"{vault_path}/{numbered_relative_path}"
-
 
 def should_step_run_today(processed_step, step_name: str, context: Dict, single_step_name: str, global_id: str) -> bool:
     """Check if step should run today based on @run-on directive."""
@@ -226,24 +234,24 @@ def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
 
     Directives can signal that a step should be skipped by returning a dict
     with '_workflow_signal': 'skip_step'. This is used by directives like
-    @input-file with required=true when no files are found.
+    @input with required=true when no files are found.
 
     Returns:
         Tuple of (should_skip, reason)
     """
-    input_file_data = processed_step.get_directive_value('input_file', [])
+    input_file_data = processed_step.get_directive_value('input', [])
 
     # Normalize to list-of-lists format for consistent handling
     if not input_file_data:
         return False, ""
     elif isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
-        # Single @input-file directive
+        # Single @input directive
         input_file_lists = [input_file_data]
     else:
-        # Multiple @input-file directives
+        # Multiple @input directives
         input_file_lists = input_file_data
 
-    # Check each input-file result for skip signals
+    # Check each input result for skip signals
     for file_list in input_file_lists:
         for file_data in file_list:
             if isinstance(file_data, dict) and file_data.get('_workflow_signal') == 'skip_step':
@@ -257,52 +265,26 @@ def build_final_prompt(processed_step) -> str:
     """Build final prompt with input file content."""
     final_prompt = processed_step.content
     
-    input_file_data = processed_step.get_directive_value('input_file', [])
+    input_file_data = processed_step.get_directive_value('input', [])
     if input_file_data:
-        # Normalize to list-of-lists format for consistent handling
-        if not input_file_data:
-            input_file_lists = []
-        elif input_file_data and isinstance(input_file_data[0], dict):
-            input_file_lists = [input_file_data]
-        else:
-            input_file_lists = input_file_data
-        
-        # Flatten list-of-lists into single list of file metadata
-        flattened_files = []
-        for file_list in input_file_lists:
-            flattened_files.extend(file_list)
-        
-        # Format each file's content for inclusion in prompt
-        formatted_content = []
-        path_only_entries = []
-        for file_data in flattened_files:
-            if file_data.get('paths_only'):
-                label = f"- {file_data['filepath']}"
-                if not file_data.get('found', True):
-                    error_msg = file_data.get('error', 'File not found')
-                    label += f" (missing: {error_msg})"
-                path_only_entries.append(label)
-            elif file_data['found'] and file_data['content']:
-                formatted_content.append(
-                    f"# File: {file_data['filepath']}\n\n{file_data['content']}"
-                )
-            elif not file_data['found']:
-                formatted_content.append(
-                    f"# File: {file_data['filepath']}\n\n[File not found: {file_data['error']}]"
-                )
-        
-        prompt_sections = []
-        if path_only_entries:
-            prompt_sections.append(
-                "File paths (content not inlined):\n" + "\n".join(path_only_entries)
-            )
-        if formatted_content:
-            prompt_sections.append("\n\n".join(formatted_content))
-
-        if prompt_sections:
-            final_prompt += "\n\n---\n\n" + "\n\n---\n\n".join(prompt_sections)
+        formatted = format_input_files_block(input_file_data)
+        if formatted:
+            final_prompt += "\n\n" + formatted
     
     return final_prompt
+
+
+def _resolve_tools_result(tools_value) -> tuple[list, str, list]:
+    if isinstance(tools_value, list):
+        return ToolsDirective.merge_results(
+            [value for value in tools_value if isinstance(value, tuple)]
+        )
+    if isinstance(tools_value, tuple):
+        if len(tools_value) >= 3:
+            return tools_value[0], tools_value[1], tools_value[2]
+        if len(tools_value) == 2:
+            return tools_value[0], tools_value[1], []
+    return [], "", []
 
 
 
@@ -310,59 +292,29 @@ def build_final_prompt(processed_step) -> str:
 ########################################################################
 ## Helper Functions - Configuration
 ########################################################################
-
-async def write_step_output(step_content: str, output_file: str, processed_step, 
-                            context: Dict, step_index: int, step_name: str, global_id: str):
-    """Write step content to output file."""
-    try:
-        created_files = context['created_files']
-        write_mode = processed_step.get_directive_value('write_mode')
-        file_mode = 'w' if write_mode == 'new' else 'a'
-        
-        with open(output_file, file_mode, encoding='utf-8') as file:
-            # Check for custom header from @header directive
-            custom_header = processed_step.get_directive_value('header')
-            if custom_header:
-                file.write(f"# {custom_header}\n\n")
-            file.write(step_content)
-            file.write("\n\n")
-        
-        created_files.add(output_file)
-        context['state_manager'].update_from_processed_step(processed_step)
-            
-    except (IOError, OSError, PermissionError) as file_error:
-        logger.error(
-            "Failed to create output file",
-            data={
-                "vault": global_id,
-                "target_file": output_file,
-                "step_name": step_name,
-                "reason": str(file_error),
-            },
-        )
-        raise
-
-
 async def create_step_agent(processed_step, workflow_instructions: str, services: CoreServices):
     """Create AI agent for step execution with optional tool integration."""
     # Get model instance from model directive (None if not specified)
     model_instance = processed_step.get_directive_value('model', None)
 
     # Get tools and enhanced instructions from tools directive
-    tools_result = processed_step.get_directive_value('tools', ([], ""))
-    if isinstance(tools_result, tuple) and len(tools_result) == 2:
-        tool_functions, tool_instructions = tools_result
-    else:
-        # Fallback for empty tools
-        tool_functions, tool_instructions = [], ""
+    tools_result = processed_step.get_directive_value('tools', [])
+    tool_functions, tool_instructions, _ = _resolve_tools_result(tools_result)
 
     # Compose instructions using Pydantic AI's list support for clean composition
-    if tool_instructions:
-        final_instructions = [workflow_instructions, tool_instructions]
-    else:
-        final_instructions = workflow_instructions
+    base_instructions = workflow_instructions or "You are a helpful assistant."
+    workflow_instructions_with_system = f"{base_instructions}\n\n{WORKFLOW_SYSTEM_INSTRUCTION}".strip()
 
-    return await services.create_agent(final_instructions, model_instance, tool_functions)
+    if tool_instructions:
+        instructions_stack = [workflow_instructions_with_system, tool_instructions]
+    else:
+        instructions_stack = [workflow_instructions_with_system]
+
+    agent = await services.create_agent(model_instance, tool_functions)
+    for inst in instructions_stack:
+        if inst:
+            agent.instructions(lambda _ctx, text=inst: text)
+    return agent
 
 
 def initialize_workflow_context(services: CoreServices):
@@ -379,6 +331,7 @@ def initialize_workflow_context(services: CoreServices):
         'state_manager': services.get_state_manager(),
         'created_files': set(),
         'tools_used': set(),
+        'buffer_store': BufferStore(),
     }
 
 
@@ -395,21 +348,28 @@ async def process_workflow_step(
     today = context['today']
 
     # Process all directives with current context (single parse operation)
-    processed_step = services.process_step(raw_step_content, reference_date=today)
+    try:
+        processed_step = services.process_step(
+            raw_step_content,
+            reference_date=today,
+            buffer_store=context.get("buffer_store"),
+        )
+    except Exception as exc:
+        raise _to_template_error(
+            exc,
+            template_pointer=f"## {step_name} (directive block at top of this step)",
+            step_name=step_name,
+            phase="directive_parse",
+        ) from exc
 
-    # Get output file path from processed step (optional)
-    output_file_path = processed_step.get_directive_value('output_file')
-    output_file = None
-
-    if output_file_path:
-        # Apply write-mode from processed step (no re-parsing)
-        write_mode = processed_step.get_directive_value('write_mode')
-        output_file = f'{services.vault_path}/{output_file_path}'
-        if write_mode == 'new':
-            output_file = generate_numbered_file_path(output_file, services.vault_path)
-
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    # Get output targets from processed step (optional, may be multiple)
+    output_target_value = processed_step.get_directive_value('output')
+    if isinstance(output_target_value, list):
+        output_targets = output_target_value
+    elif output_target_value:
+        output_targets = [output_target_value]
+    else:
+        output_targets = []
 
     # Check @run-on directive for scheduled execution
     if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
@@ -436,44 +396,124 @@ async def process_workflow_step(
         )
         return  # Skip this step
 
-    tools_result = processed_step.get_directive_value('tools', ([], ""))
-    tool_functions = tools_result[0] if isinstance(tools_result, tuple) else []
+    tools_result = processed_step.get_directive_value('tools', [])
+    tool_functions, _, tool_specs = _resolve_tools_result(tools_result)
     if tool_functions:
-        raw_tools = None
-        for line in raw_step_content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("@tools"):
-                raw_tools = stripped[len("@tools"):].strip()
-                break
-        if raw_tools:
-            tool_names = [name for name in re.split(r"[ ,]+", raw_tools) if name]
+        if tool_specs:
+            tool_names = [spec.name for spec in tool_specs]
         else:
-            tool_names = [
-                getattr(tool, "__name__", "tool") for tool in tool_functions
-            ]
+            raw_tools = None
+            for line in raw_step_content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("@tools"):
+                    raw_tools = stripped[len("@tools"):].strip()
+                    break
+            if raw_tools:
+                tool_names = [name for name in re.split(r"[ ,]+", raw_tools) if name]
+            else:
+                tool_names = [
+                    getattr(tool, "__name__", "tool") for tool in tool_functions
+                ]
         context["tools_used"].update(tool_names)
 
     # Build final prompt with input file content
     final_prompt = build_final_prompt(processed_step)
+    output_target_label = None
+    if output_targets:
+        labels = []
+        for output_target in output_targets:
+            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                labels.append(f"variable:{output_target.get('name')}")
+            elif isinstance(output_target, dict) and output_target.get("type") == "context":
+                labels.append("context")
+            elif output_target:
+                labels.append(f"file:{output_target}")
+        if labels:
+            output_target_label = ", ".join(labels)
     logger.set_sinks(["validation"]).info(
         "workflow_step_prompt",
         data={
             "step_name": step_name,
-            "output_file": output_file_path,
+            "output_target": output_target_label,
             "prompt": final_prompt,
         },
     )
 
     # Generate AI content
-    chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
-    step_content = await services.generate_response(chat_agent, final_prompt)
+    try:
+        chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
+    except Exception as exc:
+        raise _to_template_error(
+            exc,
+            template_pointer=f"## {step_name} (@model/@tools setup in this step)",
+            step_name=step_name,
+            phase="agent_setup",
+        ) from exc
+    buffer_store = context.get("buffer_store")
+    deps = SimpleNamespace(
+        buffer_store=buffer_store,
+        buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
+    )
+    try:
+        step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
+    except Exception as exc:
+        raise _to_template_error(
+            exc,
+            template_pointer=f"## {step_name} (step prompt/model execution)",
+            step_name=step_name,
+            phase="model_run",
+        ) from exc
 
-    # Write AI-generated content to output file (if @output-file specified)
-    if output_file:
-        await write_step_output(step_content, output_file, processed_step,
-                                context, step_index, step_name, services.workflow_id)
+    # Write AI-generated content to output targets (if @output specified)
+    if output_targets:
+        write_mode = processed_step.get_directive_value('write_mode')
+        header_value = processed_step.get_directive_value('header')
+        for output_target in output_targets:
+            if isinstance(output_target, dict) and output_target.get("type") == "context":
+                logger.info(
+                    "Workflow output target ignored (context not supported)",
+                    data={
+                        "vault": services.workflow_id,
+                        "step_name": step_name,
+                    },
+                )
+                continue
+            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                target = OutputTarget(type="buffer", name=output_target.get("name"))
+            else:
+                target = OutputTarget(type="file", path=output_target)
+            try:
+                write_result = write_output(
+                    target=target,
+                    content=step_content,
+                    write_mode=write_mode,
+                    buffer_store=context.get("buffer_store"),
+                    vault_path=services.vault_path,
+                    header=header_value,
+                    buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
+                    default_scope="run",
+                    metadata={
+                        "source": "workflow_step",
+                        "origin_id": services.workflow_id,
+                        "origin_name": step_name,
+                        "origin_type": "workflow_step",
+                        "write_mode": write_mode or "append",
+                        "size_chars": len(step_content or ""),
+                    },
+                )
+            except Exception as exc:
+                raise _to_template_error(
+                    exc,
+                    template_pointer=f"## {step_name} (@output/@write_mode/@header in this step)",
+                    step_name=step_name,
+                    phase="output_write",
+                ) from exc
+            if write_result.get("type") == "file" and write_result.get("path"):
+                context['created_files'].add(write_result.get("path"))
+        # Update state manager for any pending patterns used
+        context['state_manager'].update_from_processed_step(processed_step)
     else:
-        # No output file - step executed for side effects only (e.g., tool calls)
+        # No output target - step executed for side effects only (e.g., tool calls)
         # Still update state manager for any pending patterns used
         context['state_manager'].update_from_processed_step(processed_step)
 
@@ -482,21 +522,24 @@ async def load_and_validate_config(services: CoreServices, step_name: str = None
     """Load workflow file and validate configuration."""
     workflow_sections = services.get_workflow_sections()
     
-    # Extract INSTRUCTIONS (case-insensitive) from workflow_sections, then filter it out from steps
-    instructions_key = next(
-        (section_name for section_name in workflow_sections.keys()
-         if section_name.strip().lower() == 'instructions'),
-        None,
+    # Extract any section containing "instructions" (case-insensitive), then filter them out from steps.
+    instruction_keys = [
+        section_name for section_name in workflow_sections.keys()
+        if "instructions" in section_name.strip().lower()
+    ]
+    workflow_instructions = "\n\n".join(
+        [
+            workflow_sections.get(section_name, "").strip()
+            for section_name in instruction_keys
+            if workflow_sections.get(section_name, "").strip()
+        ]
     )
-    workflow_instructions = ""
-    if instructions_key:
-        workflow_instructions = workflow_sections.get(instructions_key, "")
     if not workflow_instructions or not workflow_instructions.strip():
         workflow_instructions = "You are a helpful assistant."
-    
-    # Filter INSTRUCTIONS from workflow steps (it's not an executable step)
-    if instructions_key:
-        workflow_steps = [k for k in workflow_sections.keys() if k != instructions_key]
+
+    # Filter instruction sections from workflow steps (they are not executable steps)
+    if instruction_keys:
+        workflow_steps = [k for k in workflow_sections.keys() if k not in instruction_keys]
     else:
         workflow_steps = list(workflow_sections.keys())
     

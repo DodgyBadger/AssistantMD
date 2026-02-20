@@ -17,6 +17,7 @@ from core.settings import validate_settings
 from core.settings.store import get_general_settings
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.context.templates import seed_system_templates
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
@@ -53,6 +54,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
     try:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
+
+        # Seed system templates if missing (non-fatal)
+        seed_system_templates(config.system_root)
 
         # Validate configuration before continuing bootstrap
         config_status = validate_settings()
@@ -104,7 +108,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             process_job_fn=ingestion_service.process_job,
             max_concurrent=ingestion_max_concurrent,
         )
-
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
 

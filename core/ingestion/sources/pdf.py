@@ -5,7 +5,6 @@ PDF importer for file-based sources.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from core.ingestion.models import RawDocument, SourceKind
 from core.ingestion.registry import importer_registry

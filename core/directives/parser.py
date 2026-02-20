@@ -96,13 +96,13 @@ def parse_directives(content: str) -> ParsedDirectives:
         ParsedDirectives with extracted directives and cleaned content
         
     Examples:
-        >>> content = '''@output-file planning/{today}
+        >>> content = '''@output file:planning/{today}
         ... @headers true
         ... 
         ... Create a weekly plan.'''
         >>> result = parse_directives(content)
         >>> result.directives
-        {'output-file': ['planning/{today}'], 'headers': ['true']}
+        {'output': ['file:planning/{today}'], 'headers': ['true']}
         >>> result.cleaned_content
         'Create a weekly plan.'
         
@@ -185,10 +185,10 @@ def extract_directive_from_line(line: str) -> Optional[tuple[str, str]]:
         Tuple of (directive_name, directive_value) if valid, None otherwise
         
     Examples:
-        >>> extract_directive_from_line("@output-file planning/{today}")
-        ('output-file', 'planning/{today}')
-        >>> extract_directive_from_line("@input-file: goals.md")
-        ('input-file', 'goals.md')
+        >>> extract_directive_from_line("@output file:planning/{today}")
+        ('output', 'file:planning/{today}')
+        >>> extract_directive_from_line("@input: file:goals.md")
+        ('input', 'file:goals.md')
         >>> extract_directive_from_line("Not a directive")
         None
     """
@@ -355,9 +355,32 @@ class DirectiveValueParser:
             if not params_str:
                 return None
 
-            param_items = [
-                item.strip() for item in params_str.split(",") if item.strip()
-            ]
+            param_items: List[str] = []
+            buf: List[str] = []
+            quote_char: str | None = None
+            for ch in params_str:
+                if ch in {"'", '"'}:
+                    if quote_char is None:
+                        quote_char = ch
+                    elif quote_char == ch:
+                        quote_char = None
+                    buf.append(ch)
+                    continue
+                if ch == "," and quote_char is None:
+                    token = "".join(buf).strip()
+                    if token:
+                        param_items.append(token)
+                    buf = []
+                    continue
+                buf.append(ch)
+
+            if quote_char is not None:
+                return None
+
+            tail = "".join(buf).strip()
+            if tail:
+                param_items.append(tail)
+
             if not param_items:
                 return None
 
@@ -367,6 +390,9 @@ class DirectiveValueParser:
                     key, val = param_item.split("=", 1)
                     key = key.strip()
                     val = val.strip()
+                    if len(val) >= 2:
+                        if (val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'"):
+                            val = val[1:-1]
                 else:
                     key = param_item.strip()
                     val = "true"
@@ -408,6 +434,13 @@ class DirectiveValueParser:
                 return value_str.strip(), None
 
             return candidate_base, params_section
+
+        # Support parameter-only values like "(variable=foo)" when allowed.
+        if value.startswith("(") and value.endswith(")") and allowed_normalized is not None:
+            params_section = value[1:-1].strip()
+            parsed = parse_parameters(params_section) if params_section else None
+            if parsed:
+                return "", parsed
 
         # Handle quoted or Obsidian-style paths up front and leave any trailing
         # parentheses to be treated as parameters on the remainder.

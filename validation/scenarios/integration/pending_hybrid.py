@@ -134,8 +134,8 @@ description: Pending hybrid validation
 
 ## STEP1
 @model test
-@input-file tasks/{pending:5}
-@output-file logs/run-{today}
+@input file: tasks/{pending:5}
+@output file: logs/run-{today}
 
 Summarize the pending files encountered. Do not modify file contents.
 """

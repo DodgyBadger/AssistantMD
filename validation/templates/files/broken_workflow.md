@@ -4,7 +4,7 @@ workflow step
 enabled: tru
 
 ## STEP1
-@output-file daily/{today
+@output file: daily/{today
 @model test
 
 Generate the daily plan without referencing other files.

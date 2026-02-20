@@ -62,6 +62,13 @@ class BasicHaikuScenario(BaseScenario):
             name="job_executed",
             expected={"job_id": "HaikuVault__haiku_writer"},
         )
+        prompt_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "STEP2"},
+        )
+        prompt = prompt_event.get("data", {}).get("prompt", "")
+        assert "--- FILE: variable: haiku_buffer ---" in prompt
 
         # Check output file was created with content
         output_path = vault / "2025-01-15.md"
@@ -84,8 +91,15 @@ description: Simple haiku writing workflow
 
 ## STEP1
 @model gpt-mini
-@output-file {today}
+@output file: {today}
+@output variable: haiku_buffer
 @header My new haiku - {today}
 
 Write a beautiful haiku about integration testing. Format it nicely with proper line breaks.
+
+## STEP2
+@model gpt-mini
+@input variable: haiku_buffer (required)
+
+Read back the haiku from the buffer and confirm it exists.
 """

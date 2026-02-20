@@ -21,6 +21,7 @@ CHAT_SESSIONS_DIR = "Chat_Sessions"
 WORKFLOW_LOGS_DIR = "Logs"
 IMPORT_DIR = "Import"
 IMPORT_ATTACHMENTS_DIR = "_attachments"
+CONTEXT_TEMPLATE_DIR = "ContextTemplates"
 
 # Assistant timeout validation bounds
 TIMEOUT_MIN = 30        # Minimum timeout in seconds
@@ -43,6 +44,22 @@ DEFAULT_MAX_SCHEDULER_WORKERS = 1
 # Helps smaller models like gemini-flash that frequently make tool validation errors
 DEFAULT_TOOL_RETRIES = 3
 
+# Buffer operations limits (characters and counts)
+BUFFER_PEEK_MAX_CHARS = 2000
+BUFFER_READ_MAX_CHARS = 8000
+BUFFER_SEARCH_MAX_MATCHES = 100
+BUFFER_SEARCH_CONTEXT_CHARS = 0
+
+# Virtual mounts registry (reserved path prefixes)
+# root values are absolute paths inside the container
+VIRTUAL_MOUNTS = {
+    "__virtual_docs__": {
+        "root": "/app/docs",
+        "read_only": True,
+    },
+}
+
+
 # ==============================================================================
 # LLM Prompts and Instructions
 # ==============================================================================
@@ -62,11 +79,59 @@ When processing web content:
 """
 
 # Regular Chat Prompts
-REGULAR_CHAT_INSTRUCTIONS = """You are a helpful AI assistant. Use the available tools to assist the user with their requests.
+REGULAR_CHAT_INSTRUCTIONS = """
+You are a helpful AI assistant. Use the available tools to assist the user with their requests.
 
 Format your responses using markdown for visual clarity:
 - Use **bold** for emphasis on key points
 - Use `code blocks` for file paths, commands, or code snippets
 - Use headers (##, ###) to organize longer responses
 - Use lists for steps or multiple items
-- Use > blockquotes for important notes or warnings"""
+- Use > blockquotes for important notes or warnings
+
+Tool calls (all tools):
+- Always use named parameters (keyword arguments); **positional arguments and args arrays are not supported.**
+- If the tool output is very large, the system may automatically route to a variable and pass you the name of the variable. You can explore the content systematically using the buffer_ops tool.
+"""
+
+# Routing guidance shown only when routing is enabled
+TOOL_ROUTING_GUIDANCE = """
+Tool output routing:
+- You may route tool output with output="variable:NAME" or output="file:PATH".
+- Use write_mode=append|replace|new when routing.
+- Only route when the user explicitly asks to save or route output.
+"""
+
+# Workflow system instruction appended to all workflow runs
+WORKFLOW_SYSTEM_INSTRUCTION = """
+You are running in an automated workflow. Carry out the instructions provided to the best of your ability.
+Do not ask clarifying questions - you do not have direct access to the user.
+"""
+
+# Optional context manager agent.instruction
+CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
+You are part of the context management system which guides the primary chat agent.
+You are not talking directly to the user.
+You are one step among several that shapes the context that will be passed to the primary chat agent.
+You are provided with some or all of the following content sections:
+
+CONTEXT_MANAGER_TASK: The task or prompt for your specific step.
+INPUT_FILES: Additional content to establish the topic or provide supporting documentation.
+PRIOR_SECTION_OUTPUTS: Outputs from earlier context manager steps in the same run.
+PRIOR_SUMMARY: The last N outputs of the context management system produced in prior runs.
+RECENT_CONVERSATION: The last N verbatim turns of the conversation between the user and the primary chat agent.
+LATEST_USER_INPUT: The last user input. This is what the primary chat agent should respond directly to.
+
+**RULES FOR RESPONDING**
+- Follow the instructions exactly. Do not add commentary or content not explicitly asked for.
+- Everything you output must be sourced from the sections provided. Do not include details of this prompt or invent content.
+- If you cannot resolve an instruction to the content provided, reply "N/A" for that instruction.
+"""
+
+# Instruction prepended when context template processing fails in history compilation.
+CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
+    "Context template error detected. "
+    "Do not continue normal task execution. "
+    "First explain this context-template error to the user and ask whether to proceed "
+    "without template management (for example by switching to the default template). "
+)

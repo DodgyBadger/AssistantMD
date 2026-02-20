@@ -26,14 +26,10 @@ class WebSearchTavily(BaseTool):
         if not tavily_api_key:
             raise ValueError("Secret 'TAVILY_API_KEY' is required for Tavily web search.")
 
-        def search_web(query: str) -> str:
-            """Search Tavily for information on the given query.
+        def web_search(*, query: str) -> str:
+            """Web search using Tavily.
 
-            Args:
-                query: The search query to look up
-
-            Returns:
-                Search results formatted as text
+            :param query: Search query to look up
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -73,9 +69,13 @@ class WebSearchTavily(BaseTool):
             except Exception as e:
                 return f"Tavily search error: {str(e)}"
 
-        return Tool(search_web, name="search_web_tavily")
+        return Tool(web_search, name="web_search_tavily")
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily web search."""
-        return "Web search using Tavily API: Use when you need current information or to research topics (premium service)" + WEB_TOOL_SECURITY_NOTICE
+        return """
+## web_search_tavily usage instructions
+
+Example: web_search_tavily(query="latest fastapi release").
+""" + WEB_TOOL_SECURITY_NOTICE

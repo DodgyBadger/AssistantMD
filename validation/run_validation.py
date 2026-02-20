@@ -8,6 +8,7 @@ with enhanced evidence collection and user-focused reporting.
 
 import sys
 import argparse
+import fnmatch
 from pathlib import Path
 
 # Add project root to path FIRST
@@ -30,13 +31,14 @@ from core.logger import UnifiedLogger  # noqa: E402
 logger = UnifiedLogger(tag="validation-cli")
 
 
-def expand_scenario_paths(runner, scenario_specs):
+def expand_scenario_paths(runner, scenario_specs, *, allow_unmatched: bool = True):
     """
     Expand scenario specifications to full scenario names.
 
     Supports:
     - Individual scenarios: "basic_haiku" or "integration/basic_haiku"
     - Folders: "integration" expands to all scenarios in that folder
+    - Globs: "integration/context_manager*" expands by fnmatch pattern
     """
     expanded = []
     all_scenarios = runner.discover_scenarios()
@@ -44,6 +46,17 @@ def expand_scenario_paths(runner, scenario_specs):
     for spec in scenario_specs:
         # Normalize path separators
         spec = spec.replace("\\", "/")
+
+        if any(ch in spec for ch in "*?[]"):
+            glob_matches = [s for s in all_scenarios if fnmatch.fnmatchcase(s, spec)]
+            if glob_matches:
+                expanded.extend(sorted(glob_matches))
+                logger.info(f"Expanded pattern '{spec}' to {len(glob_matches)} scenarios")
+                continue
+            logger.warning(f"No scenarios found matching pattern '{spec}'")
+            if allow_unmatched:
+                expanded.append(spec)
+            continue
 
         # Check if this is an exact match for a scenario
         if spec in all_scenarios:
@@ -59,7 +72,8 @@ def expand_scenario_paths(runner, scenario_specs):
 
         # Not found - let it through and fail during execution with clear error
         logger.warning(f"No scenarios found matching '{spec}'")
-        expanded.append(spec)
+        if allow_unmatched:
+            expanded.append(spec)
 
     return expanded
 
@@ -69,7 +83,7 @@ def run_scenarios(args):
     runner = ValidationRunner()
 
     # Expand folder paths to individual scenarios
-    scenario_names = expand_scenario_paths(runner, args.scenarios)
+    scenario_names = expand_scenario_paths(runner, args.scenarios, allow_unmatched=True)
 
     if not scenario_names:
         logger.error("No scenarios to run")
@@ -112,6 +126,14 @@ def run_scenarios(args):
         
         if result.error_message:
             print(f"   Error: {result.error_message}")
+        if getattr(result, "error_classification", None):
+            classification = result.error_classification
+            error_type = classification.get("type")
+            recommendation = classification.get("recommendation")
+            if error_type:
+                print(f"   Classification: {error_type}")
+            if recommendation:
+                print(f"   Recommendation: {recommendation}")
         
         # scenarios manage their own evidence in runs directory
         print("   Evidence: Check /app/validation/runs/ for scenario artifacts")
@@ -132,7 +154,10 @@ def run_scenarios(args):
 def list_scenarios(args):
     """List available scenarios."""
     runner = ValidationRunner()
-    scenarios = runner.discover_scenarios(pattern=args.pattern)
+    if args.patterns:
+        scenarios = expand_scenario_paths(runner, args.patterns, allow_unmatched=False)
+    else:
+        scenarios = runner.discover_scenarios()
 
     print("=== AVAILABLE SCENARIOS ===")
     if scenarios:
@@ -168,8 +193,6 @@ def list_scenarios(args):
 
     else:
         print("No scenarios found")
-        if args.pattern:
-            print(f"(No scenarios matching pattern: {args.pattern})")
         print("\n🚀 To create a scenario:")
         print("   1. Add a .py file to validation/scenarios/ (or subfolder)")
         print("   2. Create a class that inherits from BaseScenario")
@@ -209,8 +232,11 @@ Features:
     
     # List command
     list_parser = subparsers.add_parser('list', help='List available scenarios')
-    list_parser.add_argument('--pattern', 
-                            help='Pattern to filter scenarios by name')
+    list_parser.add_argument(
+        'patterns',
+        nargs='*',
+        help='Optional glob patterns to filter scenarios',
+    )
     
     args = parser.parse_args()
     

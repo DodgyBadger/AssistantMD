@@ -4,7 +4,7 @@ Pydantic models for API request and response schemas.
 
 from __future__ import annotations
 
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -36,8 +36,8 @@ class ChatExecuteRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")
-    use_conversation_history: bool = Field(True, description="Whether to maintain conversation state")
     instructions: Optional[str] = Field(None, description="Optional system instructions")
+    context_template: Optional[str] = Field(None, description="Optional context manager template name")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 
@@ -85,6 +85,7 @@ class ConfigurationStatusInfo(BaseModel):
     issues: List[ConfigurationIssueInfo] = Field(default_factory=list, description="Configuration issues discovered during validation")
     tool_availability: Dict[str, bool] = Field(default_factory=dict, description="Tool availability keyed by tool name")
     model_availability: Dict[str, bool] = Field(default_factory=dict, description="Model availability keyed by model name")
+    default_model: Optional[str] = Field(None, description="Default model alias from settings")
 
 
 class StatusResponse(BaseModel):
@@ -180,6 +181,21 @@ class MetadataResponse(BaseModel):
     vaults: List[str] = Field(..., description="Available vault names")
     models: List[ModelInfo] = Field(..., description="Available models")
     tools: List[ToolInfo] = Field(..., description="Available tools")
+    settings: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Selected settings values for UI hints.",
+    )
+    default_context_template: Optional[str] = Field(
+        None,
+        description="Default context template name for chat sessions.",
+    )
+
+
+class TemplateInfo(BaseModel):
+    """Context template metadata for UI selection."""
+    name: str = Field(..., description="Template filename")
+    source: str = Field(..., description="Template source: vault or system")
+    path: Optional[str] = Field(None, description="Full path to template, if available")
 
 
 class ModelConfigRequest(BaseModel):
