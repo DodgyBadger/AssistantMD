@@ -1,61 +1,75 @@
 # AssistantMD
 
-AssistantMD is a markdown-native chat UI and agent harness for automating research and knowledge workflows. It works alongside Obsidian (or any markdown editor) so that you retain full control of your data (even your chat sessions are saved as markdown). Compose exactly the behaviour you want using a flexible set of control primitives in templates that sit alongside your other markdown files.
+AssistantMD is a **markdown-native chat UI** and **agent harness** for automating research and knowledge workflows. It works alongside Obsidian (or any markdown editor) so you retain **full control of your data**: chats, templates and many automation outputs are saved as plain markdown that you can inspect and version control.
+
+> **Security note:** AssistantMD has **no built-in auth or TLS**. Run it on a trusted network and/or add your own security layers. See [docs/setup/security.md](docs/setup/security.md).
+
+
+## Why AssistantMD
+
+- **File-first ownership:** Markdown wherever possible; SQLite only when a database is required.
+- **Composable behaviour:** Define instructions, tool access, routing and multi-step logic in templates. Adapt the system to how you want to work.
+- **Cautious automation:** Built with prompt-injection awareness and a conservative stance toward untrusted content.
+
+
+## How it works (mental model)
+
+When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
+
+- `AssistantMD/Chat_Sessions/` - chat transcripts
+- `AssistantMD/ContextTemplates/` - context templates
+- `AssistantMD/Workflows/` - scheduled / multi-step workflows
+- `AssistantMD/Import/` - drop PDFs to import to markdown
+
+### Define behaviour in templates
+
+Templates are plain markdown files that live inside your vault. Behaviour is composed using control primitives (plain text syntax) such as yaml frontmatter, @directives and substitution patterns. For example:
+
+- `schedule: "cron: 10 0 * * *"` - schedules a workflow template
+- `@input` / `@output` - pull from or write to files and in-memory variables (buffers)
+- `@tools` - enable tools per step (web search, file ops, extract/crawl, workflow runner)
+- `@model` - choose a model per step
+- `{today}` or `{this-week}` - read or write files based on date
+
+See [docs/use/reference.md](docs/use/reference.md) for the full directive reference.
+
 
 ## Typical use cases
 
-**Deep research in the chat UI**  
-Give AssistantMD a topic, focus and constraints, then let it run: search the web, open pages, pull key details and keep digging through follow-up searches. It can stash text in a buffer so the chat stays usable while it works through lots of material. Have it write summary reports straight to your vault whenever you want.
+### Deep research in the chat UI
+Give AssistantMD a research goal and let it run: **search**, **open pages**, **extract details**, and keep digging via follow-up queries. When you’re ready, have it write a synthesis report into your vault.
 
-**Project-aware chat**  
-After building a research library, you can create a context template that loads the key project facts into each new chat. That way you can continue the work without re-explaining background details every time. It makes follow-on analysis, drafting and decision support much faster while staying grounded in your vault content.
+### Project-aware chat (context templates)
+Stop repeating yourself. Set up a focused working set (notes, summaries, reporting templates, etc.) for your projects so you can jump into new chats quickly.
 
-**Scheduled workflows for planning and follow-through**
-Set up workflows that run on a schedule and keep your notes up to date. For example, a weekly planner can scan your master task list, carry forward unfinished items from last week, integrate longer-term goals and draft a weekly plan. The result is a repeatable loop that is grounded in your markdown files and adapts as your notes change.
-
-**Prototype prompts and workflows**  
-AssistantMD can be used to rapidly prototype prompts, workflows and context architecture for specialized agents. Draft or adjust a workflow, run it from chat with `workflow_run`, inspect the outputs in your vault and iterate. The architecture is extensible, so you can also mock up specialized workflow engines when you need a different pattern.
+### Scheduled workflows for planning and follow-through
+Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. every morning, scan new notes and copy actions and follow-ups into a master task list).
 
 
-## Design philosophy
+## Features
 
-**Data ownership:** Wherever possible, AssistantMD uses markdown files so data remains accessible and can be version controlled. For functionality requiring a database, SQLite maintains the file-first approach. Even chat sessions are automatically saved as markdown in your vault.
-
-**Explicit / minimal magic:** Plain-text control primitives let you compose a wide range of behaviours. Hidden defaults and magic behaviour are kept to a minimum. Templates are explicit, flexible and traceable.
-
-**Security:** The focus is safe, local automation on your markdown files. Prompt-injection is a core concern, so AssistantMD takes a cautious approach to untrusted web content and external integrations.
-
-## Requirements
-
-- Docker Engine or Docker Desktop
-- At least one LLM API key
-- Comfort with the terminal
-
-## ✨ Features
-
-**📥 Import Pipeline**
-- Import PDFs and URLs into markdown and build a searchable project/research library in your vault.
+**📥 Import pipeline**
+- Import PDFs and URLs into markdown and build a searchable research library in your vault.
 - Keep source material in plain text for downstream workflows and chat.
 
-**👷‍♂️ Scheduled Workflows**
-- Multi-step, scheduled workflows. Each step can define prompt, model, tools and content routing.
-- Define workflows using markdown templates in `AssistantMD/Workflows/`
+**👷‍♂️ Scheduled workflows**
+- Multi-step, scheduled workflows with per-step prompts, models, tools, and output routing.
+- Workflow templates live in `AssistantMD/Workflows/`.
 
-**💬 Steerable Chat + Context Manager**
-- Reason over your vault with controllable context, custom instructions, tools, and buffers.
-- Define context templates in `AssistantMD/ContextTemplates`.
+**💬 Context manager**
+- Steer your chat sessions using markdown templates. From simple custom instructions to multi-step context assembly.
+- Context templates live in `AssistantMD/ContextTemplates/`.
 
-**🔐 Plain-Text Ownership & Control**
+**🔐 Plain-text ownership & control**
 - Self-hosted, single-user design with markdown-first storage.
 - Docker-based deployment, with data remaining local and inspectable.
 
-**🤖 AI Providers**
+**🤖 Multiple AI providers**
 - GPT, Claude, Gemini, Mistral, Grok
-- Any OpenAI-compatible API (Ollama, etc.)
+- Any OpenAI-compatible API (e.g. Ollama)
 
-<img src="docs/chat-UI-screenshot.png" alt="Chat UI screenshot" height="700">
 
-## 📚 Documentation
+## Documentation
 
 - **[Installation Guide](docs/setup/installation.md)**
 - **[Basic Usage](docs/use/overview.md)**
@@ -64,13 +78,22 @@ AssistantMD can be used to rapidly prototype prompts, workflows and context arch
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
 
-## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Requirements
+
+- Docker Engine or Docker Desktop
+- At least one LLM API key (OpenAI / Anthropic / Google / etc.) or an OpenAI-compatible API endpoint
+- Comfort with the terminal
+
+
+## License
+
+MIT — see `LICENSE`.
+
 
 ## Attributions
 
 Some design ideas in AssistantMD were shaped by the work of others:
 
-- **RLM-style research loops**: [RLM: Rewriting the Language Model Loop](https://alexzhang13.github.io/blog/2025/rlm/)
-- **Context engineering for long-running agents**: [Summary notes in this repo](context_management.md), covering themes from Google, Anthropic, Stanford/SambaNova ACE, and Manus.
+- **RLM-style research loops**: https://alexzhang13.github.io/blog/2025/rlm/
+- **Context engineering for long-running agents**: summary notes in this repo (`context_management.md`), covering themes from Google, Anthropic, Stanford/SambaNova ACE, and Manus.

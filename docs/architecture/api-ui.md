@@ -29,3 +29,6 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - Endpoint logic is intentionally thin; most behavior should live in services/core modules.
 - Config and secret updates trigger reload through runtime reload service.
 - Ingestion and workflow manual runs are surfaced via API services.
+- Interactive API docs are available at `/docs` (Swagger UI) and `/openapi.json` (OpenAPI schema).
+- The OpenAPI schema is the source of truth for endpoint shapes.
+- Security: no built-in auth/TLS by default; if deployed remotely, place behind network/auth controls.
