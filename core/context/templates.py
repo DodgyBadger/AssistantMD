@@ -27,7 +27,7 @@ class TemplateRecord:
 
     name: str
     content: str
-    source: str  # "vault", "system", or "builtin"
+    source: str  # "vault" or "system"
     path: Optional[Path]
     sha256: str
     schema_block: Optional[str] = None  # raw YAML/JSON block if present
@@ -228,7 +228,7 @@ def load_template(
     system_root: Optional[Path] = None,
 ) -> TemplateRecord:
     """
-    Resolve a template by name with vault → system → builtin priority.
+    Resolve a template by name with vault → system priority.
 
     Args:
         name: Template filename (required)
@@ -277,7 +277,7 @@ def list_templates(
     system_root: Optional[Path] = None,
 ) -> List[TemplateRecord]:
     """
-    List available templates from vault and system locations (no fallback/builtin).
+    List available templates from vault and system locations.
     """
     records: List[TemplateRecord] = []
     normalized_root = Path(vault_path) if vault_path else None
