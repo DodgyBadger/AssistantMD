@@ -32,8 +32,6 @@ Templates are plain markdown files that live inside your vault. Behaviour is com
 - `{today}` or `{this-week}` - read or write files based on date
 
 See a [lightweight chat memory implementation](docs/examples/ContextTemplates/weekly-memory.md?plain=1) in the example library.  
-See [docs/use/reference.md](docs/use/reference.md) for the full directive reference.
-
 
 ## Typical use cases
 
@@ -87,6 +85,7 @@ Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. 
 - **[Basic Usage](docs/use/README.md)**
 - **[Context Manager](docs/use/context_manager.md)**
 - **[Workflows](docs/use/workflows.md)**
+- **[Reference](docs/use/reference.md)**
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
 
@@ -100,7 +99,7 @@ Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. 
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [LICENSE](LICENSE).
 
 
 ## Attributions
@@ -108,4 +107,5 @@ MIT — see `LICENSE`.
 Some design ideas in AssistantMD were shaped by the work of others:
 
 - **RLM-style research loops**: https://alexzhang13.github.io/blog/2025/rlm/
-- **Context engineering for long-running agents**: summary notes in this repo (`context_management.md`), covering themes from Google, Anthropic, Stanford/SambaNova ACE, and Manus.
+- **Context engineering for long-running agents**: summary notes in this repo ([docs/use/context_manager.md](docs/use/context_manager.md)), covering themes from Google, Anthropic, Stanford/SambaNova ACE, and Manus.
+- Third-party software notices: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
