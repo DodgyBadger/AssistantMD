@@ -7,6 +7,24 @@
     <base href="./">
     <link rel="stylesheet" href="static/output.css">
     <script src="static/vendor/marked.min.js"></script>
+    <script src="static/vendor/dompurify.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true,
+                packages: { '[+]': ['noerrors', 'noundefined'] }
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+            },
+            loader: {
+                load: ['[tex]/noerrors', '[tex]/noundefined']
+            }
+        };
+    </script>
+    <script src="static/vendor/mathjax/tex-chtml.js"></script>
     <style>
         /* Theme Color Variables */
         :root, [data-theme="light"] {

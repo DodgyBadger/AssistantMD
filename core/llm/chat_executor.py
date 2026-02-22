@@ -204,7 +204,6 @@ def _prepare_agent_config(
     vault_path: str,
     tools: List[str],
     model: str,
-    instructions: Optional[str],
 ) -> tuple:
     """
     Prepare agent configuration (shared between streaming and non-streaming).
@@ -212,11 +211,7 @@ def _prepare_agent_config(
     Returns:
         Tuple of (base_instructions, tool_instructions, model_instance, tool_functions)
     """
-    # Select base instructions
-    if instructions:
-        base_instructions = instructions  # Custom instructions override
-    else:
-        base_instructions = REGULAR_CHAT_INSTRUCTIONS
+    base_instructions = REGULAR_CHAT_INSTRUCTIONS
 
     # Process tools directive to get tool functions
     tool_functions = []
@@ -245,8 +240,7 @@ async def execute_chat_prompt(
     tools: List[str],
     model: str,
     session_manager: SessionManager,
-    instructions: Optional[str] = None,
-    context_template: Optional[str] = None,    
+    context_template: Optional[str] = None,
 ) -> ChatExecutionResult:
     """
     Execute chat prompt with user-selected tools and model.
@@ -259,14 +253,12 @@ async def execute_chat_prompt(
         tools: List of tool names selected by user
         model: Model name selected by user
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults to regular chat instructions)
-
     Returns:
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, instructions
+        vault_name, vault_path, tools, model
     )
 
     resolved_template = _resolve_context_template_name(vault_path, context_template)
@@ -339,7 +331,6 @@ async def execute_chat_prompt_stream(
     tools: List[str],
     model: str,
     session_manager: SessionManager,
-    instructions: Optional[str] = None,
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
@@ -355,14 +346,12 @@ async def execute_chat_prompt_stream(
         tools: List of tool names selected by user
         model: Model name selected by user
         session_manager: Session manager instance for history storage
-        instructions: Optional system instructions (defaults to regular chat instructions)
-
     Yields:
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, instructions
+        vault_name, vault_path, tools, model
     )
 
     resolved_template = _resolve_context_template_name(vault_path, context_template)

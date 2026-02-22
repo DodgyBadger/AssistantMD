@@ -428,7 +428,6 @@ async def chat_execute(request: ChatExecuteRequest):
                 tools=request.tools,
                 model=request.model,
                 session_manager=session_manager,
-                instructions=request.instructions,
                 context_template=request.context_template
             )
 
@@ -455,7 +454,6 @@ async def chat_execute(request: ChatExecuteRequest):
                 tools=request.tools,
                 model=request.model,
                 session_manager=session_manager,
-                instructions=request.instructions,
                 context_template=request.context_template
             )
 
