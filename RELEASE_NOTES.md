@@ -1,7 +1,27 @@
 # Release Notes
 
+## 2026-02-24 - v0.4.1.
 
-## 2026-02-20
+### Feature: LaTeX rendering in chat
+This release adds first-class LaTeX rendering in assistant responses using bundled MathJax in the chat UI.
+
+- Supports inline math (`$...$`, `\(...\)`) and display math (`$$...$$`, `\[...\]`).
+- Preserves math while markdown is parsed, then typesets math after render (including streaming responses).
+- Skips math parsing inside code blocks/inline code so examples stay literal.
+
+### Security and rendering hardening
+- Added DOMPurify to sanitize assistant-rendered HTML before inserting into the chat UI.
+- Improved post-processing flow for assistant messages so link behavior, math rendering, and code-copy buttons are applied consistently.
+
+### Chat instruction stack simplification
+- Removed request-level custom chat instructions override from the chat API path.
+- Consolidated default chat behavior into the regular instruction template/constants for more predictable prompting.
+
+### Documentation and legal
+- Added `THIRD_PARTY_NOTICES.md` with bundled frontend asset notices and dependency inventory references.
+- Updated README links for reference docs, license, and third-party notices.
+
+## 2026-02-20 - v0.4.0.
 
 ### Feature: Context manager
 This release introduces the **Context Manager** which allows you to shape what the chat agent sees, from simple system‑prompt injection to multi‑step context assembly. It applies the lessons learned by research on long‑running agents: curated working sets, structured summaries and explicit attention budgeting beat dumping full transcripts into ever‑larger contexts.
