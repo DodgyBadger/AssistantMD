@@ -640,6 +640,9 @@
         const reasonLine = model.status_message && !model.available
             ? `<div class="text-xs state-error mt-1">${escapeHtml(model.status_message)}</div>`
             : '';
+        const capabilities = Array.isArray(model.capabilities) && model.capabilities.length
+            ? model.capabilities.join(', ')
+            : 'text';
 
                 const actions = editable
                     ? `
@@ -670,6 +673,10 @@
                         <div>
                             <div class="text-xs font-medium text-txt-secondary mb-1">Model Identifier</div>
                             <div class="text-xs font-mono text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(model.model_string)}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs font-medium text-txt-secondary mb-1">Capabilities</div>
+                            <div class="text-xs text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(capabilities)}</div>
                         </div>
                     </div>
                     <div class="flex gap-2 justify-start md:justify-end shrink-0">
@@ -711,6 +718,11 @@
                     <div>
                         <label class="block text-xs font-medium text-txt-primary mb-1.5">Model Identifier</label>
                         <input data-field="model_string" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary font-mono text-sm transition-colors" placeholder="e.g. claude-sonnet-4-5" value="${escapeHtml(draft.model_string || '')}" />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-txt-primary mb-1.5">Capabilities</label>
+                        <input data-field="capabilities" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="e.g. text, vision" value="${escapeHtml(draft.capabilities || 'text')}" />
+                        <p class="text-xs text-txt-secondary mt-1">Comma-separated values. Example: <code>text, vision</code>.</p>
                     </div>
                     <div class="flex justify-end gap-2">
                         <button data-action="cancel-model" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
@@ -789,7 +801,10 @@ function startModelEdit(modelName) {
     state.modelDraft = {
         name: model.name,
         provider: model.provider,
-        model_string: model.model_string
+        model_string: model.model_string,
+        capabilities: Array.isArray(model.capabilities) && model.capabilities.length
+            ? model.capabilities.join(', ')
+            : 'text'
     };
 
     renderModels();
@@ -809,7 +824,8 @@ function startNewModel() {
     state.modelDraft = {
         name: '',
         provider: defaultProvider,
-        model_string: ''
+        model_string: '',
+        capabilities: 'text'
     };
 
     renderModels();
@@ -833,6 +849,11 @@ async function saveModelRow(rowKey) {
     let alias = (draft.name || '').trim().toLowerCase();
     const provider = (draft.provider || '').trim();
     const modelString = (draft.model_string || '').trim();
+    const capabilitiesInput = (draft.capabilities || '').trim();
+    const capabilities = capabilitiesInput
+        .split(',')
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0);
 
     const isNew = state.modelEdit.mode === 'new' || rowKey === '__new';
     const originalName = state.modelEdit.mode === 'existing' ? state.modelEdit.key : null;
@@ -844,6 +865,10 @@ async function saveModelRow(rowKey) {
 
     if (!provider || !modelString) {
         setStatus(elements.modelFeedback, 'Provider and model identifier are required.', 'error');
+        return;
+    }
+    if (!capabilities.length) {
+        setStatus(elements.modelFeedback, 'At least one capability is required (e.g. text).', 'error');
         return;
     }
 
@@ -859,7 +884,8 @@ async function saveModelRow(rowKey) {
     try {
         const payload = {
             provider: provider,
-            model_string: modelString
+            model_string: modelString,
+            capabilities: capabilities
         };
 
         const response = await fetch(`api/system/models/${encodeURIComponent(alias)}`, {

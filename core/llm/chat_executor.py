@@ -29,6 +29,7 @@ from core.constants import (
 )
 from core.directives.model import ModelDirective
 from core.directives.tools import ToolsDirective
+from core.llm.model_utils import model_supports_capability
 from core.context.manager import build_context_manager_history_processor
 from core.context.templates import load_template
 from core.settings.store import get_general_settings
@@ -263,6 +264,21 @@ def _resolve_image_prompt(
     return prompt_content, prompt_for_history, len(prompt_content) - 1
 
 
+def _validate_image_capability(model_alias: str, image_paths: Optional[List[str]]) -> None:
+    """Fail fast if image attachments are requested for a non-vision model."""
+    if not image_paths:
+        return
+    has_paths = any((path or "").strip() for path in image_paths)
+    if not has_paths:
+        return
+    if model_supports_capability(model_alias, "vision"):
+        return
+    raise ValueError(
+        f"Model '{model_alias}' does not declare 'vision' capability in settings.yaml. "
+        "Use a vision-capable model or remove image attachments."
+    )
+
+
 def _prepare_agent_config(
     vault_name: str,
     vault_path: str,
@@ -322,6 +338,7 @@ async def execute_chat_prompt(
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
+    _validate_image_capability(model, image_paths)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model
     )
@@ -423,6 +440,7 @@ async def execute_chat_prompt_stream(
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
+    _validate_image_capability(model, image_paths)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model
     )

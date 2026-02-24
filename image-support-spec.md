@@ -200,6 +200,37 @@ Guideline:
 1. Evaluate need for dedicated `image_ops_safe`.
 2. If needed, include transformation/classification helpers with strict scope.
 
+## Progress Update (2026-02-24)
+Status snapshot for current branch work.
+
+Completed:
+- Base multimodal prompt plumbing in chat path:
+  - chat request supports `image_paths`
+  - runtime can send `str | Sequence[UserContent]` to `Agent.run(...)`
+  - local vault image paths are attached via `BinaryContent.from_path(...)`
+- `file_ops_safe(operation="read")` now supports image files and returns multimodal `ToolReturn` content for vision-capable models.
+- Tool auto-buffer routing updated to bypass multimodal `ToolReturn` payloads (prevents accidental buffering of large base64-serialized image content).
+- PydanticAI integration research captured in this document (API shape, capability caveats, and baseline approach).
+
+Partially complete:
+- Non-markdown image handling exists in chat and `file_ops_safe`, but workflow `@input ... (images=...)` path is not yet implemented end-to-end.
+- Context-window protection for high image counts is not finalized (interim bypass exists; policy controls still pending).
+
+Not started (from Phase 1):
+- PDF `page_images`/`hybrid` ingestion modes.
+- Image ingestion strategies (`image_ocr`, `image_copy`).
+- Extension-aware `@input file:` behavior for non-markdown default handling.
+- Markdown embedded image ref extraction and attachment in workflow/context pipeline.
+- Model capability metadata wiring in settings/runtime (`capabilities: ["text", "vision", ...]`) with policy enforcement.
+- Formal documentation/examples for end users.
+
+Next recommended implementation order:
+1. Add model capability metadata to settings schema + runtime checks.
+2. Implement `@input ... (images=auto|include|ignore|only)` parsing and routing.
+3. Add image attachment limits (count/bytes) and overflow policy.
+4. Add ingestion features (`page_images`, `image_ocr`, `image_copy`).
+5. Add validation scenarios covering direct image refs, markdown embedded refs, non-vision failure modes, and limit enforcement.
+
 ## Validation Strategy
 - Unit tests for extension resolution and input parsing.
 - Unit tests for markdown embedded image parsing and path resolution.

@@ -819,11 +819,13 @@ def _build_model_info(
     if hasattr(config, "provider"):
         provider = config.provider
         model_string = config.model_string
+        capabilities = list(getattr(config, "capabilities", ["text"]) or ["text"])
         user_editable = getattr(config, "user_editable", True)
         description = getattr(config, "description", None)
     else:
         provider = config['provider']
         model_string = config['model_string']
+        capabilities = list(config.get("capabilities", ["text"]) or ["text"])
         user_editable = config.get('user_editable', True)
         description = config.get('description')
 
@@ -835,6 +837,7 @@ def _build_model_info(
         name=name,
         provider=provider,
         model_string=model_string,
+        capabilities=capabilities,
         available=availability.get(name, True),
         user_editable=user_editable,
         description=description,
@@ -915,6 +918,7 @@ def upsert_configurable_model(model_name: str, payload: ModelConfigRequest) -> M
             name=model_name,
             provider=payload.provider,
             model_string=payload.model_string,
+            capabilities=payload.capabilities,
             description=payload.description,
         )
     except SettingsError as exc:
@@ -1227,11 +1231,13 @@ async def get_metadata() -> MetadataResponse:
         if hasattr(config, "provider"):
             provider = config.provider
             model_string = config.model_string
+            capabilities = list(getattr(config, "capabilities", ["text"]) or ["text"])
             user_editable = getattr(config, "user_editable", True)
             description = getattr(config, "description", None)
         else:
             provider = config['provider']
             model_string = config['model_string']
+            capabilities = list(config.get("capabilities", ["text"]) or ["text"])
             user_editable = config.get('user_editable', True)
             description = config.get('description')
 
@@ -1240,6 +1246,7 @@ async def get_metadata() -> MetadataResponse:
                 name=name,
                 provider=provider,
                 model_string=model_string,
+                capabilities=capabilities,
                 available=config_status.model_availability.get(name, True),
                 user_editable=user_editable,
                 description=description,
