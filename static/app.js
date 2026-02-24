@@ -32,6 +32,8 @@ const state = {
     shouldAutoScroll: true
 };
 
+let mathTypesetQueue = Promise.resolve();
+
 // DOM elements - Chat
 const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
@@ -722,7 +724,6 @@ async function sendMessage() {
         tools: selectedTools,
         model: model,
         context_template: chatElements.templateSelector ? chatElements.templateSelector.value || null : null,
-        instructions: null,
         stream: true
     };
 
@@ -889,6 +890,136 @@ function enforceExternalLinkBehavior(container) {
     });
 }
 
+function renderAssistantHtml(bodyDiv, markdownContent = '') {
+    if (!bodyDiv) return;
+    const content = (markdownContent || '').trim();
+    const protectedContent = protectLatexForMarkdown(content);
+    const renderedHtml = content ? marked.parse(protectedContent.markdown) : '';
+    const restoredHtml = restoreLatexPlaceholders(renderedHtml, protectedContent.segments);
+    bodyDiv.innerHTML = sanitizeAssistantHtml(restoredHtml);
+}
+
+function protectLatexForMarkdown(markdown) {
+    if (!markdown) {
+        return { markdown: '', segments: [] };
+    }
+
+    const segments = [];
+    const codePattern = /(```[\s\S]*?```|`[^`\n]*`)/g;
+    let cursor = 0;
+    let output = '';
+    let match = codePattern.exec(markdown);
+
+    while (match) {
+        output += replaceLatexSegments(markdown.slice(cursor, match.index), segments);
+        output += match[0];
+        cursor = match.index + match[0].length;
+        match = codePattern.exec(markdown);
+    }
+
+    output += replaceLatexSegments(markdown.slice(cursor), segments);
+    return { markdown: output, segments };
+}
+
+function replaceLatexSegments(text, segments) {
+    if (!text) return '';
+
+    const pattern =
+        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|(?<!\\)\$[^$\n]+?(?<!\\)\$)/g;
+
+    return text.replace(pattern, (rawMath) => {
+        const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
+        segments.push(rawMath);
+        return placeholder;
+    });
+}
+
+function restoreLatexPlaceholders(html, segments) {
+    if (!html || !segments.length) return html;
+
+    return segments.reduce((acc, rawMath, index) => {
+        const placeholder = `@@MATH_SEGMENT_${index}@@`;
+        return acc.split(placeholder).join(escapeHtml(rawMath));
+    }, html);
+}
+
+function escapeHtml(value) {
+    if (!value) return '';
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function getMathJax() {
+    if (typeof window === 'undefined') return null;
+    const mathJax = window.MathJax;
+    if (!mathJax || typeof mathJax.typesetPromise !== 'function') return null;
+    return mathJax;
+}
+
+function sanitizeAssistantHtml(html) {
+    if (!html) return '';
+
+    if (!window.DOMPurify || typeof window.DOMPurify.sanitize !== 'function') {
+        return html;
+    }
+
+    return window.DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true }
+    });
+}
+
+function postProcessAssistantBody(bodyDiv) {
+    if (!bodyDiv) return;
+    enforceExternalLinkBehavior(bodyDiv);
+    renderAssistantMath(bodyDiv);
+    attachCodeCopyButtons(bodyDiv);
+}
+
+function renderAssistantMath(bodyDiv) {
+    if (!bodyDiv) return;
+    const mathJax = getMathJax();
+    if (!mathJax) return;
+
+    mathTypesetQueue = mathTypesetQueue
+        .then(() => mathJax.startup?.promise)
+        .then(() => {
+            if (typeof mathJax.typesetClear === 'function') {
+                mathJax.typesetClear([bodyDiv]);
+            }
+            return mathJax.typesetPromise([bodyDiv]);
+        })
+        .catch((error) => {
+            console.warn('MathJax render failed:', error);
+        });
+}
+
+function scheduleAssistantPostProcess(context, delayMs = 120) {
+    if (!context || !context.bodyDiv) return;
+
+    if (context.postProcessTimer) {
+        clearTimeout(context.postProcessTimer);
+    }
+
+    context.postProcessTimer = window.setTimeout(() => {
+        postProcessAssistantBody(context.bodyDiv);
+        context.postProcessTimer = null;
+        scrollChatToBottom();
+    }, delayMs);
+}
+
+function flushAssistantPostProcess(context) {
+    if (!context || !context.bodyDiv) return;
+
+    if (context.postProcessTimer) {
+        clearTimeout(context.postProcessTimer);
+        context.postProcessTimer = null;
+    }
+
+    postProcessAssistantBody(context.bodyDiv);
+}
+
 // Add message to chat with copy controls
 function addMessage(role, content, options = {}) {
     const messageDiv = document.createElement('div');
@@ -907,8 +1038,8 @@ function addMessage(role, content, options = {}) {
     bodyDiv.className = 'message-body';
 
     if (role === 'assistant') {
-        bodyDiv.innerHTML = marked.parse(content);
-        enforceExternalLinkBehavior(bodyDiv);
+        renderAssistantHtml(bodyDiv, content);
+        postProcessAssistantBody(bodyDiv);
     } else {
         const escapedContent = content
             .replace(/&/g, '&amp;')
@@ -919,10 +1050,6 @@ function addMessage(role, content, options = {}) {
     }
 
     contentDiv.appendChild(bodyDiv);
-
-    if (role === 'assistant') {
-        attachCodeCopyButtons(bodyDiv);
-    }
 
     const footerDiv = document.createElement('div');
     footerDiv.className = 'message-footer';
@@ -1018,7 +1145,8 @@ function createAssistantStreamingMessage() {
         fullText: '',
         errorMessages: [],
         hasTools: false,
-        toolSummary: null
+        toolSummary: null,
+        postProcessTimer: null
     };
 }
 
@@ -1065,15 +1193,14 @@ function updateToolCallsSummary(context) {
     context.toolCallsSummaryTitle.textContent = `Tool calls (${total})`;
 }
 
-function renderAssistantMarkdown(context) {
-    if (!context.fullText.trim()) {
-        context.bodyDiv.innerHTML = '';
+function renderAssistantMarkdown(context, options = {}) {
+    const { finalize = false } = options;
+    renderAssistantHtml(context.bodyDiv, context.fullText);
+    if (finalize) {
+        flushAssistantPostProcess(context);
     } else {
-        context.bodyDiv.innerHTML = marked.parse(context.fullText);
-        enforceExternalLinkBehavior(context.bodyDiv);
-        attachCodeCopyButtons(context.bodyDiv);
+        scheduleAssistantPostProcess(context);
     }
-
     scrollChatToBottom();
 }
 
@@ -1170,6 +1297,8 @@ function createToolStatusEntry(context, toolId, payload) {
 }
 
 function finalizeAssistantMessage(context, metadata) {
+    renderAssistantMarkdown(context, { finalize: true });
+
     const hasError = context.errorMessages.length > 0;
     const endedEarly = metadata.status && metadata.status !== 'done' && !hasError;
 
