@@ -1,11 +1,15 @@
-from typing import AsyncIterator, Optional, List, Any
+from typing import AsyncIterator, Optional, List, Any, Sequence
 import json
 from datetime import datetime
 
 from pydantic_ai.agent import Agent
+from pydantic_ai.messages import UserContent
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.directives.model import ModelDirective
 from core.settings.store import get_general_settings
+
+
+PromptInput = str | Sequence[UserContent]
 
 async def create_agent(
     model=None,
@@ -64,7 +68,11 @@ async def create_agent(
     return agent
 
 
-async def generate_stream(agent, prompt, message_history) -> AsyncIterator[str]:
+async def generate_stream(
+    agent: Agent,
+    prompt: PromptInput,
+    message_history,
+) -> AsyncIterator[str]:
     try:
         async with agent.run_stream(
             prompt,
@@ -92,7 +100,12 @@ async def generate_stream(agent, prompt, message_history) -> AsyncIterator[str]:
         raise
 
 
-async def generate_response(agent, prompt, message_history=None, deps=None):
+async def generate_response(
+    agent: Agent,
+    prompt: PromptInput,
+    message_history=None,
+    deps=None,
+):
     try:
         if message_history:
             result = await agent.run(

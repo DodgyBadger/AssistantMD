@@ -33,6 +33,10 @@ class ChatExecuteRequest(BaseModel):
     """Request model for chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")
     prompt: str = Field(..., min_length=1, description="User prompt text")
+    image_paths: List[str] = Field(
+        default_factory=list,
+        description="Optional image file paths (relative to vault or absolute within vault) to attach",
+    )
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")

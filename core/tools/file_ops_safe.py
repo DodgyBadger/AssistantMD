@@ -8,6 +8,9 @@ import os
 import glob
 import shutil
 import subprocess
+from pathlib import Path
+
+from pydantic_ai.messages import BinaryContent, ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
@@ -42,7 +45,7 @@ class FileOpsSafe(BaseTool):
             include_all: bool = False,
             recursive: bool = False,
             scope: str = "",
-        ) -> str:
+        ) -> str | ToolReturn:
             """Read/write/list/search markdown files in a vault or virtual mount.
 
             :param operation: Operation name
@@ -127,6 +130,7 @@ Instead, explore the vault structure first, then target specific folders or file
 
 READING & WRITING:
 - file_ops_safe(operation="read", target="path/to/file.md"): Read file content
+- file_ops_safe(operation="read", target="path/to/image.png"): Attach image content for vision-capable models
 - file_ops_safe(operation="write", target="path/to/file.md", content="text"): Create NEW file (fails if exists)
 - file_ops_safe(operation="append", target="path/to/file.md", content="text"): Append to EXISTING file (fails if not exists)
 - file_ops_safe(operation="move", target="old/path.md", destination="new/path.md"): Move files (fails if destination exists)
@@ -137,15 +141,33 @@ BEST PRACTICES:
 2. Use 'search' to find content across files efficiently
 3. Navigate into relevant directories before doing recursive searches
 4. Read only files relevant to the user's request
-5. All files must use .md extension
+5. Write/append operations require .md files; read also supports image files
 6. All operations are SAFE - no overwriting or data loss
 """
 
 
     @classmethod
-    def _read_file(cls, path: str, vault_path: str) -> str:
+    def _validate_read_path(cls, path: str, vault_path: str) -> str:
+        """Validate read path within vault boundaries, allowing non-markdown files."""
+        mount_key = get_virtual_mount_key(path)
+        if mount_key:
+            raise ValueError(f"'{mount_key}' is reserved for a virtual mount")
+        if ".." in path:
+            raise ValueError("Path traversal not allowed - '..' found in path")
+        if path.startswith("/"):
+            raise ValueError("Absolute paths not allowed")
+
+        full_path = os.path.join(vault_path, path)
+        resolved_path = os.path.realpath(full_path)
+        vault_abs = os.path.realpath(vault_path)
+        if not resolved_path.startswith(vault_abs + os.sep) and resolved_path != vault_abs:
+            raise ValueError("Path escapes vault boundaries")
+        return resolved_path
+
+    @classmethod
+    def _read_file(cls, path: str, vault_path: str) -> str | ToolReturn:
         """Read file contents."""
-        full_path = validate_and_resolve_path(path, vault_path)
+        full_path = cls._validate_read_path(path, vault_path)
 
         if os.path.isdir(full_path):
             return f"Cannot read '{path}' - this is a directory, not a file. Use file_operations('list', target='{path}') to see files in this directory."
@@ -153,8 +175,35 @@ BEST PRACTICES:
         if not os.path.exists(full_path):
             return f"Cannot read '{path}' - file does not exist. Use file_operations('list') to see available files."
 
-        with open(full_path, 'r', encoding='utf-8') as file:
-            file_content = file.read()
+        binary_content = BinaryContent.from_path(full_path)
+        if binary_content.is_image:
+            relative_path = Path(full_path).resolve().relative_to(Path(vault_path).resolve())
+            relative_display = relative_path.as_posix()
+            image_note = (
+                f"Attached image from '{relative_display}'. Use this image to answer the user's request."
+            )
+            return ToolReturn(
+                return_value=(
+                    f"Attached image '{relative_display}' "
+                    f"({binary_content.media_type}, {len(binary_content.data)} bytes)."
+                ),
+                content=[image_note, binary_content],
+                metadata={
+                    "filepath": relative_display,
+                    "media_type": binary_content.media_type,
+                    "size_bytes": len(binary_content.data),
+                },
+            )
+
+        try:
+            with open(full_path, 'r', encoding='utf-8') as file:
+                file_content = file.read()
+        except UnicodeDecodeError:
+            return (
+                f"Cannot read '{path}' as text - this file is binary ({binary_content.media_type}). "
+                "Image files are supported for multimodal reading; other binary types are not supported by "
+                "file_ops_safe(read) yet."
+            )
         return f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}"
 
     @classmethod

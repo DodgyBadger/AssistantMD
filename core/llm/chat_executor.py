@@ -9,14 +9,16 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, AsyncIterator, Any
+from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai import (
+    BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
     TextPartDelta, FunctionToolCallEvent, FunctionToolResultEvent
 )
+from pydantic_ai.messages import UserContent
 
 from core.llm.agents import create_agent
 from core.llm.session_manager import SessionManager
@@ -36,6 +38,9 @@ from core.runtime.buffers import BufferStore, get_session_buffer_store
 
 
 logger = UnifiedLogger(tag="chat-executor")
+
+
+PromptInput = str | Sequence[UserContent]
 
 
 def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
@@ -199,6 +204,65 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
     return str(history_file)
 
 
+def _resolve_image_prompt(
+    *,
+    prompt_text: str,
+    image_paths: Optional[List[str]],
+    vault_path: str,
+) -> tuple[PromptInput, str, int]:
+    """Build prompt payload and history-safe text from optional image attachments."""
+    if not image_paths:
+        return prompt_text, prompt_text, 0
+
+    vault_root = Path(vault_path).resolve()
+    prompt_content: List[UserContent] = [prompt_text]
+    history_lines: List[str] = []
+    seen_paths: set[str] = set()
+
+    for raw_path in image_paths:
+        candidate = (raw_path or "").strip()
+        if not candidate:
+            continue
+
+        image_path = Path(candidate)
+        if not image_path.is_absolute():
+            image_path = vault_root / image_path
+        resolved_path = image_path.resolve()
+
+        if resolved_path != vault_root and vault_root not in resolved_path.parents:
+            raise ValueError(
+                f"Image path '{candidate}' is outside the vault and cannot be attached."
+            )
+        if not resolved_path.is_file():
+            raise ValueError(f"Image file not found: {candidate}")
+
+        resolved_key = str(resolved_path)
+        if resolved_key in seen_paths:
+            continue
+        seen_paths.add(resolved_key)
+
+        file_content = BinaryContent.from_path(resolved_path)
+        if not file_content.is_image:
+            raise ValueError(f"File is not an image and cannot be attached: {candidate}")
+
+        prompt_content.append(file_content)
+        display_path = resolved_path.relative_to(vault_root).as_posix()
+        history_lines.append(f"- {display_path}")
+
+    if len(prompt_content) == 1:
+        return prompt_text, prompt_text, 0
+
+    prompt_for_history = "\n".join(
+        [
+            prompt_text,
+            "",
+            "[Attached images]",
+            *history_lines,
+        ]
+    )
+    return prompt_content, prompt_for_history, len(prompt_content) - 1
+
+
 def _prepare_agent_config(
     vault_name: str,
     vault_path: str,
@@ -236,6 +300,7 @@ async def execute_chat_prompt(
     vault_name: str,
     vault_path: str,
     prompt: str,
+    image_paths: Optional[List[str]],
     session_id: str,
     tools: List[str],
     model: str,
@@ -285,6 +350,12 @@ async def execute_chat_prompt(
     # Get message history (always tracked now)
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
+    user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
+        prompt_text=prompt,
+        image_paths=image_paths,
+        vault_path=vault_path,
+    )
+
     # Run agent
     session_buffer_store = get_session_buffer_store(session_id)
     run_deps = ChatRunDeps(
@@ -293,7 +364,7 @@ async def execute_chat_prompt(
         buffer_store_registry={"session": session_buffer_store},
     )
     result = await agent.run(
-        prompt,
+        user_prompt,
         message_history=message_history,
         deps=run_deps,
     )
@@ -302,7 +373,7 @@ async def execute_chat_prompt(
     session_manager.add_messages(session_id, vault_name, result.new_messages())
 
     # Save chat history to markdown file
-    history_file = save_chat_history(vault_path, session_id, prompt, result.output)
+    history_file = save_chat_history(vault_path, session_id, prompt_for_history, result.output)
     logger.info(
         "Chat executed",
         data={
@@ -311,6 +382,7 @@ async def execute_chat_prompt(
             "model": model,
             "tools_count": len(tools),
             "prompt_length": len(prompt),
+            "attached_image_count": attached_image_count,
             "history_file": history_file,
         },
     )
@@ -327,6 +399,7 @@ async def execute_chat_prompt_stream(
     vault_name: str,
     vault_path: str,
     prompt: str,
+    image_paths: Optional[List[str]],
     session_id: str,
     tools: List[str],
     model: str,
@@ -378,6 +451,12 @@ async def execute_chat_prompt_stream(
     # Get message history
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
+    user_prompt, prompt_for_history, _attached_image_count = _resolve_image_prompt(
+        prompt_text=prompt,
+        image_paths=image_paths,
+        vault_path=vault_path,
+    )
+
     # Stream response and capture final result for history storage
     full_response = ""
     final_result = None
@@ -393,7 +472,7 @@ async def execute_chat_prompt_stream(
         # Use run_stream_events() to properly handle tool calls
         # This runs the agent graph to completion and streams all events
         async for event in agent.run_stream_events(
-            prompt,
+            user_prompt,
             message_history=message_history,
             deps=run_deps,
         ):
@@ -512,4 +591,4 @@ async def execute_chat_prompt_stream(
 
     # Save chat history to markdown file
     if final_result:
-        save_chat_history(vault_path, session_id, prompt, full_response)
+        save_chat_history(vault_path, session_id, prompt_for_history, full_response)
