@@ -16,7 +16,6 @@ from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.mistral import MistralProvider
-from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.grok import GrokProvider
 from pydantic_ai.settings import ModelSettings
@@ -30,6 +29,18 @@ from core.settings.secrets_store import get_secret_value
 
 class ModelDirective(DirectiveProcessor):
     """Processor for @model directive that specifies which AI model to use for a step."""
+
+    @staticmethod
+    def _resolve_config_value(raw_value: str | None) -> str | None:
+        """Resolve a provider config value as secret name first, then literal value."""
+        if raw_value is None:
+            return None
+
+        value = raw_value.strip()
+        if not value or value.lower() == "null":
+            return None
+
+        return get_secret_value(value) or value
     
     def get_directive_name(self) -> str:
         return "model"
@@ -147,10 +158,12 @@ class ModelDirective(DirectiveProcessor):
             # elif enable_thinking:
             #     settings_kwargs["openai_reasoning_effort"] = "high"
             #     settings_kwargs["openai_reasoning_summary"] = "auto"
-            api_key = get_secret_value('OPENAI_API_KEY')
+            provider_config = get_provider_config(provider)
+            api_key = self._resolve_config_value(provider_config.get('api_key'))
+            base_url = self._resolve_config_value(provider_config.get('base_url'))
             return OpenAIResponsesModel(
                 model_string,
-                provider=OpenAIProvider(api_key=api_key),
+                provider=OpenAIProvider(api_key=api_key, base_url=base_url),
                 settings=OpenAIResponsesModelSettings(**settings_kwargs),
             )
 
@@ -191,14 +204,16 @@ class ModelDirective(DirectiveProcessor):
                 )
 
             # Look up in secrets store first, fall back to literal value
-            base_url = get_secret_value(base_url_config) or base_url_config
+            base_url = self._resolve_config_value(base_url_config)
 
             settings_kwargs = {"timeout": get_default_api_timeout()}
             max_output_tokens = get_default_max_output_tokens()
             if max_output_tokens > 0:
                 settings_kwargs["max_tokens"] = max_output_tokens
+
+            api_key = self._resolve_config_value(provider_config.get('api_key'))
             return OpenAIModel(
                 model_string,
-                provider=OllamaProvider(base_url=base_url),
+                provider=OpenAIProvider(api_key=api_key, base_url=base_url),
                 settings=ModelSettings(**settings_kwargs)
             )
