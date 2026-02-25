@@ -102,18 +102,15 @@ This keeps existing templates compatible while enabling explicit image inputs.
 
 ### New `@input` image policy parameter
 Add optional parameter:
-- `images=auto|include|ignore|only`
+- `images=auto|ignore`
 
 Semantics:
 - `auto` (default): include image refs when model/runtime supports multimodal input; otherwise ignore with warning metadata.
-- `include`: always attempt to include image refs; fail step if runtime/model cannot attach images.
 - `ignore`: never attach images; treat image references as text/refs only.
-- `only`: pass image refs without inlining markdown/text body content (for vision-first steps).
 
 Examples:
-- `@input file:lesson.md (images=include)`
+- `@input file:lesson.md (images=auto)`
 - `@input file:lesson.md (images=ignore)`
-- `@input file:Imported/book/pages/*.png (images=only)`
 
 ## 3) Input Payload Model: Text vs Image
 For non-text/binary file inputs:
@@ -147,7 +144,6 @@ For large markdown files with many images:
 If image refs are broken/missing:
 - keep original markdown text and insert an explicit missing-image marker at the same position
 - add warning metadata (missing path + source pointer) without failing by default
-- if `images=include`, missing required refs may fail the step based on `required` policy
 
 ### Local vs Remote image-ref policy (default assumptions)
 To keep reasoning pipelines predictable and safe, prioritize local artifacts over remote fetches.
@@ -290,16 +286,56 @@ Not started (from Phase 1):
 - Formal documentation/examples for end users.
 
 Next recommended implementation order:
-1. Implement `@input ... (images=auto|include|ignore|only)` parsing and routing.
-2. Add image attachment limits (count/bytes) and overflow policy.
+1. Add targeted validation scenarios for chunked markdown image reads in workflow/context and `file_ops_safe`.
+2. Finalize multimodal vs text auto-buffering policy interaction for large multimodal tool outputs.
 3. Add ingestion features (`page_images`, `image_ocr`, `image_copy`).
 4. Define/implement upgrade assist for existing settings (optional migration helper or UI nudge for missing `vision` capability).
-5. Add validation scenarios covering direct image refs, markdown embedded refs, non-vision failure modes, capability gating, and limit enforcement.
+5. Add documentation/examples for end users (including supported file-type policy and `images=auto|ignore` behavior).
+
+## Progress Update (2026-02-25)
+Status snapshot for image-chunking work completed after the 2026-02-24 update.
+
+Completed:
+- Introduced shared chunking subsystem under `core/chunking`:
+  - `markdown.py`: ordered markdown parsing into text/image-ref chunks
+  - `prompt_builder.py`: resolves embedded image refs and builds interleaved prompt payloads
+  - `policy.py`: settings-backed attachment policy (count/size/remote policy)
+- Implemented markdown embedded-image prompt assembly for workflow `@input` path.
+- Implemented markdown embedded-image prompt assembly for context-manager `@input` path.
+- Added extension-aware `@input file:` resolution behavior:
+  - default `.md` only when no extension is provided
+  - explicit extension honored
+- Added centralized supported file-type policy in `core/constants.py`:
+  - single map: extension -> content kind (currently markdown/image)
+- Enforced supported file-type policy in:
+  - `@input` file loading
+  - `file_ops_safe(operation="read")`
+- Wired `file_ops_safe(read)` to auto-use chunking for markdown files with embedded image refs:
+  - plain markdown without embedded refs remains simple text read
+  - markdown with embedded image refs returns multimodal `ToolReturn` content in source order
+- Added settings-backed chunking policy controls:
+  - `chunking_max_images_per_prompt`
+  - `chunking_max_image_mb_per_image`
+  - `chunking_max_image_mb_total`
+  - `chunking_allow_remote_images`
+  - MB-based settings are converted to bytes in accessors; legacy byte-key fallback remains for compatibility.
+- Simplified `@input images=` policy modes to:
+  - `auto` (default)
+  - `ignore`
+
+Behavior notes:
+- Remote image URLs remain ref-only by default; no remote download/attach path is implemented yet.
+- Image policy no longer has strict modes (`include`/`only`) in this phase.
+
+Still not started:
+- PDF `page_images` / `hybrid` ingestion modes.
+- Image ingestion strategies (`image_ocr`, `image_copy`).
+- Dedicated validation scenarios for chunking/image-policy paths.
 
 ## Validation Strategy
 - Unit tests for extension resolution and input parsing.
 - Unit tests for markdown embedded image parsing and path resolution.
-- Unit tests for `images=` policy modes (`auto/include/ignore/only`).
+- Unit tests for `images=` policy modes (`auto/ignore`).
 - Smoke tests for ingestion output artifacts (`pages/`, `manifest.json`).
 - Smoke tests for image-file ingestion (`image_ocr` success/failure, `image_copy` outputs).
 - End-to-end scenario:
@@ -314,7 +350,7 @@ Next recommended implementation order:
 - Exact attachment API shape per provider/model adapter.
 - Size limits and downscaling policy for very large images.
 - Whether `index.md` is always produced or optional.
-- How much non-markdown read support should be exposed via `file_ops_safe` in phase 1.
+- Whether/when to expand `SUPPORTED_READ_FILE_TYPES` beyond markdown/image (for example `.json`) and how to stage that safely.
 
 ## Model Capability Metadata
 Image handling requires explicit model capability awareness in the provider/model subsystem.
@@ -329,7 +365,7 @@ Design notes:
 - Runtime/provider adapter remains final authority (defensive check before request send).
 - If model lacks required capability:
   - `images=auto`: degrade gracefully with warning metadata.
-  - `images=include` or `images=only`: fail step with clear actionable error.
+  - `images=ignore`: do not attempt image attachment.
 
 Future capability examples:
 - `text`

@@ -27,6 +27,8 @@ from core.context.store import (
 from core.directives.context_manager import _parse_passthrough_runs
 from core.directives.tools import ToolsDirective
 from core.logger import UnifiedLogger
+from core.chunking import build_input_files_prompt
+from core.llm.model_utils import model_supports_capability
 from core.runtime.buffers import BufferStore
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.utils.hash import hash_file_content
@@ -757,6 +759,7 @@ def resolve_section_inputs(
     vault_name: str,
     section_key: str,
     section_name: str,
+    model_alias: str,
 ) -> InputResolutionResult:
     section_directives = section.directives or {}
     input_file_values = section_directives.get("input", [])
@@ -830,6 +833,7 @@ def resolve_section_inputs(
             )
             return InputResolutionResult(
                 input_file_data=None,
+                input_files_prompt=None,
                 context_input_outputs=[],
                 empty_input_file_directive=empty_input_file_directive,
                 skip_required=True,
@@ -863,8 +867,20 @@ def resolve_section_inputs(
                     "files": file_summaries,
                 },
             )
+    input_files_prompt = None
+    if input_file_data or empty_input_file_directive:
+        supports_vision = model_supports_capability(model_alias, "vision")
+        built_prompt = build_input_files_prompt(
+            input_file_data=input_file_data,
+            vault_path=vault_path,
+            has_empty_directive=empty_input_file_directive and not input_file_data,
+            supports_vision=supports_vision,
+        )
+        input_files_prompt = built_prompt.prompt
+
     return InputResolutionResult(
         input_file_data=input_file_data,
+        input_files_prompt=input_files_prompt,
         context_input_outputs=context_input_outputs,
         empty_input_file_directive=empty_input_file_directive,
         skip_required=False,
@@ -1152,6 +1168,7 @@ async def run_context_section(
         vault_name=exec_ctx.vault_name,
         section_key=section_key,
         section_name=section.name,
+        model_alias=model_directive_value or exec_ctx.model_alias,
     )
     if input_resolution.skip_required:
         return SectionExecutionResult(summary_messages=[], persisted_sections=[])
@@ -1245,6 +1262,7 @@ async def run_context_section(
                                 and not input_resolution.input_file_data
                             ),
                         ),
+                        "input_files_prompt": input_resolution.input_files_prompt,
                     },
                 )
             manager_instruction = CONTEXT_MANAGER_SYSTEM_INSTRUCTION

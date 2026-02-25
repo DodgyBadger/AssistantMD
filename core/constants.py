@@ -59,6 +59,22 @@ VIRTUAL_MOUNTS = {
     },
 }
 
+# Supported user content types for direct read/context operations.
+# Single source of truth: extension -> content kind.
+# AssistantMD remains markdown-native, with first-class local image support.
+SUPPORTED_READ_FILE_TYPES = {
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
+    ".gif": "image",
+    ".bmp": "image",
+    ".tiff": "image",
+    ".tif": "image",
+}
+
 
 # ==============================================================================
 # LLM Prompts and Instructions

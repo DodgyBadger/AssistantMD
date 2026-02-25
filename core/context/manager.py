@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from pydantic_ai import RunContext
 from core.directives.model import ModelDirective
@@ -14,7 +14,7 @@ from core.constants import (
 )
 from core.directives.bootstrap import ensure_builtin_directives_registered
 from core.directives.registry import get_global_registry
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, UserContent
 from core.tools.utils import estimate_token_count
 from core.context.store import add_context_summary, upsert_session
 from core.runtime.buffers import BufferStore
@@ -34,6 +34,7 @@ from core.context.manager_types import (
 )
 
 logger = UnifiedLogger(tag="context-manager")
+PromptInput = str | Sequence[UserContent]
 
 
 async def manage_context(
@@ -63,6 +64,11 @@ async def manage_context(
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
     input_files = input_data.context_payload.get("input_files") if isinstance(input_data.context_payload, dict) else None
+    input_files_prompt = (
+        input_data.context_payload.get("input_files_prompt")
+        if isinstance(input_data.context_payload, dict)
+        else None
+    )
     prompt_parts: List[str] = []
     manager_task = ""
     section_body = None
@@ -79,7 +85,7 @@ async def manage_context(
                 ]
             )
         )
-    if input_files:
+    if input_files and not input_files_prompt:
         prompt_parts.append(input_files)
     if previous_summary:
         prompt_parts.append(
@@ -111,7 +117,18 @@ async def manage_context(
                 ]
             )
         )
-    prompt = "\n\n".join(prompt_parts).strip() or "No content provided."
+    prompt_text = "\n\n".join(prompt_parts).strip() or "No content provided."
+    prompt: PromptInput = prompt_text
+    if input_files_prompt:
+        if isinstance(input_files_prompt, str):
+            prompt = "\n\n".join([prompt_text, input_files_prompt]).strip()
+        elif isinstance(input_files_prompt, Sequence):
+            multimodal_parts: List[UserContent] = []
+            if prompt_text:
+                multimodal_parts.append(prompt_text)
+            for part in input_files_prompt:
+                multimodal_parts.append(part)
+            prompt = multimodal_parts
 
     agent = await create_agent(
         model=model_instance,

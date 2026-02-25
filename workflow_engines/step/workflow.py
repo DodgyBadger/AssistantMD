@@ -1,14 +1,17 @@
 
 from datetime import datetime
 import re
-from typing import Dict
+from typing import Dict, Optional
 from types import SimpleNamespace
 
 from core.logger import UnifiedLogger
 from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
 from core.core_services import CoreServices
+from core.chunking import build_input_files_prompt
+from core.llm.agents import PromptInput
+from core.llm.model_utils import model_supports_capability
 from core.runtime.buffers import BufferStore
-from core.utils.routing import OutputTarget, format_input_files_block, write_output
+from core.utils.routing import OutputTarget, write_output
 from core.directives.tools import ToolsDirective
 
 # Create workflow logger
@@ -261,17 +264,31 @@ def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
     return False, ""
 
 
-def build_final_prompt(processed_step) -> str:
-    """Build final prompt with input file content."""
-    final_prompt = processed_step.content
-    
-    input_file_data = processed_step.get_directive_value('input', [])
-    if input_file_data:
-        formatted = format_input_files_block(input_file_data)
-        if formatted:
-            final_prompt += "\n\n" + formatted
-    
-    return final_prompt
+def _resolve_workflow_model_alias(processed_step) -> Optional[str]:
+    raw_model = processed_step.get_directive_value("model")
+    if isinstance(raw_model, str) and raw_model.strip():
+        return raw_model.strip()
+    return None
+
+
+def build_final_prompt(processed_step, *, vault_path: str) -> tuple[PromptInput, str, int, list[str]]:
+    """Build final prompt with optional ordered media chunks from @input content."""
+    base_prompt = processed_step.content
+    input_file_data = processed_step.get_directive_value("input", [])
+    if not input_file_data:
+        return base_prompt, base_prompt, 0, []
+
+    model_alias = _resolve_workflow_model_alias(processed_step)
+    supports_vision = (
+        model_supports_capability(model_alias, "vision") if model_alias else None
+    )
+    built = build_input_files_prompt(
+        input_file_data=input_file_data,
+        vault_path=vault_path,
+        base_prompt=base_prompt,
+        supports_vision=supports_vision,
+    )
+    return built.prompt, built.prompt_text, built.attached_image_count, built.warnings
 
 
 def _resolve_tools_result(tools_value) -> tuple[list, str, list]:
@@ -417,7 +434,10 @@ async def process_workflow_step(
         context["tools_used"].update(tool_names)
 
     # Build final prompt with input file content
-    final_prompt = build_final_prompt(processed_step)
+    final_prompt, final_prompt_text, attached_image_count, prompt_warnings = build_final_prompt(
+        processed_step,
+        vault_path=services.vault_path,
+    )
     output_target_label = None
     if output_targets:
         labels = []
@@ -435,7 +455,9 @@ async def process_workflow_step(
         data={
             "step_name": step_name,
             "output_target": output_target_label,
-            "prompt": final_prompt,
+            "prompt": final_prompt_text,
+            "attached_image_count": attached_image_count,
+            "prompt_warnings": prompt_warnings,
         },
     )
 

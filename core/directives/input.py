@@ -16,20 +16,36 @@ from core.utils.routing import build_manifest, normalize_write_mode, parse_outpu
 from core.runtime.buffers import get_buffer_store_for_scope
 from core.logger import UnifiedLogger
 from core.tools.utils import get_virtual_mount_key, resolve_virtual_path
+from core.constants import SUPPORTED_READ_FILE_TYPES
 
 logger = UnifiedLogger(tag="directive-input")
 
 
 def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
     """Load content from a single file with metadata."""
-    # Normalize file path for metadata
+    # Preserve explicit extension; default to .md only when no extension exists.
     normalized_path = file_path
-    if not normalized_path.endswith('.md'):
+    if "." not in os.path.basename(normalized_path):
         normalized_path = f"{normalized_path}.md"
     
-    # Extract filename without extension for metadata
-    filename = os.path.basename(file_path).replace('.md', '')
-    filepath_without_ext = file_path.replace('.md', '') if file_path.endswith('.md') else file_path
+    filename = os.path.splitext(os.path.basename(normalized_path))[0]
+    extension = os.path.splitext(normalized_path)[1].lower()
+    filepath_without_ext = (
+        normalized_path[:-3] if normalized_path.endswith(".md") else normalized_path
+    )
+
+    if extension not in SUPPORTED_READ_FILE_TYPES:
+        return {
+            "filepath": filepath_without_ext,
+            "source_path": normalized_path,
+            "filename": filename,
+            "content": "",
+            "found": False,
+            "error": (
+                f"Unsupported file type '{extension or '[none]'}'. "
+                "Only markdown and image files are supported."
+            ),
+        }
     
     try:
         # Construct absolute path if needed
@@ -53,6 +69,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
         
         return {
             "filepath": filepath_without_ext,
+            "source_path": normalized_path,
             "filename": filename,
             "content": content,
             "found": True,
@@ -62,6 +79,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
     except FileNotFoundError:
         return {
             "filepath": filepath_without_ext,
+            "source_path": normalized_path,
             "filename": filename,
             "content": "",
             "found": False,
@@ -71,6 +89,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
         if get_virtual_mount_key(normalized_path):
             return {
                 "filepath": filepath_without_ext,
+                "source_path": normalized_path,
                 "filename": filename,
                 "content": "",
                 "found": False,
@@ -78,6 +97,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
             }
         return {
             "filepath": filepath_without_ext,
+            "source_path": normalized_path,
             "filename": filename,
             "content": "",
             "found": False,
@@ -145,6 +165,7 @@ class InputFileDirective(DirectiveProcessor):
             "required",
             "refs_only",
             "refs-only",
+            "images",
             "head",
             "properties",
             "output",
@@ -234,6 +255,7 @@ class InputFileDirective(DirectiveProcessor):
                 'required',
                 'refs_only',
                 'refs-only',
+                'images',
                 'head',
                 'properties',
                 'output',
@@ -244,6 +266,9 @@ class InputFileDirective(DirectiveProcessor):
                 return False
             if param_name in {'required', 'refs_only', 'refs-only'}:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
+                    return False
+            if param_name == 'images':
+                if param_value.lower() not in {'auto', 'ignore'}:
                     return False
             if param_name == 'head':
                 try:
@@ -279,6 +304,7 @@ class InputFileDirective(DirectiveProcessor):
             parameters.get('refs_only', parameters.get('refs-only', '')).lower()
             in ['true', 'yes', '1']
         )
+        images_policy = parameters.get("images", "auto").strip().lower() or "auto"
         head_chars = self._parse_head_chars(parameters.get('head'))
         properties_enabled, properties_keys = self._parse_properties_mode(parameters.get('properties'))
         output_target_value = parameters.get('output')
@@ -306,6 +332,7 @@ class InputFileDirective(DirectiveProcessor):
                     "content": "",
                     "found": False,
                     "error": "Variable store unavailable",
+                    "images_policy": images_policy,
                 }]
 
             entry = buffer_store.get(variable_name)
@@ -321,6 +348,7 @@ class InputFileDirective(DirectiveProcessor):
                     "content": "",
                     "found": False,
                     "error": "Variable not found",
+                    "images_policy": images_policy,
                 }]
 
             content_value = entry.content or ""
@@ -330,6 +358,7 @@ class InputFileDirective(DirectiveProcessor):
                 "content": "" if refs_only else content_value,
                 "found": True,
                 "error": None,
+                "images_policy": images_policy,
             }
             if refs_only:
                 result["refs_only"] = True
@@ -392,6 +421,7 @@ class InputFileDirective(DirectiveProcessor):
                 if isinstance(file_data, dict):
                     file_data['refs_only'] = True
                     file_data['content'] = ""
+                    file_data["images_policy"] = images_policy
         else:
             if properties_enabled:
                 result_files = [
@@ -405,6 +435,9 @@ class InputFileDirective(DirectiveProcessor):
                     if isinstance(file_data, dict) else file_data
                     for file_data in result_files
                 ]
+            for file_data in result_files:
+                if isinstance(file_data, dict):
+                    file_data["images_policy"] = images_policy
 
         if output_target_value:
             return self._route_input_results(

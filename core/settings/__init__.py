@@ -352,3 +352,73 @@ def get_routing_allowed_tools() -> list[str]:
     if isinstance(value, str):
         return [item.strip().lower() for item in value.split(",") if item.strip()]
     return []
+
+
+def get_chunking_max_images_per_prompt() -> int:
+    """Return max image attachments per chunked prompt."""
+    entry = get_general_settings().get("chunking_max_images_per_prompt")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 20
+    return parsed if parsed > 0 else 20
+
+
+def get_chunking_max_image_bytes_per_image() -> int:
+    """Return max bytes allowed for a single chunked image attachment."""
+    settings = get_general_settings()
+    entry_mb = settings.get("chunking_max_image_mb_per_image")
+    value_mb = getattr(entry_mb, "value", None) if entry_mb is not None else None
+    if value_mb is not None:
+        try:
+            parsed_mb = int(value_mb)
+        except (TypeError, ValueError):
+            parsed_mb = 5
+        parsed_mb = parsed_mb if parsed_mb > 0 else 5
+        return parsed_mb * 1024 * 1024
+
+    # Backward-compatible fallback for legacy byte-based setting name.
+    entry = settings.get("chunking_max_image_bytes_per_image")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 5 * 1024 * 1024
+    return parsed if parsed > 0 else 5 * 1024 * 1024
+
+
+def get_chunking_max_image_bytes_total() -> int:
+    """Return max total bytes allowed for chunked image attachments in one prompt."""
+    settings = get_general_settings()
+    entry_mb = settings.get("chunking_max_image_mb_total")
+    value_mb = getattr(entry_mb, "value", None) if entry_mb is not None else None
+    if value_mb is not None:
+        try:
+            parsed_mb = int(value_mb)
+        except (TypeError, ValueError):
+            parsed_mb = 100
+        parsed_mb = parsed_mb if parsed_mb > 0 else 100
+        return parsed_mb * 1024 * 1024
+
+    # Backward-compatible fallback for legacy byte-based setting name.
+    entry = settings.get("chunking_max_image_bytes_total")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 100 * 1024 * 1024
+    return parsed if parsed > 0 else 100 * 1024 * 1024
+
+
+def get_chunking_allow_remote_images() -> bool:
+    """Return whether remote markdown image refs are allowed by chunking policy."""
+    entry = get_general_settings().get("chunking_allow_remote_images")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False

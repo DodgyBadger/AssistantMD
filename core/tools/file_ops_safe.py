@@ -13,6 +13,8 @@ from pathlib import Path
 from pydantic_ai.messages import BinaryContent, ToolReturn
 from pydantic_ai.tools import Tool
 
+from core.chunking import build_input_files_prompt, parse_markdown_chunks
+from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger
 from core.settings import get_file_search_timeout_seconds
 from .base import BaseTool
@@ -131,6 +133,7 @@ Instead, explore the vault structure first, then target specific folders or file
 READING & WRITING:
 - file_ops_safe(operation="read", target="path/to/file.md"): Read file content
 - file_ops_safe(operation="read", target="path/to/image.png"): Attach image content for vision-capable models
+- file_ops_safe(operation="read", target="path/to/note.md"): If markdown embeds local images, returns ordered multimodal content
 - file_ops_safe(operation="write", target="path/to/file.md", content="text"): Create NEW file (fails if exists)
 - file_ops_safe(operation="append", target="path/to/file.md", content="text"): Append to EXISTING file (fails if not exists)
 - file_ops_safe(operation="move", target="old/path.md", destination="new/path.md"): Move files (fails if destination exists)
@@ -175,6 +178,14 @@ BEST PRACTICES:
         if not os.path.exists(full_path):
             return f"Cannot read '{path}' - file does not exist. Use file_operations('list') to see available files."
 
+        extension = Path(full_path).suffix.lower()
+        if extension not in SUPPORTED_READ_FILE_TYPES:
+            allowed = ", ".join(sorted(SUPPORTED_READ_FILE_TYPES.keys()))
+            return (
+                f"Cannot read '{path}' - unsupported file type '{extension or '[none]'}'. "
+                f"Supported extensions: {allowed}."
+            )
+
         binary_content = BinaryContent.from_path(full_path)
         if binary_content.is_image:
             relative_path = Path(full_path).resolve().relative_to(Path(vault_path).resolve())
@@ -203,6 +214,50 @@ BEST PRACTICES:
                 f"Cannot read '{path}' as text - this file is binary ({binary_content.media_type}). "
                 "Image files are supported for multimodal reading; other binary types are not supported by "
                 "file_ops_safe(read) yet."
+            )
+        if SUPPORTED_READ_FILE_TYPES.get(extension) != "markdown":
+            return (
+                f"Cannot read '{path}' as markdown content. "
+                "Only markdown and image files are supported."
+            )
+        markdown_chunks = parse_markdown_chunks(file_content)
+        has_embedded_images = any(chunk.kind == "image_ref" for chunk in markdown_chunks)
+        if has_embedded_images:
+            built = build_input_files_prompt(
+                input_file_data=[
+                    {
+                        "filepath": path,
+                        "source_path": path,
+                        "filename": Path(path).stem,
+                        "content": file_content,
+                        "found": True,
+                        "error": None,
+                        "images_policy": "auto",
+                    }
+                ],
+                vault_path=vault_path,
+                include_file_framing=False,
+                supports_vision=None,
+            )
+            if isinstance(built.prompt, list):
+                return ToolReturn(
+                    return_value=(
+                        f"Successfully read markdown file '{path}' with embedded images "
+                        f"({built.attached_image_count} image attachment(s), "
+                        f"{built.attached_image_bytes} bytes)."
+                    ),
+                    content=built.prompt,
+                    metadata={
+                        "filepath": path,
+                        "media_mode": "markdown+images",
+                        "attached_image_count": built.attached_image_count,
+                        "attached_image_bytes": built.attached_image_bytes,
+                        "warnings": built.warnings,
+                    },
+                )
+            return (
+                f"Successfully read file '{path}' ({len(file_content)} characters)\n\n"
+                f"{built.prompt_text}"
             )
         return f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}"
 

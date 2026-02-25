@@ -32,6 +32,22 @@ settings:
     value: []
     description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"
     restart_required: false
+  chunking_max_images_per_prompt:
+    value: 20
+    description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt."
+    restart_required: false
+  chunking_max_image_mb_per_image:
+    value: 5
+    description: "Maximum size in MB for a single image attachment from chunked markdown inputs."
+    restart_required: false
+  chunking_max_image_mb_total:
+    value: 100
+    description: "Maximum total MB allowed for all chunked image attachments in a single prompt."
+    restart_required: false
+  chunking_allow_remote_images:
+    value: false
+    description: "Allow remote image URLs in markdown chunking (currently ref-only behavior; no download/attach)."
+    restart_required: false
   debug:
     value: false
     description: "Enable verbose API error responses. Restart required."
