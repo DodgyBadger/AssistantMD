@@ -1,5 +1,12 @@
 # Release Notes
 
+## 2026-02-25 - v0.4.2.
+
+### Bug fix: OpenAI-compatible provider auth and base URL wiring
+- Fixed OpenAI-compatible provider setup to consistently pass configured `api_key` and `base_url` values (from secrets or literal settings).
+- Unified OpenAI-compatible routing to use `OpenAIProvider` so both authenticated remote endpoints and local no-auth endpoints work through the same path.
+- Added custom `base_url` support for the `openai` provider configuration path.
+
 ## 2026-02-24 - v0.4.1.
 
 ### Feature: LaTeX rendering in chat
