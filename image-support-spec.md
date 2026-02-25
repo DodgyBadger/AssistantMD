@@ -332,6 +332,37 @@ Still not started:
 - Image ingestion strategies (`image_ocr`, `image_copy`).
 - Dedicated validation scenarios for chunking/image-policy paths.
 
+### Addendum (2026-02-25, later)
+Status snapshot for deterministic context-protection policy updates completed in this session.
+
+Completed:
+- Introduced shared DRY image-ref policy helpers under `core/chunking/image_refs.py`:
+  - local embedded image-ref resolution
+  - embedded image-ref normalization to followable markers
+  - unified decision function for image attachment vs refs-only fallback
+- Updated both major call paths to use the same policy logic:
+  - `file_ops_safe(read)` markdown-with-images path
+  - `@input`/context prompt assembly via `build_input_files_prompt(...)`
+- Added token-first gating for markdown-with-images:
+  - compute token estimate from raw markdown text
+  - if `raw_text_tokens > auto_buffer_max_tokens`, skip image attachment and return refs-normalized text
+  - this restores deterministic auto-buffer protection because the tool result remains text-only
+- Added all-or-none image preflight behavior (shared):
+  - if any configured image guard fails (count, per-image bytes, total bytes), attach no images for that file
+  - return refs-normalized text so image exploration can proceed explicitly
+- Normalized embedded refs now preserve followability when degraded:
+  - local refs become `[IMAGE REF: <vault-relative-path>]`
+  - remote refs remain `[REMOTE IMAGE REF: <url>]`
+  - unresolved refs become `[MISSING IMAGE: <original-ref>]`
+
+Behavior notes:
+- Policy precedence is deterministic:
+  1) token overflow gate
+  2) image preflight gate
+  3) attach interleaved images only when both pass
+- If both token overflow and image preflight would fail, the outcome is the same refs-only fallback (token gate triggers first).
+- No new LLM-controllable `file_ops_safe` read parameter was introduced; policy is centralized and settings-driven.
+
 ## Validation Strategy
 - Unit tests for extension resolution and input parsing.
 - Unit tests for markdown embedded image parsing and path resolution.

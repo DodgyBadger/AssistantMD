@@ -13,10 +13,18 @@ from pathlib import Path
 from pydantic_ai.messages import BinaryContent, ToolReturn
 from pydantic_ai.tools import Tool
 
-from core.chunking import build_input_files_prompt, parse_markdown_chunks
+from core.chunking import (
+    build_input_files_prompt,
+    default_chunking_policy,
+    evaluate_markdown_image_policy,
+    parse_markdown_chunks,
+)
 from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger
-from core.settings import get_file_search_timeout_seconds
+from core.settings import (
+    get_auto_buffer_max_tokens,
+    get_file_search_timeout_seconds,
+)
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
@@ -223,6 +231,21 @@ BEST PRACTICES:
         markdown_chunks = parse_markdown_chunks(file_content)
         has_embedded_images = any(chunk.kind == "image_ref" for chunk in markdown_chunks)
         if has_embedded_images:
+            decision = evaluate_markdown_image_policy(
+                file_content=file_content,
+                markdown_chunks=markdown_chunks,
+                source_markdown_path=path,
+                vault_path=vault_path,
+                auto_buffer_max_tokens=get_auto_buffer_max_tokens(),
+                policy=default_chunking_policy(),
+            )
+            if not decision.attach_images:
+                return (
+                    f"Successfully read file '{path}' ({len(file_content)} characters) "
+                    f"(image attachments skipped: {decision.reason})\n\n"
+                    f"{decision.normalized_text or file_content}"
+                )
+
             built = build_input_files_prompt(
                 input_file_data=[
                     {

@@ -12,6 +12,8 @@ from pydantic_ai import BinaryContent
 from pydantic_ai.messages import UserContent
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
+from core.settings import get_auto_buffer_max_tokens
+from .image_refs import evaluate_markdown_image_policy, resolve_local_image_path
 from .markdown import MarkdownChunk, parse_markdown_chunks
 from .policy import ChunkingPolicy, default_chunking_policy
 
@@ -56,42 +58,6 @@ def _resolve_source_markdown_path(file_data: dict[str, Any]) -> Optional[str]:
     return filepath
 
 
-def _resolve_local_image_path(
-    *,
-    image_ref: str,
-    source_markdown_path: str,
-    vault_path: str,
-) -> Optional[Path]:
-    ref = (image_ref or "").strip()
-    if not ref:
-        return None
-    if ref.startswith(("http://", "https://")):
-        return None
-
-    vault_root = Path(vault_path).resolve()
-    source_path = Path(source_markdown_path)
-    source_dir = source_path.parent
-    candidate = Path(ref)
-    if candidate.is_absolute():
-        resolved = (vault_root / str(candidate).lstrip("/")).resolve()
-    else:
-        resolved = (vault_root / source_dir / candidate).resolve()
-
-    if not (resolved == vault_root or vault_root in resolved.parents):
-        return None
-    if resolved.is_file():
-        return resolved
-
-    if "." not in candidate.name:
-        for ext, kind in SUPPORTED_READ_FILE_TYPES.items():
-            if kind != "image":
-                continue
-            fallback = resolved.with_suffix(ext)
-            if fallback.is_file():
-                return fallback
-    return None
-
-
 def _is_markdown_file(file_data: dict[str, Any]) -> bool:
     source_path = _resolve_source_markdown_path(file_data)
     if not source_path:
@@ -117,11 +83,17 @@ def build_input_files_prompt(
     default_images_policy: str = "auto",
     policy: Optional[ChunkingPolicy] = None,
     include_file_framing: bool = True,
+    auto_buffer_max_tokens: Optional[int] = None,
 ) -> InputFilesPromptBuildResult:
     """
     Build prompt payload from @input directive data while preserving markdown image order.
     """
     effective_policy = policy or default_chunking_policy()
+    effective_auto_buffer_limit = (
+        get_auto_buffer_max_tokens()
+        if auto_buffer_max_tokens is None
+        else auto_buffer_max_tokens
+    )
     file_lists = _normalize_input_file_lists(input_file_data)
     parts: List[UserContent] = []
     text_lines: List[str] = []
@@ -203,6 +175,22 @@ def build_input_files_prompt(
                 continue
 
             source_markdown_path = _resolve_source_markdown_path(item) or filepath
+            decision = evaluate_markdown_image_policy(
+                file_content=content,
+                markdown_chunks=markdown_chunks,
+                source_markdown_path=source_markdown_path,
+                vault_path=vault_path,
+                auto_buffer_max_tokens=effective_auto_buffer_limit,
+                policy=effective_policy,
+            )
+            if not decision.attach_images:
+                _append_text(parts, text_lines, f"{decision.normalized_text or content}\n")
+                if decision.reason:
+                    warnings.append(
+                        f"Skipped image attachments for '{filepath}': {decision.reason}."
+                    )
+                continue
+
             for chunk in markdown_chunks:
                 if chunk.kind == "text":
                     _append_text(parts, text_lines, chunk.text)
