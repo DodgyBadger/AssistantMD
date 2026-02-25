@@ -243,7 +243,15 @@ Guideline:
 4. Add markdown-embedded image reference extraction for `.md` inputs.
 5. Add image-reference payload path through input/routing.
 6. Add multimodal attachment support in model execution path.
-7. Document feature usage and limitations.
+7. Add dedicated validation scenarios for image chunking and policy paths:
+  - token-overflow refs-only fallback
+  - all-or-none image preflight fallback (count/per-image/total-size)
+  - normalized embedded image refs remain followable in buffered/text-only paths
+  - parity checks for `@input` and `file_ops_safe(read)` behavior
+8. Document feature usage, policy behavior, and limitations:
+  - chunking/attachment settings and guard precedence
+  - refs-only fallback semantics and follow-up exploration guidance
+  - supported file-type policy and `images=auto|ignore` behavior
 
 ## Phase 2: Workflow Templates + Examples
 1. Provide sample templates for workbook analysis and photo tagging.
