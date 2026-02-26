@@ -218,7 +218,10 @@ def validate_settings(
     if status.model_availability and not any(status.model_availability.values()):
         status.add_issue(
             name="LLM_PROVIDER_CONFIG",
-            message="Configure at least one LLM provider (API key or local base_url).",
+            message=(
+                "Configure at least one model with a usable provider (API key or"
+                " local base_url)."
+            ),
             severity="warning",
         )
 
