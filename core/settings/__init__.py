@@ -23,7 +23,7 @@ from core.settings.store import (
     get_providers_config,
     get_tools_config,
 )
-from core.settings.secrets_store import load_secrets, secret_has_value
+from core.settings.secrets_store import get_secret_value, load_secrets, secret_has_value
 
 
 class SettingsError(Exception):
@@ -176,6 +176,23 @@ def validate_settings(
 
     providers = providers_config or get_providers_config()
     models = models_config or get_models_config()
+
+    def _provider_base_url_configured(provider_cfg: Any) -> bool:
+        """Return True when provider base_url resolves from secret or literal URL."""
+        raw_base_url = getattr(provider_cfg, "base_url", None)
+        if raw_base_url is None and isinstance(provider_cfg, dict):
+            raw_base_url = provider_cfg.get("base_url")
+        if not isinstance(raw_base_url, str):
+            return False
+
+        base_url = raw_base_url.strip()
+        if not base_url or base_url.lower() == "null":
+            return False
+
+        if get_secret_value(base_url):
+            return True
+        return "://" in base_url
+
     for model_name, model_config in models.items():
         provider_name = getattr(model_config, "provider", None) or (
             model_config.get("provider") if isinstance(model_config, dict) else None
@@ -196,6 +213,8 @@ def validate_settings(
         api_key_name = getattr(provider_config, "api_key", None)
         if isinstance(api_key_name, str) and api_key_name.lower() != "null" and api_key_name:
             if not secret_has_value(api_key_name):
+                if _provider_base_url_configured(provider_config):
+                    continue
                 status.model_availability[model_name] = False
                 status.add_issue(
                     name=f"model:{model_name}",
