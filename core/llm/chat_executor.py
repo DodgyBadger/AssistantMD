@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, TextPart
 from pydantic_ai import (
     BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
@@ -495,8 +495,8 @@ async def execute_chat_prompt_stream(
             deps=run_deps,
         ):
             if isinstance(event, PartStartEvent):
-                # Initial text part - send as first chunk
-                if hasattr(event.part, 'content') and event.part.content:
+                # Initial visible assistant text part
+                if isinstance(event.part, TextPart) and event.part.content:
                     delta_text = event.part.content
                     full_response += delta_text
 
