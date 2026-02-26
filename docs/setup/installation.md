@@ -1,6 +1,6 @@
 ## Prerequisites
 *   [Docker Engine](https://docs.docker.com/engine/install/) (Linux) or [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, Mac)
-*   At least one LLM API Key
+*   An LLM endpoint (cloud API key or local model server)
 
 ⚠️ It is strongly recommended that you back up your vaults before deploying for the first time, or create a test vault and then migrate the mount path when you have verified that everything works as expected.
 
@@ -127,3 +127,5 @@ AssistantMD will see three vaults called `Personal`, `Work` and `Family`
       - "/absolute/path/to/your/vaults:/app/data"
       - ./system:/app/system              
 ```
+
+**Local LLMs (general guidance)**: If running your local LM server on bare metal (for example LM Studio), change the settings to serve on local network so you get a host IP and not `127.0.0.1`. Localhost will not be reachable from inside the AssistantMD container without additional Docker networking customization. The `base_url` should look like `http://<host-lan-ip>:1234/v1` (for example `http://192.168.1.42:1234/v1`). If running your local LM server inside a Docker container, make sure AssistantMD and the LM server are on the same Docker network and use the Docker service name as the `base_url`, for example `http://lmstudio:1234/v1`.
