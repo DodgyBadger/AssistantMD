@@ -153,13 +153,6 @@ def validate_settings(
     status = ConfigurationStatus()
     template_sections = _load_template_sections()
 
-    if not active_settings.has_any_llm_key():
-        status.add_issue(
-            name="LLM_API_KEYS",
-            message="Add at least one LLM API key under Secrets in the Configuration tab.",
-            severity="warning",
-        )
-
     tools = tools_config or get_tools_config()
     for tool_name, tool_config in tools.items():
         required_secrets = []
@@ -221,6 +214,13 @@ def validate_settings(
                     message=f"Configure {api_key_name}",
                     severity="warning",
                 )
+
+    if status.model_availability and not any(status.model_availability.values()):
+        status.add_issue(
+            name="LLM_PROVIDER_CONFIG",
+            message="Configure at least one LLM provider (API key or local base_url).",
+            severity="warning",
+        )
 
     _add_missing_template_issues(
         status,
