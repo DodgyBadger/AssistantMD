@@ -1,5 +1,15 @@
 # Release Notes
 
+## 2026-02-25 - v0.4.2.
+
+### Bug fix: OpenAI-compatible provider auth and base URL wiring
+- Fixed OpenAI-compatible provider setup to consistently pass configured `api_key` and `base_url` values (from secrets or literal settings).
+- Unified OpenAI-compatible routing to use `OpenAIProvider` so both authenticated remote endpoints and local no-auth endpoints work through the same path.
+- Added custom `base_url` support for the `openai` provider configuration path.
+- Fixed chat streaming assembly to include only visible text parts, preventing reasoning/thinking part prefixes (for example stray leading words like `"The"` in some provider streams).
+- Allowed base-url-only OpenAI-compatible providers (for example local LM Studio without API key), so local endpoints are usable when `base_url` is configured.
+- Updated configuration health warning logic to only warn when no LLM provider/model is usable, instead of warning whenever no API key exists.
+
 ## 2026-02-24 - v0.4.1.
 
 ### Feature: LaTeX rendering in chat
