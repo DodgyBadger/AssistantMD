@@ -25,6 +25,7 @@ from core.settings import (
     get_auto_buffer_max_tokens,
     get_file_search_timeout_seconds,
 )
+from core.utils.image_inputs import build_image_tool_payload
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
@@ -196,22 +197,17 @@ BEST PRACTICES:
 
         binary_content = BinaryContent.from_path(full_path)
         if binary_content.is_image:
-            relative_path = Path(full_path).resolve().relative_to(Path(vault_path).resolve())
-            relative_display = relative_path.as_posix()
-            image_note = (
-                f"Attached image from '{relative_display}'. Use this image to answer the user's request."
+            payload = build_image_tool_payload(
+                image_path=Path(full_path),
+                vault_path=vault_path,
             )
             return ToolReturn(
                 return_value=(
-                    f"Attached image '{relative_display}' "
-                    f"({binary_content.media_type}, {len(binary_content.data)} bytes)."
+                    f"Attached image '{payload.metadata['filepath']}' "
+                    f"({payload.metadata['media_type']}, {payload.metadata['size_bytes']} bytes)."
                 ),
-                content=[image_note, binary_content],
-                metadata={
-                    "filepath": relative_display,
-                    "media_type": binary_content.media_type,
-                    "size_bytes": len(binary_content.data),
-                },
+                content=[payload.note, payload.image_blob],
+                metadata=payload.metadata,
             )
 
         try:

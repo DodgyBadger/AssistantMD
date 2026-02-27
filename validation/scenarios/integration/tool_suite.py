@@ -21,6 +21,7 @@ class ToolSuiteScenario(BaseScenario):
 
         # Seed workflow that contains one step per tool
         self.create_file(vault,"AssistantMD/Workflows/tool_suite.md",TOOL_SUITE_WORKFLOW)
+        self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
 
         checkpoint = self.event_checkpoint()
         await self.start_system()
@@ -86,6 +87,8 @@ description: Validation workflow that exercises every available tool with a ligh
 
 Use the safe file operations tool to list the root of the vault and report the first entry found.
 Also create a file at tmp/unsafe-test.md with the content 'original'.
+Then read images/test_image.jpg with file_ops_safe.
+Include the exact phrase `Attached image 'images/test_image.jpg'` in your response.
 You must call the tool before responding.
 
 ## FILE_OPS_UNSAFE

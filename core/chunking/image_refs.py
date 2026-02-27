@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
+from core.utils.image_inputs import (
+    format_image_ref_marker,
+    format_missing_image_marker,
+    format_remote_image_ref_marker,
+)
 from core.tools.utils import estimate_token_count
 
 from .markdown import MarkdownChunk
@@ -75,7 +80,7 @@ def normalize_embedded_image_refs(
 
         image_ref = (chunk.image_ref or "").strip()
         if image_ref.startswith(("http://", "https://")):
-            parts.append(f"[REMOTE IMAGE REF: {image_ref}]")
+            parts.append(format_remote_image_ref_marker(image_ref))
             continue
 
         resolved = resolve_local_image_path(
@@ -84,11 +89,11 @@ def normalize_embedded_image_refs(
             vault_path=vault_path,
         )
         if resolved is None:
-            parts.append(f"[MISSING IMAGE: {image_ref}]")
+            parts.append(format_missing_image_marker(image_ref))
             continue
 
         relative = resolved.relative_to(vault_root).as_posix()
-        parts.append(f"[IMAGE REF: {relative}]")
+        parts.append(format_image_ref_marker(relative))
     return "".join(parts)
 
 

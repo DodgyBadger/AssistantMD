@@ -24,6 +24,8 @@ Chat works like other AI chats but with access to your markdown files. Open **Ch
 - **tavily_extract**: extract content from specific URLs (API required, free tier available)
 - **tavily_crawl**: crawl and extract content from multiple pages (API required, free tier available)
 
+Chat can also read local images when you use `file_ops_safe(read)` on image files in your vault.
+
 **A note about chat sessions**: Unlike most chat apps, you will not find a list of sessions in the chat UI. A transcript of each session is saved as a markdown file in `AssistantMD/Chat_Sessions`. Since these are just files in your vault, the chat agent has full access to them. If you want to continue a conversation, just ask the chat agent to load it. The default context template includes instructions that make this really easy - just type something like "Let's continue our conversation about quantum entanglement". You can also set up more sophisticated memory systems by combining scheduled workflows and context templates. [See this example](../examples/ContextTemplates/weekly-memory.md)
 
 
@@ -36,6 +38,8 @@ Learn more in [Context Manager](context_manager.md).
 ### Workflows
 
 Workflows allow you to schedule and structure prompts or sequences of prompts. Define a workflow by creating a markdown file inside `AssistantMD/Workflows/`.
+
+Workflows can accept local images as inputs via `@input file: path/to/image.png`, and markdown inputs can embed images with standard markdown syntax.
 
 [Go here](workflows.md) for more about creating workflows.
 

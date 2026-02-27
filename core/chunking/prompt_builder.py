@@ -8,11 +8,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
-from pydantic_ai import BinaryContent
 from pydantic_ai.messages import UserContent
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.settings import get_auto_buffer_max_tokens
+from core.utils.image_inputs import (
+    evaluate_image_attachment,
+    format_missing_image_marker,
+    format_remote_image_ref_marker,
+)
 from .image_refs import evaluate_markdown_image_policy, resolve_local_image_path
 from .markdown import MarkdownChunk, parse_markdown_chunks
 from .policy import ChunkingPolicy, default_chunking_policy
@@ -63,6 +67,30 @@ def _is_markdown_file(file_data: dict[str, Any]) -> bool:
     if not source_path:
         return False
     return SUPPORTED_READ_FILE_TYPES.get(Path(source_path).suffix.lower()) == "markdown"
+
+
+def _is_image_file(file_data: dict[str, Any]) -> bool:
+    source_path = _resolve_source_markdown_path(file_data)
+    if not source_path:
+        return False
+    return SUPPORTED_READ_FILE_TYPES.get(Path(source_path).suffix.lower()) == "image"
+
+
+def _resolve_input_file_path(file_data: dict[str, Any], vault_path: str) -> Optional[Path]:
+    raw_path = str(file_data.get("source_path") or file_data.get("filepath") or "").strip()
+    if not raw_path:
+        return None
+    candidate = Path(raw_path)
+    vault_root = Path(vault_path).resolve()
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (vault_root / candidate).resolve()
+    if resolved != vault_root and vault_root not in resolved.parents:
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
 
 
 def _effective_images_policy(file_data: dict[str, Any], default_policy: str) -> str:
@@ -162,6 +190,34 @@ def build_input_files_prompt(
                     f"[FILE NOT FOUND: {item.get('error', 'File not found')}]\n",
                 )
                 continue
+            if _is_image_file(item):
+                resolved_image = _resolve_input_file_path(item, vault_path)
+                if resolved_image is None:
+                    _append_text(
+                        parts,
+                        text_lines,
+                        f"{format_missing_image_marker(filepath)}\n",
+                    )
+                    warnings.append(f"Could not resolve image input '{filepath}'.")
+                    continue
+                decision = evaluate_image_attachment(
+                    image_path=resolved_image,
+                    policy=effective_policy,
+                    images_policy=images_policy,
+                    supports_vision=supports_vision,
+                    seen_images=seen_images,
+                    attached_count=attached_count,
+                    attached_bytes=attached_bytes,
+                )
+                _append_text(parts, text_lines, f"{decision.marker}\n")
+                warnings.extend(decision.warnings)
+                if decision.attached and decision.image_blob:
+                    seen_images.add(decision.image_key)
+                    attached_count += 1
+                    attached_bytes += decision.size_bytes
+                    parts.append(decision.image_blob)
+                continue
+
             if not isinstance(content, str):
                 _append_text(parts, text_lines, "[UNSUPPORTED CONTENT TYPE]\n")
                 continue
@@ -198,85 +254,49 @@ def build_input_files_prompt(
 
                 image_ref = chunk.image_ref or ""
                 if image_ref.startswith(("http://", "https://")):
-                    marker = f"[REMOTE IMAGE REF: {image_ref}]"
-                    _append_text(parts, text_lines, marker)
+                    _append_text(
+                        parts,
+                        text_lines,
+                        format_remote_image_ref_marker(image_ref),
+                    )
                     if effective_policy.allow_remote_images:
                         warnings.append(
                             f"Remote image attach not implemented yet; kept URL ref only: {image_ref}"
                         )
                     continue
 
-                resolved_image = _resolve_local_image_path(
+                resolved_image = resolve_local_image_path(
                     image_ref=image_ref,
                     source_markdown_path=source_markdown_path,
                     vault_path=vault_path,
                 )
                 if resolved_image is None:
-                    _append_text(parts, text_lines, f"[MISSING IMAGE: {image_ref}]")
+                    _append_text(
+                        parts,
+                        text_lines,
+                        format_missing_image_marker(image_ref),
+                    )
                     warnings.append(
                         f"Could not resolve embedded image '{image_ref}' from '{source_markdown_path}'."
                     )
                     continue
 
-                image_key = str(resolved_image)
-                if image_key in seen_images:
-                    _append_text(parts, text_lines, f"[IMAGE: {resolved_image.name} (deduped)]")
-                    continue
-
-                image_blob = BinaryContent.from_path(resolved_image)
-                if not image_blob.is_image:
-                    _append_text(parts, text_lines, f"[NON-IMAGE REF: {image_ref}]")
-                    warnings.append(
-                        f"Embedded ref resolved to non-image file '{resolved_image.as_posix()}'."
-                    )
-                    continue
-
-                blob_size = len(image_blob.data)
-                if blob_size > effective_policy.max_image_bytes_per_image:
-                    _append_text(
-                        parts,
-                        text_lines,
-                        f"[IMAGE SKIPPED (too large): {resolved_image.name}]",
-                    )
-                    warnings.append(
-                        f"Skipped image '{resolved_image.as_posix()}' ({blob_size} bytes) "
-                        "because it exceeds per-image size limit."
-                    )
-                    continue
-                if attached_count >= effective_policy.max_images_per_prompt:
-                    _append_text(
-                        parts,
-                        text_lines,
-                        f"[IMAGE SKIPPED (count limit): {resolved_image.name}]",
-                    )
-                    warnings.append(
-                        "Skipped image due to max_images_per_prompt limit."
-                    )
-                    continue
-                if attached_bytes + blob_size > effective_policy.max_image_bytes_total:
-                    _append_text(
-                        parts,
-                        text_lines,
-                        f"[IMAGE SKIPPED (byte budget): {resolved_image.name}]",
-                    )
-                    warnings.append(
-                        "Skipped image due to max_image_bytes_total limit."
-                    )
-                    continue
-
-                if supports_vision is False or images_policy == "ignore":
-                    _append_text(parts, text_lines, f"[IMAGE REF: {resolved_image.as_posix()}]")
-                    continue
-
-                _append_text(
-                    parts,
-                    text_lines,
-                    f"[IMAGE: {resolved_image.as_posix()}]",
+                decision = evaluate_image_attachment(
+                    image_path=resolved_image,
+                    policy=effective_policy,
+                    images_policy=images_policy,
+                    supports_vision=supports_vision,
+                    seen_images=seen_images,
+                    attached_count=attached_count,
+                    attached_bytes=attached_bytes,
                 )
-                seen_images.add(image_key)
-                attached_count += 1
-                attached_bytes += blob_size
-                parts.append(image_blob)
+                _append_text(parts, text_lines, decision.marker)
+                warnings.extend(decision.warnings)
+                if decision.attached and decision.image_blob:
+                    seen_images.add(decision.image_key)
+                    attached_count += 1
+                    attached_bytes += decision.size_bytes
+                    parts.append(decision.image_blob)
 
             _append_text(parts, text_lines, "\n")
 

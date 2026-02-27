@@ -34,7 +34,8 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
         normalized_path[:-3] if normalized_path.endswith(".md") else normalized_path
     )
 
-    if extension not in SUPPORTED_READ_FILE_TYPES:
+    kind = SUPPORTED_READ_FILE_TYPES.get(extension)
+    if kind is None:
         return {
             "filepath": filepath_without_ext,
             "source_path": normalized_path,
@@ -64,7 +65,19 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
             if not resolved_path.startswith(vault_abs + os.sep) and resolved_path != vault_abs:
                 raise ValueError("Path escapes vault boundaries")
 
-        with open(resolved_path, 'r', encoding='utf-8') as file:
+        if kind == "image":
+            if not os.path.isfile(resolved_path):
+                raise FileNotFoundError
+            return {
+                "filepath": filepath_without_ext,
+                "source_path": normalized_path,
+                "filename": filename,
+                "content": "",
+                "found": True,
+                "error": None,
+            }
+
+        with open(resolved_path, "r", encoding="utf-8") as file:
             content = file.read()
         
         return {
