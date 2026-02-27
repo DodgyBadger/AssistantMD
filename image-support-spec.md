@@ -371,6 +371,28 @@ Behavior notes:
 - If both token overflow and image preflight would fail, the outcome is the same refs-only fallback (token gate triggers first).
 - No new LLM-controllable `file_ops_safe` read parameter was introduced; policy is centralized and settings-driven.
 
+## Progress Update (2026-02-27)
+Status snapshot for direct image @input support, shared helpers, and validation coverage.
+
+Completed:
+- Direct image inputs in workflows and context (`@input file: image.jpg`) now attach images in prompts when policy allows.
+- Shared image attachment helpers extracted to `core/utils/image_inputs.py` to keep markers/gating consistent.
+- Embedded image ref normalization uses shared markers (`[IMAGE REF]`, `[MISSING IMAGE]`, `[REMOTE IMAGE REF]`).
+- `file_ops_safe(read)` continues to return multimodal payloads for images and markdown with embedded images, now using shared image payload helpers.
+- Added validation coverage:
+  - `basic_haiku` uses a real image input in Step 1.
+  - `tool_suite` reads an image with `file_ops_safe(read)`.
+  - `image_input_policy` scenario asserts image markers, `images=ignore`, and missing-image handling.
+- Documentation updated:
+  - `docs/use/reference.md` (image inputs, `images=auto|ignore`, routing note)
+  - `docs/use/README.md` (brief user-facing mention)
+  - `docs/architecture/multimodal.md` (architecture overview)
+- Remote image policy setting is still refs-only; no download/attach path implemented yet.
+
+Remaining from Phase 1:
+- PDF `page_images` / `hybrid` ingestion modes.
+- Image ingestion strategies (`image_ocr`, `image_copy`).
+
 ## Validation Strategy
 - Unit tests for extension resolution and input parsing.
 - Unit tests for markdown embedded image parsing and path resolution.
