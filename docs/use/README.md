@@ -45,7 +45,17 @@ Workflows can accept local images as inputs via `@input file: path/to/image.png`
 
 ### Importer
 
-Import PDFs and URLs into your vault as markdown. Drop files into `AssistantMD/Import/` for bulk imports, or point the importer at a URL to convert a page to markdown. Imports land under `Imported/` (configurable in the web UI).
+Import PDFs, images, and URLs into your vault. Drop files into `AssistantMD/Import/` for bulk imports, or point the importer at a URL to convert a page to markdown.
+
+For PDF imports, use the **PDF Mode** selector in the Import UI:
+- **Markdown** (default): preferred for most documents and the main workflow format in AssistantMD.
+- **Page Images**: use when layout fidelity matters (complex tables, figure-heavy pages, or visual context that markdown extraction may lose). This mode renders each PDF page to an image and writes a `manifest.json`.
+
+OCR controls:
+- **Use OCR (PDF)** enables OCR-first markdown extraction for PDF imports.
+- **Capture OCR images** optionally retains OCR-returned image payloads as local assets.
+
+Imports are written under `Imported/` (configurable in the web UI), with each import in its own folder (for example `Imported/My_Doc/My_Doc.md`, `Imported/My_Doc/assets/...`, or `Imported/My_Doc/pages/...` with `manifest.json` in Page Images mode).
 
 **Note**: The importer is a work in progress and likely to change as I test different backend ingestion solutions.
 
