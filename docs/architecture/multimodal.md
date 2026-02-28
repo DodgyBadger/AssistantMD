@@ -1,71 +1,78 @@
 # Multimodal Architecture
 
-This document describes how AssistantMD handles image inputs alongside markdown text. The user-facing model is simple: markdown files can reference images in the vault, and the system will attach or reference those images according to policy and model capabilities.
+This document describes how AssistantMD handles image inputs alongside markdown text in workflow/context inputs and tool reads.
 
 ## Scope
 
-- Local image inputs via `@input file:...`
-- Embedded image refs inside markdown
-- Tool path for `file_ops_safe(read)` on images and markdown with embedded images
-- Attachment and safety policies for image payloads
+- Direct image inputs via `@input file:...`
+- Embedded image refs inside markdown inputs
+- `file_ops_safe(read)` behavior for image and markdown-with-images reads
+- Model capability gating and attachment/fallback policy
+
+## Core Decisions
+
+- `@input` image policy modes are `images=auto|ignore` only.
+- Remote `http(s)` image refs are refs-only by default (no implicit download/attach).
+- Text token protection and multimodal attachment limits are separate policy layers.
+- `file_ops_safe` remains the primary read tool; no LLM-controlled per-call image-policy override.
 
 ## Key Components
 
-- `core/chunking/markdown.py`: parses markdown into ordered text and image-ref chunks.
-- `core/chunking/prompt_builder.py`: assembles prompts with interleaved text/image parts.
-- `core/chunking/image_refs.py`: resolves embedded image refs and normalizes refs for fallback.
-- `core/utils/image_inputs.py`: shared attachment gating and marker formatting.
-- `core/tools/file_ops_safe.py`: image-aware read path for chat tool calls.
-- `core/llm/model_utils.py`: `vision` capability checks for model aliases.
+- `core/chunking/markdown.py`: parses markdown into ordered text/image-ref chunks.
+- `core/chunking/prompt_builder.py`: assembles interleaved prompt payloads.
+- `core/chunking/image_refs.py`: resolves refs and applies normalized fallback markers.
+- `core/utils/image_inputs.py`: shared marker formatting and image attachment helpers.
+- `core/tools/file_ops_safe.py`: image-aware read path for tools.
+- `core/llm/model_utils.py`: model `vision` capability checks.
 
-## Data Flow Overview
+## Data Flow
 
-### Workflow + Context `@input`
+### Workflow/Context `@input`
 
-1. `@input` directives resolve files in the vault (`core/directives/input.py`).
-2. `build_input_files_prompt(...)` builds the ordered prompt payload.
-3. For markdown with embedded images:
-   - parse into ordered chunks
-   - resolve local image refs relative to the markdown file
-   - attach images when policy allows
-4. For direct image inputs (`@input file: image.jpg`):
-   - attach the image directly when policy allows
-5. If the selected model lacks `vision`, image attachments are replaced with refs.
+1. `@input file:` resolves vault files (default `.md` only when no extension is provided).
+2. Markdown inputs are parsed into ordered text/image chunks.
+3. Direct image inputs and embedded local refs are attached only when policy + capability gates pass.
+4. If attachment is not allowed, image refs are preserved as explicit markers.
 
 ### `file_ops_safe(read)`
 
-- Reading a local image returns a multimodal `ToolReturn` (text note + image attachment).
-- Reading markdown with embedded images uses the same chunking + attachment logic as `@input`.
-- If the markdown is too large, image attachments are skipped and refs are normalized.
+- Reading an image returns multimodal `ToolReturn` content.
+- Reading markdown-with-images uses the same chunking/policy pipeline as `@input`.
+- For large markdown inputs or image-policy failures, output degrades to refs-normalized text.
 
-## Attachment Policy (Images)
+## Capability + Policy Gates
 
-The shared attachment policy applies consistently across workflows, context templates, and tool reads.
+Attachment requires all applicable gates to pass:
 
-Policy gates (all must pass to attach images):
-- Text token preflight: skip attachments if raw markdown text exceeds `auto_buffer_max_tokens`.
-- Max image count
-- Max per-image size
-- Max total bytes
-- Model capability: requires `vision`
+1. Model capability gate (`vision` required for image attachment)
+2. Text token gate (`raw_text_tokens <= auto_buffer_max_tokens`)
+3. Image preflight gates (count, per-image bytes, total image bytes)
 
-If any gate fails, images are not attached; image references are normalized so they remain followable.
+Deterministic precedence:
 
-## Auto-Buffering + Large Inputs
+1. token overflow gate
+2. image preflight gate
+3. multimodal attach
 
-When a markdown input is too large, the system normalizes embedded image refs to vault-relative paths and returns text-only content. This enables auto-buffering to protect the context window while preserving image discoverability.
+If any gate fails, the system returns followable refs markers instead of attachments.
+
+## Auto-Buffering Interaction
+
+Multimodal `ToolReturn` payloads are not routed through text token auto-buffer serialization. This avoids converting image payloads into large base64 text blobs that would incorrectly trigger buffering.
 
 ## Marker Conventions
 
-When images cannot be attached or are missing, the prompt contains explicit markers:
+Markers are centralized in `core/utils/image_inputs.py`.
 
-- `[IMAGE: path]` (attached image)
-- `[IMAGE REF: path]` (reference only)
-- `[REMOTE IMAGE REF: url]` (remote URL)
+- `[IMAGE: path]` (attached/local image marker)
+- `[IMAGE REF: path]` (local ref-only fallback)
+- `[REMOTE IMAGE REF: url]` (remote URL ref)
 - `[MISSING IMAGE: ref]` (unresolvable ref)
-
-These markers are defined centrally in `core/utils/image_inputs.py`.
+- `[NON-IMAGE REF: path]` (resolved path not image-typed)
 
 ## Security Notes
 
-Image files are treated as untrusted content. Resolution always enforces vault boundaries and attachment policy limits. Remote image URLs remain references by default (no automatic download/attach).
+- Image inputs are treated as untrusted content.
+- Vault boundary checks apply to local path resolution.
+- Remote URLs remain refs-only by default.
+- Any future remote attach path requires explicit opt-in plus network/content limits.

@@ -1,552 +1,161 @@
-# Image Content Support Spec and Implementation Plan
+# Image Content Support Spec
 
 ## Goal
-Add images as a first-class content type in AssistantMD while preserving the existing markdown-first workflow model and composability.
 
-This plan focuses on reusable primitives, not a single hardcoded page-classification pipeline.
+Support images as a first-class content type in AssistantMD while preserving markdown-first ergonomics and composable workflows.
 
 ## Product Principles
+
 - Keep ingestion deterministic and simple.
 - Keep workflow behavior instruction-driven and composable.
-- Preserve markdown ergonomics (`.md` default) while enabling explicit non-markdown inputs.
-- Avoid over-specializing for "PDF page classification" only.
-
-## Current Constraints (as of 2026-02-23)
-- Ingestion is text-first: source importer -> text extractor -> markdown renderer.
-- Workflow/context input assumes markdown content and `.md` extension behavior.
-- File tooling and output routing are markdown-centric.
-
-## Target Capabilities
-1. Ingest PDFs to image pages in vault folders.
-2. Reference images directly in directives (`@input file:...png`).
-3. Resolve embedded image references inside markdown inputs and attach actual images at runtime.
-4. Pass image references through workflow/context machinery without inlining binary.
-5. Allow model reasoning over referenced images for flexible tasks:
-- workbook lesson extraction
-- chapter boundary detection
-- photo tagging
-- graphics reasoning
-- other user-defined image workflows
-6. Ingest standalone image files using OCR/text extraction strategies where requested.
+- Preserve `.md` defaults while enabling explicit non-markdown inputs.
+- Avoid hardcoded, domain-specific classification behavior in core ingestion.
 
 ## Scope
+
 ### In Scope
-- `PDF -> page images` ingestion mode.
-- Image file ingestion sources (`.png`, `.jpg`, `.jpeg`, `.webp`, optionally `.tiff`).
-- Extension-aware `@input file:` behavior.
-- Structured image-reference handling in input routing.
-- Markdown-embedded image resolution (markdown image tags and wikilinks).
-- Optional manifest output for large jobs.
 
-### Out of Scope (for this phase)
-- Hardcoded classification logic in ingestion.
-- Mandatory image-specific tool for basic read/reference use.
-- Changes to context-template execution semantics beyond image refs.
+- PDF import mode for rendering page images (`page_images`).
+- Image file import support (`.png`, `.jpg`, `.jpeg`, `.webp`, `.tif`, `.tiff`) with OCR strategy support.
+- Extension-aware `@input file:` resolution.
+- Direct image `@input` usage in workflows/context.
+- Markdown embedded-image resolution (`![...](...)`, `![[...]]`) with multimodal prompt assembly.
+- Structured policy controls for image attachment (count/size/remote handling).
+- Manifest/artifact outputs for large image-oriented ingestion flows.
 
-## Proposed Architecture
+### Out of Scope
 
-## 1) Ingestion: Add Image Output Mode
-Add ingestion mode choices for PDF jobs:
-- `markdown` (existing)
-- `page_images` (new)
+- Hardcoded content classification logic in ingestion.
+- Mandatory dedicated image tool for basic read/reference workflows.
+- Batch execution engine redesign in this track.
 
-For `page_images` mode, write vault artifacts under configured import output root:
-- `Imported/<doc>/pages/page_0001.png ...`
-- `Imported/<doc>/manifest.json` (optional but recommended)
+## Normative Requirements
 
-### Manifest minimum fields
-- source PDF path/name
-- page count
-- page->image path map
-- render parameters (dpi/scale)
-- file hash/mtime where practical
+## 1) Ingestion Modes and Sources
 
-Note: Manifest should be metadata only; no assumption of page labels/classification.
+- PDF imports MUST support `pdf_mode=markdown|page_images`.
+- `page_images` mode MUST apply to PDF files only.
+- In `page_images` mode, ingestion MUST bypass text extraction strategies and render deterministic page images.
+- `page_images` outputs MUST include:
+  - `Imported/<name>/pages/page_0001.png ...`
+  - `Imported/<name>/manifest.json`
+- `manifest.json` MUST remain metadata-only (no implied classification semantics).
+- Ingestion MUST support image files from `AssistantMD/Import` as first-class sources.
 
-### Image files as ingestion sources
-Support direct import of image files from `AssistantMD/Import` as first-class sources.
+## 2) OCR Strategy and OCR Asset Behavior
 
-Proposed image strategies:
-- `image_ocr` (new): OCR image -> markdown/text artifact.
-
-Provider tie-in:
-- Implement `image_ocr` using Mistral OCR (same secret-gated approach as `pdf_ocr`).
-- Add settings for image OCR model/endpoint (defaults may mirror existing PDF OCR settings initially).
-- Keep strategy ordering configurable (for example `["image_ocr"]`).
-
-### OCR image retention (revisit item)
-Current behavior:
-- PDF OCR extraction requests text content and does not retain OCR-provided image payloads by default.
-
-Planned revisit:
-- Add a configurable OCR ingestion option to retain OCR image outputs when desired.
-- Support both:
-  - per-run toggle in UI-triggered ingestion (for one-off imports)
-  - global default setting in configuration (for recurring behavior)
-- Keep default conservative (text-first) unless explicitly enabled, with attachment size/count limits.
-
-## 2) Directive Input: Extension-Aware File Resolution
-Update `@input file:` behavior:
-- If no extension is provided, default to `.md`.
-- If an extension is provided, honor it.
-- Add an image handling parameter to control attachment behavior explicitly.
-
-Examples:
-- `@input file:notes/today` -> `notes/today.md`
-- `@input file:Imported/book/pages/page_0001.png` -> exact image file
-
-This keeps existing templates compatible while enabling explicit image inputs.
-
-### New `@input` image policy parameter
-Add optional parameter:
-- `images=auto|ignore`
-
-Semantics:
-- `auto` (default): include image refs when model/runtime supports multimodal input; otherwise ignore with warning metadata.
-- `ignore`: never attach images; treat image references as text/refs only.
-
-Examples:
-- `@input file:lesson.md (images=auto)`
-- `@input file:lesson.md (images=ignore)`
-
-## 3) Input Payload Model: Text vs Image
-For non-text/binary file inputs:
-- Do not inline bytes into prompt text.
-- Emit structured input records (refs):
-  - vault-relative path
-  - mime type
-  - optional dimensions/hash
-  - found/error status
-
-Prompt formatting should include an `IMAGE_REFS`-style section when refs are present.
-
-### Markdown file behavior with embedded images
-When input is markdown (`@input file:note.md`), parse and resolve image references from:
-- standard markdown image tags: `![alt](path/to/image.png)`
-- Obsidian-style embeds/wikilinks: `![[image.png]]`
-
-For each resolvable image reference:
-- parse markdown into ordered content chunks (text/image/text/...) rather than separating all text from all images
-- preserve image position relative to surrounding text so reasoning stays in local context
-- construct multimodal prompt payload as interleaved `UserContent` sequence
-  - example shape: `[text_chunk_1, image_1, text_chunk_2, image_2, ...]`
-- preserve source mapping (`note.md` chunk/line span -> `image path`) for traceability
-
-For large markdown files with many images:
-- keep chunk boundaries explicit (do not flatten to one giant text block)
-- apply attachment budgets (count/bytes) over ordered chunks
-- when budget is exceeded, spill deferred chunks to buffer/state while preserving ordering metadata
-- allow follow-up retrieval by chunk id/range so model can continue exploration without losing positional context
-
-If image refs are broken/missing:
-- keep original markdown text and insert an explicit missing-image marker at the same position
-- add warning metadata (missing path + source pointer) without failing by default
-
-### Local vs Remote image-ref policy (default assumptions)
-To keep reasoning pipelines predictable and safe, prioritize local artifacts over remote fetches.
-
-Default policy:
-- local image refs (vault-resolved paths): include by default when `images=auto`
-- remote image refs (`http(s)` URLs): keep as refs/URLs by default (no automatic download/attach)
-
-Escalation policy:
-- remote image attach is opt-in (explicit user/tool request or strict policy mode)
-- when remote attach is enabled, apply strict safeguards:
-  - domain allowlist/denylist
-  - per-image size limit and download timeout
-  - content-type validation
-  - max remote image count per step
-
-Budget priority:
-- consume attachment budget with local images first
-- include remote images only after local budget decisions or explicit selection
-
-Operational note:
-- web-search/fetch pipelines should treat remote images as secondary by default; extracted text remains primary unless the step explicitly asks for visual analysis.
-
-### Security posture for image inputs
-Image files must be treated as untrusted content, including local files and remote URLs.
-
-Threats to account for:
-- crafted image payloads targeting decoder/parser vulnerabilities
-- polyglot files (extension says image, content is inconsistent/malicious)
-- decompression bombs or oversized media causing resource exhaustion
-- hidden/steganographic data and prompt-injection text revealed via OCR
-
-Required safeguards:
-- validate media type using magic bytes + parser validation (not extension alone)
-- enforce hard limits on file size, dimensions, and decode resource usage
-- prefer a sandboxed decode/thumbnail/normalize path for remote or unknown images
-- re-encode to safe canonical formats where practical before attachment
-- apply network controls for remote fetch (allowlist/denylist, timeout, max bytes, max files)
-- treat OCR output and extracted text as untrusted input in downstream reasoning/tool calls
-
-## 4) Agent Runtime: Multimodal Attachment Path
-When a step has image refs:
-- Attach referenced images to model input for multimodal-capable models.
-- Preserve text prompt and markdown refs for traceability.
-- If model does not support image input, fail clearly with actionable error.
-- Deduplicate repeated references (same image linked multiple times).
-- Apply configurable attach limits to avoid unbounded payload size.
-
-## 5) File Tools: Keep Minimal Changes Initially
-`file_ops_safe` already provides list/discovery and safe path handling.
-
-Phase-1 approach:
-- Keep `file_ops_safe` as primary file explorer.
-- Allow safe read/metadata behavior for non-markdown files where needed.
-- Do not introduce `image_ops_safe` until there is clear demand for image transforms (resize/crop/exif/etc.).
-
-## Workflow Composition Patterns
-
-## Pattern A: Workbook to Study Program
-1. Ingest PDF as `page_images`.
-2. Scheduled workflow reads page refs from folder/manifest.
-3. LLM generates:
-- lesson structure
-- chapter boundaries
-- study schedule artifacts
-4. Context template consumes produced markdown plans for tutoring chat.
-
-## Pattern B: Photo Archive Tagging
-1. Images dropped into vault folder.
-2. Workflow runs periodically on new files.
-3. LLM writes tags/summaries/index markdown.
-
-## Pattern C: Reorganization from Raw Pages
-1. Keep raw pages immutable in one folder.
-2. Run organization workflow to create chapter/topic subfolders.
-3. Re-run only changed/low-confidence ranges using hashes + manifest state.
-
-## Large PDF Operational Guidance (600+ pages)
-- Keep ingestion as one-pass deterministic render.
-- Process in batched page windows (e.g., 20-50 pages) at workflow level.
-- Store intermediate JSON/markdown outputs for resume/retry.
-- Avoid global all-pages-in-one-prompt operations.
-
-## JSON as First-Class Automation Artifact
-Treat `.json` as first-class for machine-oriented metadata and state.
-
-Guideline:
-- `.md` remains default human-authored format.
-- `.json` used for manifests, classification outputs, run state, and resumable processing.
-
-## Implementation Plan (Phased)
-
-## Phase 1: Core Image Content Enablement
-1. Add ingestion mode for PDF page image extraction.
-2. Add image file sources and baseline strategy (`image_ocr`).
-3. Add extension-aware `@input file:` behavior.
-4. Add markdown-embedded image reference extraction for `.md` inputs.
-5. Add image-reference payload path through input/routing.
-6. Add multimodal attachment support in model execution path.
-7. Add dedicated validation scenarios for image chunking and policy paths:
-  - token-overflow refs-only fallback
-  - all-or-none image preflight fallback (count/per-image/total-size)
-  - normalized embedded image refs remain followable in buffered/text-only paths
-  - parity checks for `@input` and `file_ops_safe(read)` behavior
-8. Document feature usage, policy behavior, and limitations:
-  - chunking/attachment settings and guard precedence
-  - refs-only fallback semantics and follow-up exploration guidance
-  - supported file-type policy and `images=auto|ignore` behavior
-
-## Phase 2: Workflow Templates + Examples
-1. Provide sample templates for workbook analysis and photo tagging.
-2. Add optional manifest-driven workflow examples.
-3. Add guidance for chapter boundary/reorganization workflows.
-
-## Phase 3: Optional Advanced Tooling
-1. Evaluate need for dedicated `image_ops_safe`.
-2. If needed, include transformation/classification helpers with strict scope.
-
-## Progress Update (2026-02-24)
-Status snapshot for current branch work.
-
-Completed:
-- Base multimodal prompt plumbing in chat path:
-  - chat request supports `image_paths`
-  - runtime can send `str | Sequence[UserContent]` to `Agent.run(...)`
-  - local vault image paths are attached via `BinaryContent.from_path(...)`
-- `file_ops_safe(operation="read")` now supports image files and returns multimodal `ToolReturn` content for vision-capable models.
-- Tool auto-buffer routing updated to bypass multimodal `ToolReturn` payloads (prevents accidental buffering of large base64-serialized image content).
-- Model capability metadata added across settings/API/config UI:
-  - model schema supports `capabilities`
-  - configuration tab can view/edit capabilities per model alias
-  - capability values are normalized and always include `text`
-- Chat runtime now validates image attachments against model `vision` capability.
-- PydanticAI integration research captured in this document (API shape, capability caveats, and baseline approach).
-
-Partially complete:
-- Non-markdown image handling exists in chat and `file_ops_safe`, but workflow `@input ... (images=...)` path is not yet implemented end-to-end.
-- Context-window protection for high image counts is not finalized (interim bypass exists; policy controls still pending).
-- Upgrade/migration strategy for existing user `system/settings.yaml` files is intentionally soft:
-  - legacy models without explicit `capabilities` remain possible
-  - enabling `vision` on existing aliases is currently manual via configuration UI.
-
-Not started (from Phase 1):
-- PDF `page_images` ingestion mode.
-- Image ingestion strategy (`image_ocr`).
-- Extension-aware `@input file:` behavior for non-markdown default handling.
-- Markdown embedded image ref extraction and attachment in workflow/context pipeline.
-- Formal documentation/examples for end users.
-
-Next recommended implementation order:
-1. Add targeted validation scenarios for chunked markdown image reads in workflow/context and `file_ops_safe`.
-2. Finalize multimodal vs text auto-buffering policy interaction for large multimodal tool outputs.
-3. Add ingestion features (`page_images`, `image_ocr`).
-3. Add ingestion features (`page_images`, `image_ocr`).
-4. Define/implement upgrade assist for existing settings (optional migration helper or UI nudge for missing `vision` capability).
-5. Add documentation/examples for end users (including supported file-type policy and `images=auto|ignore` behavior).
-
-## Progress Update (2026-02-25)
-Status snapshot for image-chunking work completed after the 2026-02-24 update.
-
-Completed:
-- Introduced shared chunking subsystem under `core/chunking`:
-  - `markdown.py`: ordered markdown parsing into text/image-ref chunks
-  - `prompt_builder.py`: resolves embedded image refs and builds interleaved prompt payloads
-  - `policy.py`: settings-backed attachment policy (count/size/remote policy)
-- Implemented markdown embedded-image prompt assembly for workflow `@input` path.
-- Implemented markdown embedded-image prompt assembly for context-manager `@input` path.
-- Added extension-aware `@input file:` resolution behavior:
-  - default `.md` only when no extension is provided
-  - explicit extension honored
-- Added centralized supported file-type policy in `core/constants.py`:
-  - single map: extension -> content kind (currently markdown/image)
-- Enforced supported file-type policy in:
-  - `@input` file loading
-  - `file_ops_safe(operation="read")`
-- Wired `file_ops_safe(read)` to auto-use chunking for markdown files with embedded image refs:
-  - plain markdown without embedded refs remains simple text read
-  - markdown with embedded image refs returns multimodal `ToolReturn` content in source order
-- Added settings-backed chunking policy controls:
-  - `chunking_max_images_per_prompt`
-  - `chunking_max_image_mb_per_image`
-  - `chunking_max_image_mb_total`
-  - `chunking_allow_remote_images`
-  - MB-based settings are converted to bytes in accessors; legacy byte-key fallback remains for compatibility.
-- Simplified `@input images=` policy modes to:
-  - `auto` (default)
-  - `ignore`
-
-Behavior notes:
-- Remote image URLs remain ref-only by default; no remote download/attach path is implemented yet.
-- Image policy no longer has strict modes (`include`/`only`) in this phase.
-
-Still not started:
-- PDF `page_images` ingestion mode.
-- Image ingestion strategy (`image_ocr`).
-- Dedicated validation scenarios for chunking/image-policy paths.
-
-### Addendum (2026-02-25, later)
-Status snapshot for deterministic context-protection policy updates completed in this session.
-
-Completed:
-- Introduced shared DRY image-ref policy helpers under `core/chunking/image_refs.py`:
-  - local embedded image-ref resolution
-  - embedded image-ref normalization to followable markers
-  - unified decision function for image attachment vs refs-only fallback
-- Updated both major call paths to use the same policy logic:
-  - `file_ops_safe(read)` markdown-with-images path
-  - `@input`/context prompt assembly via `build_input_files_prompt(...)`
-- Added token-first gating for markdown-with-images:
-  - compute token estimate from raw markdown text
-  - if `raw_text_tokens > auto_buffer_max_tokens`, skip image attachment and return refs-normalized text
-  - this restores deterministic auto-buffer protection because the tool result remains text-only
-- Added all-or-none image preflight behavior (shared):
-  - if any configured image guard fails (count, per-image bytes, total bytes), attach no images for that file
-  - return refs-normalized text so image exploration can proceed explicitly
-- Normalized embedded refs now preserve followability when degraded:
-  - local refs become `[IMAGE REF: <vault-relative-path>]`
-  - remote refs remain `[REMOTE IMAGE REF: <url>]`
-  - unresolved refs become `[MISSING IMAGE: <original-ref>]`
-
-Behavior notes:
-- Policy precedence is deterministic:
-  1) token overflow gate
-  2) image preflight gate
-  3) attach interleaved images only when both pass
-- If both token overflow and image preflight would fail, the outcome is the same refs-only fallback (token gate triggers first).
-- No new LLM-controllable `file_ops_safe` read parameter was introduced; policy is centralized and settings-driven.
-
-## Progress Update (2026-02-27)
-Status snapshot for direct image @input support, shared helpers, and validation coverage.
-
-Completed:
-- Direct image inputs in workflows and context (`@input file: image.jpg`) now attach images in prompts when policy allows.
-- Shared image attachment helpers extracted to `core/utils/image_inputs.py` to keep markers/gating consistent.
-- Embedded image ref normalization uses shared markers (`[IMAGE REF]`, `[MISSING IMAGE]`, `[REMOTE IMAGE REF]`).
-- `file_ops_safe(read)` continues to return multimodal payloads for images and markdown with embedded images, now using shared image payload helpers.
-- Added validation coverage:
-  - `basic_haiku` uses a real image input in Step 1.
-  - `tool_suite` reads an image with `file_ops_safe(read)`.
-  - `image_input_policy` scenario asserts image markers, `images=ignore`, and missing-image handling.
-- Documentation updated:
-  - `docs/use/reference.md` (image inputs, `images=auto|ignore`, routing note)
-  - `docs/use/README.md` (brief user-facing mention)
-  - `docs/architecture/multimodal.md` (architecture overview)
-- Remote image policy setting is still refs-only; no download/attach path implemented yet.
-
-Remaining from Phase 1:
-- PDF `page_images` ingestion mode.
-- Image ingestion strategy (`image_ocr`).
-
-## Progress Update (2026-02-28)
-Status snapshot for ingestion-mode and OCR-asset work completed in this session.
-
-Completed:
-- Implemented image ingestion source + OCR strategy:
-  - image file importer registration (`.png`, `.jpg`, `.jpeg`, `.webp`, `.tif`, `.tiff`)
-  - dedicated `image_ocr` strategy (separate from `pdf_ocr`)
-- Refactored OCR integration to shared helper plumbing:
-  - common Mistral OCR request/response parsing path
-  - separate strategy wrappers for PDF vs image document types
-- Simplified OCR configuration to shared keys:
+- Image ingestion MUST support an `image_ocr` strategy.
+- OCR integration SHOULD share common request/response parsing plumbing across PDF OCR and image OCR wrappers.
+- OCR configuration MUST use shared keys:
   - `ingestion_ocr_model`
   - `ingestion_ocr_endpoint`
-  - legacy OCR key fallback retained for compatibility
-- Added OCR image capture controls:
+- Legacy OCR setting keys MUST remain supported as compatibility fallback.
+- OCR image capture MUST be configurable via:
   - global setting: `ingestion_ocr_capture_images`
-  - one-shot import UI override: `capture_ocr_images`
-- Implemented OCR image persistence:
-  - OCR response image payloads are parsed and written as binary artifacts
-  - markdown output records `ocr_images_saved` metadata when assets are emitted
-- Implemented markdown image-link rewrite for OCR output:
-  - rewrites OCR inline refs (for example `img-0.jpeg`) to local saved asset paths
-  - preserves followable links in rendered markdown outputs
-- Updated import output layout to per-import folders:
-  - markdown mode: `Imported/<name>/<name>.md`
-  - OCR assets: `Imported/<name>/assets/...`
-- Added PDF `page_images` import mode (batch-friendly via existing Import workflow):
-  - UI mode selector (`Markdown` vs `Page Images`)
-  - one-shot `pdf_mode` request option through API and job options
-  - page image render output: `Imported/<name>/pages/page_0001.png ...`
-  - manifest output: `Imported/<name>/manifest.json`
-- Added shared output-path helper to prevent naming/path drift between modes:
-  - markdown and `page_images` now resolve folder/name rules from one code path
+  - one-shot override: `capture_ocr_images`
+- When OCR image assets are persisted, OCR markdown image references MUST be rewritten to local followable paths.
 
-Behavior notes:
-- `page_images` mode bypasses text extraction strategies for PDF files only.
-- In `page_images` mode, OCR-specific toggles are disabled in the import UI.
-- Non-PDF ingestion continues through existing strategy-based behavior.
+## 3) Output Layout
 
-Remaining from Phase 1 (revised):
-- none in this track (`page_images` + `image_ocr` completed).
+- Import outputs MUST use per-import folders to avoid naming/path drift.
+- Markdown mode output MUST be `Imported/<name>/<name>.md`.
+- OCR assets MUST be written under `Imported/<name>/assets/...` when enabled.
+- `page_images` artifacts MUST be written under `Imported/<name>/pages/...` plus manifest.
 
-## Validation Strategy
-- Unit tests for extension resolution and input parsing.
-- Unit tests for markdown embedded image parsing and path resolution.
-- Unit tests for `images=` policy modes (`auto/ignore`).
-- Smoke tests for ingestion output artifacts (`pages/`, `manifest.json`).
-- Smoke tests for image-file ingestion (`image_ocr` success/failure).
-- End-to-end scenario:
-  - import PDF -> image pages
-  - import standalone image -> OCR text output
-  - workflow consumes direct image refs
-  - workflow consumes markdown file containing embedded image refs
-  - outputs markdown plan/index
-- Failure-path tests for non-vision models and missing files.
+## 4) `@input` File Resolution and Image Policy
 
-## Open Questions
-- Exact attachment API shape per provider/model adapter.
-- Size limits and downscaling policy for very large images.
-- Whether `index.md` is always produced or optional.
-- Whether/when to expand `SUPPORTED_READ_FILE_TYPES` beyond markdown/image (for example `.json`) and how to stage that safely.
+- `@input file:<path>` resolution MUST default to `.md` only when no extension is supplied.
+- If an extension is supplied, the resolver MUST honor it as-is.
+- `@input` image policy modes MUST be limited to:
+  - `images=auto` (default)
+  - `images=ignore`
+- `images=auto` MUST attempt attachment only when policy and model capability allow.
+- `images=ignore` MUST never attach images and MUST keep image refs as text markers/refs.
 
-## Model Capability Metadata
-Image handling requires explicit model capability awareness in the provider/model subsystem.
+## 5) Supported File-Type Policy
 
-Use a single extensible model field:
-- `capabilities: ["text", "vision", ...]`
+- Supported readable file types for these paths MUST be centrally defined and reused by:
+  - `@input` file loading
+  - `file_ops_safe(operation="read")`
+- Current supported kinds in this track are markdown and image.
 
-Design notes:
-- Prefer one capabilities list over many booleans.
-- Backward compatible default when missing: `["text"]`.
-- `@input ... (images=...)` policy should validate against selected model capabilities before execution.
-- Runtime/provider adapter remains final authority (defensive check before request send).
-- If model lacks required capability:
-  - `images=auto`: degrade gracefully with warning metadata.
-  - `images=ignore`: do not attempt image attachment.
+## 6) Markdown Embedded Image Semantics
 
-Future capability examples:
-- `text`
-- `vision`
-- `audio_input`
-- `pdf_input`
-- `tool_calling`
+- For markdown inputs, the system MUST resolve embedded image refs from both markdown image syntax and wikilink embeds.
+- Prompt assembly MUST preserve source order as interleaved content (text/image/text/...); image order MUST NOT be flattened or regrouped.
+- Broken or unresolved refs MUST preserve local context position and produce explicit followable markers.
+- Marker forms MUST remain standardized:
+  - `[IMAGE REF: <vault-relative-path>]`
+  - `[REMOTE IMAGE REF: <url>]`
+  - `[MISSING IMAGE: <original-ref>]`
 
-## PydanticAI Multimodal Integration Notes (Research: 2026-02-24)
-These notes capture concrete implementation facts verified against this repo's pinned dependency:
-- `pydantic-ai==1.60.0`
+## 7) Remote vs Local Image Policy
 
-### Confirmed prompt API shape
-- `Agent.run(...)` accepts either:
-  - plain `str` prompt (existing behavior)
-  - `Sequence[UserContent]` for multimodal prompts
-- `UserContent` supports text plus multimodal objects, including:
-  - `BinaryContent` (inline bytes + media type)
-  - `ImageUrl` (remote URL image reference)
+- Local vault-resolved images MUST be eligible for attachment under `images=auto` and policy limits.
+- Remote `http(s)` image refs MUST remain refs-only by default (no implicit download/attach).
+- Any remote attach behavior MUST be explicit opt-in and guarded by:
+  - domain allowlist/denylist
+  - timeout and max-bytes limits
+  - content-type validation
+  - max remote image count constraints
 
-Minimal working shape:
-- `["Describe this image.", BinaryContent.from_path("/abs/path/image.png")]`
+## 8) Runtime Capability and Attachment Behavior
 
-This means Phase 1 runtime integration can be implemented without custom provider SDK branches by constructing `Sequence[UserContent]` and passing it through existing `agent.run(...)` calls.
+- Model metadata MUST include extensible `capabilities` with default compatibility behavior including `text`.
+- Vision attachment MUST be gated by model `vision` capability before request send.
+- Runtime/provider adapter MUST remain final defensive authority for modality support.
+- If model capability is insufficient:
+  - `images=auto` MUST degrade gracefully with warning metadata/ref behavior.
+  - `images=ignore` MUST continue without attachment attempts.
 
-### Image object types to use
-- Local vault files:
-  - `BinaryContent.from_path(path)` preferred.
-  - If media type inference fails, construct `BinaryContent(data=..., media_type=...)` explicitly.
-- Remote image URLs (optional later):
-  - `ImageUrl(url=...)`, optionally `force_download=True`.
+## 9) Context Protection and Fallback Precedence
 
-### Important capability-check caveat
-- In `pydantic-ai==1.60.0`, there is no single cross-provider `supports_image_input` profile flag to reliably preflight image input support.
-- Provider/model adapters perform support checks and mapping at request time.
+- Image handling MUST keep text token protection and multimodal attachment policy as separate layers.
+- For markdown-with-images, token-first gating MUST run before image attachment:
+  - if text exceeds `auto_buffer_max_tokens`, return refs-normalized text (no image attachments).
+- Image preflight MUST be all-or-none per file for configured limits:
+  - image count
+  - per-image size
+  - total image size
+- If any preflight guard fails, image attachments MUST be skipped and refs-normalized text returned.
+- Policy precedence MUST be deterministic:
+  1. token overflow gate
+  2. image preflight gate
+  3. multimodal attach
 
-Implication for AssistantMD:
-- Keep `capabilities: ["text", "vision", ...]` in `settings.yaml` as the app-level contract.
-- Validate `@input ... (images=...)` policy against AssistantMD model capabilities before calling `agent.run(...)`.
-- Keep provider/runtime error handling as a defensive second line (final authority if provider behavior differs from metadata).
+## 10) Tooling Decisions
 
-### Phase-1 baseline integration target
-Before full `@input images=` support, establish this base path:
-1. Resolve one explicit image file path.
-2. Build prompt as `Sequence[UserContent]` with text + `BinaryContent`.
-3. Send through existing agent execution path.
-4. Confirm non-vision models fail with actionable error routing.
+- `file_ops_safe` MUST remain the primary file exploration/read tool in this track.
+- `file_ops_safe(read)` MUST support image files and markdown-with-embedded-images multimodal returns.
+- Auto-buffer routing MUST NOT treat multimodal `ToolReturn` payloads as plain text for token buffering decisions.
+- No LLM-controlled per-call read parameter for image policy is in scope; policy remains centralized and settings-driven.
+- A dedicated `image_ops_safe` tool remains deferred unless transform demand is proven.
 
-This base path should be implemented and smoke-tested first, then generalized for image refs extracted from directives/markdown.
+## 11) Security Requirements
 
-### Tool routing interaction discovered during implementation
-- Current tool output auto-buffering logic is token-based and text-centric.
-- Multimodal `ToolReturn` values (for example, image `BinaryContent`) can serialize to very large base64 strings if treated as plain text.
-- If auto-buffering runs on serialized multimodal payloads, image reads are incorrectly routed to buffers and no longer attached inline to the model.
+Image inputs (local and remote) MUST be treated as untrusted.
 
-Current patch behavior (accepted as interim):
-- Bypass auto-buffer routing when a tool result is `ToolReturn` containing multimodal content parts (`BinaryContent`, `ImageUrl`, etc.).
-- Keep multimodal tool payload inline so the model can actually consume image attachments.
+Required safeguards:
 
-Follow-up design task (required before broad rollout):
-- Add modality-aware context protection policies so inline image attachments remain bounded.
-- Proposed controls:
-  - `max_images_per_tool_result` (hard cap per tool call)
-  - `max_images_per_step` (aggregate cap across tool calls)
-  - `max_image_bytes_per_step` (aggregate byte budget)
-  - optional downscale/compression pipeline before attachment
-  - dedupe-by-hash for repeated reads of same image
-  - policy behavior when limits exceeded (`drop_oldest`, `drop_newest`, `fail`, `summarize_refs_only`)
-- Keep text auto-buffering and multimodal attachment limits as separate policy layers (do not reuse text token estimation for binary payload decisions).
+- Validate media type using content inspection (not extension alone).
+- Enforce hard limits on file size/dimensions/decode resource usage.
+- Apply strict network controls for any remote image fetch path.
+- Treat OCR output as untrusted text in downstream reasoning/tool flows.
 
-## Deferred: Batch Execution Design
-Batch is relevant for high-volume image operations but likely conflicts with strict sequential step-engine semantics.
+## 12) Validation Requirements
 
-Current position:
-- Do not include batch in this phase.
-- Specify batch separately after core image content primitives are stable.
+Coverage MUST include:
 
-Topics for future batch spec:
-- whether batch is a new workflow engine vs per-step execution mode
-- async run state and resume semantics
-- polling/retry/error aggregation
-- artifact model (`requests.jsonl`, `results.jsonl`, run state)
-- compatibility with existing scheduler and step workflow expectations
+- extension-aware `@input` resolution behavior.
+- markdown embedded-image parsing and ordered multimodal assembly.
+- `images=auto|ignore` policy behavior.
+- missing/broken image marker behavior.
+- `file_ops_safe(read)` parity for markdown/image paths.
+- `page_images` ingestion artifact checks (`pages/`, `manifest.json`).
+- image-file ingestion (`image_ocr`) success and failure paths.
+- non-vision model behavior for image inputs.
+
+## Deferred Design Work
+
+- Modality-aware overflow policies for inline attachments (drop/fail/summarize behavior) are required before broad rollout of high-volume multimodal flows.
+- Batch execution architecture remains a separate future spec.
