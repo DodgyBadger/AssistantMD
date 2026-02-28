@@ -11,6 +11,7 @@ from typing import Any, Optional
 from pydantic_ai import BinaryContent
 
 from core.chunking.policy import ChunkingPolicy
+from core.utils.hash import hash_bytes
 
 
 def format_image_ref_marker(path: str) -> str:
@@ -49,6 +50,7 @@ class ImageAttachmentDecision:
     attached: bool
     size_bytes: int
     image_key: str
+    image_hash: Optional[str]
 
 
 def evaluate_image_attachment(
@@ -58,6 +60,7 @@ def evaluate_image_attachment(
     images_policy: str,
     supports_vision: Optional[bool],
     seen_images: set[str],
+    seen_image_hashes: set[str],
     attached_count: int,
     attached_bytes: int,
 ) -> ImageAttachmentDecision:
@@ -72,6 +75,7 @@ def evaluate_image_attachment(
             attached=False,
             size_bytes=0,
             image_key=image_key,
+            image_hash=None,
         )
 
     image_blob = BinaryContent.from_path(image_path)
@@ -85,6 +89,19 @@ def evaluate_image_attachment(
             attached=False,
             size_bytes=0,
             image_key=image_key,
+            image_hash=None,
+        )
+
+    image_hash = hash_bytes(image_blob.data, length=None)
+    if image_hash in seen_image_hashes:
+        return ImageAttachmentDecision(
+            marker=format_image_deduped_marker(image_name),
+            image_blob=None,
+            warnings=[],
+            attached=False,
+            size_bytes=0,
+            image_key=image_key,
+            image_hash=image_hash,
         )
 
     blob_size = len(image_blob.data)
@@ -99,6 +116,7 @@ def evaluate_image_attachment(
             attached=False,
             size_bytes=0,
             image_key=image_key,
+            image_hash=image_hash,
         )
     if attached_count >= policy.max_images_per_prompt:
         return ImageAttachmentDecision(
@@ -108,6 +126,7 @@ def evaluate_image_attachment(
             attached=False,
             size_bytes=0,
             image_key=image_key,
+            image_hash=image_hash,
         )
     if attached_bytes + blob_size > policy.max_image_bytes_total:
         return ImageAttachmentDecision(
@@ -117,6 +136,7 @@ def evaluate_image_attachment(
             attached=False,
             size_bytes=0,
             image_key=image_key,
+            image_hash=image_hash,
         )
 
     if supports_vision is False or images_policy == "ignore":
@@ -127,6 +147,7 @@ def evaluate_image_attachment(
             attached=False,
             size_bytes=0,
             image_key=image_key,
+            image_hash=image_hash,
         )
 
     return ImageAttachmentDecision(
@@ -136,6 +157,7 @@ def evaluate_image_attachment(
         attached=True,
         size_bytes=blob_size,
         image_key=image_key,
+        image_hash=image_hash,
     )
 
 

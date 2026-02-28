@@ -8,7 +8,6 @@ This roadmap reflects the implemented direction and decisions through 2026-02-28
 - ✅ Support multimodal prompt payloads (`str | Sequence[UserContent]`) and local image attachment via `BinaryContent`.
 - ✅ Keep provider/runtime as final defensive authority even after app-level capability checks.
 - ⬜ Add modality-aware attachment limits at runtime (per tool call/per step/image bytes).
-- ⬜ Add optional downscale/compression + dedupe-by-hash policy for repeated images.
 
 ## 2) Input Semantics and Routing
 - ✅ Make `@input file:` extension-aware:
@@ -31,7 +30,10 @@ This roadmap reflects the implemented direction and decisions through 2026-02-28
 - ✅ Keep policy precedence deterministic: token gate -> image preflight -> multimodal attach.
 - ✅ Keep text auto-buffering separate from multimodal handling.
 - ✅ Bypass text-centric auto-buffer routing for multimodal `ToolReturn` payloads to prevent accidental base64 buffering.
-- ⬜ Finalize explicit multimodal overflow behavior (`drop_oldest`/`drop_newest`/`fail`/`summarize_refs_only`).
+- ✅ Keep multimodal overflow fallback simple and behaviorally consistent:
+  - default remains all-or-none `refs-only` fallback (drop-all attachments for the gated input)
+  - do not introduce partial keep/drop policies by default (`drop_oldest`/`drop_newest`) to avoid biased retention signals
+  - align fallback semantics with auto-buffer exploration (text + followable refs first)
 
 ## 4) Ingestion and Artifact Layout
 - ✅ Add PDF ingestion mode selector: `markdown` vs `page_images`.
@@ -63,3 +65,5 @@ This roadmap reflects the implemented direction and decisions through 2026-02-28
 ## 7) Deferred / Explicitly Out of Current Track
 - ✅ Keep batch execution design deferred until core image primitives and policy controls are stable.
 - ✅ Keep markdown-first ergonomics as default while enabling explicit non-markdown inputs.
+- ✅ Defer image-specific REPL/buffer exploration mechanics and address them as part of a broader `buffer_ops`/REPL behavior upgrade package.
+- ✅ Defer image compaction/downscale work for this track (not planned unless future evidence shows size-based gates are a real bottleneck).

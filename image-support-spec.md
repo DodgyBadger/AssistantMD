@@ -159,3 +159,5 @@ Coverage MUST include:
 
 - Modality-aware overflow policies for inline attachments (drop/fail/summarize behavior) are required before broad rollout of high-volume multimodal flows.
 - Batch execution architecture remains a separate future spec.
+- Image-focused REPL/buffer exploration workflow changes are deferred and should be specified within a broader `buffer_ops`/REPL architecture update, not as a standalone image-track change.
+- Image compaction/downscale before attachment is deferred and out of scope for this track.

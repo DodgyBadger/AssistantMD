@@ -129,6 +129,7 @@ def build_input_files_prompt(
     attached_count = 0
     attached_bytes = 0
     seen_images: set[str] = set()
+    seen_image_hashes: set[str] = set()
 
     if base_prompt:
         _append_text(parts, text_lines, base_prompt)
@@ -206,6 +207,7 @@ def build_input_files_prompt(
                     images_policy=images_policy,
                     supports_vision=supports_vision,
                     seen_images=seen_images,
+                    seen_image_hashes=seen_image_hashes,
                     attached_count=attached_count,
                     attached_bytes=attached_bytes,
                 )
@@ -213,6 +215,8 @@ def build_input_files_prompt(
                 warnings.extend(decision.warnings)
                 if decision.attached and decision.image_blob:
                     seen_images.add(decision.image_key)
+                    if decision.image_hash:
+                        seen_image_hashes.add(decision.image_hash)
                     attached_count += 1
                     attached_bytes += decision.size_bytes
                     parts.append(decision.image_blob)
@@ -287,6 +291,7 @@ def build_input_files_prompt(
                     images_policy=images_policy,
                     supports_vision=supports_vision,
                     seen_images=seen_images,
+                    seen_image_hashes=seen_image_hashes,
                     attached_count=attached_count,
                     attached_bytes=attached_bytes,
                 )
@@ -294,6 +299,8 @@ def build_input_files_prompt(
                 warnings.extend(decision.warnings)
                 if decision.attached and decision.image_blob:
                     seen_images.add(decision.image_key)
+                    if decision.image_hash:
+                        seen_image_hashes.add(decision.image_hash)
                     attached_count += 1
                     attached_bytes += decision.size_bytes
                     parts.append(decision.image_blob)
