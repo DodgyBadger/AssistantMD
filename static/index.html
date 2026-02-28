@@ -647,6 +647,97 @@
             border-color: rgb(var(--accent-primary) / 0.55);
             color: rgb(var(--accent-hover));
         }
+        .chat-compose-wrap {
+            position: relative;
+        }
+        .chat-attach-btn {
+            position: absolute;
+            right: 1rem;
+            bottom: 0.5rem;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 9999px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: rgb(var(--text-secondary));
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .chat-attach-btn.has-attachments {
+            color: rgb(var(--accent-primary));
+        }
+        .chat-attach-btn:hover {
+            color: rgb(var(--accent-primary));
+            border-color: transparent;
+            background: transparent;
+        }
+        .chat-attach-badge {
+            display: none;
+            position: absolute;
+            top: -0.2rem;
+            right: -0.2rem;
+            min-width: 1rem;
+            height: 1rem;
+            border-radius: 9999px;
+            padding: 0 0.2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgb(var(--accent-primary));
+            color: rgb(var(--text-on-accent));
+            font-size: 0.62rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .chat-attachment-popover {
+            position: absolute;
+            right: 0.75rem;
+            bottom: 3rem;
+            width: min(18rem, calc(100vw - 3rem));
+            max-height: 11rem;
+            overflow: auto;
+            border-radius: 0.6rem;
+            border: 1px solid rgb(var(--border-primary));
+            background: rgb(var(--bg-card));
+            box-shadow: 0 8px 20px rgb(0 0 0 / 0.14);
+            padding: 0.45rem;
+            z-index: 30;
+        }
+        .chat-attachment-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            width: 100%;
+            border-radius: 0.45rem;
+            color: rgb(var(--text-primary));
+            padding: 0.3rem 0.45rem;
+            font-size: 0.75rem;
+            margin-bottom: 0.2rem;
+        }
+        .chat-attachment-item:last-child {
+            margin-bottom: 0;
+        }
+        .chat-attachment-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 10.5rem;
+        }
+        .chat-attachment-remove {
+            border: 0;
+            background: transparent;
+            color: rgb(var(--text-secondary));
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+            font-size: 0.85rem;
+        }
+        .chat-attachment-remove:hover {
+            color: rgb(var(--state-error));
+        }
     </style>
 </head>
 <body class="bg-app-bg transition-colors duration-200">
@@ -722,12 +813,22 @@
                 </div>
                 <div class="border-t border-border-primary p-4">
                     <div class="flex gap-2">
-                        <textarea
-                            id="chat-input"
-                            rows="3"
-                            placeholder="Type your message (Ctrl+Enter or Cmd+Enter to send)..."
-                            class="flex-1 px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
-                        ></textarea>
+                        <div class="flex-1">
+                            <div class="chat-compose-wrap">
+                                <textarea
+                                    id="chat-input"
+                                    rows="3"
+                                    placeholder="Type your message (Ctrl+Enter or Cmd+Enter to send)..."
+                                    class="block w-full px-3 py-2 pr-12 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
+                                ></textarea>
+                                <button id="attach-btn" type="button" class="chat-attach-btn" title="Attach image(s)" aria-label="Attach image(s)" aria-expanded="false" aria-controls="chat-attachment-popover">
+                                    📎
+                                    <span id="attach-count-badge" class="chat-attach-badge" style="display:none"></span>
+                                </button>
+                                <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
+                                <div id="chat-attachment-popover" class="chat-attachment-popover hidden" role="menu" aria-label="Pending attachments"></div>
+                            </div>
+                        </div>
                         <button
                             id="send-btn"
                             class="px-6 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"

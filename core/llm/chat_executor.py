@@ -48,6 +48,14 @@ logger = UnifiedLogger(tag="chat-executor")
 PromptInput = str | Sequence[UserContent]
 
 
+@dataclass(frozen=True)
+class UploadedImageAttachment:
+    """Direct chat image attachment sourced from request payload bytes."""
+
+    display_name: str
+    content: BinaryContent
+
+
 def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
     """
     Safely truncate long strings for streaming metadata.
@@ -213,10 +221,11 @@ def _resolve_image_prompt(
     *,
     prompt_text: str,
     image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
     vault_path: str,
 ) -> tuple[PromptInput, str, int]:
     """Build prompt payload and history-safe text from optional image attachments."""
-    if not image_paths:
+    if not image_paths and not image_uploads:
         return prompt_text, prompt_text, 0
 
     vault_root = Path(vault_path).resolve()
@@ -224,7 +233,7 @@ def _resolve_image_prompt(
     history_lines: List[str] = []
     seen_paths: set[str] = set()
 
-    for raw_path in image_paths:
+    for raw_path in image_paths or []:
         candidate = (raw_path or "").strip()
         if not candidate:
             continue
@@ -262,6 +271,24 @@ def _resolve_image_prompt(
         display_path = resolved_path.relative_to(vault_root).as_posix()
         history_lines.append(f"- {display_path}")
 
+    for upload in image_uploads or []:
+        file_content = upload.content
+        display_name = (upload.display_name or "").strip() or "uploaded-image"
+        if not file_content.is_image:
+            raise ValueError(
+                f"Uploaded file '{display_name}' is not an image and cannot be attached."
+            )
+        image_size_bytes = len(file_content.data)
+        max_image_bytes = get_chunking_max_image_bytes_per_image()
+        if image_size_bytes > max_image_bytes:
+            max_image_mb = get_chunking_max_image_mb_per_image()
+            raise ValueError(
+                f"Image '{display_name}' is too large to attach ({image_size_bytes} bytes). "
+                f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+            )
+        prompt_content.append(file_content)
+        history_lines.append(f"- [upload] {display_name}")
+
     if len(prompt_content) == 1:
         return prompt_text, prompt_text, 0
 
@@ -276,12 +303,17 @@ def _resolve_image_prompt(
     return prompt_content, prompt_for_history, len(prompt_content) - 1
 
 
-def _validate_image_capability(model_alias: str, image_paths: Optional[List[str]]) -> None:
+def _validate_image_capability(
+    model_alias: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
+) -> None:
     """Fail fast if image attachments are requested for a non-vision model."""
-    if not image_paths:
+    has_uploads = bool(image_uploads)
+    if not image_paths and not has_uploads:
         return
-    has_paths = any((path or "").strip() for path in image_paths)
-    if not has_paths:
+    has_paths = any((path or "").strip() for path in (image_paths or []))
+    if not has_paths and not has_uploads:
         return
     if model_supports_capability(model_alias, "vision"):
         return
@@ -329,6 +361,7 @@ async def execute_chat_prompt(
     vault_path: str,
     prompt: str,
     image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
     session_id: str,
     tools: List[str],
     model: str,
@@ -350,7 +383,7 @@ async def execute_chat_prompt(
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
-    _validate_image_capability(model, image_paths)
+    _validate_image_capability(model, image_paths, image_uploads)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model
     )
@@ -382,6 +415,7 @@ async def execute_chat_prompt(
     user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
         prompt_text=prompt,
         image_paths=image_paths,
+        image_uploads=image_uploads,
         vault_path=vault_path,
     )
 
@@ -429,6 +463,7 @@ async def execute_chat_prompt_stream(
     vault_path: str,
     prompt: str,
     image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
     session_id: str,
     tools: List[str],
     model: str,
@@ -452,7 +487,7 @@ async def execute_chat_prompt_stream(
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
-    _validate_image_capability(model, image_paths)
+    _validate_image_capability(model, image_paths, image_uploads)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model
     )
@@ -484,6 +519,7 @@ async def execute_chat_prompt_stream(
     user_prompt, prompt_for_history, _attached_image_count = _resolve_image_prompt(
         prompt_text=prompt,
         image_paths=image_paths,
+        image_uploads=image_uploads,
         vault_path=vault_path,
     )
 

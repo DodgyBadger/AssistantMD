@@ -3,14 +3,20 @@ API endpoint implementations for the AssistantMD system.
 """
 
 
+import json
 from typing import List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic_ai import BinaryContent
 
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.llm.session_manager import SessionManager
-from core.llm.chat_executor import execute_chat_prompt, execute_chat_prompt_stream
+from core.llm.chat_executor import (
+    UploadedImageAttachment,
+    execute_chat_prompt,
+    execute_chat_prompt_stream,
+)
 
 from .models import (
     VaultRescanRequest,
@@ -74,6 +80,140 @@ router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 
 # Create module-level session manager for chat conversations
 session_manager = SessionManager()
+
+
+def _parse_form_bool(value: object, default: bool = False) -> bool:
+    """Parse HTML form boolean values."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return default
+
+
+def _parse_form_tools(raw_tools: list[object]) -> list[str]:
+    """Normalize repeated tools fields from multipart form data."""
+    values = [str(item).strip() for item in raw_tools if str(item).strip()]
+    if len(values) == 1 and values[0].startswith("["):
+        try:
+            parsed = json.loads(values[0])
+        except json.JSONDecodeError:
+            return values
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+    return values
+
+
+async def _parse_chat_execute_payload(
+    request: Request,
+) -> tuple[ChatExecuteRequest, list[UploadedImageAttachment]]:
+    """Parse chat request from JSON or multipart form-data."""
+    content_type = (request.headers.get("content-type") or "").lower()
+    if content_type.startswith("application/json"):
+        payload = ChatExecuteRequest.model_validate(await request.json())
+        return payload, []
+
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        tools = _parse_form_tools(form.getlist("tools"))
+        image_paths = [str(item).strip() for item in form.getlist("image_paths") if str(item).strip()]
+        payload = ChatExecuteRequest.model_validate(
+            {
+                "vault_name": str(form.get("vault_name") or "").strip(),
+                "prompt": str(form.get("prompt") or "").strip(),
+                "image_paths": image_paths,
+                "session_id": str(form.get("session_id") or "").strip() or None,
+                "tools": tools,
+                "model": str(form.get("model") or "").strip(),
+                "context_template": str(form.get("context_template") or "").strip() or None,
+                "stream": _parse_form_bool(form.get("stream"), default=False),
+            }
+        )
+        uploads: list[UploadedImageAttachment] = []
+        for item in form.getlist("images"):
+            if not hasattr(item, "read"):
+                continue
+            raw_bytes = await item.read()
+            if not raw_bytes:
+                continue
+            media_type = str(
+                getattr(item, "content_type", None) or "application/octet-stream"
+            ).strip().lower()
+            uploads.append(
+                UploadedImageAttachment(
+                    display_name=(
+                        str(getattr(item, "filename", None) or "uploaded-image").strip()
+                        or "uploaded-image"
+                    ),
+                    content=BinaryContent(data=raw_bytes, media_type=media_type),
+                )
+            )
+        return payload, uploads
+
+    raise ValueError(
+        "Unsupported Content-Type for /api/chat/execute. Use application/json or multipart/form-data."
+    )
+
+
+async def _execute_chat_request(
+    chat_request: ChatExecuteRequest,
+    image_uploads: list[UploadedImageAttachment],
+):
+    """Execute chat request in streaming or non-streaming mode."""
+    runtime = get_runtime_context()
+    vault_path = str(runtime.config.data_root / chat_request.vault_name)
+    session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
+
+    if chat_request.stream:
+        stream = execute_chat_prompt_stream(
+            vault_name=chat_request.vault_name,
+            vault_path=vault_path,
+            prompt=chat_request.prompt,
+            image_paths=chat_request.image_paths,
+            image_uploads=image_uploads,
+            session_id=session_id,
+            tools=chat_request.tools,
+            model=chat_request.model,
+            session_manager=session_manager,
+            context_template=chat_request.context_template,
+        )
+
+        return StreamingResponse(
+            stream,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "Content-Encoding": "identity",
+                "X-Accel-Buffering": "no",
+                "X-Session-ID": session_id,
+            },
+        )
+
+    result = await execute_chat_prompt(
+        vault_name=chat_request.vault_name,
+        vault_path=vault_path,
+        prompt=chat_request.prompt,
+        image_paths=chat_request.image_paths,
+        image_uploads=image_uploads,
+        session_id=session_id,
+        tools=chat_request.tools,
+        model=chat_request.model,
+        session_manager=session_manager,
+        context_template=chat_request.context_template,
+    )
+
+    return ChatExecuteResponse(
+        response=result.response,
+        session_id=result.session_id,
+        message_count=result.message_count,
+    )
 
 
 #######################################################################
@@ -400,7 +540,7 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
 #######################################################################
 
 @router.post("/chat/execute")
-async def chat_execute(request: ChatExecuteRequest):
+async def chat_execute(request: Request):
     """
     Execute chat prompt with user-selected tools and model.
 
@@ -412,60 +552,8 @@ async def chat_execute(request: ChatExecuteRequest):
     Follows OpenAI API conventions for compatibility with standard clients.
     """
     try:
-        # Get vault path from runtime context
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / request.vault_name)
-
-        # Generate session ID if not provided (first turn), otherwise reuse existing
-        session_id = request.session_id or generate_session_id(request.vault_name)
-
-        # Handle streaming vs non-streaming
-        if request.stream:
-            # Streaming response (SSE format)
-            stream = execute_chat_prompt_stream(
-                vault_name=request.vault_name,
-                vault_path=vault_path,
-                prompt=request.prompt,
-                image_paths=request.image_paths,
-                session_id=session_id,
-                tools=request.tools,
-                model=request.model,
-                session_manager=session_manager,
-                context_template=request.context_template
-            )
-
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache, no-transform",
-                    "Connection": "keep-alive",
-                    # Disable compression to avoid browser buffering of SSE chunks
-                    "Content-Encoding": "identity",
-                    # Prevent reverse proxies (nginx, etc.) from buffering the stream
-                    "X-Accel-Buffering": "no",
-                    "X-Session-ID": session_id  # Return session ID in header for client tracking
-                }
-            )
-        else:
-            # Non-streaming response (JSON)
-            result = await execute_chat_prompt(
-                vault_name=request.vault_name,
-                vault_path=vault_path,
-                prompt=request.prompt,
-                image_paths=request.image_paths,
-                session_id=session_id,
-                tools=request.tools,
-                model=request.model,
-                session_manager=session_manager,
-                context_template=request.context_template
-            )
-
-            return ChatExecuteResponse(
-                response=result.response,
-                session_id=result.session_id,
-                message_count=result.message_count
-            )
+        chat_request, image_uploads = await _parse_chat_execute_payload(request)
+        return await _execute_chat_request(chat_request, image_uploads)
     except Exception as e:
         return create_error_response(e)
 

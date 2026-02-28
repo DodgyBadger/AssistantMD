@@ -32,6 +32,10 @@ const state = {
     restartRequired: false,
     shouldAutoScroll: true
 };
+const chatComposeState = {
+    pendingAttachments: [],
+    popoverOpen: false
+};
 
 let mathTypesetQueue = Promise.resolve();
 
@@ -43,6 +47,10 @@ const chatElements = {
     toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
+    attachBtn: document.getElementById('attach-btn'),
+    attachInput: document.getElementById('attach-input'),
+    attachCountBadge: document.getElementById('attach-count-badge'),
+    attachmentPopover: document.getElementById('chat-attachment-popover'),
     sendBtn: document.getElementById('send-btn'),
     newSessionBtn: document.getElementById('new-session-btn')
 };
@@ -126,6 +134,123 @@ function renderChatEmptyState(message = CHAT_EMPTY_STATE_MESSAGE) {
 
 function addChatErrorMessage(errorText) {
     addMessage('error', `Error: ${errorText || 'Streaming failed'}`);
+}
+
+function formatAttachmentSize(sizeBytes) {
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = sizeBytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+        value /= 1024;
+        idx += 1;
+    }
+    const precision = idx === 0 ? 0 : 1;
+    return `${value.toFixed(precision)} ${units[idx]}`;
+}
+
+function renderPendingAttachments() {
+    const items = chatComposeState.pendingAttachments;
+    const badge = chatElements.attachCountBadge;
+    const popover = chatElements.attachmentPopover;
+    const attachBtn = chatElements.attachBtn;
+
+    if (badge) {
+        if (!items.length) {
+            badge.textContent = '';
+            badge.style.display = 'none';
+        } else {
+            badge.textContent = String(items.length);
+            badge.style.display = 'inline-flex';
+        }
+    }
+
+    if (attachBtn) {
+        attachBtn.classList.toggle('has-attachments', items.length > 0);
+    }
+
+    if (!popover) return;
+    if (!items.length) {
+        popover.classList.add('hidden');
+        popover.innerHTML = '';
+        popover.setAttribute('aria-hidden', 'true');
+        chatComposeState.popoverOpen = false;
+        if (attachBtn) {
+            attachBtn.setAttribute('aria-expanded', 'false');
+        }
+        return;
+    }
+
+    const listHtml = items
+        .map((item, index) => `
+            <div class="chat-attachment-item">
+                <span class="chat-attachment-name" title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</span>
+                <span class="text-txt-secondary">${formatAttachmentSize(item.file.size)}</span>
+                <button type="button" class="chat-attachment-remove" data-attachment-remove="${index}" aria-label="Remove attachment">✕</button>
+            </div>
+        `)
+        .join('');
+    popover.innerHTML = `
+        <div class="chat-attachment-item">
+            <button type="button" class="chat-attachment-remove" data-attachment-add="true" aria-label="Add images" style="padding:0.2rem 0.35rem;border-radius:0.35rem;border:1px solid rgb(var(--border-primary));">
+                + Add images...
+            </button>
+        </div>
+        ${listHtml}
+    `;
+    popover.setAttribute('aria-hidden', chatComposeState.popoverOpen ? 'false' : 'true');
+}
+
+function setAttachmentPopoverOpen(isOpen) {
+    const popover = chatElements.attachmentPopover;
+    const attachBtn = chatElements.attachBtn;
+    if (!popover || !attachBtn) return;
+    const shouldOpen = Boolean(isOpen) && chatComposeState.pendingAttachments.length > 0;
+    chatComposeState.popoverOpen = shouldOpen;
+    popover.classList.toggle('hidden', !shouldOpen);
+    popover.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+    attachBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+}
+
+function clearPendingAttachments() {
+    chatComposeState.pendingAttachments = [];
+    setAttachmentPopoverOpen(false);
+    if (chatElements.attachInput) {
+        chatElements.attachInput.value = '';
+    }
+    renderPendingAttachments();
+}
+
+function addPendingAttachments(fileList) {
+    if (!fileList || !fileList.length) return;
+
+    const existingKeys = new Set(
+        chatComposeState.pendingAttachments.map(
+            (item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`
+        )
+    );
+
+    for (const file of Array.from(fileList)) {
+        if (!file || !file.type || !file.type.startsWith('image/')) {
+            continue;
+        }
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (existingKeys.has(key)) {
+            continue;
+        }
+        existingKeys.add(key);
+        chatComposeState.pendingAttachments.push({ file, key });
+    }
+    renderPendingAttachments();
+    if (chatComposeState.pendingAttachments.length > 0) {
+        setAttachmentPopoverOpen(true);
+    }
+}
+
+function openAttachmentPicker() {
+    if (chatElements.attachInput) {
+        chatElements.attachInput.click();
+    }
 }
 
 function syncChatControlLocks() {
@@ -239,6 +364,7 @@ async function init() {
     await fetchMetadata();
     await fetchSystemStatus();
     setupEventListeners();
+    renderPendingAttachments();
     updateCollapsibleArrows();
 }
 
@@ -657,6 +783,75 @@ function setupEventListeners() {
         chatElements.newSessionBtn.addEventListener('click', clearSession);
     }
 
+    if (chatElements.attachBtn && chatElements.attachInput) {
+        chatElements.attachBtn.addEventListener('click', () => {
+            if (chatComposeState.pendingAttachments.length > 0) {
+                setAttachmentPopoverOpen(!chatComposeState.popoverOpen);
+                return;
+            }
+            openAttachmentPicker();
+        });
+        chatElements.attachInput.addEventListener('change', (event) => {
+            const input = event.target;
+            addPendingAttachments(input?.files);
+            if (input) {
+                input.value = '';
+            }
+        });
+        chatElements.attachBtn.addEventListener('mouseenter', () => {
+            if (chatComposeState.pendingAttachments.length > 0) {
+                setAttachmentPopoverOpen(true);
+            }
+        });
+        chatElements.attachBtn.addEventListener('focus', () => {
+            if (chatComposeState.pendingAttachments.length > 0) {
+                setAttachmentPopoverOpen(true);
+            }
+        });
+    }
+
+    if (chatElements.attachmentPopover) {
+        chatElements.attachmentPopover.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const idxRaw = target.getAttribute('data-attachment-remove');
+            const addAction = target.getAttribute('data-attachment-add');
+            if (addAction === 'true') {
+                openAttachmentPicker();
+                return;
+            }
+            if (idxRaw === null) return;
+            const idx = Number.parseInt(idxRaw, 10);
+            if (Number.isNaN(idx) || idx < 0 || idx >= chatComposeState.pendingAttachments.length) return;
+            chatComposeState.pendingAttachments.splice(idx, 1);
+            renderPendingAttachments();
+            if (chatComposeState.pendingAttachments.length === 0) {
+                setAttachmentPopoverOpen(false);
+            }
+        });
+        chatElements.attachmentPopover.addEventListener('mouseenter', () => {
+            if (chatComposeState.pendingAttachments.length > 0) {
+                setAttachmentPopoverOpen(true);
+            }
+        });
+        chatElements.attachmentPopover.addEventListener('mouseleave', () => {
+            if (chatComposeState.popoverOpen) {
+                setAttachmentPopoverOpen(false);
+            }
+        });
+    }
+
+    document.addEventListener('click', (event) => {
+        if (!chatComposeState.popoverOpen) return;
+        const target = event.target;
+        if (!(target instanceof Node)) return;
+        const clickedAttachBtn = chatElements.attachBtn && chatElements.attachBtn.contains(target);
+        const clickedPopover = chatElements.attachmentPopover && chatElements.attachmentPopover.contains(target);
+        if (!clickedAttachBtn && !clickedPopover) {
+            setAttachmentPopoverOpen(false);
+        }
+    });
+
     if (dashElements.rescanBtn) {
         dashElements.rescanBtn.addEventListener('click', rescanVaults);
     }
@@ -733,7 +928,9 @@ async function fetchTemplates(vault, preferredTemplate = '') {
 // Send message handler with streaming response support
 async function sendMessage() {
     const message = chatElements.chatInput.value.trim();
-    if (!message || state.isLoading) return;
+    const pendingUploads = chatComposeState.pendingAttachments.slice();
+    if ((!message && pendingUploads.length === 0) || state.isLoading) return;
+    const effectivePrompt = message || 'Please analyze the attached image(s).';
 
     const vault = chatElements.vaultSelector.value;
     const model = chatElements.modelSelector.value;
@@ -748,7 +945,10 @@ async function sendMessage() {
         return;
     }
 
-    addMessage('user', message);
+    const userMessageText = pendingUploads.length > 0
+        ? `${effectivePrompt}\n\n[Attached images]\n${pendingUploads.map((item) => `- ${item.file.name}`).join('\n')}`
+        : effectivePrompt;
+    addMessage('user', userMessageText.trim());
     chatElements.chatInput.value = '';
     state.isLoading = true;
     chatElements.sendBtn.disabled = true;
@@ -757,32 +957,57 @@ async function sendMessage() {
     const selectedTools = Array.from(chatElements.toolsCheckboxes.querySelectorAll('input:checked'))
         .map(cb => cb.value);
 
-    const requestData = {
-        vault_name: vault,
-        prompt: message,
-        tools: selectedTools,
-        model: model,
-        context_template: chatElements.templateSelector ? chatElements.templateSelector.value || null : null,
-        stream: true
-    };
-
-    if (state.sessionId) {
-        requestData.session_id = state.sessionId;
-    }
+    const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
 
     const loadingMessage = addLoadingMessage();
 
     try {
-        const response = await fetch('api/chat/execute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestData)
-        });
+        let response;
+        if (pendingUploads.length > 0) {
+            const formData = new FormData();
+            formData.append('vault_name', vault);
+            formData.append('prompt', effectivePrompt);
+            formData.append('model', model);
+            formData.append('stream', 'true');
+            if (contextTemplateValue) {
+                formData.append('context_template', contextTemplateValue);
+            }
+            selectedTools.forEach((toolName) => formData.append('tools', toolName));
+            if (state.sessionId) {
+                formData.append('session_id', state.sessionId);
+            }
+            pendingUploads.forEach((item) => {
+                formData.append('images', item.file, item.file.name);
+            });
+            response = await fetch('api/chat/execute', {
+                method: 'POST',
+                body: formData
+            });
+        } else {
+            const requestData = {
+                vault_name: vault,
+                prompt: effectivePrompt,
+                tools: selectedTools,
+                model: model,
+                context_template: contextTemplateValue,
+                stream: true
+            };
+            if (state.sessionId) {
+                requestData.session_id = state.sessionId;
+            }
+            response = await fetch('api/chat/execute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+        }
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.message || `HTTP ${response.status}`);
         }
+
+        clearPendingAttachments();
 
         removeLoadingMessage(loadingMessage);
 
@@ -1556,6 +1781,7 @@ async function clearSession() {
     if (!confirmed) return;
 
     state.sessionId = null;
+    clearPendingAttachments();
     renderChatEmptyState();
     syncChatControlLocks();
     updateStatus();
