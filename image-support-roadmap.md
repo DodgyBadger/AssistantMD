@@ -7,7 +7,7 @@ This roadmap reflects the implemented direction and decisions through 2026-02-28
 - ✅ Gate image attachment on `vision` capability in runtime/chat path.
 - ✅ Support multimodal prompt payloads (`str | Sequence[UserContent]`) and local image attachment via `BinaryContent`.
 - ✅ Keep provider/runtime as final defensive authority even after app-level capability checks.
-- ⬜ Add modality-aware attachment limits at runtime (per tool call/per step/image bytes).
+- ⬜ Add modality-aware attachment limits at runtime (per ToolReturn assembly image bytes/count; cross-step accumulation intentionally out of scope for now).
 
 ## 2) Input Semantics and Routing
 - ✅ Make `@input file:` extension-aware:
@@ -19,6 +19,7 @@ This roadmap reflects the implemented direction and decisions through 2026-02-28
 - ✅ Keep missing/unresolved refs in-place with explicit markers and warning metadata.
 - ✅ Centralize supported file-type policy (markdown/image) and enforce in both `@input` and `file_ops_safe(read)`.
 - ✅ Keep remote image refs as refs-only by default (no automatic download/attach).
+- ✅ Support direct chat image uploads from the composer (paperclip) without persisting files to vault.
 - ⬜ Implement opt-in remote image fetch/attach path with allowlist/limits/timeouts/content-type validation.
 
 ## 3) Context Protection and Fallback Behavior
@@ -56,11 +57,13 @@ This roadmap reflects the implemented direction and decisions through 2026-02-28
 - ✅ Extend `file_ops_safe(read)` to support image files and markdown-with-images multimodal returns.
 - ✅ Do not add `image_ops_safe` in this track; revisit only if image transforms become a real need.
 - ✅ Do not add an LLM-controlled `file_ops_safe(read)` image-policy parameter; keep policy centralized/settings-driven.
+- ✅ Keep a single chat execution endpoint (`/api/chat/execute`) and support both JSON and multipart payloads instead of adding a separate upload endpoint.
 
 ## 6) Validation and Docs
 - ✅ Add validation coverage for direct image inputs, `file_ops_safe(read)` image reads, `images=ignore`, and missing-image markers.
 - ✅ Update user and architecture docs for image inputs, routing behavior, and multimodal design.
 - ⬜ Add/complete targeted stress validation for large multimodal payload protection (high image count/size scenarios).
+- ⬜ Update the general `README.md` and draft release notes for everything in this feature branch.
 
 ## 7) Deferred / Explicitly Out of Current Track
 - ✅ Keep batch execution design deferred until core image primitives and policy controls are stable.
