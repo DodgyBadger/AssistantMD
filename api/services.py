@@ -235,6 +235,7 @@ def scan_import_folder(
     vault: str,
     queue_only: bool = False,
     strategies: list[str] | None = None,
+    capture_ocr_images: bool | None = None,
 ):
     """
     Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
@@ -254,6 +255,10 @@ def scan_import_folder(
     search_roots = [import_root]
     if legacy_import_root.exists():
         search_roots.append(legacy_import_root)
+
+    extractor_options: dict[str, Any] = {}
+    if capture_ocr_images is not None:
+        extractor_options["ocr_capture_images"] = bool(capture_ocr_images)
 
     for root in search_roots:
         for item in sorted(root.iterdir()):
@@ -275,12 +280,18 @@ def scan_import_folder(
                 skipped.append(str(item.name))
                 continue
 
+            job_options: dict[str, Any] = {}
+            if strategies:
+                job_options["strategies"] = strategies
+            if extractor_options:
+                job_options["extractor_options"] = extractor_options
+
             job = ingest_service.enqueue_job(
                 source_uri=item.name,
                 vault=vault,
                 source_type=SourceKind.FILE.value,
                 mime_hint=None,
-                options={"strategies": strategies} if strategies else {},
+                options=job_options,
             )
             jobs_created.append(job)
 

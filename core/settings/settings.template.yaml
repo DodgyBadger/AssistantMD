@@ -66,13 +66,22 @@ settings:
       - pdf_ocr
     description: "Available strategies and priority for PDF ingestion. JSON array. Remove value to disable or reorder as needed. E.g. [\"pdf_ocr\"] will force all imports through OCR."
     restart_required: false
-  ingestion_pdf_ocr_model:
+  ingestion_ocr_model:
     value: "mistral-ocr-latest"
-    description: "Model used for OCR extraction."
+    description: "Model used for ingestion OCR extraction."
     restart_required: false
-  ingestion_pdf_ocr_endpoint:
+  ingestion_ocr_endpoint:
     value: "https://api.mistral.ai/v1/ocr"
-    description: "HTTP endpoint for OCR extraction."
+    description: "HTTP endpoint for ingestion OCR extraction."
+    restart_required: false
+  ingestion_ocr_capture_images:
+    value: false
+    description: "When true, request OCR image payloads and persist them as assets during ingestion."
+    restart_required: false
+  ingestion_image_default_strategies:
+    value:
+      - image_ocr
+    description: "Available strategies and priority for image ingestion. JSON array. Remove value to disable or reorder as needed."
     restart_required: false
   ingestion_output_path_pattern:
     value: "Imported/"

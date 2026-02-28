@@ -15,6 +15,7 @@ Examples:
 
 - URL import: source importer fetches HTML, strategy `html_markdownify` extracts markdown text.
 - PDF import: source importer loads PDF bytes, strategies (for example `pdf_text`, then `pdf_ocr`) run in order until one succeeds.
+- Image import: source importer loads image bytes, strategy `image_ocr` extracts text via OCR.
 
 ## Entry Points
 
@@ -62,8 +63,9 @@ Worker scheduling is driven by general settings:
 3. Build strategy order:
    - URL default: `html_markdownify`
    - PDF defaults from settings (`ingestion_pdf_default_strategies`), fallback `pdf_text`, `pdf_ocr`.
+   - Image defaults from settings (`ingestion_image_default_strategies`), fallback `image_ocr`.
 4. Run extractors in order until one returns non-empty text.
-5. Render to markdown and store output under configured base path.
+5. Render to markdown and store output under configured base path (when `ingestion_ocr_capture_images=true`, OCR image payloads are persisted under `<import-name>_assets/`).
 6. Save output paths and mark `completed` (or `failed` with error).
 
 Built-in handlers are imported for registry side effects in `_load_builtin_handlers()`.
@@ -73,6 +75,7 @@ Built-in handlers are imported for registry side effects in `_load_builtin_handl
 Current secret-gated strategy:
 
 - `pdf_ocr` requires `MISTRAL_API_KEY`
+- `image_ocr` requires `MISTRAL_API_KEY`
 
 If required secrets are missing, the strategy is skipped and warnings are attached to extraction metadata.
 

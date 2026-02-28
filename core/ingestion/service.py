@@ -36,6 +36,7 @@ from core.logger import UnifiedLogger
 class IngestionService:
     _STRATEGY_SECRET_REQUIREMENTS = {
         "pdf_ocr": "MISTRAL_API_KEY",
+        "image_ocr": "MISTRAL_API_KEY",
     }
 
     def __init__(self):
@@ -222,8 +223,9 @@ class IngestionService:
         """
         general_settings = get_general_settings()
         pdf_default_strategies: list[str] = []
-        pdf_ocr_model = "mistral-ocr-latest"
-        pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        ocr_model = "mistral-ocr-latest"
+        ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        image_default_strategies: list[str] = []
         base_output_dir = "Imported/"
         url_read_timeout_seconds = 10
         url_connect_timeout_seconds = 10
@@ -233,13 +235,23 @@ class IngestionService:
         except Exception:
             pdf_default_strategies = []
         try:
-            pdf_ocr_model = str(general_settings.get("ingestion_pdf_ocr_model").value)
+            ocr_model = str(general_settings.get("ingestion_ocr_model").value)
         except Exception:
-            pdf_ocr_model = "mistral-ocr-latest"
+            try:
+                ocr_model = str(general_settings.get("ingestion_pdf_ocr_model").value)
+            except Exception:
+                ocr_model = "mistral-ocr-latest"
         try:
-            pdf_ocr_endpoint = str(general_settings.get("ingestion_pdf_ocr_endpoint").value)
+            ocr_endpoint = str(general_settings.get("ingestion_ocr_endpoint").value)
         except Exception:
-            pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+            try:
+                ocr_endpoint = str(general_settings.get("ingestion_pdf_ocr_endpoint").value)
+            except Exception:
+                ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        try:
+            image_default_strategies = list(general_settings.get("ingestion_image_default_strategies").value)
+        except Exception:
+            image_default_strategies = []
         try:
             base_output_dir = str(general_settings.get("ingestion_output_path_pattern").value)
         except Exception:
@@ -260,8 +272,13 @@ class IngestionService:
         return {
             "pdf": {
                 "default_strategies": pdf_default_strategies,
-                "ocr_model": pdf_ocr_model,
-                "ocr_endpoint": pdf_ocr_endpoint,
+                "ocr_model": ocr_model,
+                "ocr_endpoint": ocr_endpoint,
+            },
+            "image": {
+                "default_strategies": image_default_strategies,
+                "ocr_model": ocr_model,
+                "ocr_endpoint": ocr_endpoint,
             },
             "output_base_dir": base_output_dir,
             "url": {
@@ -306,9 +323,14 @@ class IngestionService:
 
         # Defaults from settings
         pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
+        image_cfg = ingestion_settings.get("image", {}) if isinstance(ingestion_settings, dict) else {}
         if suffix == ".pdf":
             cfg_strategies = pdf_cfg.get("default_strategies") or []
             default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["pdf_text", "pdf_ocr"]
+            return default_strats
+        if suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}:
+            cfg_strategies = image_cfg.get("default_strategies") or []
+            default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["image_ocr"]
             return default_strats
         return []
 
@@ -355,7 +377,9 @@ class IngestionService:
         """
         # Imports are intentional for side effects (registry registration).
         import core.ingestion.sources.pdf  # noqa: F401
+        import core.ingestion.sources.image  # noqa: F401
         import core.ingestion.sources.web  # noqa: F401
         import core.ingestion.strategies.pdf_text  # noqa: F401
         import core.ingestion.strategies.pdf_ocr  # noqa: F401
+        import core.ingestion.strategies.image_ocr  # noqa: F401
         import core.ingestion.strategies.html_raw  # noqa: F401

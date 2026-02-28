@@ -87,6 +87,7 @@
         importVaultSelect: null,
         importQueueCheckbox: null,
         importUseOcrCheckbox: null,
+        importCaptureOcrImagesCheckbox: null,
         importStatus: null,
         importScanBtn: null,
         importRefreshVaultsBtn: null,
@@ -133,6 +134,7 @@
         elements.importVaultSelect = document.getElementById('import-vault-select');
         elements.importQueueCheckbox = document.getElementById('import-queue');
         elements.importUseOcrCheckbox = document.getElementById('import-use-ocr');
+        elements.importCaptureOcrImagesCheckbox = document.getElementById('import-capture-ocr-images');
         elements.importStatus = document.getElementById('import-status');
         elements.importScanBtn = document.getElementById('import-scan');
         elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
@@ -261,7 +263,11 @@
             return;
         }
 
-        const cards = state.settings.map((setting) => {
+        const sortedSettings = [...state.settings].sort((a, b) =>
+            String(a?.key ?? '').localeCompare(String(b?.key ?? ''), undefined, { sensitivity: 'base' })
+        );
+
+        const cards = sortedSettings.map((setting) => {
             if (state.settingEditKey === setting.key) {
                 return renderSettingEditCard(setting);
             }
@@ -1206,11 +1212,22 @@ async function saveModelRow(rowKey) {
             (entry) => entry.name === 'MISTRAL_API_KEY' && entry.has_value
         );
         elements.importUseOcrCheckbox.disabled = !hasMistral;
+        if (elements.importCaptureOcrImagesCheckbox) {
+            elements.importCaptureOcrImagesCheckbox.disabled = !hasMistral;
+        }
         elements.importUseOcrCheckbox.title = hasMistral
             ? ''
             : 'Requires MISTRAL_API_KEY secret';
+        if (elements.importCaptureOcrImagesCheckbox) {
+            elements.importCaptureOcrImagesCheckbox.title = hasMistral
+                ? ''
+                : 'Requires MISTRAL_API_KEY secret';
+        }
         if (!hasMistral) {
             elements.importUseOcrCheckbox.checked = false;
+            if (elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.checked = false;
+            }
         }
     }
 
@@ -1567,10 +1584,14 @@ async function saveModelRow(rowKey) {
 
         const queueOnly = Boolean(elements.importQueueCheckbox?.checked);
         const useOcr = Boolean(elements.importUseOcrCheckbox?.checked);
+        const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
 
         const payload = { vault, queue_only: queueOnly };
         if (useOcr) {
-            payload.strategies = ["pdf_ocr", "pdf_text"];
+            payload.strategies = ["pdf_ocr", "pdf_text", "image_ocr"];
+        }
+        if (captureOcrImages) {
+            payload.capture_ocr_images = true;
         }
 
         state.isScanningImport = true;
