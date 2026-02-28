@@ -23,6 +23,8 @@ from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger
 from core.settings import (
     get_auto_buffer_max_tokens,
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_mb_per_image,
     get_file_search_timeout_seconds,
 )
 from core.utils.image_inputs import build_image_tool_payload
@@ -197,6 +199,14 @@ BEST PRACTICES:
 
         binary_content = BinaryContent.from_path(full_path)
         if binary_content.is_image:
+            max_image_bytes = get_chunking_max_image_bytes_per_image()
+            image_size_bytes = len(binary_content.data)
+            if image_size_bytes > max_image_bytes:
+                max_image_mb = get_chunking_max_image_mb_per_image()
+                return (
+                    f"Cannot attach image '{path}' ({image_size_bytes} bytes) - exceeds "
+                    f"chunking_max_image_mb_per_image ({max_image_mb} MB)."
+                )
             payload = build_image_tool_payload(
                 image_path=Path(full_path),
                 vault_path=vault_path,

@@ -290,6 +290,25 @@ def refresh_configuration_status_cache() -> None:
     get_configuration_status.cache_clear()  # type: ignore[attr-defined]
 
 
+@lru_cache(maxsize=32)
+def _get_template_setting_positive_int(setting_key: str, fallback: int) -> int:
+    """Return a positive int default from settings.template.yaml for a setting key."""
+    try:
+        raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        return fallback
+    value = (
+        raw.get("settings", {})
+        .get(setting_key, {})
+        .get("value")
+    )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
 def _load_template_sections() -> Dict[str, set]:
     """Load template keys for each section to detect missing entries."""
     try:
@@ -387,27 +406,42 @@ def get_chunking_max_images_per_prompt() -> int:
     return parsed if parsed > 0 else 20
 
 
+def get_chunking_max_image_mb_per_image() -> int:
+    """Return max MB allowed for a single image attachment."""
+    settings = get_general_settings()
+    entry_mb = settings.get("chunking_max_image_mb_per_image")
+    value_mb = getattr(entry_mb, "value", None) if entry_mb is not None else None
+    template_default = _get_template_setting_positive_int(
+        "chunking_max_image_mb_per_image", 5
+    )
+    try:
+        parsed_mb = int(value_mb)
+    except (TypeError, ValueError):
+        parsed_mb = template_default
+    return parsed_mb if parsed_mb > 0 else template_default
+
+
 def get_chunking_max_image_bytes_per_image() -> int:
     """Return max bytes allowed for a single chunked image attachment."""
     settings = get_general_settings()
     entry_mb = settings.get("chunking_max_image_mb_per_image")
     value_mb = getattr(entry_mb, "value", None) if entry_mb is not None else None
     if value_mb is not None:
-        try:
-            parsed_mb = int(value_mb)
-        except (TypeError, ValueError):
-            parsed_mb = 5
-        parsed_mb = parsed_mb if parsed_mb > 0 else 5
-        return parsed_mb * 1024 * 1024
+        return get_chunking_max_image_mb_per_image() * 1024 * 1024
 
     # Backward-compatible fallback for legacy byte-based setting name.
     entry = settings.get("chunking_max_image_bytes_per_image")
     value = getattr(entry, "value", None) if entry is not None else None
+    template_default_bytes = (
+        _get_template_setting_positive_int("chunking_max_image_mb_per_image", 5)
+        * 1024
+        * 1024
+    )
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        return 5 * 1024 * 1024
-    return parsed if parsed > 0 else 5 * 1024 * 1024
+        return template_default_bytes
+    return parsed if parsed > 0 else template_default_bytes
 
 
 def get_chunking_max_image_bytes_total() -> int:

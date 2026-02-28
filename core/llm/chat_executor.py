@@ -32,6 +32,10 @@ from core.directives.tools import ToolsDirective
 from core.llm.model_utils import model_supports_capability
 from core.context.manager import build_context_manager_history_processor
 from core.context.templates import load_template
+from core.settings import (
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_mb_per_image,
+)
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
@@ -245,6 +249,14 @@ def _resolve_image_prompt(
         file_content = BinaryContent.from_path(resolved_path)
         if not file_content.is_image:
             raise ValueError(f"File is not an image and cannot be attached: {candidate}")
+        image_size_bytes = len(file_content.data)
+        max_image_bytes = get_chunking_max_image_bytes_per_image()
+        if image_size_bytes > max_image_bytes:
+            max_image_mb = get_chunking_max_image_mb_per_image()
+            raise ValueError(
+                f"Image '{candidate}' is too large to attach ({image_size_bytes} bytes). "
+                f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+            )
 
         prompt_content.append(file_content)
         display_path = resolved_path.relative_to(vault_root).as_posix()

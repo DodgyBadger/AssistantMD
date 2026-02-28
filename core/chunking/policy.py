@@ -16,10 +16,10 @@ from core.settings import (
 
 @dataclass(frozen=True)
 class ChunkingPolicy:
-    max_images_per_prompt: int = 20
-    max_image_bytes_per_image: int = 5 * 1024 * 1024
-    max_image_bytes_total: int = 100 * 1024 * 1024
-    allow_remote_images: bool = False
+    max_images_per_prompt: int
+    max_image_bytes_per_image: int
+    max_image_bytes_total: int
+    allow_remote_images: bool
 
 
 def default_chunking_policy() -> ChunkingPolicy:

@@ -18,6 +18,7 @@ const STATUS_EMOJIS = {
     done: '✅',
     error: '⚠️'
 };
+const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
 
 // State management
 const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
@@ -87,6 +88,44 @@ function handleChatScroll() {
     const container = chatElements.chatMessages;
     if (!container) return;
     state.shouldAutoScroll = isChatNearBottom(container);
+}
+
+function isChatPlaceholderNode(node) {
+    if (!node || !(node instanceof HTMLElement)) return false;
+    return node.classList.contains('text-center') &&
+        node.classList.contains('text-txt-secondary') &&
+        node.classList.contains('text-sm');
+}
+
+function clearChatPlaceholderIfPresent() {
+    const container = chatElements.chatMessages;
+    if (!container) return;
+    if (container.children.length !== 1) return;
+    if (!isChatPlaceholderNode(container.children[0])) return;
+    container.innerHTML = '';
+}
+
+function appendChatMessageNode(node, { forceScroll = true } = {}) {
+    const container = chatElements.chatMessages;
+    if (!container || !node) return;
+    clearChatPlaceholderIfPresent();
+    container.appendChild(node);
+    scrollChatToBottom(forceScroll);
+}
+
+function renderChatEmptyState(message = CHAT_EMPTY_STATE_MESSAGE) {
+    const container = chatElements.chatMessages;
+    if (!container) return;
+    container.innerHTML = '';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'text-center text-txt-secondary text-sm';
+    placeholder.textContent = message;
+    container.appendChild(placeholder);
+    state.shouldAutoScroll = true;
+}
+
+function addChatErrorMessage(errorText) {
+    addMessage('error', `Error: ${errorText || 'Streaming failed'}`);
 }
 
 function syncChatControlLocks() {
@@ -840,7 +879,7 @@ async function sendMessage() {
     } catch (error) {
         console.error('Error sending message:', error);
         removeLoadingMessage(loadingMessage);
-        addMessage('error', `❌ Error: ${error.message || 'Streaming failed'}`);
+        addChatErrorMessage(error.message);
     } finally {
         state.isLoading = false;
         chatElements.sendBtn.disabled = false;
@@ -864,13 +903,7 @@ function addLoadingMessage() {
 
     messageDiv.appendChild(contentDiv);
 
-    if (chatElements.chatMessages.children.length === 1 &&
-        chatElements.chatMessages.children[0].classList.contains('text-center')) {
-        chatElements.chatMessages.innerHTML = '';
-    }
-
-    chatElements.chatMessages.appendChild(messageDiv);
-    scrollChatToBottom(true);
+    appendChatMessageNode(messageDiv, { forceScroll: true });
 
     return messageDiv;
 }
@@ -1082,13 +1115,7 @@ function addMessage(role, content, options = {}) {
 
     messageDiv.appendChild(contentDiv);
 
-    if (chatElements.chatMessages.children.length === 1 &&
-        chatElements.chatMessages.children[0].classList.contains('text-center')) {
-        chatElements.chatMessages.innerHTML = '';
-    }
-
-    chatElements.chatMessages.appendChild(messageDiv);
-    scrollChatToBottom(true);
+    appendChatMessageNode(messageDiv, { forceScroll: true });
 }
 
 function createAssistantStreamingMessage() {
@@ -1123,13 +1150,7 @@ function createAssistantStreamingMessage() {
     contentDiv.appendChild(bodyDiv);
     messageDiv.appendChild(contentDiv);
 
-    if (chatElements.chatMessages.children.length === 1 &&
-        chatElements.chatMessages.children[0].classList.contains('text-center')) {
-        chatElements.chatMessages.innerHTML = '';
-    }
-
-    chatElements.chatMessages.appendChild(messageDiv);
-    scrollChatToBottom(true);
+    appendChatMessageNode(messageDiv, { forceScroll: true });
 
     return {
         messageDiv,
@@ -1207,8 +1228,24 @@ function renderAssistantMarkdown(context, options = {}) {
 function setAssistantStatus(context, label, state = 'thinking') {
     const emoji = STATUS_EMOJIS[state] || STATUS_EMOJIS.thinking;
     context.statusText.textContent = `${label} ${emoji}`;
-    context.indicator.className = 'stream-status-indicator typing';
-    context.indicator.innerHTML = TYPING_DOTS_HTML;
+    context.indicator.className = 'stream-status-indicator';
+    if (state === 'thinking') {
+        context.indicator.classList.add('typing');
+        context.indicator.innerHTML = TYPING_DOTS_HTML;
+        return;
+    }
+
+    const stateClass = state === 'tools'
+        ? 'tool'
+        : state === 'done'
+        ? 'success'
+        : state === 'error'
+        ? 'error'
+        : '';
+    if (stateClass) {
+        context.indicator.classList.add(stateClass);
+    }
+    context.indicator.textContent = emoji;
 }
 
 function handleToolEvent(context, payload) {
@@ -1370,7 +1407,8 @@ function parseSseEvent(rawEvent) {
         }
     }
 
-    const dataPayload = dataLines.join('');
+    // Preserve SSE semantics: each `data:` line is joined with a newline.
+    const dataPayload = dataLines.join('\n');
     if (!dataPayload) return null;
 
     try {
@@ -1518,7 +1556,7 @@ async function clearSession() {
     if (!confirmed) return;
 
     state.sessionId = null;
-    chatElements.chatMessages.innerHTML = '<div class="text-center text-txt-secondary text-sm">Start a conversation...</div>';
+    renderChatEmptyState();
     syncChatControlLocks();
     updateStatus();
 }
