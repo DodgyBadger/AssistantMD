@@ -20,8 +20,8 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/app/docker/.venv/bin/python",
-        "python.terminal.activateEnvironment": true,
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.terminal.activateEnvironment": false,
         "terminal.integrated.shell.linux": "/bin/bash"
       },
       "extensions": [
