@@ -49,12 +49,10 @@ This plan focuses on reusable primitives, not a single hardcoded page-classifica
 Add ingestion mode choices for PDF jobs:
 - `markdown` (existing)
 - `page_images` (new)
-- `hybrid` (both)
 
 For `page_images` mode, write vault artifacts under configured import output root:
 - `Imported/<doc>/pages/page_0001.png ...`
 - `Imported/<doc>/manifest.json` (optional but recommended)
-- `Imported/<doc>/index.md` (optional human-readable entry point)
 
 ### Manifest minimum fields
 - source PDF path/name
@@ -70,12 +68,11 @@ Support direct import of image files from `AssistantMD/Import` as first-class so
 
 Proposed image strategies:
 - `image_ocr` (new): OCR image -> markdown/text artifact.
-- `image_copy` (new): store/relocate image artifact without OCR text extraction (for downstream vision workflows).
 
 Provider tie-in:
 - Implement `image_ocr` using Mistral OCR (same secret-gated approach as `pdf_ocr`).
 - Add settings for image OCR model/endpoint (defaults may mirror existing PDF OCR settings initially).
-- Keep strategy ordering configurable (for example `["image_ocr", "image_copy"]`).
+- Keep strategy ordering configurable (for example `["image_ocr"]`).
 
 ### OCR image retention (revisit item)
 Current behavior:
@@ -238,7 +235,7 @@ Guideline:
 
 ## Phase 1: Core Image Content Enablement
 1. Add ingestion mode for PDF page image extraction.
-2. Add image file sources and baseline strategies (`image_ocr`, `image_copy`).
+2. Add image file sources and baseline strategy (`image_ocr`).
 3. Add extension-aware `@input file:` behavior.
 4. Add markdown-embedded image reference extraction for `.md` inputs.
 5. Add image-reference payload path through input/routing.
@@ -287,8 +284,8 @@ Partially complete:
   - enabling `vision` on existing aliases is currently manual via configuration UI.
 
 Not started (from Phase 1):
-- PDF `page_images`/`hybrid` ingestion modes.
-- Image ingestion strategies (`image_ocr`, `image_copy`).
+- PDF `page_images` ingestion mode.
+- Image ingestion strategy (`image_ocr`).
 - Extension-aware `@input file:` behavior for non-markdown default handling.
 - Markdown embedded image ref extraction and attachment in workflow/context pipeline.
 - Formal documentation/examples for end users.
@@ -296,7 +293,8 @@ Not started (from Phase 1):
 Next recommended implementation order:
 1. Add targeted validation scenarios for chunked markdown image reads in workflow/context and `file_ops_safe`.
 2. Finalize multimodal vs text auto-buffering policy interaction for large multimodal tool outputs.
-3. Add ingestion features (`page_images`, `image_ocr`, `image_copy`).
+3. Add ingestion features (`page_images`, `image_ocr`).
+3. Add ingestion features (`page_images`, `image_ocr`).
 4. Define/implement upgrade assist for existing settings (optional migration helper or UI nudge for missing `vision` capability).
 5. Add documentation/examples for end users (including supported file-type policy and `images=auto|ignore` behavior).
 
@@ -336,8 +334,8 @@ Behavior notes:
 - Image policy no longer has strict modes (`include`/`only`) in this phase.
 
 Still not started:
-- PDF `page_images` / `hybrid` ingestion modes.
-- Image ingestion strategies (`image_ocr`, `image_copy`).
+- PDF `page_images` ingestion mode.
+- Image ingestion strategy (`image_ocr`).
 - Dedicated validation scenarios for chunking/image-policy paths.
 
 ### Addendum (2026-02-25, later)
@@ -390,8 +388,8 @@ Completed:
 - Remote image policy setting is still refs-only; no download/attach path implemented yet.
 
 Remaining from Phase 1:
-- PDF `page_images` / `hybrid` ingestion modes.
-- Image ingestion strategies (`image_ocr`, `image_copy`).
+- PDF `page_images` ingestion mode.
+- Image ingestion strategy (`image_ocr`).
 
 ## Progress Update (2026-02-28)
 Status snapshot for ingestion-mode and OCR-asset work completed in this session.
@@ -433,18 +431,17 @@ Behavior notes:
 - Non-PDF ingestion continues through existing strategy-based behavior.
 
 Remaining from Phase 1 (revised):
-- `hybrid` PDF ingestion mode (if still desired for this phase).
-- `image_copy` ingestion strategy.
+- none in this track (`page_images` + `image_ocr` completed).
 
 ## Validation Strategy
 - Unit tests for extension resolution and input parsing.
 - Unit tests for markdown embedded image parsing and path resolution.
 - Unit tests for `images=` policy modes (`auto/ignore`).
 - Smoke tests for ingestion output artifacts (`pages/`, `manifest.json`).
-- Smoke tests for image-file ingestion (`image_ocr` success/failure, `image_copy` outputs).
+- Smoke tests for image-file ingestion (`image_ocr` success/failure).
 - End-to-end scenario:
   - import PDF -> image pages
-  - import standalone image -> OCR text output and/or copied artifact
+  - import standalone image -> OCR text output
   - workflow consumes direct image refs
   - workflow consumes markdown file containing embedded image refs
   - outputs markdown plan/index
