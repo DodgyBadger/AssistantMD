@@ -393,6 +393,49 @@ Remaining from Phase 1:
 - PDF `page_images` / `hybrid` ingestion modes.
 - Image ingestion strategies (`image_ocr`, `image_copy`).
 
+## Progress Update (2026-02-28)
+Status snapshot for ingestion-mode and OCR-asset work completed in this session.
+
+Completed:
+- Implemented image ingestion source + OCR strategy:
+  - image file importer registration (`.png`, `.jpg`, `.jpeg`, `.webp`, `.tif`, `.tiff`)
+  - dedicated `image_ocr` strategy (separate from `pdf_ocr`)
+- Refactored OCR integration to shared helper plumbing:
+  - common Mistral OCR request/response parsing path
+  - separate strategy wrappers for PDF vs image document types
+- Simplified OCR configuration to shared keys:
+  - `ingestion_ocr_model`
+  - `ingestion_ocr_endpoint`
+  - legacy OCR key fallback retained for compatibility
+- Added OCR image capture controls:
+  - global setting: `ingestion_ocr_capture_images`
+  - one-shot import UI override: `capture_ocr_images`
+- Implemented OCR image persistence:
+  - OCR response image payloads are parsed and written as binary artifacts
+  - markdown output records `ocr_images_saved` metadata when assets are emitted
+- Implemented markdown image-link rewrite for OCR output:
+  - rewrites OCR inline refs (for example `img-0.jpeg`) to local saved asset paths
+  - preserves followable links in rendered markdown outputs
+- Updated import output layout to per-import folders:
+  - markdown mode: `Imported/<name>/<name>.md`
+  - OCR assets: `Imported/<name>/assets/...`
+- Added PDF `page_images` import mode (batch-friendly via existing Import workflow):
+  - UI mode selector (`Markdown` vs `Page Images`)
+  - one-shot `pdf_mode` request option through API and job options
+  - page image render output: `Imported/<name>/pages/page_0001.png ...`
+  - manifest output: `Imported/<name>/manifest.json`
+- Added shared output-path helper to prevent naming/path drift between modes:
+  - markdown and `page_images` now resolve folder/name rules from one code path
+
+Behavior notes:
+- `page_images` mode bypasses text extraction strategies for PDF files only.
+- In `page_images` mode, OCR-specific toggles are disabled in the import UI.
+- Non-PDF ingestion continues through existing strategy-based behavior.
+
+Remaining from Phase 1 (revised):
+- `hybrid` PDF ingestion mode (if still desired for this phase).
+- `image_copy` ingestion strategy.
+
 ## Validation Strategy
 - Unit tests for extension resolution and input parsing.
 - Unit tests for markdown embedded image parsing and path resolution.

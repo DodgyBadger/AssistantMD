@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 from core.ingestion.models import ExtractedDocument, RenderOptions
+from core.ingestion.output_paths import resolve_import_output_paths
 from core.runtime.paths import get_data_root
 
 
@@ -18,26 +19,14 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> List[dic
     """
     Render a single markdown artifact for the extracted document.
     """
-    base_dir = options.path_pattern or "Imported/"
-    rel_dir = base_dir.rstrip("/")
-    if options.relative_dir:
-        rel_dir = os.path.join(rel_dir, options.relative_dir.strip("/"))
-
-    # Prefer original filename when available; otherwise derive from title/URL
-    filename = None
-    if options.source_filename:
-        filename = Path(options.source_filename).stem
-    if not filename:
-        filename = options.title or "import"
-
-    if options.source_filename and options.source_filename.startswith("http"):
-        filename = _slugify(filename)
-    else:
-        # Keep file-like names but strip path separators
-        filename = filename.replace("/", "_").replace("\\", "_").strip() or "import"
-
-    job_dir = os.path.join(rel_dir, filename).lstrip("/")
-    rel_path = os.path.join(job_dir, f"{filename}.md").lstrip("/")
+    paths = resolve_import_output_paths(
+        path_pattern=options.path_pattern,
+        relative_dir=options.relative_dir,
+        source_filename=options.source_filename,
+        title=options.title,
+    )
+    job_dir = paths.job_dir
+    rel_path = paths.markdown_path
 
     display_source_path = None
     if options.source_filename:
@@ -97,17 +86,6 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> List[dic
     ]
     artifacts.extend(image_artifacts)
     return artifacts
-
-
-def _slugify(name: str) -> str:
-    allowed = []
-    for ch in name.lower():
-        if ch.isalnum():
-            allowed.append(ch)
-        elif ch in (" ", "-", "_"):
-            allowed.append("-")
-    slug = "".join(allowed).strip("-")
-    return slug or "import"
 
 
 def _render_ocr_image_artifacts(

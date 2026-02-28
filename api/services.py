@@ -236,6 +236,7 @@ def scan_import_folder(
     queue_only: bool = False,
     strategies: list[str] | None = None,
     capture_ocr_images: bool | None = None,
+    pdf_mode: str | None = None,
 ):
     """
     Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
@@ -259,6 +260,9 @@ def scan_import_folder(
     extractor_options: dict[str, Any] = {}
     if capture_ocr_images is not None:
         extractor_options["ocr_capture_images"] = bool(capture_ocr_images)
+    normalized_pdf_mode = (pdf_mode or "").strip().lower()
+    if normalized_pdf_mode not in {"", "markdown", "page_images"}:
+        normalized_pdf_mode = ""
 
     for root in search_roots:
         for item in sorted(root.iterdir()):
@@ -285,6 +289,8 @@ def scan_import_folder(
                 job_options["strategies"] = strategies
             if extractor_options:
                 job_options["extractor_options"] = extractor_options
+            if normalized_pdf_mode:
+                job_options["pdf_mode"] = normalized_pdf_mode
 
             job = ingest_service.enqueue_job(
                 source_uri=item.name,

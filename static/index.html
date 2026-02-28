@@ -1003,7 +1003,14 @@
                             </div>
 
                             <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                                <div class="flex items-center gap-4">
+                                <div class="flex items-center gap-4 flex-wrap">
+                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                        <span>PDF Mode</span>
+                                        <select id="import-pdf-mode" class="px-2 py-1 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                            <option value="markdown">Markdown</option>
+                                            <option value="page_images">Page Images</option>
+                                        </select>
+                                    </label>
                                     <label class="flex items-center gap-2 text-sm text-txt-primary">
                                         <input id="import-use-ocr" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
                                         <span>Use OCR (PDF)</span>

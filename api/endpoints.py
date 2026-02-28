@@ -216,6 +216,7 @@ async def import_scan(request: ImportScanRequest):
             queue_only=request.queue_only,
             strategies=request.strategies,
             capture_ocr_images=request.capture_ocr_images,
+            pdf_mode=request.pdf_mode,
         )
         job_infos = [
             ImportJobInfo(

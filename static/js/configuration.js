@@ -85,6 +85,7 @@
         secretResetBtn: null,
 
         importVaultSelect: null,
+        importPdfModeSelect: null,
         importQueueCheckbox: null,
         importUseOcrCheckbox: null,
         importCaptureOcrImagesCheckbox: null,
@@ -132,6 +133,7 @@
         elements.secretResetBtn = document.getElementById('secret-reset');
 
         elements.importVaultSelect = document.getElementById('import-vault-select');
+        elements.importPdfModeSelect = document.getElementById('import-pdf-mode');
         elements.importQueueCheckbox = document.getElementById('import-queue');
         elements.importUseOcrCheckbox = document.getElementById('import-use-ocr');
         elements.importCaptureOcrImagesCheckbox = document.getElementById('import-capture-ocr-images');
@@ -165,6 +167,7 @@
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
         elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
+        elements.importPdfModeSelect?.addEventListener('change', updateImportOcrAvailability);
     }
 
     const restartNoticeText = 'Restart recommended: restart the container to apply pending changes.';
@@ -1211,19 +1214,32 @@ async function saveModelRow(rowKey) {
         const hasMistral = state.secrets.some(
             (entry) => entry.name === 'MISTRAL_API_KEY' && entry.has_value
         );
-        elements.importUseOcrCheckbox.disabled = !hasMistral;
+        const isPageImagesMode = (elements.importPdfModeSelect?.value || 'markdown') === 'page_images';
+        const disableOcrControls = !hasMistral || isPageImagesMode;
+
+        elements.importUseOcrCheckbox.disabled = disableOcrControls;
         if (elements.importCaptureOcrImagesCheckbox) {
-            elements.importCaptureOcrImagesCheckbox.disabled = !hasMistral;
+            elements.importCaptureOcrImagesCheckbox.disabled = disableOcrControls;
         }
-        elements.importUseOcrCheckbox.title = hasMistral
-            ? ''
-            : 'Requires MISTRAL_API_KEY secret';
-        if (elements.importCaptureOcrImagesCheckbox) {
-            elements.importCaptureOcrImagesCheckbox.title = hasMistral
+        if (isPageImagesMode) {
+            elements.importUseOcrCheckbox.title = 'Disabled for PDF mode: Page Images';
+            if (elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.title = 'Disabled for PDF mode: Page Images';
+            }
+        } else {
+            elements.importUseOcrCheckbox.title = hasMistral
                 ? ''
                 : 'Requires MISTRAL_API_KEY secret';
+            if (elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.title = hasMistral
+                    ? ''
+                    : 'Requires MISTRAL_API_KEY secret';
+            }
         }
-        if (!hasMistral) {
+        if (elements.importCaptureOcrImagesCheckbox) {
+            // title is set above to keep mode/secret messaging consistent
+        }
+        if (disableOcrControls) {
             elements.importUseOcrCheckbox.checked = false;
             if (elements.importCaptureOcrImagesCheckbox) {
                 elements.importCaptureOcrImagesCheckbox.checked = false;
@@ -1585,8 +1601,12 @@ async function saveModelRow(rowKey) {
         const queueOnly = Boolean(elements.importQueueCheckbox?.checked);
         const useOcr = Boolean(elements.importUseOcrCheckbox?.checked);
         const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
+        const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
 
         const payload = { vault, queue_only: queueOnly };
+        if (pdfMode === 'page_images') {
+            payload.pdf_mode = 'page_images';
+        }
         if (useOcr) {
             payload.strategies = ["pdf_ocr", "pdf_text", "image_ocr"];
         }
