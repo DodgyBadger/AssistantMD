@@ -329,6 +329,14 @@
         .message-bubble.message-assistant .message-body em {
             color: rgb(var(--text-primary));
         }
+        .message-bubble.message-assistant .message-body h1,
+        .message-bubble.message-assistant .message-body h2,
+        .message-bubble.message-assistant .message-body h3,
+        .message-bubble.message-assistant .message-body h4,
+        .message-bubble.message-assistant .message-body h5,
+        .message-bubble.message-assistant .message-body h6 {
+            color: rgb(var(--text-primary));
+        }
         .message-bubble.message-assistant .message-body a {
             color: rgb(var(--accent-primary));
         }
@@ -337,6 +345,38 @@
         }
         .message-bubble.message-assistant .message-body hr {
             border-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body blockquote {
+            color: rgb(var(--text-primary));
+            border-inline-start-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body table {
+            color: rgb(var(--text-primary));
+        }
+        .message-bubble.message-assistant .message-body thead {
+            border-bottom-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body tfoot {
+            border-top-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body tbody tr {
+            border-bottom-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body th,
+        .message-bubble.message-assistant .message-body td {
+            color: rgb(var(--text-primary));
+            border-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body ul > li::marker,
+        .message-bubble.message-assistant .message-body ol > li::marker {
+            color: rgb(var(--text-secondary));
+        }
+        .message-bubble.message-assistant .message-body figcaption {
+            color: rgb(var(--text-secondary));
+        }
+        .message-bubble.message-assistant .message-body kbd {
+            color: rgb(var(--text-primary));
+            box-shadow: 0 0 0 1px rgb(var(--border-primary));
         }
         .message-bubble.message-assistant pre {
             background: rgb(var(--bg-elevated));
@@ -705,6 +745,14 @@
             box-shadow: 0 8px 20px rgb(0 0 0 / 0.14);
             padding: 0.45rem;
             z-index: 30;
+        }
+        @media (max-width: 768px) {
+            .chat-attachment-popover {
+                left: 0.75rem;
+                right: 0.75rem;
+                width: auto;
+                max-width: none;
+            }
         }
         .chat-attachment-item {
             display: inline-flex;

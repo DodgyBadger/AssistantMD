@@ -25,6 +25,7 @@ from core.settings import (
     get_auto_buffer_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
+    get_file_ops_safe_list_max_results,
     get_file_search_timeout_seconds,
 )
 from core.utils.image_inputs import build_image_tool_payload
@@ -99,8 +100,19 @@ class FileOpsSafe(BaseTool):
                     return cls._move_file(target, destination, vault_path)
                 elif operation == "list":
                     if get_virtual_mount_key(target):
-                        return cls._list_virtual_mount(target, include_all=include_all, recursive=recursive)
-                    return cls._list_files(target, vault_path, include_all=include_all, recursive=recursive)
+                        return cls._list_virtual_mount(
+                            target,
+                            include_all=include_all,
+                            recursive=recursive,
+                            max_results=get_file_ops_safe_list_max_results(),
+                        )
+                    return cls._list_files(
+                        target,
+                        vault_path,
+                        include_all=include_all,
+                        recursive=recursive,
+                        max_results=get_file_ops_safe_list_max_results(),
+                    )
                 elif operation == "mkdir":
                     if get_virtual_mount_key(target):
                         return cls._deny_virtual_write(target, "mkdir")
@@ -124,7 +136,7 @@ class FileOpsSafe(BaseTool):
 DISCOVERY - Start narrow, expand as needed:
 - file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)
 - file_ops_safe(operation="list", target="FolderName"): List .md files inside a folder (non-recursive)
-- file_ops_safe(operation="list", target="FolderName", recursive=True): Recursive listing (use sparingly - capped at 200 results)
+- file_ops_safe(operation="list", target="FolderName", recursive=True): Recursive listing (use sparingly - result cap is configurable)
 - file_ops_safe(operation="list", target="FolderName/*", include_all=True): Include non-md/hidden files
 - file_ops_safe(operation="list", target="notes/**/*.md", recursive=True): Explicit glob pattern for recursive match
 
@@ -201,7 +213,7 @@ BEST PRACTICES:
         if binary_content.is_image:
             max_image_bytes = get_chunking_max_image_bytes_per_image()
             image_size_bytes = len(binary_content.data)
-            if image_size_bytes > max_image_bytes:
+            if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
                 max_image_mb = get_chunking_max_image_mb_per_image()
                 return (
                     f"Cannot attach image '{path}' ({image_size_bytes} bytes) - exceeds "
@@ -361,7 +373,14 @@ BEST PRACTICES:
         return f"Successfully moved '{path}' to '{destination}'"
 
     @classmethod
-    def _list_files(cls, target: str, vault_path: str, include_all: bool, recursive: bool, max_results: int = 200) -> str:
+    def _list_files(
+        cls,
+        target: str,
+        vault_path: str,
+        include_all: bool,
+        recursive: bool,
+        max_results: int,
+    ) -> str:
         """List files and directories matching a target path or glob."""
         # Default to top-level view
         target = target.strip()
@@ -413,7 +432,7 @@ BEST PRACTICES:
 
         # Cap results to avoid overwhelming context
         truncated = False
-        if len(files) + len(directories) > max_results:
+        if max_results > 0 and len(files) + len(directories) > max_results:
             truncated = True
             remaining = max_results
             directories = sorted(directories)[:remaining]
@@ -434,7 +453,13 @@ BEST PRACTICES:
         return '\n\n'.join(result_parts)
 
     @classmethod
-    def _list_virtual_mount(cls, target: str, include_all: bool, recursive: bool, max_results: int = 200) -> str:
+    def _list_virtual_mount(
+        cls,
+        target: str,
+        include_all: bool,
+        recursive: bool,
+        max_results: int,
+    ) -> str:
         """List files and directories under a virtual mount."""
         target = target.strip()
         mount_key = get_virtual_mount_key(target) or ""
@@ -490,7 +515,7 @@ BEST PRACTICES:
             return f"No files or directories found for target '{target}'"
 
         truncated = False
-        if len(files) + len(directories) > max_results:
+        if max_results > 0 and len(files) + len(directories) > max_results:
             truncated = True
             remaining = max_results
             directories = sorted(directories)[:remaining]

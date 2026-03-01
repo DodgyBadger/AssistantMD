@@ -384,6 +384,20 @@ def get_file_search_timeout_seconds() -> float:
     return timeout if timeout > 0 else 10.0
 
 
+def get_file_ops_safe_list_max_results() -> int:
+    """Return max list results for file_ops_safe list operations (0 disables cap)."""
+    entry = get_general_settings().get("file_ops_safe_list_max_results")
+    value = getattr(entry, "value", None) if entry is not None else None
+    template_default = _get_template_setting_positive_int(
+        "file_ops_safe_list_max_results", 200
+    )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return template_default
+    return parsed if parsed >= 0 else template_default
+
+
 def get_routing_allowed_tools() -> list[str]:
     """Return list of tool names allowed to accept routing in chat."""
     entry = get_general_settings().get("routing_allowed_tools")
@@ -399,11 +413,12 @@ def get_chunking_max_images_per_prompt() -> int:
     """Return max image attachments per chunked prompt."""
     entry = get_general_settings().get("chunking_max_images_per_prompt")
     value = getattr(entry, "value", None) if entry is not None else None
+    template_default = 20
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        return 20
-    return parsed if parsed > 0 else 20
+        return template_default
+    return parsed if parsed >= 0 else template_default
 
 
 def get_chunking_max_image_mb_per_image() -> int:
@@ -418,7 +433,7 @@ def get_chunking_max_image_mb_per_image() -> int:
         parsed_mb = int(value_mb)
     except (TypeError, ValueError):
         parsed_mb = template_default
-    return parsed_mb if parsed_mb > 0 else template_default
+    return parsed_mb if parsed_mb >= 0 else template_default
 
 
 def get_chunking_max_image_bytes_per_image() -> int:
@@ -441,7 +456,7 @@ def get_chunking_max_image_bytes_per_image() -> int:
         parsed = int(value)
     except (TypeError, ValueError):
         return template_default_bytes
-    return parsed if parsed > 0 else template_default_bytes
+    return parsed if parsed >= 0 else template_default_bytes
 
 
 def get_chunking_max_image_bytes_total() -> int:
@@ -454,7 +469,7 @@ def get_chunking_max_image_bytes_total() -> int:
             parsed_mb = int(value_mb)
         except (TypeError, ValueError):
             parsed_mb = 100
-        parsed_mb = parsed_mb if parsed_mb > 0 else 100
+        parsed_mb = parsed_mb if parsed_mb >= 0 else 100
         return parsed_mb * 1024 * 1024
 
     # Backward-compatible fallback for legacy byte-based setting name.
@@ -464,7 +479,7 @@ def get_chunking_max_image_bytes_total() -> int:
         parsed = int(value)
     except (TypeError, ValueError):
         return 100 * 1024 * 1024
-    return parsed if parsed > 0 else 100 * 1024 * 1024
+    return parsed if parsed >= 0 else 100 * 1024 * 1024
 
 
 def get_chunking_allow_remote_images() -> bool:

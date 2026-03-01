@@ -105,7 +105,10 @@ def evaluate_image_attachment(
         )
 
     blob_size = len(image_blob.data)
-    if blob_size > policy.max_image_bytes_per_image:
+    if (
+        policy.max_image_bytes_per_image > 0
+        and blob_size > policy.max_image_bytes_per_image
+    ):
         return ImageAttachmentDecision(
             marker=format_image_skipped_marker("too large", image_name),
             image_blob=None,
@@ -118,7 +121,10 @@ def evaluate_image_attachment(
             image_key=image_key,
             image_hash=image_hash,
         )
-    if attached_count >= policy.max_images_per_prompt:
+    if (
+        policy.max_images_per_prompt > 0
+        and attached_count >= policy.max_images_per_prompt
+    ):
         return ImageAttachmentDecision(
             marker=format_image_skipped_marker("count limit", image_name),
             image_blob=None,
@@ -128,7 +134,10 @@ def evaluate_image_attachment(
             image_key=image_key,
             image_hash=image_hash,
         )
-    if attached_bytes + blob_size > policy.max_image_bytes_total:
+    if (
+        policy.max_image_bytes_total > 0
+        and attached_bytes + blob_size > policy.max_image_bytes_total
+    ):
         return ImageAttachmentDecision(
             marker=format_image_skipped_marker("byte budget", image_name),
             image_blob=None,

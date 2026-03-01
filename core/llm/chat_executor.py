@@ -261,7 +261,7 @@ def _resolve_image_prompt(
             raise ValueError(f"File is not an image and cannot be attached: {candidate}")
         image_size_bytes = len(file_content.data)
         max_image_bytes = get_chunking_max_image_bytes_per_image()
-        if image_size_bytes > max_image_bytes:
+        if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
             max_image_mb = get_chunking_max_image_mb_per_image()
             raise ValueError(
                 f"Image '{candidate}' is too large to attach ({image_size_bytes} bytes). "
@@ -281,7 +281,7 @@ def _resolve_image_prompt(
             )
         image_size_bytes = len(file_content.data)
         max_image_bytes = get_chunking_max_image_bytes_per_image()
-        if image_size_bytes > max_image_bytes:
+        if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
             max_image_mb = get_chunking_max_image_mb_per_image()
             raise ValueError(
                 f"Image '{display_name}' is too large to attach ({image_size_bytes} bytes). "

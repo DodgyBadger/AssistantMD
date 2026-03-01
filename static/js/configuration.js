@@ -1533,6 +1533,80 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    function normalizeOutputPaths(outputs) {
+        if (!Array.isArray(outputs)) return [];
+        const seen = new Set();
+        const normalized = [];
+        outputs.forEach((value) => {
+            const path = String(value || '').trim();
+            if (!path || seen.has(path)) return;
+            seen.add(path);
+            normalized.push(path);
+        });
+        return normalized;
+    }
+
+    function summarizeImportOutputs(outputs) {
+        const paths = normalizeOutputPaths(outputs);
+        if (!paths.length) {
+            return {
+                destinationLabel: 'No output files',
+                filesLabel: '0 files',
+            };
+        }
+
+        const directorySegments = paths.map((path) => {
+            const slashIndex = path.lastIndexOf('/');
+            const folder = slashIndex >= 0 ? path.slice(0, slashIndex) : '';
+            return folder ? folder.split('/').filter(Boolean) : [];
+        });
+
+        let commonDir = directorySegments[0] ? directorySegments[0].slice() : [];
+        for (let i = 1; i < directorySegments.length; i += 1) {
+            const current = directorySegments[i];
+            let prefixLen = 0;
+            while (
+                prefixLen < commonDir.length &&
+                prefixLen < current.length &&
+                commonDir[prefixLen] === current[prefixLen]
+            ) {
+                prefixLen += 1;
+            }
+            commonDir = commonDir.slice(0, prefixLen);
+            if (!commonDir.length) break;
+        }
+
+        // Import outputs generally live under Imported/<import-set>/...
+        // Prefer showing that root folder instead of deep subfolders like /pages.
+        const destinationSegments = (
+            commonDir.length >= 2 && commonDir[0] === 'Imported'
+                ? commonDir.slice(0, 2)
+                : commonDir
+        );
+        const destinationLabel = destinationSegments.length
+            ? destinationSegments.join('/')
+            : '(vault root)';
+
+        const extensionCounts = new Map();
+        paths.forEach((path) => {
+            const slashIndex = path.lastIndexOf('/');
+            const filename = slashIndex >= 0 ? path.slice(slashIndex + 1) : path;
+            const dotIndex = filename.lastIndexOf('.');
+            const extension = dotIndex > 0
+                ? filename.slice(dotIndex + 1).toLowerCase()
+                : 'no-ext';
+            extensionCounts.set(extension, (extensionCounts.get(extension) || 0) + 1);
+        });
+
+        const typeParts = Array.from(extensionCounts.entries())
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([ext, count]) => `${count} ${ext}`);
+
+        const filesLabel = `${paths.length} file${paths.length === 1 ? '' : 's'} (${typeParts.join(', ')})`;
+
+        return { destinationLabel, filesLabel };
+    }
+
     function renderImportResults() {
         if (!elements.importResults) return;
         const results = state.importResults;
@@ -1549,12 +1623,21 @@ async function saveModelRow(rowKey) {
                 html += '<ul class="list-disc list-inside space-y-1">';
                 html += jobs
                     .map((job) => {
-                        const outputs = Array.isArray(job.outputs) && job.outputs.length
-                            ? ` → ${job.outputs.join(', ')}`
-                            : '';
+                        const outputSummary = summarizeImportOutputs(job.outputs);
                         const status = job.status || 'queued';
                         const source = job.source_uri || 'unknown';
-                        return `<li><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span>${outputs ? ` <span class="subtle">${outputs}</span>` : ''}</li>`;
+                        return `
+                            <li>
+                                <span class="text-txt-primary font-medium">${escapeHtml(source)}</span>
+                                <span class="subtle">(${escapeHtml(status)})</span>
+                                <div class="text-xs text-txt-secondary ml-4">
+                                    Destination: <span class="text-txt-primary">${escapeHtml(outputSummary.destinationLabel)}</span>
+                                </div>
+                                <div class="text-xs text-txt-secondary ml-4">
+                                    Files: ${escapeHtml(outputSummary.filesLabel)}
+                                </div>
+                            </li>
+                        `;
                     })
                     .join('');
                 html += '</ul></div>';
@@ -1562,25 +1645,24 @@ async function saveModelRow(rowKey) {
             if (skipped.length > 0) {
                 html += `<div class="space-y-2 pt-3 border-t border-border-primary"><div class="font-medium text-txt-primary">Skipped (${skipped.length})</div>`;
                 html += '<ul class="list-disc list-inside space-y-1">';
-                html += skipped.map((name) => `<li>${name}</li>`).join('');
+                html += skipped.map((name) => `<li>${escapeHtml(name)}</li>`).join('');
                 html += '</ul></div>';
             }
             if (html) sections.push(html);
         }
 
         if (urlResult) {
-            const outputs = Array.isArray(urlResult.outputs) ? urlResult.outputs : [];
+            const outputSummary = summarizeImportOutputs(urlResult.outputs);
             const status = urlResult.status || 'unknown';
             const error = urlResult.error;
             const source = urlResult.source_uri || urlResult.url || 'unknown';
 
             let html = `<div class="space-y-2"><div class="font-medium text-txt-primary">Latest URL import</div>`;
-            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span></div>`;
-            if (outputs.length) {
-                html += '<div class="text-sm">Outputs: ' + outputs.join(', ') + '</div>';
-            }
+            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${escapeHtml(source)}</span> <span class="subtle">(${escapeHtml(status)})</span></div>`;
+            html += `<div class="text-sm text-txt-secondary">Destination: <span class="text-txt-primary">${escapeHtml(outputSummary.destinationLabel)}</span></div>`;
+            html += `<div class="text-sm text-txt-secondary">Files: ${escapeHtml(outputSummary.filesLabel)}</div>`;
             if (error) {
-                html += `<div class="text-sm state-error">Error: ${error}</div>`;
+                html += `<div class="text-sm state-error">Error: ${escapeHtml(error)}</div>`;
             }
             html += '</div>';
             sections.push(html);

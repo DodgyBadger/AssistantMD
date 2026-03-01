@@ -28,21 +28,25 @@ settings:
     value: 10
     description: "Timeout in seconds for file_ops_safe search operations."
     restart_required: false
+  file_ops_safe_list_max_results:
+    value: 200
+    description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
+    restart_required: false
   routing_allowed_tools:
     value: []
     description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"
     restart_required: false
   chunking_max_images_per_prompt:
     value: 20
-    description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt."
+    description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt. 0 = disabled."
     restart_required: false
   chunking_max_image_mb_per_image:
     value: 5
-    description: "Maximum size in MB for a single image attachment from chunked markdown inputs."
+    description: "Maximum size in MB for a single image attachment from chunked markdown inputs. 0 = disabled."
     restart_required: false
   chunking_max_image_mb_total:
     value: 100
-    description: "Maximum total MB allowed for all chunked image attachments in a single prompt."
+    description: "Maximum total MB allowed for all chunked image attachments in a single prompt. 0 = disabled."
     restart_required: false
   chunking_allow_remote_images:
     value: false

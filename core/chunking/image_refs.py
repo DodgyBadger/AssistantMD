@@ -147,7 +147,10 @@ def evaluate_markdown_image_policy(
         if image_key in unique_images:
             continue
         image_size = resolved.stat().st_size
-        if image_size > policy.max_image_bytes_per_image:
+        if (
+            policy.max_image_bytes_per_image > 0
+            and image_size > policy.max_image_bytes_per_image
+        ):
             return MarkdownImageDecision(
                 attach_images=False,
                 reason="per-image size limit exceeded",
@@ -159,7 +162,10 @@ def evaluate_markdown_image_policy(
             )
         unique_images[image_key] = image_size
 
-    if len(unique_images) > policy.max_images_per_prompt:
+    if (
+        policy.max_images_per_prompt > 0
+        and len(unique_images) > policy.max_images_per_prompt
+    ):
         return MarkdownImageDecision(
             attach_images=False,
             reason="max image count exceeded",
@@ -169,7 +175,10 @@ def evaluate_markdown_image_policy(
                 vault_path=vault_path,
             ),
         )
-    if sum(unique_images.values()) > policy.max_image_bytes_total:
+    if (
+        policy.max_image_bytes_total > 0
+        and sum(unique_images.values()) > policy.max_image_bytes_total
+    ):
         return MarkdownImageDecision(
             attach_images=False,
             reason="total image byte budget exceeded",
