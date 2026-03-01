@@ -29,6 +29,7 @@ from core.directives.tools import ToolsDirective
 from core.logger import UnifiedLogger
 from core.chunking import build_input_files_prompt
 from core.llm.model_utils import model_supports_capability
+from core.llm.model_selection import resolve_model_execution_spec
 from core.runtime.buffers import BufferStore
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.utils.hash import hash_file_content
@@ -869,7 +870,13 @@ def resolve_section_inputs(
             )
     input_files_prompt = None
     if input_file_data or empty_input_file_directive:
-        supports_vision = model_supports_capability(model_alias, "vision")
+        execution = resolve_model_execution_spec(model_alias)
+        # Skip modes (for example "@model none") do not have model capabilities.
+        supports_vision = (
+            False
+            if execution.mode == "skip"
+            else model_supports_capability(model_alias, "vision")
+        )
         built_prompt = build_input_files_prompt(
             input_file_data=input_file_data,
             vault_path=vault_path,
@@ -1094,7 +1101,8 @@ async def run_context_section(
     model_values = section_directives.get("model", [])
     if model_values:
         model_directive_value = model_values[-1]
-        if model_directive_value.strip().lower() == "none":
+        execution = resolve_model_execution_spec(model_directive_value)
+        if execution.mode == "skip":
             skip_llm = True
 
     output_targets = resolve_section_outputs(

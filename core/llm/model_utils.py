@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Dict, Tuple, Any
 
 from core.logger import UnifiedLogger
+from core.llm.model_selection import resolve_model_execution_spec
 from core.settings.store import get_models_config, get_providers_config
 from core.settings.secrets_store import get_secret_value, secret_has_value, load_secrets
 
@@ -177,6 +178,9 @@ def model_supports_capability(model_name: str, capability: str) -> bool:
     """Return True when model alias includes the requested capability."""
     requested = capability.lower().strip()
     if not requested:
+        return False
+    execution = resolve_model_execution_spec(model_name)
+    if execution.mode == "skip" or not execution.base_alias:
         return False
     return requested in get_model_capabilities(model_name)
 

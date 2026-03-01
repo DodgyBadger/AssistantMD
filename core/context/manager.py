@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 from pydantic_ai import RunContext
 from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
+from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.context.templates import load_template
 from core.logger import UnifiedLogger
 from core.constants import (
@@ -56,7 +57,20 @@ async def manage_context(
     # Resolve model instance
     model_directive = ModelDirective()
     model_to_use = model_override or input_data.model_alias
+    model_execution = resolve_model_execution_spec(model_to_use)
+    if model_execution.mode == "skip":
+        return ContextManagerResult(
+            raw_output="",
+            template=input_data.template,
+            model_alias="none",
+        )
     model_instance = model_directive.process_value(model_to_use, "context-manager")
+    if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
+        return ContextManagerResult(
+            raw_output="",
+            template=input_data.template,
+            model_alias="none",
+        )
 
     manager_instruction = instructions_override if instructions_override is not None else CONTEXT_MANAGER_SYSTEM_INSTRUCTION
     context_instructions = input_data.template.instructions

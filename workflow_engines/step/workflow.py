@@ -10,6 +10,7 @@ from core.core_services import CoreServices
 from core.chunking import build_input_files_prompt
 from core.llm.agents import PromptInput
 from core.llm.model_utils import model_supports_capability
+from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.runtime.buffers import BufferStore
 from core.utils.routing import OutputTarget, write_output
 from core.directives.tools import ToolsDirective
@@ -264,11 +265,13 @@ def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
     return False, ""
 
 
-def _resolve_workflow_model_alias(processed_step) -> Optional[str]:
-    raw_model = processed_step.get_directive_value("model")
-    if isinstance(raw_model, str) and raw_model.strip():
-        return raw_model.strip()
-    return None
+def _resolve_workflow_model_execution(processed_step) -> ModelExecutionSpec:
+    model_value = processed_step.get_directive_value("model")
+    if isinstance(model_value, ModelExecutionSpec):
+        return model_value
+    if isinstance(model_value, str) and model_value.strip():
+        return resolve_model_execution_spec(model_value.strip())
+    return resolve_model_execution_spec(None)
 
 
 def build_final_prompt(processed_step, *, vault_path: str) -> tuple[PromptInput, str, int, list[str]]:
@@ -278,9 +281,15 @@ def build_final_prompt(processed_step, *, vault_path: str) -> tuple[PromptInput,
     if not input_file_data:
         return base_prompt, base_prompt, 0, []
 
-    model_alias = _resolve_workflow_model_alias(processed_step)
+    model_execution = _resolve_workflow_model_execution(processed_step)
     supports_vision = (
-        model_supports_capability(model_alias, "vision") if model_alias else None
+        False
+        if model_execution.mode == "skip"
+        else (
+            model_supports_capability(model_execution.raw_alias, "vision")
+            if model_execution.raw_alias
+            else None
+        )
     )
     built = build_input_files_prompt(
         input_file_data=input_file_data,
@@ -313,6 +322,10 @@ async def create_step_agent(processed_step, workflow_instructions: str, services
     """Create AI agent for step execution with optional tool integration."""
     # Get model instance from model directive (None if not specified)
     model_instance = processed_step.get_directive_value('model', None)
+    if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
+        raise ValueError(
+            "Step model is configured for skip mode and should not create an agent."
+        )
 
     # Get tools and enhanced instructions from tools directive
     tools_result = processed_step.get_directive_value('tools', [])
@@ -438,6 +451,8 @@ async def process_workflow_step(
         processed_step,
         vault_path=services.vault_path,
     )
+    model_execution = _resolve_workflow_model_execution(processed_step)
+    skip_llm = model_execution.mode == "skip"
     output_target_label = None
     if output_targets:
         labels = []
@@ -461,33 +476,43 @@ async def process_workflow_step(
         },
     )
 
-    # Generate AI content
-    try:
-        chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
-    except Exception as exc:
-        raise _to_template_error(
-            exc,
-            template_pointer=f"## {step_name} (@model/@tools setup in this step)",
-            step_name=step_name,
-            phase="agent_setup",
-        ) from exc
-    buffer_store = context.get("buffer_store")
-    deps = SimpleNamespace(
-        buffer_store=buffer_store,
-        buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
-    )
-    try:
-        step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
-    except Exception as exc:
-        raise _to_template_error(
-            exc,
-            template_pointer=f"## {step_name} (step prompt/model execution)",
-            step_name=step_name,
-            phase="model_run",
-        ) from exc
+    # Generate AI content unless model execution is explicitly skipped.
+    if skip_llm:
+        step_content = ""
+        logger.set_sinks(["validation"]).info(
+            "workflow_step_skipped",
+            data={
+                "step_name": step_name,
+                "reason": "model_none",
+            },
+        )
+    else:
+        try:
+            chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
+        except Exception as exc:
+            raise _to_template_error(
+                exc,
+                template_pointer=f"## {step_name} (@model/@tools setup in this step)",
+                step_name=step_name,
+                phase="agent_setup",
+            ) from exc
+        buffer_store = context.get("buffer_store")
+        deps = SimpleNamespace(
+            buffer_store=buffer_store,
+            buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
+        )
+        try:
+            step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
+        except Exception as exc:
+            raise _to_template_error(
+                exc,
+                template_pointer=f"## {step_name} (step prompt/model execution)",
+                step_name=step_name,
+                phase="model_run",
+            ) from exc
 
     # Write AI-generated content to output targets (if @output specified)
-    if output_targets:
+    if output_targets and not skip_llm:
         write_mode = processed_step.get_directive_value('write_mode')
         header_value = processed_step.get_directive_value('header')
         for output_target in output_targets:
@@ -535,8 +560,8 @@ async def process_workflow_step(
         # Update state manager for any pending patterns used
         context['state_manager'].update_from_processed_step(processed_step)
     else:
-        # No output target - step executed for side effects only (e.g., tool calls)
-        # Still update state manager for any pending patterns used
+        # No write occurred (no output target, or model execution was skipped).
+        # Still update state manager for any pending patterns used.
         context['state_manager'].update_from_processed_step(processed_step)
 
 

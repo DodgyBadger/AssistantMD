@@ -6,6 +6,7 @@ from pydantic_ai.agent import Agent
 from pydantic_ai.messages import UserContent
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.directives.model import ModelDirective
+from core.llm.model_selection import ModelExecutionSpec
 from core.settings.store import get_general_settings
 
 
@@ -48,6 +49,11 @@ async def create_agent(
         # Create model instance using directive processor
         model_directive = ModelDirective()
         model = model_directive.process_value(default_model_name, '/default')
+        if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
+            raise ValueError(
+                "default_model cannot use skip mode ('none'). "
+                "Set a concrete LLM alias in system/settings.yaml."
+            )
     
     # Pure composition - assemble the pre-configured pieces
     agent_kwargs = {

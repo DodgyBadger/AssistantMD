@@ -23,6 +23,7 @@ from pydantic_ai.settings import ModelSettings
 from .base import DirectiveProcessor
 from .parser import DirectiveValueParser
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
+from core.llm.model_selection import resolve_model_execution_spec
 from core.settings import get_default_api_timeout, get_default_max_output_tokens
 from core.settings.secrets_store import get_secret_value
 
@@ -51,6 +52,10 @@ class ModelDirective(DirectiveProcessor):
             return False
         
         try:
+            execution = resolve_model_execution_spec(value)
+            if execution.mode == "skip":
+                return True
+
             # Parse model name and parameters
             model_name, parameters = DirectiveValueParser.parse_value_with_parameters(
                 value, allowed_parameters={"thinking"}
@@ -84,7 +89,8 @@ class ModelDirective(DirectiveProcessor):
             **context: Additional context (not used for model directive)
 
         Returns:
-            Configured Pydantic AI model instance ready for agent creation
+            Configured Pydantic AI model instance ready for agent creation,
+            or a ModelExecutionSpec in skip mode for aliases like 'none'
 
         Raises:
             ValueError: If model name is not recognized or model creation fails
@@ -97,6 +103,10 @@ class ModelDirective(DirectiveProcessor):
             value, allowed_parameters={"thinking"}
         )
         normalized_model = DirectiveValueParser.normalize_string(model_name, to_lower=True)
+
+        execution = resolve_model_execution_spec(value)
+        if execution.mode == "skip":
+            return execution
 
         # Special case: test model (hardcoded for validation, not in mappings)
         if normalized_model == 'test':

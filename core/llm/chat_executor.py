@@ -28,6 +28,7 @@ from core.constants import (
     CHAT_SESSIONS_DIR,
 )
 from core.directives.model import ModelDirective
+from core.llm.model_selection import ModelExecutionSpec
 from core.directives.tools import ToolsDirective
 from core.llm.model_utils import model_supports_capability
 from core.context.manager import build_context_manager_history_processor
@@ -352,6 +353,11 @@ def _prepare_agent_config(
     # Process model directive to get Pydantic AI model instance
     model_directive = ModelDirective()
     model_instance = model_directive.process_value(model, f"{vault_name}/chat")
+    if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
+        raise ValueError(
+            "Chat execution does not support skip mode model alias 'none'. "
+            "Select a concrete model."
+        )
 
     return base_instructions, tool_instructions, model_instance, tool_functions
 
