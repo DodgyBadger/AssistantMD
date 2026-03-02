@@ -6,6 +6,7 @@ real user workflows with readable, high-level operations.
 """
 
 import sys
+import inspect
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -70,6 +71,8 @@ class BaseScenario(ABC):
         self._system_controller = None
         self._time_controller = None
         self._api_client = None
+        self._soft_failures: List[Dict[str, str]] = []
+        self._teardown_completed = False
     
     # === ABSTRACT METHOD ===
     
@@ -297,6 +300,66 @@ class BaseScenario(ABC):
         if not matches:
             raise AssertionError(f"No validation event '{name}' matched: {expected}")
         return matches[-1]
+
+    # === SOFT ASSERTIONS ===
+
+    def soft_assert(self, condition: bool, message: str):
+        """Record assertion failures without interrupting scenario execution."""
+        if condition:
+            return
+        caller = inspect.currentframe().f_back
+        location = ""
+        if caller is not None:
+            location = (
+                f"{caller.f_code.co_filename}:{caller.f_lineno}"
+                f" ({caller.f_code.co_name})"
+            )
+        self._soft_failures.append(
+            {
+                "message": str(message),
+                "location": location,
+            }
+        )
+        if location:
+            self._log_timeline(f"⚠️ Soft assert failed at {location}: {message}")
+        else:
+            self._log_timeline(f"⚠️ Soft assert failed: {message}")
+
+    def soft_assert_equal(self, actual: Any, expected: Any, message: str = ""):
+        """Soft assertion helper for equality checks."""
+        detail = message or "Values are not equal"
+        self.soft_assert(
+            actual == expected,
+            f"{detail} | expected={expected!r}, actual={actual!r}",
+        )
+
+    def soft_assert_event_contains(
+        self,
+        events: Optional[List[Dict[str, Any]]] = None,
+        *,
+        name: str,
+        expected: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Soft variant of assert_event_contains; returns event when found."""
+        try:
+            return self.assert_event_contains(events, name=name, expected=expected)
+        except AssertionError as exc:
+            self.soft_assert(False, str(exc))
+            return None
+
+    def assert_no_failures(self):
+        """Raise one aggregated assertion if any soft assertions failed."""
+        if not self._soft_failures:
+            return
+        lines = ["Soft assertion failures:"]
+        for idx, failure in enumerate(self._soft_failures, start=1):
+            message = failure.get("message", "Assertion failed")
+            location = failure.get("location", "")
+            if location:
+                lines.append(f"{idx}. {message} @ {location}")
+            else:
+                lines.append(f"{idx}. {message}")
+        raise AssertionError("\n".join(lines))
     
     # === API ENDPOINT TESTING ===
     
@@ -313,11 +376,22 @@ class BaseScenario(ABC):
     
     def teardown_scenario(self):
         """Clean up after scenario execution."""
+        if self._teardown_completed:
+            return
         self._log_timeline("Scenario teardown - saving system interactions")
         try:
             self._save_system_interactions()
+            self._teardown_completed = True
         except Exception:
             raise
+
+    def mark_scenario_outcome(self, status: str, details: str = ""):
+        """Append an explicit scenario-level final outcome to the timeline."""
+        normalized = status.strip().upper()
+        if details:
+            self._log_timeline(f"=== SCENARIO {normalized}: {details} ===")
+        else:
+            self._log_timeline(f"=== SCENARIO {normalized} ===")
     
     # === INTERNAL HELPER METHODS ===
     

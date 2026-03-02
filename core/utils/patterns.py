@@ -45,25 +45,27 @@ class PatternUtilities:
     @staticmethod
     def _apply_format_tokens(dt: datetime, fmt: str) -> str:
         """Apply custom token formatting to a datetime."""
-        replacements = [
-            ("YYYY", f"{dt.year:04d}"),
-            ("MMMM", dt.strftime("%B")),
-            ("MMM", dt.strftime("%b")),
-            ("dddd", dt.strftime("%A")),
-            ("ddd", dt.strftime("%a")),
-            ("YY", f"{dt.year % 100:02d}"),
-            ("MM", f"{dt.month:02d}"),
-            ("DD", f"{dt.day:02d}"),
-            ("HH", f"{dt.hour:02d}"),
-            ("mm", f"{dt.minute:02d}"),
-            ("ss", f"{dt.second:02d}"),
-            ("M", str(dt.month)),
-            ("D", str(dt.day)),
-        ]
-        output = fmt
-        for token, value in replacements:
-            output = output.replace(token, value)
-        return output
+        replacements = {
+            "YYYY": f"{dt.year:04d}",
+            "MMMM": dt.strftime("%B"),
+            "MMM": dt.strftime("%b"),
+            "dddd": dt.strftime("%A"),
+            "ddd": dt.strftime("%a"),
+            "YY": f"{dt.year % 100:02d}",
+            "MM": f"{dt.month:02d}",
+            "DD": f"{dt.day:02d}",
+            "HH": f"{dt.hour:02d}",
+            "mm": f"{dt.minute:02d}",
+            "ss": f"{dt.second:02d}",
+            "M": str(dt.month),
+            "D": str(dt.day),
+        }
+        # Replace only original format tokens, longest-first, to avoid mutating
+        # expanded values (e.g. "Mon" should not be transformed by "M").
+        token_pattern = re.compile(
+            "|".join(sorted((re.escape(token) for token in replacements), key=len, reverse=True))
+        )
+        return token_pattern.sub(lambda m: replacements[m.group(0)], fmt)
     
     @staticmethod
     def resolve_date_pattern(pattern: str, reference_date: datetime, week_start_day: int = 0) -> str:

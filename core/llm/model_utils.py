@@ -182,6 +182,10 @@ def model_supports_capability(model_name: str, capability: str) -> bool:
     execution = resolve_model_execution_spec(model_name)
     if execution.mode == "skip" or not execution.base_alias:
         return False
+    # Validation-only built-in model alias handled by ModelDirective.
+    # It is not in settings model mappings and should be treated as text-only.
+    if execution.base_alias == "test":
+        return requested == "text"
     return requested in get_model_capabilities(model_name)
 
 
