@@ -1,5 +1,21 @@
 # Release Notes
 
+## TBD - v0.4.3.
+
+### Added images as first-class input type
+
+
+### Bug fixes
+
+
+### Validation Scenario Refactor
+- Reorganized integration validation into three lanes: root `integration/` for golden-path journeys, `integration/core` for deterministic contracts, and `integration/live` for live smoke scenarios.
+- Consolidated overlapping contract coverage into core scenarios (especially `primitives_contract`) and retired redundant overlap cases.
+
+### Documentation Updates
+- Split contributor/agent guidance into progressive-disclosure docs under `docs/agent-guides/`, with a simplified root `AGENTS.md`.
+- Added a running refactor checklist in `validation_suite_refactor_plan.md` and aligned validation documentation to the new scenario structure.
+
 ## 2026-02-25 - v0.4.2.
 
 ### Bug fix: OpenAI-compatible provider auth and base URL wiring
