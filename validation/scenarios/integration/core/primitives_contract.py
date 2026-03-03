@@ -58,6 +58,7 @@ class PrimitivesContractScenario(BaseScenario):
             "notes/long_note.md",
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
         )
+        self.create_file(vault, "notes/with (parens).md", "PARENS_CONTENT")
         self.create_file(vault, "timeline/2026-03-01.md", "OLDER_ENTRY")
         self.create_file(vault, "timeline/2026-03-02.md", "LATEST_ENTRY")
         self.create_file(vault, "tasks/task1.md", "Task 1")
@@ -146,6 +147,24 @@ class PrimitivesContractScenario(BaseScenario):
         self._assert_contains(refs_prompt, "- notes/plain", "Expected refs-only path listing")
         self._assert_not_contains(refs_prompt, "PLAIN_BODY", "Refs-only prompt should not inline content")
 
+        # @input path handling: virtual docs + parentheses path in refs_only mode.
+        paths_prompt = self._prompt_for_step(events, "INPUT_PATHS_EXTENDED")
+        self._assert_contains(
+            paths_prompt,
+            "Workflow Guide",
+            "Expected virtual docs content from __virtual_docs__/use/workflows",
+        )
+        self._assert_contains(
+            paths_prompt,
+            "- notes/with (parens)",
+            "Expected refs-only listing for path containing parentheses",
+        )
+        self._assert_not_contains(
+            paths_prompt,
+            "PARENS_CONTENT",
+            "Refs-only path with parentheses should not inline content",
+        )
+
         # @input pattern modes: latest + latest:N.
         latest_one_prompt = self._prompt_for_step(events, "LATEST_ONE")
         self._assert_contains(latest_one_prompt, "LATEST_ENTRY", "Expected latest file content")
@@ -186,6 +205,49 @@ class PrimitivesContractScenario(BaseScenario):
             },
         )
 
+        # Buffer variable contract: append/replace/refs_only/required-missing.
+        buffer_read_prompt = self._prompt_for_step(events, "BUFFER_READ")
+        self._assert_contains(
+            buffer_read_prompt,
+            "--- FILE: variable: contract_buffer ---",
+            "Expected buffer variable reference in read prompt",
+        )
+        self._assert_contains(
+            buffer_read_prompt,
+            "success (no tool calls)",
+            "Expected initial buffer content in read prompt",
+        )
+
+        buffer_after_append_prompt = self._prompt_for_step(events, "BUFFER_READ_AFTER_APPEND")
+        self.soft_assert(
+            buffer_after_append_prompt.count("success (no tool calls)") == 2,
+            "Expected appended buffer content to appear twice",
+        )
+
+        buffer_after_replace_prompt = self._prompt_for_step(events, "BUFFER_READ_AFTER_REPLACE")
+        self.soft_assert(
+            buffer_after_replace_prompt.count("success (no tool calls)") == 1,
+            "Expected replaced buffer content to appear once",
+        )
+
+        buffer_paths_only_prompt = self._prompt_for_step(events, "BUFFER_PATHS_ONLY")
+        self._assert_contains(
+            buffer_paths_only_prompt,
+            "- variable: contract_buffer",
+            "Expected refs_only buffer path listing",
+        )
+        self._assert_not_contains(
+            buffer_paths_only_prompt,
+            "success (no tool calls)",
+            "Expected refs_only buffer prompt to omit inline content",
+        )
+
+        self._event(
+            events,
+            name="workflow_step_skipped",
+            expected={"step_name": "BUFFER_REQUIRED_MISSING"},
+        )
+
         # Output artifacts validate @output, @header, @write_mode, and pattern substitutions.
         run_on_daily = vault / "outputs" / "run-on-daily.md"
         self.soft_assert(run_on_daily.exists(), "Daily run_on step should write output")
@@ -214,6 +276,70 @@ class PrimitivesContractScenario(BaseScenario):
         self.soft_assert(pattern_file.exists(), "Expected pattern-substituted output path")
         pattern_content = self._read_if_exists(pattern_file)
         self._assert_contains(pattern_content, "# Pattern March Monday", "Expected month/day-name token substitution in header")
+
+        # Additional pattern token coverage merged from pattern_substitution contract.
+        yesterday_file = vault / "outputs" / "yesterday-2026-03-01.md"
+        self.soft_assert(yesterday_file.exists(), "Expected {yesterday} output path")
+        self._assert_contains(
+            self._read_if_exists(yesterday_file),
+            "# Yesterday 2026-03-01",
+            "Expected {yesterday} token substitution in header",
+        )
+
+        tomorrow_file = vault / "outputs" / "tomorrow-2026-03-03.md"
+        self.soft_assert(tomorrow_file.exists(), "Expected {tomorrow} output path")
+        self._assert_contains(
+            self._read_if_exists(tomorrow_file),
+            "# Tomorrow 2026-03-03",
+            "Expected {tomorrow} token substitution in header",
+        )
+
+        last_week_file = vault / "outputs" / "last-week-2026-02-22.md"
+        self.soft_assert(last_week_file.exists(), "Expected {last-week} output path")
+        self._assert_contains(
+            self._read_if_exists(last_week_file),
+            "# Last Week 2026-02-22",
+            "Expected {last-week} token substitution in header",
+        )
+
+        next_week_file = vault / "outputs" / "next-week-2026-03-08.md"
+        self.soft_assert(next_week_file.exists(), "Expected {next-week} output path")
+        self._assert_contains(
+            self._read_if_exists(next_week_file),
+            "# Next Week 2026-03-08",
+            "Expected {next-week} token substitution in header",
+        )
+
+        last_month_file = vault / "outputs" / "last-month-2026-02.md"
+        self.soft_assert(last_month_file.exists(), "Expected {last-month} output path")
+        self._assert_contains(
+            self._read_if_exists(last_month_file),
+            "# Last Month 2026-02",
+            "Expected {last-month} token substitution in header",
+        )
+
+        formatted_tokens_file = vault / "outputs" / "formats-20260302-20260301-202603-Mon-Mar.md"
+        self.soft_assert(
+            formatted_tokens_file.exists(),
+            "Expected compact format token substitutions in output path",
+        )
+        self._assert_contains(
+            self._read_if_exists(formatted_tokens_file),
+            "# Formats 20260302 20260301 202603 Mon Mar",
+            "Expected compact format token substitutions in header",
+        )
+
+        # @tools directive parse step should execute and write an artifact.
+        self._event(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "TOOLS_DIRECTIVE_PARSE"},
+        )
+        tools_directive_output = vault / "outputs" / "tools-directive.md"
+        self.soft_assert(
+            tools_directive_output.exists(),
+            "Expected tools-directive step to write output artifact",
+        )
 
         # Context-template primitives: passthrough/token-threshold/cache/recent-runs/recent-summaries.
         checkpoint = self.event_checkpoint()
@@ -405,6 +531,14 @@ Summarize head slice.
 
 Summarize refs only.
 
+## INPUT_PATHS_EXTENDED
+@model test
+@input file: __virtual_docs__/use/workflows
+@input file: notes/with (parens) (refs_only)
+@output variable: paths_buffer
+
+Validate virtual docs and parentheses path handling.
+
 ## REQUIRED_SKIP
 @model test
 @input file: notes/missing (required)
@@ -448,6 +582,57 @@ Process pending files once.
 
 Pending should now be empty.
 
+## BUFFER_WRITE
+@model test
+@output variable: contract_buffer
+
+Write buffer seed.
+
+## BUFFER_READ
+@model test
+@input variable: contract_buffer
+
+Read buffer content.
+
+## BUFFER_APPEND
+@model test
+@input variable: contract_buffer
+@output variable: contract_buffer
+@write-mode append
+
+Append another entry.
+
+## BUFFER_READ_AFTER_APPEND
+@model test
+@input variable: contract_buffer
+
+Read appended content.
+
+## BUFFER_REPLACE
+@model test
+@output variable: contract_buffer
+@write-mode replace
+
+Replace content.
+
+## BUFFER_READ_AFTER_REPLACE
+@model test
+@input variable: contract_buffer
+
+Read replaced content.
+
+## BUFFER_PATHS_ONLY
+@model test
+@input variable: contract_buffer (refs_only=true)
+
+Paths only check.
+
+## BUFFER_REQUIRED_MISSING
+@model test
+@input variable: missing_contract_buffer (required)
+
+Should skip when required buffer is missing.
+
 ## WRITE_REPLACE
 @model test
 @output file: outputs/mode-target
@@ -485,6 +670,48 @@ Use tool directives in deterministic mode.
 @header Pattern {month-name} {day-name}
 
 Validate month/day substitution in output and header.
+
+## PATTERN_YESTERDAY
+@model test
+@output file: outputs/yesterday-{yesterday}
+@header Yesterday {yesterday}
+
+Validate yesterday token substitution.
+
+## PATTERN_TOMORROW
+@model test
+@output file: outputs/tomorrow-{tomorrow}
+@header Tomorrow {tomorrow}
+
+Validate tomorrow token substitution.
+
+## PATTERN_LAST_WEEK
+@model test
+@output file: outputs/last-week-{last-week}
+@header Last Week {last-week}
+
+Validate last-week token substitution.
+
+## PATTERN_NEXT_WEEK
+@model test
+@output file: outputs/next-week-{next-week}
+@header Next Week {next-week}
+
+Validate next-week token substitution.
+
+## PATTERN_LAST_MONTH
+@model test
+@output file: outputs/last-month-{last-month}
+@header Last Month {last-month}
+
+Validate last-month token substitution.
+
+## PATTERN_FORMAT_TOKENS
+@model test
+@output file: outputs/formats-{today:YYYYMMDD}-{this-week:YYYYMMDD}-{this-month:YYYYMM}-{day-name:ddd}-{month-name:MMM}
+@header Formats {today:YYYYMMDD} {this-week:YYYYMMDD} {this-month:YYYYMM} {day-name:ddd} {month-name:MMM}
+
+Validate compact format token substitutions.
 """
 
 

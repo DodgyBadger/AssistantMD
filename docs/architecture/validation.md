@@ -4,48 +4,10 @@ Run scenarios that exercise features and use cases. Assert functionality by chec
 
 Scenarios can be narrow (e.g. verifying a single prompt composition rule) or broad (snapshotting an entire workflow run).
 
-## Validation-First Feature Workflow
+For process guidance on validation-driven implementation, see [Testing and Validation](../agent-guides/testing-and-validation.md#validation-first-workflow).
 
-Use the validation framework to shape feature design from day one, not as a final verification pass.
+## Core principles
 
-### 1) Write the feature spec in terms of artifacts
-
-Before implementation, define:
-- final artifacts users will observe (files, API responses, state changes)
-- internal artifacts required for confidence (validation events at key decision points)
-- non-negotiable invariants (what must never regress)
-
-### 2) Add scenario assertions before implementation
-
-Create or extend a scenario with failing assertions for those artifacts:
-- final artifact assertions (end-user behavior)
-- internal artifact assertions (decision correctness, skip reasons, routing, cache behavior)
-
-This makes the scenario the executable contract for the feature.
-
-### 3) Define event contracts in the implementation plan
-
-For each critical branch in the feature plan, define the required validation event:
-- event name
-- minimum payload keys that represent behavior
-- when the event should fire
-
-Only add events at decision boundaries; avoid noisy instrumentation.
-
-### 4) Implement in small slices until scenario contract passes
-
-- Build the smallest increment that satisfies the next failing assertion.
-- Keep assertions behavior-focused (avoid coupling to internals).
-- Prefer deterministic scenarios (`@model test`) unless real model behavior is explicitly required.
-
-### 5) Tighten and keep
-
-After green:
-- keep contract assertions as long-term regression guards
-- remove temporary debug-only events/assertions
-- preserve stable event names/payload keys as compatibility surface for scenarios
-
-**Core principles:**
 - Validate use cases, features and internal decision points, not isolated functions.
 - Reduce maintenance burden by loosely coupling scenarios to production code through system and end-user outputs.
 - Scenarios should be readable and high-level. Avoid dense code.

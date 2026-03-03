@@ -34,7 +34,7 @@ class ContextManagerCacheModesScenario(BaseScenario):
             "vault_name": vault.name,
             "prompt": "Summarize the seed note briefly.",
             "tools": [],
-            "model": "gpt-mini",
+            "model": "test",
             "context_template": "cache_modes.md",
         }
         first_response = self.call_api("/api/chat/execute", method="POST", data=first_payload)
@@ -272,7 +272,7 @@ description: Validation template for cache modes.
 @recent-summaries 0
 @input file: notes/seed
 @cache daily
-@model gpt-mini
+@model test
 
 Summarize the haiku imagery in one short sentence.
 
@@ -281,7 +281,7 @@ Summarize the haiku imagery in one short sentence.
 @recent-summaries 0
 @input file: notes/seed
 @cache weekly
-@model gpt-mini
+@model test
 
 Summarize the haiku mood in one short sentence.
 
@@ -290,7 +290,7 @@ Summarize the haiku mood in one short sentence.
 @recent-summaries 0
 @input file: notes/seed
 @cache 5m
-@model gpt-mini
+@model test
 
 Summarize the haiku setting in one short sentence.
 
@@ -299,7 +299,7 @@ Summarize the haiku setting in one short sentence.
 @recent-summaries 0
 @input file: notes/seed
 @cache session
-@model gpt-mini
+@model test
 
 Summarize the haiku in one short sentence.
 """
@@ -314,7 +314,7 @@ description: Validation template for cache modes (v2).
 @recent-summaries 0
 @input file: notes/seed
 @cache daily
-@model gpt-mini
+@model test
 
 Summarize the haiku imagery in one short sentence, focusing on light.
 
@@ -323,7 +323,7 @@ Summarize the haiku imagery in one short sentence, focusing on light.
 @recent-summaries 0
 @input file: notes/seed
 @cache weekly
-@model gpt-mini
+@model test
 
 Summarize the haiku mood in one short sentence.
 
@@ -332,7 +332,7 @@ Summarize the haiku mood in one short sentence.
 @recent-summaries 0
 @input file: notes/seed
 @cache 5m
-@model gpt-mini
+@model test
 
 Summarize the haiku setting in one short sentence.
 
@@ -341,7 +341,7 @@ Summarize the haiku setting in one short sentence.
 @recent-summaries 0
 @input file: notes/seed
 @cache session
-@model gpt-mini
+@model test
 
 Summarize the haiku in one short sentence.
 """

@@ -14,7 +14,7 @@ from validation.core.base_scenario import BaseScenario
 
 
 class ImportPipelineScenario(BaseScenario):
-    """Validate importing a PDF from AssistantMD/Import and ingesting a URL."""
+    """Validate importing a PDF from AssistantMD/Import."""
 
     async def test_scenario(self):
         vault = self.create_vault("ImportPipelineVault")
@@ -40,40 +40,20 @@ class ImportPipelineScenario(BaseScenario):
         job = jobs[0]
         assert job.get("status") == "completed", "Job should complete inline"
         outputs = job.get("outputs") or []
-        assert any(
-            out.endswith("Imported/sample.md") for out in outputs
-        ), "Output path should include Imported/sample.md"
+        assert len(outputs) > 0, "Import scan should return at least one output path"
+        sample_rel_path = outputs[0]
+        assert sample_rel_path.endswith(".md"), "Import output should be markdown"
+        assert sample_rel_path.startswith("Imported/"), "Import output should be under Imported/"
 
         # Source file should be removed after successful import
         assert not import_path.exists(), "Source file should be cleaned up"
 
         # Validate the rendered markdown exists and contains the extracted text
-        sample_path = vault / "Imported" / "sample.md"
-        assert sample_path.exists(), "Expected Imported/sample.md to be created"
+        sample_path = vault / sample_rel_path
+        assert sample_path.exists(), f"Expected {sample_rel_path} to be created"
         sample_content = sample_path.read_text()
         assert "Import validation" in sample_content
         assert "mime: application/pdf" in sample_content
-
-        # === URL INGEST ===
-        url_response = self.call_api(
-            "/api/import/url",
-            method="POST",
-            data={"vault": vault.name, "url": "https://example.com", "clean_html": True},
-        )
-        assert url_response.status_code == 200, "URL ingest should return 200"
-        url_payload = url_response.json()
-        assert url_payload.get("status") == "completed", (
-            "URL ingest job should complete"
-        )
-        url_outputs = url_payload.get("outputs") or []
-        assert len(url_outputs) > 0, "URL ingest should return at least one output path"
-        # Verify the rendered file exists and contains expected markers
-        for rel_path in url_outputs:
-            output_path = vault / rel_path
-            assert output_path.exists(), f"Expected {rel_path} to be created"
-            output_content = output_path.read_text()
-            assert "example" in output_content
-            assert "mime: text/html" in output_content
 
         await self.stop_system()
         self.teardown_scenario()

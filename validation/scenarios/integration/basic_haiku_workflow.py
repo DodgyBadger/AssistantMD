@@ -1,7 +1,8 @@
 """
-Basic Haiku scenario - simplest possible real workflow test.
+Basic haiku workflow happy-path scenario.
 
-Tests single-step workflow execution with file output.
+Runs a real image+text workflow end-to-end with a live model to provide
+human-reviewable artifacts.
 """
 
 import sys
@@ -15,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class BasicHaikuScenario(BaseScenario):
-    """Test basic single-step workflow execution."""
+class BasicHaikuWorkflowScenario(BaseScenario):
+    """Golden-path workflow execution with multimodal input and file outputs."""
 
     async def test_scenario(self):
         """Execute complete end-to-end workflow: system startup → workflow execution."""

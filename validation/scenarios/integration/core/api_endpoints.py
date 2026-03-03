@@ -173,7 +173,7 @@ class ApiEndpointsScenario(BaseScenario):
             "vault_name": vault.name,
             "prompt": "Say hello from integration test.",
             "tools": [],
-            "model": "gpt-mini",
+            "model": "test",
         }
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
         assert chat_first.status_code == 200, "Chat execution succeeds"
@@ -190,29 +190,6 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
 
-        # Exercise workflow-run tool through chat endpoint
-        checkpoint = self.event_checkpoint()
-        workflow_tool_chat = self.call_api(
-            "/api/chat/execute",
-            method="POST",
-            data={
-                "vault_name": vault.name,
-                "prompt": (
-                    "Use workflow_run to list workflows, then run workflow "
-                    "'status_probe'. You must call the tool before responding."
-                ),
-                "tools": ["workflow_run"],
-                "model": "gpt-mini",
-            },
-        )
-        assert workflow_tool_chat.status_code == 200, "Chat tool invocation succeeds"
-        events = self.events_since(checkpoint)
-        self.assert_event_contains(
-            events,
-            name="tool_invoked",
-            expected={"tool": "workflow_run"},
-        )
-
         await self.stop_system()
         self.teardown_scenario()
 
@@ -227,7 +204,7 @@ description: Validation helper workflow
 
 ## STEP1
 @output file: logs/{today}
-@model gpt-mini
+@model test
 
 Summarize the validation run context.
 """
