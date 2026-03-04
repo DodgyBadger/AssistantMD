@@ -1,6 +1,6 @@
 # Release Notes
 
-## TBD - v0.4.3.
+## 2026-03-27 - v0.4.3.
 
 ### Added images as first-class input type
 - Images are supported in chat, workflow and context templates. E.g. `@input file: myimage.png`
