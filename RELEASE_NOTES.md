@@ -2,12 +2,21 @@
 
 ## TBD - v0.4.3.
 
-
 ### Added images as first-class input type
-
+- Images are supported in chat, workflow and context templates. E.g. `@input file: myimage.png`
+- `file_ops_safe(read)` supports image reads and markdown files that contain embedded images.
+- Markdown files with embedded images are read in source-order so the LLM sees content as it appears in the document (text and images are interleaved into a multimodal prompt).
+- When images cannot be attached (for example due to model or size limits), AssistantMD falls back gracefully with clear, followable image references instead of failing.
+- Added image attachment size controls in settings: `chunking_max_image_mb_per_image`, `chunking_max_image_mb_total`, `chunking_max_images_per_prompt`.
+- For markdown files with embedded images, AssistantMD preflights raw text token size first; if text alone exceeds `auto_buffer_max_tokens`, it skips multimodal attachment, returns text with normalized image reference markers and standard auto-buffer routing can apply.
+- PDF import includes a page-image mode that outputs each page as an image, useful for documents where standard markdown conversion fails to output useful information.
+- Import supports image-source OCR flows, including optional capture of OCR image assets in import outputs.
 
 ### Bug fixes
-
+- Fixed inconsistent `@model none` handling across context and workflow execution. Steps/sections configured to skip now reliably bypass LLM execution instead of partially entering model setup paths.
+- Fixed invalid model configuration handling so chat/default-model execution cannot proceed with skip-mode aliases like `none`; the app now raises a clear configuration error.
+- Fixed directive date/time format token replacement so expanded values are not mutated by overlapping tokens (for example weekday/month text no longer gets corrupted by single-letter token passes).
+- Fixed validation artifact consistency so scenario `timeline.md` outcomes now align with CLI pass/fail results (including explicit final outcome markers and teardown on failure paths). (Issue #28)
 
 ### Validation Scenario Refactor
 - Reorganized integration validation into three lanes: root `integration/` for golden-path journeys, `integration/core` for deterministic contracts, and `integration/live` for live smoke scenarios.
@@ -16,6 +25,7 @@
 ### Documentation Updates
 - Split contributor/agent guidance into progressive-disclosure docs under `docs/agent-guides/`, with a simplified root `AGENTS.md`.
 - Added a running refactor checklist in `validation_suite_refactor_plan.md` and aligned validation documentation to the new scenario structure.
+
 
 ## 2026-02-25 - v0.4.2.
 
@@ -26,6 +36,7 @@
 - Fixed chat streaming assembly to include only visible text parts, preventing reasoning/thinking part prefixes (for example stray leading words like `"The"` in some provider streams).
 - Allowed base-url-only OpenAI-compatible providers (for example local LM Studio without API key), so local endpoints are usable when `base_url` is configured.
 - Updated configuration health warning logic to only warn when no LLM provider/model is usable, instead of warning whenever no API key exists.
+
 
 ## 2026-02-24 - v0.4.1.
 
@@ -47,6 +58,7 @@ This release adds first-class LaTeX rendering in assistant responses using bundl
 ### Documentation and legal
 - Added `THIRD_PARTY_NOTICES.md` with bundled frontend asset notices and dependency inventory references.
 - Updated README links for reference docs, license, and third-party notices.
+
 
 ## 2026-02-20 - v0.4.0.
 

@@ -19,7 +19,7 @@ When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault
 - `AssistantMD/Chat_Sessions/` - chat transcripts
 - `AssistantMD/ContextTemplates/` - context templates
 - `AssistantMD/Workflows/` - scheduled / multi-step workflows
-- `AssistantMD/Import/` - drop PDFs to import to markdown
+- `AssistantMD/Import/` - drop PDFs or images to import to markdown
 
 ### Define behaviour in templates
 
@@ -59,7 +59,7 @@ Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. 
 ## Features
 
 **📥 Import pipeline**
-- Import PDFs and URLs into markdown and build a searchable research library in your vault.
+- Import PDFs, images and URLs into markdown and build a searchable research library in your vault.
 - Keep source material in plain text for downstream workflows and chat.
 
 **👷‍♂️ Scheduled workflows**
@@ -83,6 +83,7 @@ Run multi-step workflows on a schedule to keep notes and plans up to date (e.g. 
 
 - **[Installation Guide](docs/setup/installation.md)**
 - **[Basic Usage](docs/use/README.md)**
+- **[Build Guide (Start Here)](docs/use/build-guide.md)**
 - **[Context Manager](docs/use/context_manager.md)**
 - **[Workflows](docs/use/workflows.md)**
 - **[Reference](docs/use/reference.md)**

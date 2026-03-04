@@ -1,74 +1,45 @@
 ## How to use AssistantMD
 
 If you have not set up the app yet, start with the [Installation Guide](../setup/installation.md).
+For a practical build path (chat -> skills -> workflows -> advanced templates), start with the [Build Guide](build-guide.md) before diving into detailed references.
 
-When you first run the app, a new `AssistantMD` folder will be added to each of your vaults. This is where files live that are unique to how AssistantMD runs.
+When you first run the app, a new `AssistantMD` folder is added to each vault:
 - `AssistantMD/Workflows` holds your workflow definitions
 - `AssistantMD/Chat_Sessions` holds markdown files containing your chat history
 - `AssistantMD/Import` is where you place files you want to import as markdown into your vault
 - `AssistantMD/ContextTemplates` holds context manager templates
 
-Once setup is complete, open the web app at `http://localhost:8000/` (or the host/port you configured).
+Open the web app at `http://localhost:8000/` (or your configured host/port).
 
 **Security note**: The app has no built-in auth or TLS. Keep it on a trusted network or add your own [security layers](../setup/security.md).
 
 ### Chat
 
-Chat works like other AI chats but with access to your markdown files. Open **Chat Settings**, pick a vault and model, then toggle tools as needed:
+Chat works like other AI chats, but with access to your vault files and enabled tools. Open **Chat Settings**, pick a vault and model, then toggle the tools you need.
+Tool availability in the UI reflects current app configuration (`system/settings.yaml`).
 
-- **web_search** (default): duckduckgo (free) or tavily (API required, free tier available)
-- **file_ops_safe** (default): search, read, create, append in your vault
-- **file_ops_unsafe**: edit, move, delete
-- **code_execution**: run code via Piston (public or self-hosted API)
-- **workflow_run**: list workflows and run a workflow in the current vault
-- **tavily_extract**: extract content from specific URLs (API required, free tier available)
-- **tavily_crawl**: crawl and extract content from multiple pages (API required, free tier available)
-
-Chat can also read local images when you use `file_ops_safe(read)` on image files in your vault.
-
-**A note about chat sessions**: Unlike most chat apps, you will not find a list of sessions in the chat UI. A transcript of each session is saved as a markdown file in `AssistantMD/Chat_Sessions`. Since these are just files in your vault, the chat agent has full access to them. If you want to continue a conversation, just ask the chat agent to load it. The default context template includes instructions that make this really easy - just type something like "Let's continue our conversation about quantum entanglement". You can also set up more sophisticated memory systems by combining scheduled workflows and context templates. [See this example](../examples/ContextTemplates/weekly-memory.md)
-
+**A note about chat sessions**: The chat UI does not show a session list. Each session is saved as a markdown transcript in `AssistantMD/Chat_Sessions`, and the agent can read those files. To continue an older thread, ask the agent to load it (for example, "continue our conversation about quantum entanglement"). For longer-term memory workflows, see [this context-template example](../examples/ContextTemplates/weekly-memory.md).
 
 ### Context Manager
 
-Context templates let you add custom system instructions and shape the context window seen by the chat agent. Templates live under `AssistantMD/ContextTemplates/` (vault-specific) or `system/ContextTemplates/` (global). Select a template per chat session in the UI.
-
-Learn more in [Context Manager](context_manager.md).
+Context templates shape what the chat agent sees. Templates live under `AssistantMD/ContextTemplates/` (vault) or `system/ContextTemplates/` (global). Select one per chat session in the UI.
+See [Context Manager](context_manager.md).
 
 ### Workflows
 
-Workflows allow you to schedule and structure prompts or sequences of prompts. Define a workflow by creating a markdown file inside `AssistantMD/Workflows/`.
-
-Workflows can accept local images as inputs via `@input file: path/to/image.png`, and markdown inputs can embed images with standard markdown syntax.
-
-[Go here](workflows.md) for more about creating workflows.
+Workflows let you schedule and structure prompts in markdown files under `AssistantMD/Workflows/`.
+See [Workflows](workflows.md).
 
 ### Importer
 
-Import PDFs, images, and URLs into your vault. Drop files into `AssistantMD/Import/` for bulk imports, or point the importer at a URL to convert a page to markdown.
-
-For PDF imports, use the **PDF Mode** selector in the Import UI:
-- **Markdown** (default): preferred for most documents and the main workflow format in AssistantMD.
-- **Page Images**: use when layout fidelity matters (complex tables, figure-heavy pages, or visual context that markdown extraction may lose). This mode renders each PDF page to an image and writes a `manifest.json`.
-
-OCR controls:
-- **Use OCR (PDF)** enables OCR-first markdown extraction for PDF imports.
-- **Capture OCR images** optionally retains OCR-returned image payloads as local assets.
-
-Imports are written under `Imported/` (configurable in the web UI), with each import in its own folder (for example `Imported/My_Doc/My_Doc.md`, `Imported/My_Doc/assets/...`, or `Imported/My_Doc/pages/...` with `manifest.json` in Page Images mode).
-
-**Note**: The importer is a work in progress and likely to change as I test different backend ingestion solutions.
+Import PDFs, images, and URLs into your vault. Drop files into `AssistantMD/Import/` for bulk import, or use URL import in the UI.
+Use PDF mode `Markdown` for normal text extraction and `Page Images` when layout fidelity matters.
+Imports are written under `Imported/` (configurable) with one folder per import.
 
 ### Configuration
 
-Use the **Configuration** tab in the web UI to configure providers (e.g. OpenAI, Anthropic) and models and manage secrets (API keys). Models are aliases that map to provider model strings so you can update to the latest LLMs without editing every workflow and context template. Adjust general settings here too (timeouts, tool settings, etc.).
-
-### Tips
-
-- Use the built-in assistantmd_helper template to get information about this app. It has access to documentation and can answer questions about AssistantMD and build and test templates. Start simple, test and iterate.
-- If using Obsidian, set up a base (Obsidian v1.9 or later) to view and manage all your workflow files and frontmatter properties in one place, making it easy to enable/disable or update schedules.
-- If using Obsidian, enabled `Use [[Wikilinks]]` and set `New link format` to `Absolute path in vault` in `Settings > Files & Links`. This will allow you to drag-and-drop from the Obsidian file explorer into input and output directives. AssistantMD will ignore the square brackets (`[[filename]]`).
+Use the **Configuration** tab to manage providers, model aliases, secrets, and general settings.
 
 ### Example Library
 
-[See here](../examples/README.md) for a growing library of example workflow and context templates. PRs accepted if you would like to submit your own for possible inclusion in the library. All submissions will be reviewed carefully to ensure no duplication or malicious instructions.
+[See here](../examples/README.md) for example workflows, context templates, and skills you can copy and adapt.
