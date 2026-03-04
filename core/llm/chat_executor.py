@@ -9,14 +9,16 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, AsyncIterator, Any
+from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
 from pydantic_ai.messages import ModelMessage, TextPart
 from pydantic_ai import (
+    BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
     TextPartDelta, FunctionToolCallEvent, FunctionToolResultEvent
 )
+from pydantic_ai.messages import UserContent
 
 from core.llm.agents import create_agent
 from core.llm.session_manager import SessionManager
@@ -26,9 +28,15 @@ from core.constants import (
     CHAT_SESSIONS_DIR,
 )
 from core.directives.model import ModelDirective
+from core.llm.model_selection import ModelExecutionSpec
 from core.directives.tools import ToolsDirective
+from core.llm.model_utils import model_supports_capability
 from core.context.manager import build_context_manager_history_processor
 from core.context.templates import load_template
+from core.settings import (
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_mb_per_image,
+)
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
@@ -36,6 +44,17 @@ from core.runtime.buffers import BufferStore, get_session_buffer_store
 
 
 logger = UnifiedLogger(tag="chat-executor")
+
+
+PromptInput = str | Sequence[UserContent]
+
+
+@dataclass(frozen=True)
+class UploadedImageAttachment:
+    """Direct chat image attachment sourced from request payload bytes."""
+
+    display_name: str
+    content: BinaryContent
 
 
 def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
@@ -199,6 +218,112 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
     return str(history_file)
 
 
+def _resolve_image_prompt(
+    *,
+    prompt_text: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
+    vault_path: str,
+) -> tuple[PromptInput, str, int]:
+    """Build prompt payload and history-safe text from optional image attachments."""
+    if not image_paths and not image_uploads:
+        return prompt_text, prompt_text, 0
+
+    vault_root = Path(vault_path).resolve()
+    prompt_content: List[UserContent] = [prompt_text]
+    history_lines: List[str] = []
+    seen_paths: set[str] = set()
+
+    for raw_path in image_paths or []:
+        candidate = (raw_path or "").strip()
+        if not candidate:
+            continue
+
+        image_path = Path(candidate)
+        if not image_path.is_absolute():
+            image_path = vault_root / image_path
+        resolved_path = image_path.resolve()
+
+        if resolved_path != vault_root and vault_root not in resolved_path.parents:
+            raise ValueError(
+                f"Image path '{candidate}' is outside the vault and cannot be attached."
+            )
+        if not resolved_path.is_file():
+            raise ValueError(f"Image file not found: {candidate}")
+
+        resolved_key = str(resolved_path)
+        if resolved_key in seen_paths:
+            continue
+        seen_paths.add(resolved_key)
+
+        file_content = BinaryContent.from_path(resolved_path)
+        if not file_content.is_image:
+            raise ValueError(f"File is not an image and cannot be attached: {candidate}")
+        image_size_bytes = len(file_content.data)
+        max_image_bytes = get_chunking_max_image_bytes_per_image()
+        if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
+            max_image_mb = get_chunking_max_image_mb_per_image()
+            raise ValueError(
+                f"Image '{candidate}' is too large to attach ({image_size_bytes} bytes). "
+                f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+            )
+
+        prompt_content.append(file_content)
+        display_path = resolved_path.relative_to(vault_root).as_posix()
+        history_lines.append(f"- {display_path}")
+
+    for upload in image_uploads or []:
+        file_content = upload.content
+        display_name = (upload.display_name or "").strip() or "uploaded-image"
+        if not file_content.is_image:
+            raise ValueError(
+                f"Uploaded file '{display_name}' is not an image and cannot be attached."
+            )
+        image_size_bytes = len(file_content.data)
+        max_image_bytes = get_chunking_max_image_bytes_per_image()
+        if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
+            max_image_mb = get_chunking_max_image_mb_per_image()
+            raise ValueError(
+                f"Image '{display_name}' is too large to attach ({image_size_bytes} bytes). "
+                f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+            )
+        prompt_content.append(file_content)
+        history_lines.append(f"- [upload] {display_name}")
+
+    if len(prompt_content) == 1:
+        return prompt_text, prompt_text, 0
+
+    prompt_for_history = "\n".join(
+        [
+            prompt_text,
+            "",
+            "[Attached images]",
+            *history_lines,
+        ]
+    )
+    return prompt_content, prompt_for_history, len(prompt_content) - 1
+
+
+def _validate_image_capability(
+    model_alias: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
+) -> None:
+    """Fail fast if image attachments are requested for a non-vision model."""
+    has_uploads = bool(image_uploads)
+    if not image_paths and not has_uploads:
+        return
+    has_paths = any((path or "").strip() for path in (image_paths or []))
+    if not has_paths and not has_uploads:
+        return
+    if model_supports_capability(model_alias, "vision"):
+        return
+    raise ValueError(
+        f"Model '{model_alias}' does not declare 'vision' capability in settings.yaml. "
+        "Use a vision-capable model or remove image attachments."
+    )
+
+
 def _prepare_agent_config(
     vault_name: str,
     vault_path: str,
@@ -228,6 +353,11 @@ def _prepare_agent_config(
     # Process model directive to get Pydantic AI model instance
     model_directive = ModelDirective()
     model_instance = model_directive.process_value(model, f"{vault_name}/chat")
+    if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
+        raise ValueError(
+            "Chat execution does not support skip mode model alias 'none'. "
+            "Select a concrete model."
+        )
 
     return base_instructions, tool_instructions, model_instance, tool_functions
 
@@ -236,6 +366,8 @@ async def execute_chat_prompt(
     vault_name: str,
     vault_path: str,
     prompt: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
     session_id: str,
     tools: List[str],
     model: str,
@@ -257,6 +389,7 @@ async def execute_chat_prompt(
         ChatExecutionResult with response and session metadata
     """
     # Prepare agent configuration (shared logic)
+    _validate_image_capability(model, image_paths, image_uploads)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model
     )
@@ -285,6 +418,13 @@ async def execute_chat_prompt(
     # Get message history (always tracked now)
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
+    user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
+        prompt_text=prompt,
+        image_paths=image_paths,
+        image_uploads=image_uploads,
+        vault_path=vault_path,
+    )
+
     # Run agent
     session_buffer_store = get_session_buffer_store(session_id)
     run_deps = ChatRunDeps(
@@ -293,7 +433,7 @@ async def execute_chat_prompt(
         buffer_store_registry={"session": session_buffer_store},
     )
     result = await agent.run(
-        prompt,
+        user_prompt,
         message_history=message_history,
         deps=run_deps,
     )
@@ -302,7 +442,7 @@ async def execute_chat_prompt(
     session_manager.add_messages(session_id, vault_name, result.new_messages())
 
     # Save chat history to markdown file
-    history_file = save_chat_history(vault_path, session_id, prompt, result.output)
+    history_file = save_chat_history(vault_path, session_id, prompt_for_history, result.output)
     logger.info(
         "Chat executed",
         data={
@@ -311,6 +451,7 @@ async def execute_chat_prompt(
             "model": model,
             "tools_count": len(tools),
             "prompt_length": len(prompt),
+            "attached_image_count": attached_image_count,
             "history_file": history_file,
         },
     )
@@ -327,6 +468,8 @@ async def execute_chat_prompt_stream(
     vault_name: str,
     vault_path: str,
     prompt: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
     session_id: str,
     tools: List[str],
     model: str,
@@ -350,6 +493,7 @@ async def execute_chat_prompt_stream(
         SSE-formatted chunks in OpenAI-compatible format
     """
     # Prepare agent configuration (shared logic)
+    _validate_image_capability(model, image_paths, image_uploads)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model
     )
@@ -378,6 +522,13 @@ async def execute_chat_prompt_stream(
     # Get message history
     message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
 
+    user_prompt, prompt_for_history, _attached_image_count = _resolve_image_prompt(
+        prompt_text=prompt,
+        image_paths=image_paths,
+        image_uploads=image_uploads,
+        vault_path=vault_path,
+    )
+
     # Stream response and capture final result for history storage
     full_response = ""
     final_result = None
@@ -393,7 +544,7 @@ async def execute_chat_prompt_stream(
         # Use run_stream_events() to properly handle tool calls
         # This runs the agent graph to completion and streams all events
         async for event in agent.run_stream_events(
-            prompt,
+            user_prompt,
             message_history=message_history,
             deps=run_deps,
         ):
@@ -512,4 +663,4 @@ async def execute_chat_prompt_stream(
 
     # Save chat history to markdown file
     if final_result:
-        save_chat_history(vault_path, session_id, prompt, full_response)
+        save_chat_history(vault_path, session_id, prompt_for_history, full_response)

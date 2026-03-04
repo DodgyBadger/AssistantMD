@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from core.runtime.paths import get_system_root
 
@@ -55,8 +55,36 @@ class ModelConfig(BaseModel):
 
     provider: str
     model_string: str
+    capabilities: list[str] = Field(default_factory=lambda: ["text"])
     description: str | None = None
     user_editable: bool = True
+
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def _normalize_capabilities(cls, value: Any) -> list[str]:
+        """Normalize capabilities and always include 'text'."""
+        if value is None:
+            return ["text"]
+
+        if isinstance(value, str):
+            raw_items = [value]
+        elif isinstance(value, list):
+            raw_items = value
+        else:
+            raw_items = [str(value)]
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            cap = str(item).strip().lower()
+            if not cap or cap in seen:
+                continue
+            seen.add(cap)
+            normalized.append(cap)
+
+        if "text" not in seen:
+            normalized.insert(0, "text")
+        return normalized
 
 
 class SettingsFile(BaseModel):

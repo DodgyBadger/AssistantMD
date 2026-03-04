@@ -13,6 +13,14 @@ from typing import List, Dict, Type, Tuple, Optional
 
 from core.logger import UnifiedLogger
 from pydantic_ai import RunContext
+from pydantic_ai.messages import (
+    AudioUrl,
+    BinaryContent,
+    DocumentUrl,
+    ImageUrl,
+    ToolReturn,
+    VideoUrl,
+)
 from core.settings.store import get_tools_config, ToolConfig
 from core.tools.utils import get_tool_instructions
 from core.tools.base import BaseTool
@@ -43,6 +51,24 @@ class ToolsDirective(DirectiveProcessor):
         tool_class: Type
         tool_function: object
         week_start_day: int = 0
+
+    @staticmethod
+    def _has_multimodal_tool_payload(result: object) -> bool:
+        """Return True when result contains multimodal payload that should stay inline."""
+        if not isinstance(result, ToolReturn):
+            return False
+        content = result.content
+        if content is None:
+            return False
+        if isinstance(content, str):
+            return False
+        for item in content:
+            if isinstance(
+                item,
+                (BinaryContent, ImageUrl, AudioUrl, DocumentUrl, VideoUrl),
+            ):
+                return True
+        return False
 
     def _wrap_tool_function(
         self,
@@ -181,6 +207,16 @@ class ToolsDirective(DirectiveProcessor):
         hard_output = params.get("output")
         output_target = hard_output or output_value
         scope_value = params.get("scope")
+        if self._has_multimodal_tool_payload(result):
+            if output_target and output_target.strip().lower() != "inline":
+                logger.warning(
+                    "Bypassing tool output routing for multimodal tool return",
+                    metadata={
+                        "tool": tool_name,
+                        "output_target": output_target,
+                    },
+                )
+            return result
         if output_target is None:
             auto_limit = get_auto_buffer_max_tokens()
             if auto_limit and auto_limit > 0:

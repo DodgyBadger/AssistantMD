@@ -8,10 +8,27 @@ import os
 import glob
 import shutil
 import subprocess
+from pathlib import Path
+
+from pydantic_ai.messages import BinaryContent, ToolReturn
 from pydantic_ai.tools import Tool
 
+from core.chunking import (
+    build_input_files_prompt,
+    default_chunking_policy,
+    evaluate_markdown_image_policy,
+    parse_markdown_chunks,
+)
+from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger
-from core.settings import get_file_search_timeout_seconds
+from core.settings import (
+    get_auto_buffer_max_tokens,
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_mb_per_image,
+    get_file_ops_safe_list_max_results,
+    get_file_search_timeout_seconds,
+)
+from core.utils.image_inputs import build_image_tool_payload
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
@@ -42,7 +59,7 @@ class FileOpsSafe(BaseTool):
             include_all: bool = False,
             recursive: bool = False,
             scope: str = "",
-        ) -> str:
+        ) -> str | ToolReturn:
             """Read/write/list/search markdown files in a vault or virtual mount.
 
             :param operation: Operation name
@@ -83,8 +100,19 @@ class FileOpsSafe(BaseTool):
                     return cls._move_file(target, destination, vault_path)
                 elif operation == "list":
                     if get_virtual_mount_key(target):
-                        return cls._list_virtual_mount(target, include_all=include_all, recursive=recursive)
-                    return cls._list_files(target, vault_path, include_all=include_all, recursive=recursive)
+                        return cls._list_virtual_mount(
+                            target,
+                            include_all=include_all,
+                            recursive=recursive,
+                            max_results=get_file_ops_safe_list_max_results(),
+                        )
+                    return cls._list_files(
+                        target,
+                        vault_path,
+                        include_all=include_all,
+                        recursive=recursive,
+                        max_results=get_file_ops_safe_list_max_results(),
+                    )
                 elif operation == "mkdir":
                     if get_virtual_mount_key(target):
                         return cls._deny_virtual_write(target, "mkdir")
@@ -108,7 +136,7 @@ class FileOpsSafe(BaseTool):
 DISCOVERY - Start narrow, expand as needed:
 - file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)
 - file_ops_safe(operation="list", target="FolderName"): List .md files inside a folder (non-recursive)
-- file_ops_safe(operation="list", target="FolderName", recursive=True): Recursive listing (use sparingly - capped at 200 results)
+- file_ops_safe(operation="list", target="FolderName", recursive=True): Recursive listing (use sparingly - result cap is configurable)
 - file_ops_safe(operation="list", target="FolderName/*", include_all=True): Include non-md/hidden files
 - file_ops_safe(operation="list", target="notes/**/*.md", recursive=True): Explicit glob pattern for recursive match
 
@@ -127,6 +155,8 @@ Instead, explore the vault structure first, then target specific folders or file
 
 READING & WRITING:
 - file_ops_safe(operation="read", target="path/to/file.md"): Read file content
+- file_ops_safe(operation="read", target="path/to/image.png"): Attach image content for vision-capable models
+- file_ops_safe(operation="read", target="path/to/note.md"): If markdown embeds local images, returns ordered multimodal content
 - file_ops_safe(operation="write", target="path/to/file.md", content="text"): Create NEW file (fails if exists)
 - file_ops_safe(operation="append", target="path/to/file.md", content="text"): Append to EXISTING file (fails if not exists)
 - file_ops_safe(operation="move", target="old/path.md", destination="new/path.md"): Move files (fails if destination exists)
@@ -137,15 +167,33 @@ BEST PRACTICES:
 2. Use 'search' to find content across files efficiently
 3. Navigate into relevant directories before doing recursive searches
 4. Read only files relevant to the user's request
-5. All files must use .md extension
+5. Write/append operations require .md files; read also supports image files
 6. All operations are SAFE - no overwriting or data loss
 """
 
 
     @classmethod
-    def _read_file(cls, path: str, vault_path: str) -> str:
+    def _validate_read_path(cls, path: str, vault_path: str) -> str:
+        """Validate read path within vault boundaries, allowing non-markdown files."""
+        mount_key = get_virtual_mount_key(path)
+        if mount_key:
+            raise ValueError(f"'{mount_key}' is reserved for a virtual mount")
+        if ".." in path:
+            raise ValueError("Path traversal not allowed - '..' found in path")
+        if path.startswith("/"):
+            raise ValueError("Absolute paths not allowed")
+
+        full_path = os.path.join(vault_path, path)
+        resolved_path = os.path.realpath(full_path)
+        vault_abs = os.path.realpath(vault_path)
+        if not resolved_path.startswith(vault_abs + os.sep) and resolved_path != vault_abs:
+            raise ValueError("Path escapes vault boundaries")
+        return resolved_path
+
+    @classmethod
+    def _read_file(cls, path: str, vault_path: str) -> str | ToolReturn:
         """Read file contents."""
-        full_path = validate_and_resolve_path(path, vault_path)
+        full_path = cls._validate_read_path(path, vault_path)
 
         if os.path.isdir(full_path):
             return f"Cannot read '{path}' - this is a directory, not a file. Use file_operations('list', target='{path}') to see files in this directory."
@@ -153,8 +201,105 @@ BEST PRACTICES:
         if not os.path.exists(full_path):
             return f"Cannot read '{path}' - file does not exist. Use file_operations('list') to see available files."
 
-        with open(full_path, 'r', encoding='utf-8') as file:
-            file_content = file.read()
+        extension = Path(full_path).suffix.lower()
+        if extension not in SUPPORTED_READ_FILE_TYPES:
+            allowed = ", ".join(sorted(SUPPORTED_READ_FILE_TYPES.keys()))
+            return (
+                f"Cannot read '{path}' - unsupported file type '{extension or '[none]'}'. "
+                f"Supported extensions: {allowed}."
+            )
+
+        binary_content = BinaryContent.from_path(full_path)
+        if binary_content.is_image:
+            max_image_bytes = get_chunking_max_image_bytes_per_image()
+            image_size_bytes = len(binary_content.data)
+            if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
+                max_image_mb = get_chunking_max_image_mb_per_image()
+                return (
+                    f"Cannot attach image '{path}' ({image_size_bytes} bytes) - exceeds "
+                    f"chunking_max_image_mb_per_image ({max_image_mb} MB)."
+                )
+            payload = build_image_tool_payload(
+                image_path=Path(full_path),
+                vault_path=vault_path,
+            )
+            return ToolReturn(
+                return_value=(
+                    f"Attached image '{payload.metadata['filepath']}' "
+                    f"({payload.metadata['media_type']}, {payload.metadata['size_bytes']} bytes)."
+                ),
+                content=[payload.note, payload.image_blob],
+                metadata=payload.metadata,
+            )
+
+        try:
+            with open(full_path, 'r', encoding='utf-8') as file:
+                file_content = file.read()
+        except UnicodeDecodeError:
+            return (
+                f"Cannot read '{path}' as text - this file is binary ({binary_content.media_type}). "
+                "Image files are supported for multimodal reading; other binary types are not supported by "
+                "file_ops_safe(read) yet."
+            )
+        if SUPPORTED_READ_FILE_TYPES.get(extension) != "markdown":
+            return (
+                f"Cannot read '{path}' as markdown content. "
+                "Only markdown and image files are supported."
+            )
+        markdown_chunks = parse_markdown_chunks(file_content)
+        has_embedded_images = any(chunk.kind == "image_ref" for chunk in markdown_chunks)
+        if has_embedded_images:
+            decision = evaluate_markdown_image_policy(
+                file_content=file_content,
+                markdown_chunks=markdown_chunks,
+                source_markdown_path=path,
+                vault_path=vault_path,
+                auto_buffer_max_tokens=get_auto_buffer_max_tokens(),
+                policy=default_chunking_policy(),
+            )
+            if not decision.attach_images:
+                return (
+                    f"Successfully read file '{path}' ({len(file_content)} characters) "
+                    f"(image attachments skipped: {decision.reason})\n\n"
+                    f"{decision.normalized_text or file_content}"
+                )
+
+            built = build_input_files_prompt(
+                input_file_data=[
+                    {
+                        "filepath": path,
+                        "source_path": path,
+                        "filename": Path(path).stem,
+                        "content": file_content,
+                        "found": True,
+                        "error": None,
+                        "images_policy": "auto",
+                    }
+                ],
+                vault_path=vault_path,
+                include_file_framing=False,
+                supports_vision=None,
+            )
+            if isinstance(built.prompt, list):
+                return ToolReturn(
+                    return_value=(
+                        f"Successfully read markdown file '{path}' with embedded images "
+                        f"({built.attached_image_count} image attachment(s), "
+                        f"{built.attached_image_bytes} bytes)."
+                    ),
+                    content=built.prompt,
+                    metadata={
+                        "filepath": path,
+                        "media_mode": "markdown+images",
+                        "attached_image_count": built.attached_image_count,
+                        "attached_image_bytes": built.attached_image_bytes,
+                        "warnings": built.warnings,
+                    },
+                )
+            return (
+                f"Successfully read file '{path}' ({len(file_content)} characters)\n\n"
+                f"{built.prompt_text}"
+            )
         return f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}"
 
     @classmethod
@@ -228,7 +373,14 @@ BEST PRACTICES:
         return f"Successfully moved '{path}' to '{destination}'"
 
     @classmethod
-    def _list_files(cls, target: str, vault_path: str, include_all: bool, recursive: bool, max_results: int = 200) -> str:
+    def _list_files(
+        cls,
+        target: str,
+        vault_path: str,
+        include_all: bool,
+        recursive: bool,
+        max_results: int,
+    ) -> str:
         """List files and directories matching a target path or glob."""
         # Default to top-level view
         target = target.strip()
@@ -280,7 +432,7 @@ BEST PRACTICES:
 
         # Cap results to avoid overwhelming context
         truncated = False
-        if len(files) + len(directories) > max_results:
+        if max_results > 0 and len(files) + len(directories) > max_results:
             truncated = True
             remaining = max_results
             directories = sorted(directories)[:remaining]
@@ -301,7 +453,13 @@ BEST PRACTICES:
         return '\n\n'.join(result_parts)
 
     @classmethod
-    def _list_virtual_mount(cls, target: str, include_all: bool, recursive: bool, max_results: int = 200) -> str:
+    def _list_virtual_mount(
+        cls,
+        target: str,
+        include_all: bool,
+        recursive: bool,
+        max_results: int,
+    ) -> str:
         """List files and directories under a virtual mount."""
         target = target.strip()
         mount_key = get_virtual_mount_key(target) or ""
@@ -357,7 +515,7 @@ BEST PRACTICES:
             return f"No files or directories found for target '{target}'"
 
         truncated = False
-        if len(files) + len(directories) > max_results:
+        if max_results > 0 and len(files) + len(directories) > max_results:
             truncated = True
             remaining = max_results
             directories = sorted(directories)[:remaining]

@@ -9,6 +9,8 @@ class ImportScanRequest(BaseModel):
     vault: str
     queue_only: bool = False
     strategies: Optional[List[str]] = None  # Optional per-run strategy override
+    capture_ocr_images: Optional[bool] = None  # Optional per-run OCR image capture override
+    pdf_mode: Optional[str] = None  # Optional per-run PDF mode override: markdown|page_images
 
 
 class ImportJobInfo(BaseModel):

@@ -329,7 +329,12 @@
         .message-bubble.message-assistant .message-body em {
             color: rgb(var(--text-primary));
         }
-        .message-bubble.message-assistant .message-body * {
+        .message-bubble.message-assistant .message-body h1,
+        .message-bubble.message-assistant .message-body h2,
+        .message-bubble.message-assistant .message-body h3,
+        .message-bubble.message-assistant .message-body h4,
+        .message-bubble.message-assistant .message-body h5,
+        .message-bubble.message-assistant .message-body h6 {
             color: rgb(var(--text-primary));
         }
         .message-bubble.message-assistant .message-body a {
@@ -340,6 +345,38 @@
         }
         .message-bubble.message-assistant .message-body hr {
             border-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body blockquote {
+            color: rgb(var(--text-primary));
+            border-inline-start-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body table {
+            color: rgb(var(--text-primary));
+        }
+        .message-bubble.message-assistant .message-body thead {
+            border-bottom-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body tfoot {
+            border-top-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body tbody tr {
+            border-bottom-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body th,
+        .message-bubble.message-assistant .message-body td {
+            color: rgb(var(--text-primary));
+            border-color: rgb(var(--border-primary));
+        }
+        .message-bubble.message-assistant .message-body ul > li::marker,
+        .message-bubble.message-assistant .message-body ol > li::marker {
+            color: rgb(var(--text-secondary));
+        }
+        .message-bubble.message-assistant .message-body figcaption {
+            color: rgb(var(--text-secondary));
+        }
+        .message-bubble.message-assistant .message-body kbd {
+            color: rgb(var(--text-primary));
+            box-shadow: 0 0 0 1px rgb(var(--border-primary));
         }
         .message-bubble.message-assistant pre {
             background: rgb(var(--bg-elevated));
@@ -650,6 +687,105 @@
             border-color: rgb(var(--accent-primary) / 0.55);
             color: rgb(var(--accent-hover));
         }
+        .chat-compose-wrap {
+            position: relative;
+        }
+        .chat-attach-btn {
+            position: absolute;
+            right: 1rem;
+            bottom: 0.5rem;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 9999px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: rgb(var(--text-secondary));
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .chat-attach-btn.has-attachments {
+            color: rgb(var(--accent-primary));
+        }
+        .chat-attach-btn:hover {
+            color: rgb(var(--accent-primary));
+            border-color: transparent;
+            background: transparent;
+        }
+        .chat-attach-badge {
+            display: none;
+            position: absolute;
+            top: -0.2rem;
+            right: -0.2rem;
+            min-width: 1rem;
+            height: 1rem;
+            border-radius: 9999px;
+            padding: 0 0.2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgb(var(--accent-primary));
+            color: rgb(var(--text-on-accent));
+            font-size: 0.62rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .chat-attachment-popover {
+            position: absolute;
+            right: 0.75rem;
+            bottom: 3rem;
+            width: min(18rem, calc(100vw - 3rem));
+            max-height: 11rem;
+            overflow: auto;
+            border-radius: 0.6rem;
+            border: 1px solid rgb(var(--border-primary));
+            background: rgb(var(--bg-card));
+            box-shadow: 0 8px 20px rgb(0 0 0 / 0.14);
+            padding: 0.45rem;
+            z-index: 30;
+        }
+        @media (max-width: 768px) {
+            .chat-attachment-popover {
+                left: 0.75rem;
+                right: 0.75rem;
+                width: auto;
+                max-width: none;
+            }
+        }
+        .chat-attachment-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            width: 100%;
+            border-radius: 0.45rem;
+            color: rgb(var(--text-primary));
+            padding: 0.3rem 0.45rem;
+            font-size: 0.75rem;
+            margin-bottom: 0.2rem;
+        }
+        .chat-attachment-item:last-child {
+            margin-bottom: 0;
+        }
+        .chat-attachment-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 10.5rem;
+        }
+        .chat-attachment-remove {
+            border: 0;
+            background: transparent;
+            color: rgb(var(--text-secondary));
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+            font-size: 0.85rem;
+        }
+        .chat-attachment-remove:hover {
+            color: rgb(var(--state-error));
+        }
     </style>
 </head>
 <body class="bg-app-bg transition-colors duration-200">
@@ -725,12 +861,22 @@
                 </div>
                 <div class="border-t border-border-primary p-4">
                     <div class="flex gap-2">
-                        <textarea
-                            id="chat-input"
-                            rows="3"
-                            placeholder="Type your message (Ctrl+Enter or Cmd+Enter to send)..."
-                            class="flex-1 px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
-                        ></textarea>
+                        <div class="flex-1">
+                            <div class="chat-compose-wrap">
+                                <textarea
+                                    id="chat-input"
+                                    rows="3"
+                                    placeholder="Type your message (Ctrl+Enter or Cmd+Enter to send)..."
+                                    class="block w-full px-3 py-2 pr-12 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
+                                ></textarea>
+                                <button id="attach-btn" type="button" class="chat-attach-btn" title="Attach image(s)" aria-label="Attach image(s)" aria-expanded="false" aria-controls="chat-attachment-popover">
+                                    📎
+                                    <span id="attach-count-badge" class="chat-attach-badge" style="display:none"></span>
+                                </button>
+                                <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
+                                <div id="chat-attachment-popover" class="chat-attachment-popover hidden" role="menu" aria-label="Pending attachments"></div>
+                            </div>
+                        </div>
                         <button
                             id="send-btn"
                             class="px-6 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1003,10 +1149,21 @@
                             </div>
 
                             <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                                <div class="flex items-center gap-4">
+                                <div class="flex items-center gap-4 flex-wrap">
+                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                        <span>PDF Mode</span>
+                                        <select id="import-pdf-mode" class="px-2 py-1 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                            <option value="markdown">Markdown</option>
+                                            <option value="page_images">Page Images</option>
+                                        </select>
+                                    </label>
                                     <label class="flex items-center gap-2 text-sm text-txt-primary">
                                         <input id="import-use-ocr" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
                                         <span>Use OCR (PDF)</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                        <input id="import-capture-ocr-images" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                        <span>Capture OCR images</span>
                                     </label>
                                     <label class="flex items-center gap-2 text-sm text-txt-primary">
                                         <input id="import-queue" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">

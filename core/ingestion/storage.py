@@ -39,8 +39,14 @@ def default_storage(rendered: List[Dict], options: RenderOptions) -> List[str]:
                     break
                 counter += 1
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        content = artifact["content"]
-        full_path.write_text(content, encoding="utf-8")
+        if "content_bytes" in artifact:
+            content_bytes = artifact["content_bytes"]
+            if not isinstance(content_bytes, (bytes, bytearray)):
+                raise ValueError(f"Binary artifact content_bytes must be bytes for {rel_path.as_posix()}")
+            full_path.write_bytes(bytes(content_bytes))
+        else:
+            content = artifact["content"]
+            full_path.write_text(content, encoding="utf-8")
         # Return vault-relative path for API/status reporting
         outputs.append(rel_path.as_posix())
 

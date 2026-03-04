@@ -85,8 +85,10 @@
         secretResetBtn: null,
 
         importVaultSelect: null,
+        importPdfModeSelect: null,
         importQueueCheckbox: null,
         importUseOcrCheckbox: null,
+        importCaptureOcrImagesCheckbox: null,
         importStatus: null,
         importScanBtn: null,
         importRefreshVaultsBtn: null,
@@ -131,8 +133,10 @@
         elements.secretResetBtn = document.getElementById('secret-reset');
 
         elements.importVaultSelect = document.getElementById('import-vault-select');
+        elements.importPdfModeSelect = document.getElementById('import-pdf-mode');
         elements.importQueueCheckbox = document.getElementById('import-queue');
         elements.importUseOcrCheckbox = document.getElementById('import-use-ocr');
+        elements.importCaptureOcrImagesCheckbox = document.getElementById('import-capture-ocr-images');
         elements.importStatus = document.getElementById('import-status');
         elements.importScanBtn = document.getElementById('import-scan');
         elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
@@ -163,6 +167,7 @@
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
         elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
+        elements.importPdfModeSelect?.addEventListener('change', updateImportOcrAvailability);
     }
 
     const restartNoticeText = 'Restart recommended: restart the container to apply pending changes.';
@@ -261,7 +266,11 @@
             return;
         }
 
-        const cards = state.settings.map((setting) => {
+        const sortedSettings = [...state.settings].sort((a, b) =>
+            String(a?.key ?? '').localeCompare(String(b?.key ?? ''), undefined, { sensitivity: 'base' })
+        );
+
+        const cards = sortedSettings.map((setting) => {
             if (state.settingEditKey === setting.key) {
                 return renderSettingEditCard(setting);
             }
@@ -640,6 +649,9 @@
         const reasonLine = model.status_message && !model.available
             ? `<div class="text-xs state-error mt-1">${escapeHtml(model.status_message)}</div>`
             : '';
+        const capabilities = Array.isArray(model.capabilities) && model.capabilities.length
+            ? model.capabilities.join(', ')
+            : 'text';
 
                 const actions = editable
                     ? `
@@ -670,6 +682,10 @@
                         <div>
                             <div class="text-xs font-medium text-txt-secondary mb-1">Model Identifier</div>
                             <div class="text-xs font-mono text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(model.model_string)}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs font-medium text-txt-secondary mb-1">Capabilities</div>
+                            <div class="text-xs text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(capabilities)}</div>
                         </div>
                     </div>
                     <div class="flex gap-2 justify-start md:justify-end shrink-0">
@@ -711,6 +727,11 @@
                     <div>
                         <label class="block text-xs font-medium text-txt-primary mb-1.5">Model Identifier</label>
                         <input data-field="model_string" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary font-mono text-sm transition-colors" placeholder="e.g. claude-sonnet-4-5" value="${escapeHtml(draft.model_string || '')}" />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-txt-primary mb-1.5">Capabilities</label>
+                        <input data-field="capabilities" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="e.g. text, vision" value="${escapeHtml(draft.capabilities || 'text')}" />
+                        <p class="text-xs text-txt-secondary mt-1">Comma-separated values. Example: <code>text, vision</code>.</p>
                     </div>
                     <div class="flex justify-end gap-2">
                         <button data-action="cancel-model" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
@@ -789,7 +810,10 @@ function startModelEdit(modelName) {
     state.modelDraft = {
         name: model.name,
         provider: model.provider,
-        model_string: model.model_string
+        model_string: model.model_string,
+        capabilities: Array.isArray(model.capabilities) && model.capabilities.length
+            ? model.capabilities.join(', ')
+            : 'text'
     };
 
     renderModels();
@@ -809,7 +833,8 @@ function startNewModel() {
     state.modelDraft = {
         name: '',
         provider: defaultProvider,
-        model_string: ''
+        model_string: '',
+        capabilities: 'text'
     };
 
     renderModels();
@@ -833,6 +858,11 @@ async function saveModelRow(rowKey) {
     let alias = (draft.name || '').trim().toLowerCase();
     const provider = (draft.provider || '').trim();
     const modelString = (draft.model_string || '').trim();
+    const capabilitiesInput = (draft.capabilities || '').trim();
+    const capabilities = capabilitiesInput
+        .split(',')
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0);
 
     const isNew = state.modelEdit.mode === 'new' || rowKey === '__new';
     const originalName = state.modelEdit.mode === 'existing' ? state.modelEdit.key : null;
@@ -844,6 +874,10 @@ async function saveModelRow(rowKey) {
 
     if (!provider || !modelString) {
         setStatus(elements.modelFeedback, 'Provider and model identifier are required.', 'error');
+        return;
+    }
+    if (!capabilities.length) {
+        setStatus(elements.modelFeedback, 'At least one capability is required (e.g. text).', 'error');
         return;
     }
 
@@ -859,7 +893,8 @@ async function saveModelRow(rowKey) {
     try {
         const payload = {
             provider: provider,
-            model_string: modelString
+            model_string: modelString,
+            capabilities: capabilities
         };
 
         const response = await fetch(`api/system/models/${encodeURIComponent(alias)}`, {
@@ -1179,12 +1214,36 @@ async function saveModelRow(rowKey) {
         const hasMistral = state.secrets.some(
             (entry) => entry.name === 'MISTRAL_API_KEY' && entry.has_value
         );
-        elements.importUseOcrCheckbox.disabled = !hasMistral;
-        elements.importUseOcrCheckbox.title = hasMistral
-            ? ''
-            : 'Requires MISTRAL_API_KEY secret';
-        if (!hasMistral) {
+        const isPageImagesMode = (elements.importPdfModeSelect?.value || 'markdown') === 'page_images';
+        const disableOcrControls = !hasMistral || isPageImagesMode;
+
+        elements.importUseOcrCheckbox.disabled = disableOcrControls;
+        if (elements.importCaptureOcrImagesCheckbox) {
+            elements.importCaptureOcrImagesCheckbox.disabled = disableOcrControls;
+        }
+        if (isPageImagesMode) {
+            elements.importUseOcrCheckbox.title = 'Disabled for PDF mode: Page Images';
+            if (elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.title = 'Disabled for PDF mode: Page Images';
+            }
+        } else {
+            elements.importUseOcrCheckbox.title = hasMistral
+                ? ''
+                : 'Requires MISTRAL_API_KEY secret';
+            if (elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.title = hasMistral
+                    ? ''
+                    : 'Requires MISTRAL_API_KEY secret';
+            }
+        }
+        if (elements.importCaptureOcrImagesCheckbox) {
+            // title is set above to keep mode/secret messaging consistent
+        }
+        if (disableOcrControls) {
             elements.importUseOcrCheckbox.checked = false;
+            if (elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.checked = false;
+            }
         }
     }
 
@@ -1474,6 +1533,80 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    function normalizeOutputPaths(outputs) {
+        if (!Array.isArray(outputs)) return [];
+        const seen = new Set();
+        const normalized = [];
+        outputs.forEach((value) => {
+            const path = String(value || '').trim();
+            if (!path || seen.has(path)) return;
+            seen.add(path);
+            normalized.push(path);
+        });
+        return normalized;
+    }
+
+    function summarizeImportOutputs(outputs) {
+        const paths = normalizeOutputPaths(outputs);
+        if (!paths.length) {
+            return {
+                destinationLabel: 'No output files',
+                filesLabel: '0 files',
+            };
+        }
+
+        const directorySegments = paths.map((path) => {
+            const slashIndex = path.lastIndexOf('/');
+            const folder = slashIndex >= 0 ? path.slice(0, slashIndex) : '';
+            return folder ? folder.split('/').filter(Boolean) : [];
+        });
+
+        let commonDir = directorySegments[0] ? directorySegments[0].slice() : [];
+        for (let i = 1; i < directorySegments.length; i += 1) {
+            const current = directorySegments[i];
+            let prefixLen = 0;
+            while (
+                prefixLen < commonDir.length &&
+                prefixLen < current.length &&
+                commonDir[prefixLen] === current[prefixLen]
+            ) {
+                prefixLen += 1;
+            }
+            commonDir = commonDir.slice(0, prefixLen);
+            if (!commonDir.length) break;
+        }
+
+        // Import outputs generally live under Imported/<import-set>/...
+        // Prefer showing that root folder instead of deep subfolders like /pages.
+        const destinationSegments = (
+            commonDir.length >= 2 && commonDir[0] === 'Imported'
+                ? commonDir.slice(0, 2)
+                : commonDir
+        );
+        const destinationLabel = destinationSegments.length
+            ? destinationSegments.join('/')
+            : '(vault root)';
+
+        const extensionCounts = new Map();
+        paths.forEach((path) => {
+            const slashIndex = path.lastIndexOf('/');
+            const filename = slashIndex >= 0 ? path.slice(slashIndex + 1) : path;
+            const dotIndex = filename.lastIndexOf('.');
+            const extension = dotIndex > 0
+                ? filename.slice(dotIndex + 1).toLowerCase()
+                : 'no-ext';
+            extensionCounts.set(extension, (extensionCounts.get(extension) || 0) + 1);
+        });
+
+        const typeParts = Array.from(extensionCounts.entries())
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([ext, count]) => `${count} ${ext}`);
+
+        const filesLabel = `${paths.length} file${paths.length === 1 ? '' : 's'} (${typeParts.join(', ')})`;
+
+        return { destinationLabel, filesLabel };
+    }
+
     function renderImportResults() {
         if (!elements.importResults) return;
         const results = state.importResults;
@@ -1490,12 +1623,21 @@ async function saveModelRow(rowKey) {
                 html += '<ul class="list-disc list-inside space-y-1">';
                 html += jobs
                     .map((job) => {
-                        const outputs = Array.isArray(job.outputs) && job.outputs.length
-                            ? ` → ${job.outputs.join(', ')}`
-                            : '';
+                        const outputSummary = summarizeImportOutputs(job.outputs);
                         const status = job.status || 'queued';
                         const source = job.source_uri || 'unknown';
-                        return `<li><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span>${outputs ? ` <span class="subtle">${outputs}</span>` : ''}</li>`;
+                        return `
+                            <li>
+                                <span class="text-txt-primary font-medium">${escapeHtml(source)}</span>
+                                <span class="subtle">(${escapeHtml(status)})</span>
+                                <div class="text-xs text-txt-secondary ml-4">
+                                    Destination: <span class="text-txt-primary">${escapeHtml(outputSummary.destinationLabel)}</span>
+                                </div>
+                                <div class="text-xs text-txt-secondary ml-4">
+                                    Files: ${escapeHtml(outputSummary.filesLabel)}
+                                </div>
+                            </li>
+                        `;
                     })
                     .join('');
                 html += '</ul></div>';
@@ -1503,25 +1645,24 @@ async function saveModelRow(rowKey) {
             if (skipped.length > 0) {
                 html += `<div class="space-y-2 pt-3 border-t border-border-primary"><div class="font-medium text-txt-primary">Skipped (${skipped.length})</div>`;
                 html += '<ul class="list-disc list-inside space-y-1">';
-                html += skipped.map((name) => `<li>${name}</li>`).join('');
+                html += skipped.map((name) => `<li>${escapeHtml(name)}</li>`).join('');
                 html += '</ul></div>';
             }
             if (html) sections.push(html);
         }
 
         if (urlResult) {
-            const outputs = Array.isArray(urlResult.outputs) ? urlResult.outputs : [];
+            const outputSummary = summarizeImportOutputs(urlResult.outputs);
             const status = urlResult.status || 'unknown';
             const error = urlResult.error;
             const source = urlResult.source_uri || urlResult.url || 'unknown';
 
             let html = `<div class="space-y-2"><div class="font-medium text-txt-primary">Latest URL import</div>`;
-            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${source}</span> <span class="subtle">(${status})</span></div>`;
-            if (outputs.length) {
-                html += '<div class="text-sm">Outputs: ' + outputs.join(', ') + '</div>';
-            }
+            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${escapeHtml(source)}</span> <span class="subtle">(${escapeHtml(status)})</span></div>`;
+            html += `<div class="text-sm text-txt-secondary">Destination: <span class="text-txt-primary">${escapeHtml(outputSummary.destinationLabel)}</span></div>`;
+            html += `<div class="text-sm text-txt-secondary">Files: ${escapeHtml(outputSummary.filesLabel)}</div>`;
             if (error) {
-                html += `<div class="text-sm state-error">Error: ${error}</div>`;
+                html += `<div class="text-sm state-error">Error: ${escapeHtml(error)}</div>`;
             }
             html += '</div>';
             sections.push(html);
@@ -1541,10 +1682,18 @@ async function saveModelRow(rowKey) {
 
         const queueOnly = Boolean(elements.importQueueCheckbox?.checked);
         const useOcr = Boolean(elements.importUseOcrCheckbox?.checked);
+        const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
+        const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
 
         const payload = { vault, queue_only: queueOnly };
+        if (pdfMode === 'page_images') {
+            payload.pdf_mode = 'page_images';
+        }
         if (useOcr) {
-            payload.strategies = ["pdf_ocr", "pdf_text"];
+            payload.strategies = ["pdf_ocr", "pdf_text", "image_ocr"];
+        }
+        if (captureOcrImages) {
+            payload.capture_ocr_images = true;
         }
 
         state.isScanningImport = true;

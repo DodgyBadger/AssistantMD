@@ -23,15 +23,21 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # 3. Use uv to sync dependencies from docker/pyproject.toml + uv.lock
-#    into the project's local virtualenv (/app/docker/.venv).
+#    into system Python (/usr/local), matching production image behavior.
 if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.lock" ]; then
   echo "Syncing dependencies with uv (including dev deps)..."
   (
     cd "${REPO_DIR}/docker"
+    unset VIRTUAL_ENV
     UV_CACHE_DIR=/tmp/uv-cache \
     UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/usr/local \
     uv sync --extra dev --no-install-project || echo "WARNING: uv sync failed; continuing"
   )
+  # Remove stale project venv to avoid accidental interpreter/path drift.
+  if [ -d "${REPO_DIR}/docker/.venv" ]; then
+    rm -rf "${REPO_DIR}/docker/.venv" || echo "WARNING: failed to remove docker/.venv"
+  fi
 else
   echo "WARNING: docker/pyproject.toml or docker/uv.lock not found; skipping uv sync."
 fi

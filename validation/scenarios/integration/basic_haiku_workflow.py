@@ -1,7 +1,8 @@
 """
-Basic Haiku scenario - simplest possible real workflow test.
+Basic haiku workflow happy-path scenario.
 
-Tests single-step workflow execution with file output.
+Runs a real image+text workflow end-to-end with a live model to provide
+human-reviewable artifacts.
 """
 
 import sys
@@ -15,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from validation.core.base_scenario import BaseScenario
 
 
-class BasicHaikuScenario(BaseScenario):
-    """Test basic single-step workflow execution."""
+class BasicHaikuWorkflowScenario(BaseScenario):
+    """Golden-path workflow execution with multimodal input and file outputs."""
 
     async def test_scenario(self):
         """Execute complete end-to-end workflow: system startup → workflow execution."""
@@ -26,6 +27,7 @@ class BasicHaikuScenario(BaseScenario):
 
         # Create simple single-step workflow
         self.create_file(vault, "AssistantMD/Workflows/haiku_writer.md", HAIKU_WRITER_WORKFLOW)
+        self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
 
         # === SYSTEM STARTUP VALIDATION ===
         # Test real system startup with vault discovery and job scheduling
@@ -90,16 +92,20 @@ description: Simple haiku writing workflow
 ---
 
 ## STEP1
+@input file: images/test_image.jpg
 @model gpt-mini
 @output file: {today}
-@output variable: haiku_buffer
 @header My new haiku - {today}
+@output variable: haiku_buffer
 
-Write a beautiful haiku about integration testing. Format it nicely with proper line breaks.
+Write a beautiful haiku about the image. Format it nicely with proper line breaks.
 
 ## STEP2
 @model gpt-mini
-@input variable: haiku_buffer (required)
+@input variable: haiku_buffer
+@output file: {today}
+@write_mode append
+@header Haiku critique
 
-Read back the haiku from the buffer and confirm it exists.
+Write a short critique about the above haiku and suggest ways to improve it. Keep it concise and constructive.
 """

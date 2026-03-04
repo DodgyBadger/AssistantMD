@@ -28,9 +28,29 @@ settings:
     value: 10
     description: "Timeout in seconds for file_ops_safe search operations."
     restart_required: false
+  file_ops_safe_list_max_results:
+    value: 200
+    description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
+    restart_required: false
   routing_allowed_tools:
     value: []
     description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"
+    restart_required: false
+  chunking_max_images_per_prompt:
+    value: 20
+    description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt. 0 = disabled."
+    restart_required: false
+  chunking_max_image_mb_per_image:
+    value: 5
+    description: "Maximum size in MB for a single image attachment from chunked markdown inputs. 0 = disabled."
+    restart_required: false
+  chunking_max_image_mb_total:
+    value: 100
+    description: "Maximum total MB allowed for all chunked image attachments in a single prompt. 0 = disabled."
+    restart_required: false
+  chunking_allow_remote_images:
+    value: false
+    description: "Allow remote image URLs in markdown chunking (currently ref-only behavior; no download/attach)."
     restart_required: false
   debug:
     value: false
@@ -50,13 +70,22 @@ settings:
       - pdf_ocr
     description: "Available strategies and priority for PDF ingestion. JSON array. Remove value to disable or reorder as needed. E.g. [\"pdf_ocr\"] will force all imports through OCR."
     restart_required: false
-  ingestion_pdf_ocr_model:
+  ingestion_ocr_model:
     value: "mistral-ocr-latest"
-    description: "Model used for OCR extraction."
+    description: "Model used for ingestion OCR extraction."
     restart_required: false
-  ingestion_pdf_ocr_endpoint:
+  ingestion_ocr_endpoint:
     value: "https://api.mistral.ai/v1/ocr"
-    description: "HTTP endpoint for OCR extraction."
+    description: "HTTP endpoint for ingestion OCR extraction."
+    restart_required: false
+  ingestion_ocr_capture_images:
+    value: false
+    description: "When true, request OCR image payloads and persist them as assets during ingestion."
+    restart_required: false
+  ingestion_image_default_strategies:
+    value:
+      - image_ocr
+    description: "Available strategies and priority for image ingestion. JSON array. Remove value to disable or reorder as needed."
     restart_required: false
   ingestion_output_path_pattern:
     value: "Imported/"
@@ -87,81 +116,97 @@ models:
   gemini:
     provider: google
     model_string: gemini-2.5-pro
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gemini-flash:
     provider: google
     model_string: gemini-2.5-flash
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gemini-flash-lite:
     provider: google
     model_string: gemini-2.5-flash-lite
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   sonnet:
     provider: anthropic
     model_string: claude-sonnet-4-5
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   opus:
     provider: anthropic
     model_string: claude-opus-4-1
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   haiku:
     provider: anthropic
     model_string: claude-haiku-4-5
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gpt:
     provider: openai
     model_string: gpt-5
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gpt-mini:
     provider: openai
     model_string: gpt-5-mini
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gpt-nano:
     provider: openai
     model_string: gpt-5-nano
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   grok:
     provider: grok
     model_string: grok-4
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   grok-mini:
     provider: grok
     model_string: grok-3-mini
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   mistral-large:
     provider: mistral
     model_string: mistral-large-latest
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   mistral-small:
     provider: mistral
     model_string: mistral-small-latest
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   mistral-medium:
     provider: mistral
     model_string: mistral-medium-latest
+    capabilities: ["text", "vision"]
     description: null
     user_editable: true
   magistral-medium:
     provider: mistral
     model_string: magistral-medium-latest
+    capabilities: ["text"]
     description: null
     user_editable: true
   magistral-small:
     provider: mistral
     model_string: magistral-small-latest
+    capabilities: ["text"]
     description: null
     user_editable: true
 

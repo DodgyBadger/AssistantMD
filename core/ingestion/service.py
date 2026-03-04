@@ -4,10 +4,13 @@ Ingestion service wired into runtime.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import List
 from pathlib import Path
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
+from core.ingestion.output_paths import resolve_import_output_paths
 from core.ingestion.registry import importer_registry, extractor_registry
 from core.ingestion.renderers import default_renderer
 from core.ingestion.storage import default_storage
@@ -36,6 +39,7 @@ from core.logger import UnifiedLogger
 class IngestionService:
     _STRATEGY_SECRET_REQUIREMENTS = {
         "pdf_ocr": "MISTRAL_API_KEY",
+        "image_ocr": "MISTRAL_API_KEY",
     }
 
     def __init__(self):
@@ -122,8 +126,29 @@ class IngestionService:
                 raw_doc = importer_fn(source_path)
 
             suffix = source_path.suffix.lower() if source_path else ""
-            strategies = self._get_strategies(job, suffix, ingestion_settings)
             options = job.options if isinstance(job.options, dict) else {}
+            pdf_mode = str(options.get("pdf_mode", "markdown")).strip().lower() if isinstance(options, dict) else "markdown"
+            if source_path:
+                relative_dir = self._compute_relative_import_dir(
+                    source_path=source_path,
+                    import_root=import_root,
+                )
+
+            if suffix == ".pdf" and pdf_mode == "page_images":
+                outputs = self._render_pdf_page_images(
+                    raw_doc=raw_doc,
+                    vault=vault,
+                    source_path=source_path,
+                    relative_dir=relative_dir,
+                    base_output_dir=ingestion_settings.get("output_base_dir", "Imported/"),
+                    dpi=150,
+                )
+                update_job_outputs(job_id, outputs)
+                self._cleanup_source_file(source_path=source_path, vault=vault)
+                self.mark_completed(job_id)
+                return
+
+            strategies = self._get_strategies(job, suffix, ingestion_settings)
             extractor_opts = options.get("extractor_options", {}) if isinstance(options, dict) else {}
             extracted, warnings = self._run_strategies(raw_doc, strategies, ingestion_settings, extractor_opts)
             if extracted is None:
@@ -131,19 +156,6 @@ class IngestionService:
                 self.logger.warning(msg, metadata={"job_id": job_id, "strategies": strategies})
                 self.mark_failed(job_id, msg)
                 return
-
-            if source_path:
-                try:
-                    source_parent = source_path.parent.resolve()
-                    import_root_resolved = import_root.resolve()
-                    if str(source_parent).startswith(str(import_root_resolved)):
-                        relative_dir = str(source_parent.relative_to(import_root_resolved)).strip("/")
-                        if relative_dir in ("", "."):
-                            relative_dir = ""
-                        else:
-                            relative_dir = relative_dir + "/"
-                except Exception:
-                    relative_dir = ""
 
             render_options = RenderOptions(
                 mode=RenderMode.FULL,
@@ -184,6 +196,109 @@ class IngestionService:
             self.mark_failed(job_id, str(exc))
             raise
 
+    def _compute_relative_import_dir(self, source_path: Path, import_root: Path) -> str:
+        try:
+            source_parent = source_path.parent.resolve()
+            import_root_resolved = import_root.resolve()
+            if str(source_parent).startswith(str(import_root_resolved)):
+                relative_dir = str(source_parent.relative_to(import_root_resolved)).strip("/")
+                if relative_dir in ("", "."):
+                    return ""
+                return f"{relative_dir}/"
+        except Exception:
+            return ""
+        return ""
+
+    def _cleanup_source_file(self, source_path: Path | None, vault: str) -> None:
+        if source_path is None:
+            return
+        try:
+            data_root = Path(get_data_root())
+            vault_root = (data_root / vault).resolve()
+            resolved_source = source_path.resolve()
+            if str(resolved_source).startswith(str(vault_root)) and resolved_source.is_file():
+                resolved_source.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def _render_pdf_page_images(
+        self,
+        *,
+        raw_doc,
+        vault: str,
+        source_path: Path | None,
+        relative_dir: str,
+        base_output_dir: str,
+        dpi: int,
+    ) -> list[str]:
+        try:
+            import fitz  # PyMuPDF
+        except ImportError as exc:
+            raise RuntimeError("PyMuPDF is required for PDF page image rendering") from exc
+
+        source_filename = str(source_path) if source_path else raw_doc.source_uri
+        paths = resolve_import_output_paths(
+            path_pattern=base_output_dir,
+            relative_dir=relative_dir,
+            source_filename=source_filename,
+            title=raw_doc.suggested_title,
+        )
+
+        job_dir_rel = Path(paths.job_dir)
+        pages_dir_rel = job_dir_rel / "pages"
+        manifest_rel = job_dir_rel / "manifest.json"
+
+        data_root = Path(get_data_root())
+        vault_root = data_root / vault
+        pages_dir_abs = vault_root / pages_dir_rel
+        manifest_abs = vault_root / manifest_rel
+        pages_dir_abs.mkdir(parents=True, exist_ok=True)
+
+        payload = raw_doc.payload if isinstance(raw_doc.payload, (bytes, bytearray)) else raw_doc.payload.encode("utf-8")
+        doc = fitz.open(stream=payload, filetype="pdf")
+        zoom = max(1, int(dpi)) / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
+
+        page_paths: list[str] = []
+        for idx, page in enumerate(doc, start=1):
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            filename = f"page_{idx:04d}.png"
+            full_path = pages_dir_abs / filename
+            pix.save(str(full_path))
+            page_paths.append((pages_dir_rel / filename).as_posix())
+
+        source_hash = hashlib.sha256(payload).hexdigest()
+        source_mtime = None
+        if source_path is not None and source_path.exists():
+            try:
+                source_mtime = source_path.stat().st_mtime
+            except Exception:
+                source_mtime = None
+
+        manifest = {
+            "source": {
+                "name": source_path.name if source_path else (raw_doc.suggested_title or "import.pdf"),
+                "path": str(source_path) if source_path else raw_doc.source_uri,
+                "mime": raw_doc.mime or "application/pdf",
+                "sha256": source_hash,
+                "mtime": source_mtime,
+            },
+            "mode": "page_images",
+            "render": {
+                "format": "png",
+                "dpi": int(dpi),
+            },
+            "page_count": len(page_paths),
+            "pages": [
+                {"page": idx + 1, "path": page_path}
+                for idx, page_path in enumerate(page_paths)
+            ],
+        }
+        manifest_abs.parent.mkdir(parents=True, exist_ok=True)
+        manifest_abs.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        return [manifest_rel.as_posix(), *page_paths]
+
     def _resolve_importer(self, source_path: Path, mime_hint: str | None):
         """
         Pick the first registered importer matching mime hint or file extension.
@@ -222,8 +337,9 @@ class IngestionService:
         """
         general_settings = get_general_settings()
         pdf_default_strategies: list[str] = []
-        pdf_ocr_model = "mistral-ocr-latest"
-        pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        ocr_model = "mistral-ocr-latest"
+        ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        image_default_strategies: list[str] = []
         base_output_dir = "Imported/"
         url_read_timeout_seconds = 10
         url_connect_timeout_seconds = 10
@@ -233,13 +349,23 @@ class IngestionService:
         except Exception:
             pdf_default_strategies = []
         try:
-            pdf_ocr_model = str(general_settings.get("ingestion_pdf_ocr_model").value)
+            ocr_model = str(general_settings.get("ingestion_ocr_model").value)
         except Exception:
-            pdf_ocr_model = "mistral-ocr-latest"
+            try:
+                ocr_model = str(general_settings.get("ingestion_pdf_ocr_model").value)
+            except Exception:
+                ocr_model = "mistral-ocr-latest"
         try:
-            pdf_ocr_endpoint = str(general_settings.get("ingestion_pdf_ocr_endpoint").value)
+            ocr_endpoint = str(general_settings.get("ingestion_ocr_endpoint").value)
         except Exception:
-            pdf_ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+            try:
+                ocr_endpoint = str(general_settings.get("ingestion_pdf_ocr_endpoint").value)
+            except Exception:
+                ocr_endpoint = "https://api.mistral.ai/v1/ocr"
+        try:
+            image_default_strategies = list(general_settings.get("ingestion_image_default_strategies").value)
+        except Exception:
+            image_default_strategies = []
         try:
             base_output_dir = str(general_settings.get("ingestion_output_path_pattern").value)
         except Exception:
@@ -260,8 +386,13 @@ class IngestionService:
         return {
             "pdf": {
                 "default_strategies": pdf_default_strategies,
-                "ocr_model": pdf_ocr_model,
-                "ocr_endpoint": pdf_ocr_endpoint,
+                "ocr_model": ocr_model,
+                "ocr_endpoint": ocr_endpoint,
+            },
+            "image": {
+                "default_strategies": image_default_strategies,
+                "ocr_model": ocr_model,
+                "ocr_endpoint": ocr_endpoint,
             },
             "output_base_dir": base_output_dir,
             "url": {
@@ -306,9 +437,14 @@ class IngestionService:
 
         # Defaults from settings
         pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
+        image_cfg = ingestion_settings.get("image", {}) if isinstance(ingestion_settings, dict) else {}
         if suffix == ".pdf":
             cfg_strategies = pdf_cfg.get("default_strategies") or []
             default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["pdf_text", "pdf_ocr"]
+            return default_strats
+        if suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}:
+            cfg_strategies = image_cfg.get("default_strategies") or []
+            default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["image_ocr"]
             return default_strats
         return []
 
@@ -355,7 +491,9 @@ class IngestionService:
         """
         # Imports are intentional for side effects (registry registration).
         import core.ingestion.sources.pdf  # noqa: F401
+        import core.ingestion.sources.image  # noqa: F401
         import core.ingestion.sources.web  # noqa: F401
         import core.ingestion.strategies.pdf_text  # noqa: F401
         import core.ingestion.strategies.pdf_ocr  # noqa: F401
+        import core.ingestion.strategies.image_ocr  # noqa: F401
         import core.ingestion.strategies.html_raw  # noqa: F401

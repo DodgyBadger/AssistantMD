@@ -4,7 +4,10 @@ Run scenarios that exercise features and use cases. Assert functionality by chec
 
 Scenarios can be narrow (e.g. verifying a single prompt composition rule) or broad (snapshotting an entire workflow run).
 
-**Core principles:**
+For process guidance on validation-driven implementation, see [Testing and Validation](../agent-guides/testing-and-validation.md#validation-first-workflow).
+
+## Core principles
+
 - Validate use cases, features and internal decision points, not isolated functions.
 - Reduce maintenance burden by loosely coupling scenarios to production code through system and end-user outputs.
 - Scenarios should be readable and high-level. Avoid dense code.
@@ -53,6 +56,8 @@ See `validation/scenarios/integration/basic_haiku.py` for a minimal example.
 
 Use validation events when you need to assert on intermediate state that is not visible in final outputs (for example, prompt composition or step-level decisions). Emit them via the validation sink on `UnifiedLogger` at the code location you want to observe. These only fire when the app is run through the validation framework - they will not fire when running in production.
 
+Validation events are intended to be a low-maintenance behavioral contract. They let scenarios validate system decisions without coupling tests to class/function interfaces that are more likely to change during refactors.
+
 Use `logger.set_sinks(["validation"]).info(...)` when you want **only** the validation artifact, or `logger.add_sink("validation").info(...)` when you want validation artifacts alongside the default sinks. The validation sink accepts any key/value pairs you want to capture. You can optionally set a stable event name by passing `data={"event": "my_event", ...}`; otherwise the log message becomes the event name.
 
 ```python
@@ -73,6 +78,41 @@ Each call writes a single YAML file under:
 `validation/runs/<timestamp>_<scenario>/artifacts/validation_events/`.
 
 The YAML includes `name`, `tag`, `timestamp`, trace information and the `data` captured in the call.
+
+### Event Contract Guidelines
+
+Treat event names and key payload fields as a compatibility surface for scenarios.
+
+- Keep event names stable and behavior-oriented (`workflow_step_skipped`, `context_cache_hit`).
+- Prefer additive payload changes (new keys) over mutating/removing existing keys.
+- If event semantics must change, introduce a new event name (or explicit version suffix) and migrate scenarios deliberately.
+- Assert on behavior keys only (decision/result metadata), not incidental internals.
+
+### Where to Emit Events
+
+Emit events at decision boundaries, not every implementation step.
+
+Good boundaries:
+- branch decisions (selected path, skip/guard reason, fallback used)
+- routing decisions (destination, item count, refs-only vs inline)
+- cache decisions (hit/miss + reason)
+- load/parse outcomes (success/failure + error class)
+
+Avoid:
+- logging every local variable/state transition
+- duplicating events that mirror existing stable artifacts
+- emitting events for trivial pass-through code with no branching risk
+
+### Keeping Product Code Clean
+
+To avoid scattered test-specific logging calls, prefer small domain helpers that wrap `UnifiedLogger` and standardize event shape.
+
+- Put emission helpers near the subsystem (`core/context/...`, `core/workflow/...`), not in scenario code.
+- Keep payload schemas centralized per subsystem.
+- Reuse helper functions across modules so event format changes happen in one place.
+- Keep validation sink usage explicit and local to decision points.
+
+This keeps the runtime code readable while preserving deterministic, high-signal assertions in scenarios.
 
 ### How to Assert in Scenarios
 

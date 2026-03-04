@@ -94,6 +94,7 @@ def upsert_model_mapping(
     name: str,
     provider: str,
     model_string: str,
+    capabilities: Optional[list[str]] = None,
     description: Optional[str] = None,
 ) -> ModelConfig:
     """
@@ -103,6 +104,7 @@ def upsert_model_mapping(
         name: Model alias (lowercase string used by workflows)
         provider: Provider name the model depends on
         model_string: Provider-specific model identifier
+        capabilities: Optional model capability list
         description: Optional human-readable description
 
     Returns:
@@ -122,10 +124,16 @@ def upsert_model_mapping(
         raise SettingsError(f"Provider '{provider}' is not defined in settings.yaml.")
 
     user_editable = getattr(existing, "user_editable", True) if existing else True
+    resolved_capabilities = (
+        capabilities
+        if capabilities is not None
+        else list(getattr(existing, "capabilities", ["text"])) if existing else ["text"]
+    )
 
     settings_file.models[name] = ModelConfig(
         provider=provider,
         model_string=model_string,
+        capabilities=resolved_capabilities,
         description=description,
         user_editable=user_editable,
     )

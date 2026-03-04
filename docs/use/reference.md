@@ -50,7 +50,7 @@ Description: Read in file/buffer content (or references) as step context.
 
 ### Values:
 `file: PATH`  
-Read in file content.
+Read in file content. If no extension is provided, `.md` is assumed. Explicit extensions are honored (for example `.png`).
 
 `variable: NAME`  
 Read content from an in-memory buffer variable.
@@ -62,6 +62,11 @@ Skip the step when no matching input is found.
 
 `refs_only`  
 Pass references only instead of full content - file path or variable name.
+
+`images=auto|ignore`  
+Control image attachment behavior for file inputs.  
+`auto` (default) attaches local images when the selected model supports vision; otherwise keeps references.  
+`ignore` never attaches images and always keeps references.
 
 `head=N`  
 Inline only the first `N` characters per resolved input (file or variable).
@@ -84,11 +89,16 @@ E.g. `@input variable:foo (scope=session)` reads foo from  session scope. This c
 - In context templates, `@input file:myfile (output=context)` will route the file contents immediately into chat agent context, bypassing the LLM.  
 - Precedence is `refs_only` > `properties` > `head`.
 - If `properties` is enabled and no frontmatter properties are found, input falls back to refs-only for that item.
+- Local image files are supported (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.tiff`, `.tif`).
+- Markdown files may include embedded images via `![alt](path)` or `![[image.png]]`; image refs are preserved in order.
+- Remote image URLs remain references by default (no automatic download/attach).
 
 ### Examples:
 - `@input file: notes/*.md`
+- `@input file: images/diagram.png`
 - `@input variable: foo`
 - `@input file: inbox/{pending:5} (required, refs_only)`
+- `@input file: notes/with-image.md (images=ignore)`
 - `@input file: notes/large.md (head=2000)`
 - `@input file: Projects/Plan (properties="status,owner")`
 - `@input file: inbox/{pending:3} (output=variable: batch, write_mode=new)`
@@ -777,6 +787,7 @@ Routing redirects directive or tool outputs to an alternate destination instead 
 - Use `scope=session|run` with `variable:` destinations to select buffer scope.
 - Some tools may not accept routing parameters.
 - If a tool output is > `auto_buffer_max_tokens` setting, output is automatically routed to a buffer variable to protect the context window and the agent is provided a pointer.
+- When a markdown input is too large, auto-buffering still applies and embedded image links are rewritten to vault-relative references so they remain resolvable.
 
 ### Examples:
 `@input variable: notes (output=file: exports/notes)`  

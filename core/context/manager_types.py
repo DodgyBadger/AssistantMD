@@ -57,6 +57,7 @@ class ContextManagerDeps:
 @dataclass
 class InputResolutionResult:
     input_file_data: Optional[Any]
+    input_files_prompt: Optional[Any]
     context_input_outputs: List[str]
     empty_input_file_directive: bool
     skip_required: bool

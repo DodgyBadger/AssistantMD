@@ -1,6 +1,6 @@
 # Example Library
 
-This folder contains example **Workflows** and **ContextTemplates** you can copy into your vault and adapt.
+This folder contains example **Workflows**, **ContextTemplates**, and **Skills** you can copy into your vault and adapt.
 Some context templates depend on one or more workflows; when applicable, that dependency is noted in the template YAML frontmatter.
 
 When viewing example `.md` files on GitHub, switch to **Code** view (not Preview). GitHub preview can make YAML frontmatter and some line breaks look different from the raw file.

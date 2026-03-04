@@ -235,6 +235,8 @@ def scan_import_folder(
     vault: str,
     queue_only: bool = False,
     strategies: list[str] | None = None,
+    capture_ocr_images: bool | None = None,
+    pdf_mode: str | None = None,
 ):
     """
     Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
@@ -254,6 +256,13 @@ def scan_import_folder(
     search_roots = [import_root]
     if legacy_import_root.exists():
         search_roots.append(legacy_import_root)
+
+    extractor_options: dict[str, Any] = {}
+    if capture_ocr_images is not None:
+        extractor_options["ocr_capture_images"] = bool(capture_ocr_images)
+    normalized_pdf_mode = (pdf_mode or "").strip().lower()
+    if normalized_pdf_mode not in {"", "markdown", "page_images"}:
+        normalized_pdf_mode = ""
 
     for root in search_roots:
         for item in sorted(root.iterdir()):
@@ -275,12 +284,20 @@ def scan_import_folder(
                 skipped.append(str(item.name))
                 continue
 
+            job_options: dict[str, Any] = {}
+            if strategies:
+                job_options["strategies"] = strategies
+            if extractor_options:
+                job_options["extractor_options"] = extractor_options
+            if normalized_pdf_mode:
+                job_options["pdf_mode"] = normalized_pdf_mode
+
             job = ingest_service.enqueue_job(
                 source_uri=item.name,
                 vault=vault,
                 source_type=SourceKind.FILE.value,
                 mime_hint=None,
-                options={"strategies": strategies} if strategies else {},
+                options=job_options,
             )
             jobs_created.append(job)
 
@@ -819,11 +836,13 @@ def _build_model_info(
     if hasattr(config, "provider"):
         provider = config.provider
         model_string = config.model_string
+        capabilities = list(getattr(config, "capabilities", ["text"]) or ["text"])
         user_editable = getattr(config, "user_editable", True)
         description = getattr(config, "description", None)
     else:
         provider = config['provider']
         model_string = config['model_string']
+        capabilities = list(config.get("capabilities", ["text"]) or ["text"])
         user_editable = config.get('user_editable', True)
         description = config.get('description')
 
@@ -835,6 +854,7 @@ def _build_model_info(
         name=name,
         provider=provider,
         model_string=model_string,
+        capabilities=capabilities,
         available=availability.get(name, True),
         user_editable=user_editable,
         description=description,
@@ -915,6 +935,7 @@ def upsert_configurable_model(model_name: str, payload: ModelConfigRequest) -> M
             name=model_name,
             provider=payload.provider,
             model_string=payload.model_string,
+            capabilities=payload.capabilities,
             description=payload.description,
         )
     except SettingsError as exc:
@@ -1227,11 +1248,13 @@ async def get_metadata() -> MetadataResponse:
         if hasattr(config, "provider"):
             provider = config.provider
             model_string = config.model_string
+            capabilities = list(getattr(config, "capabilities", ["text"]) or ["text"])
             user_editable = getattr(config, "user_editable", True)
             description = getattr(config, "description", None)
         else:
             provider = config['provider']
             model_string = config['model_string']
+            capabilities = list(config.get("capabilities", ["text"]) or ["text"])
             user_editable = config.get('user_editable', True)
             description = config.get('description')
 
@@ -1240,6 +1263,7 @@ async def get_metadata() -> MetadataResponse:
                 name=name,
                 provider=provider,
                 model_string=model_string,
+                capabilities=capabilities,
                 available=config_status.model_availability.get(name, True),
                 user_editable=user_editable,
                 description=description,

@@ -145,6 +145,12 @@ class ValidationRunner:
                 asyncio.run(scenario_instance.test_scenario())
             else:
                 scenario_instance.test_scenario()
+            if hasattr(scenario_instance, "assert_no_failures"):
+                scenario_instance.assert_no_failures()
+            if hasattr(scenario_instance, "mark_scenario_outcome"):
+                scenario_instance.mark_scenario_outcome("passed")
+            if hasattr(scenario_instance, "teardown_scenario"):
+                scenario_instance.teardown_scenario()
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -159,17 +165,28 @@ class ValidationRunner:
 
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
-            error_msg = f"Scenario execution error: {str(e)}"
+            error_msg = self._format_scenario_error(e, scenario_name)
             stack_trace = traceback.format_exc()
 
             # Reuse V1 error classification
             error_classification = self._classify_error(e, scenario_name)
+            evidence_path = str(self.runs_dir)
+            if "scenario_instance" in locals() and hasattr(scenario_instance, "run_path"):
+                evidence_path = str(scenario_instance.run_path)
+                if hasattr(scenario_instance, "mark_scenario_outcome"):
+                    scenario_instance.mark_scenario_outcome("failed", error_msg)
+                if hasattr(scenario_instance, "teardown_scenario"):
+                    try:
+                        scenario_instance.teardown_scenario()
+                    except Exception:
+                        # Preserve original scenario failure as primary signal.
+                        pass
 
             scenario_result = ScenarioResult(
                 scenario_name=scenario_name,
                 status=error_classification['status'],
                 execution_time=execution_time,
-                evidence_path=str(self.runs_dir),
+                evidence_path=evidence_path,
                 error_message=error_msg
             )
 
@@ -177,6 +194,53 @@ class ValidationRunner:
             scenario_result.stack_trace = stack_trace
 
             return scenario_result
+
+    def _format_scenario_error(self, exception: Exception, scenario_name: str) -> str:
+        """Build a concise, actionable error message for scenario failures."""
+        exc_type = type(exception).__name__
+        exc_text = str(exception).strip()
+        if not exc_text and exc_type == "AssertionError":
+            exc_text = "Assertion failed"
+        elif not exc_text:
+            exc_text = "No additional error message"
+
+        extracted_tb = traceback.extract_tb(exception.__traceback__)
+        target_frame = None
+
+        scenario_rel = f"validation/scenarios/{scenario_name}.py".replace("\\", "/")
+        for frame in reversed(extracted_tb):
+            normalized = frame.filename.replace("\\", "/")
+            if normalized.endswith(scenario_rel):
+                target_frame = frame
+                break
+
+        if target_frame is None and extracted_tb:
+            target_frame = extracted_tb[-1]
+
+        location = ""
+        source_line = ""
+        if target_frame is not None:
+            location = (
+                f"{target_frame.filename}:{target_frame.lineno} "
+                f"(in {target_frame.name})"
+            )
+            source_line = (target_frame.line or "").strip()
+
+        tail = ""
+        if extracted_tb:
+            tail_frames = extracted_tb[-4:]
+            tail = "".join(traceback.format_list(tail_frames)).strip()
+
+        lines = [f"Scenario execution error: {exc_type}: {exc_text}"]
+        if location:
+            lines.append(f"Failure location: {location}")
+        if source_line:
+            lines.append(f"Failing code: {source_line}")
+        if tail:
+            lines.append("Traceback tail:")
+            lines.append(tail)
+
+        return "\n".join(lines)
     
     def _classify_error(self, exception: Exception, scenario_name: str) -> Dict[str, str]:
         """Classify errors using V1 logic."""

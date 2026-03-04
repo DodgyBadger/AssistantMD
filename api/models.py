@@ -33,6 +33,10 @@ class ChatExecuteRequest(BaseModel):
     """Request model for chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")
     prompt: str = Field(..., min_length=1, description="User prompt text")
+    image_paths: List[str] = Field(
+        default_factory=list,
+        description="Optional image file paths (relative to vault or absolute within vault) to attach",
+    )
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")
@@ -145,6 +149,10 @@ class ModelInfo(BaseModel):
     name: str = Field(..., description="User-friendly model name")
     provider: str = Field(..., description="Provider (anthropic, openai, google, etc.)")
     model_string: str = Field(..., description="Actual model identifier")
+    capabilities: List[str] = Field(
+        default_factory=lambda: ["text"],
+        description="Declared model capabilities (e.g. text, vision)",
+    )
     available: bool = Field(True, description="Whether required credentials are configured")
     user_editable: bool = Field(True, description="If the model mapping is user-editable via UI")
     description: Optional[str] = Field(None, description="Optional human-readable description")
@@ -202,6 +210,10 @@ class ModelConfigRequest(BaseModel):
 
     provider: str = Field(..., description="Provider name the model uses")
     model_string: str = Field(..., description="Provider-specific model identifier")
+    capabilities: Optional[List[str]] = Field(
+        None,
+        description="Optional model capabilities list (e.g. [\"text\", \"vision\"])",
+    )
     description: Optional[str] = Field(None, description="Optional description for UI display")
 
 

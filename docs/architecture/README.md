@@ -34,6 +34,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
 | [Engines + Directives](engines-directives.md) | Execute workflow logic and parse `@directives` | `workflow_engines/`, `core/directives/` |
 | [LLM + Tools](llm-tools.md) | Agent creation, tool loading, routing, model resolution | `core/llm/`, `core/tools/`, `core/directives/tools.py` |
+| [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_ops_safe.py` |
 | [Context Manager](context-manager-subsystem.md) | Context-template execution | `core/context/` |
 | [Settings + Secrets](settings-secrets.md) | Typed config store and YAML-backed secrets store | `core/settings/` |
 | [Ingestion Pipeline](ingestion-pipeline.md) | Import queue, extraction strategies, rendering/storage, worker execution | `core/ingestion/`, `api/services.py` |

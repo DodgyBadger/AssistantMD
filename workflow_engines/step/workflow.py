@@ -1,14 +1,18 @@
 
 from datetime import datetime
 import re
-from typing import Dict
+from typing import Dict, Optional
 from types import SimpleNamespace
 
 from core.logger import UnifiedLogger
 from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
 from core.core_services import CoreServices
+from core.chunking import build_input_files_prompt
+from core.llm.agents import PromptInput
+from core.llm.model_utils import model_supports_capability
+from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.runtime.buffers import BufferStore
-from core.utils.routing import OutputTarget, format_input_files_block, write_output
+from core.utils.routing import OutputTarget, write_output
 from core.directives.tools import ToolsDirective
 
 # Create workflow logger
@@ -261,17 +265,39 @@ def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
     return False, ""
 
 
-def build_final_prompt(processed_step) -> str:
-    """Build final prompt with input file content."""
-    final_prompt = processed_step.content
-    
-    input_file_data = processed_step.get_directive_value('input', [])
-    if input_file_data:
-        formatted = format_input_files_block(input_file_data)
-        if formatted:
-            final_prompt += "\n\n" + formatted
-    
-    return final_prompt
+def _resolve_workflow_model_execution(processed_step) -> ModelExecutionSpec:
+    model_value = processed_step.get_directive_value("model")
+    if isinstance(model_value, ModelExecutionSpec):
+        return model_value
+    if isinstance(model_value, str) and model_value.strip():
+        return resolve_model_execution_spec(model_value.strip())
+    return resolve_model_execution_spec(None)
+
+
+def build_final_prompt(processed_step, *, vault_path: str) -> tuple[PromptInput, str, int, list[str]]:
+    """Build final prompt with optional ordered media chunks from @input content."""
+    base_prompt = processed_step.content
+    input_file_data = processed_step.get_directive_value("input", [])
+    if not input_file_data:
+        return base_prompt, base_prompt, 0, []
+
+    model_execution = _resolve_workflow_model_execution(processed_step)
+    supports_vision = (
+        False
+        if model_execution.mode == "skip"
+        else (
+            model_supports_capability(model_execution.raw_alias, "vision")
+            if model_execution.raw_alias
+            else None
+        )
+    )
+    built = build_input_files_prompt(
+        input_file_data=input_file_data,
+        vault_path=vault_path,
+        base_prompt=base_prompt,
+        supports_vision=supports_vision,
+    )
+    return built.prompt, built.prompt_text, built.attached_image_count, built.warnings
 
 
 def _resolve_tools_result(tools_value) -> tuple[list, str, list]:
@@ -296,6 +322,10 @@ async def create_step_agent(processed_step, workflow_instructions: str, services
     """Create AI agent for step execution with optional tool integration."""
     # Get model instance from model directive (None if not specified)
     model_instance = processed_step.get_directive_value('model', None)
+    if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
+        raise ValueError(
+            "Step model is configured for skip mode and should not create an agent."
+        )
 
     # Get tools and enhanced instructions from tools directive
     tools_result = processed_step.get_directive_value('tools', [])
@@ -417,7 +447,12 @@ async def process_workflow_step(
         context["tools_used"].update(tool_names)
 
     # Build final prompt with input file content
-    final_prompt = build_final_prompt(processed_step)
+    final_prompt, final_prompt_text, attached_image_count, prompt_warnings = build_final_prompt(
+        processed_step,
+        vault_path=services.vault_path,
+    )
+    model_execution = _resolve_workflow_model_execution(processed_step)
+    skip_llm = model_execution.mode == "skip"
     output_target_label = None
     if output_targets:
         labels = []
@@ -435,37 +470,49 @@ async def process_workflow_step(
         data={
             "step_name": step_name,
             "output_target": output_target_label,
-            "prompt": final_prompt,
+            "prompt": final_prompt_text,
+            "attached_image_count": attached_image_count,
+            "prompt_warnings": prompt_warnings,
         },
     )
 
-    # Generate AI content
-    try:
-        chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
-    except Exception as exc:
-        raise _to_template_error(
-            exc,
-            template_pointer=f"## {step_name} (@model/@tools setup in this step)",
-            step_name=step_name,
-            phase="agent_setup",
-        ) from exc
-    buffer_store = context.get("buffer_store")
-    deps = SimpleNamespace(
-        buffer_store=buffer_store,
-        buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
-    )
-    try:
-        step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
-    except Exception as exc:
-        raise _to_template_error(
-            exc,
-            template_pointer=f"## {step_name} (step prompt/model execution)",
-            step_name=step_name,
-            phase="model_run",
-        ) from exc
+    # Generate AI content unless model execution is explicitly skipped.
+    if skip_llm:
+        step_content = ""
+        logger.set_sinks(["validation"]).info(
+            "workflow_step_skipped",
+            data={
+                "step_name": step_name,
+                "reason": "model_none",
+            },
+        )
+    else:
+        try:
+            chat_agent = await create_step_agent(processed_step, workflow_instructions, services)
+        except Exception as exc:
+            raise _to_template_error(
+                exc,
+                template_pointer=f"## {step_name} (@model/@tools setup in this step)",
+                step_name=step_name,
+                phase="agent_setup",
+            ) from exc
+        buffer_store = context.get("buffer_store")
+        deps = SimpleNamespace(
+            buffer_store=buffer_store,
+            buffer_store_registry={"run": buffer_store} if buffer_store is not None else {},
+        )
+        try:
+            step_content = await services.generate_response(chat_agent, final_prompt, deps=deps)
+        except Exception as exc:
+            raise _to_template_error(
+                exc,
+                template_pointer=f"## {step_name} (step prompt/model execution)",
+                step_name=step_name,
+                phase="model_run",
+            ) from exc
 
     # Write AI-generated content to output targets (if @output specified)
-    if output_targets:
+    if output_targets and not skip_llm:
         write_mode = processed_step.get_directive_value('write_mode')
         header_value = processed_step.get_directive_value('header')
         for output_target in output_targets:
@@ -513,8 +560,8 @@ async def process_workflow_step(
         # Update state manager for any pending patterns used
         context['state_manager'].update_from_processed_step(processed_step)
     else:
-        # No output target - step executed for side effects only (e.g., tool calls)
-        # Still update state manager for any pending patterns used
+        # No write occurred (no output target, or model execution was skipped).
+        # Still update state manager for any pending patterns used.
         context['state_manager'].update_from_processed_step(processed_step)
 
 

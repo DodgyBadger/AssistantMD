@@ -19,7 +19,7 @@ from core.workflow.parser import (
     get_workflow_sections,
     process_step_content,
 )
-from core.llm.agents import generate_response, create_agent
+from core.llm.agents import PromptInput, create_agent, generate_response
 from core.directives.registry import register_directive
 from core.directives.base import DirectiveProcessor
 from core.utils.file_state import WorkflowFileStateManager
@@ -161,7 +161,13 @@ class CoreServices:
         """
         return await create_agent(model=model, tools=tools, history_processors=history_processors)
     
-    async def generate_response(self, agent, prompt: str, message_history=None, deps=None) -> str:
+    async def generate_response(
+        self,
+        agent,
+        prompt: PromptInput,
+        message_history=None,
+        deps=None,
+    ) -> str:
         """
         Generate LLM response using a pre-configured agent.
         

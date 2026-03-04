@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from pydantic_ai import RunContext
 from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
+from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.context.templates import load_template
 from core.logger import UnifiedLogger
 from core.constants import (
@@ -14,7 +15,7 @@ from core.constants import (
 )
 from core.directives.bootstrap import ensure_builtin_directives_registered
 from core.directives.registry import get_global_registry
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, UserContent
 from core.tools.utils import estimate_token_count
 from core.context.store import add_context_summary, upsert_session
 from core.runtime.buffers import BufferStore
@@ -34,6 +35,7 @@ from core.context.manager_types import (
 )
 
 logger = UnifiedLogger(tag="context-manager")
+PromptInput = str | Sequence[UserContent]
 
 
 async def manage_context(
@@ -55,7 +57,20 @@ async def manage_context(
     # Resolve model instance
     model_directive = ModelDirective()
     model_to_use = model_override or input_data.model_alias
+    model_execution = resolve_model_execution_spec(model_to_use)
+    if model_execution.mode == "skip":
+        return ContextManagerResult(
+            raw_output="",
+            template=input_data.template,
+            model_alias="none",
+        )
     model_instance = model_directive.process_value(model_to_use, "context-manager")
+    if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
+        return ContextManagerResult(
+            raw_output="",
+            template=input_data.template,
+            model_alias="none",
+        )
 
     manager_instruction = instructions_override if instructions_override is not None else CONTEXT_MANAGER_SYSTEM_INSTRUCTION
     context_instructions = input_data.template.instructions
@@ -63,6 +78,11 @@ async def manage_context(
     rendered_history = input_data.context_payload.get("rendered_history") if isinstance(input_data.context_payload, dict) else None
     previous_summary = input_data.context_payload.get("previous_summary") if isinstance(input_data.context_payload, dict) else None
     input_files = input_data.context_payload.get("input_files") if isinstance(input_data.context_payload, dict) else None
+    input_files_prompt = (
+        input_data.context_payload.get("input_files_prompt")
+        if isinstance(input_data.context_payload, dict)
+        else None
+    )
     prompt_parts: List[str] = []
     manager_task = ""
     section_body = None
@@ -79,7 +99,7 @@ async def manage_context(
                 ]
             )
         )
-    if input_files:
+    if input_files and not input_files_prompt:
         prompt_parts.append(input_files)
     if previous_summary:
         prompt_parts.append(
@@ -111,7 +131,18 @@ async def manage_context(
                 ]
             )
         )
-    prompt = "\n\n".join(prompt_parts).strip() or "No content provided."
+    prompt_text = "\n\n".join(prompt_parts).strip() or "No content provided."
+    prompt: PromptInput = prompt_text
+    if input_files_prompt:
+        if isinstance(input_files_prompt, str):
+            prompt = "\n\n".join([prompt_text, input_files_prompt]).strip()
+        elif isinstance(input_files_prompt, Sequence):
+            multimodal_parts: List[UserContent] = []
+            if prompt_text:
+                multimodal_parts.append(prompt_text)
+            for part in input_files_prompt:
+                multimodal_parts.append(part)
+            prompt = multimodal_parts
 
     agent = await create_agent(
         model=model_instance,

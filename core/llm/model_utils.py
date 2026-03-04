@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Dict, Tuple, Any
 
 from core.logger import UnifiedLogger
+from core.llm.model_selection import resolve_model_execution_spec
 from core.settings.store import get_models_config, get_providers_config
 from core.settings.secrets_store import get_secret_value, secret_has_value, load_secrets
 
@@ -17,6 +18,7 @@ logger = UnifiedLogger(tag="models")
 
 _MODEL_CACHE_LOCK = Lock()
 MODEL_MAPPINGS: Dict[str, Tuple[str, str]] = {}
+MODEL_CAPABILITIES: Dict[str, set[str]] = {}
 PROVIDER_CONFIGS: Dict[str, Dict[str, Any]] = {}
 
 
@@ -41,6 +43,28 @@ def _get_model_mappings() -> Dict[str, Tuple[str, str]]:
     return mappings
 
 
+def _get_model_capabilities() -> Dict[str, set[str]]:
+    """Get model capabilities with normalized lowercase values."""
+    models = get_models_config()
+    capabilities_map: Dict[str, set[str]] = {}
+
+    for model_name, model_config in models.items():
+        if hasattr(model_config, "capabilities"):
+            capabilities = list(model_config.capabilities or ["text"])
+        else:
+            capabilities = list(model_config.get("capabilities", ["text"]))
+        normalized = {
+            str(capability).strip().lower()
+            for capability in capabilities
+            if str(capability).strip()
+        }
+        if not normalized:
+            normalized = {"text"}
+        capabilities_map[model_name.lower().strip()] = normalized
+
+    return capabilities_map
+
+
 def _get_provider_configs() -> Dict[str, Dict[str, Any]]:
     """Get full provider configurations from YAML configuration.
 
@@ -61,8 +85,9 @@ def _get_provider_configs() -> Dict[str, Dict[str, Any]]:
 
 def _refresh_model_cache_unlocked() -> None:
     """Refresh module-level caches for model/provider mappings."""
-    global MODEL_MAPPINGS, PROVIDER_CONFIGS
+    global MODEL_MAPPINGS, MODEL_CAPABILITIES, PROVIDER_CONFIGS
     MODEL_MAPPINGS = _get_model_mappings()
+    MODEL_CAPABILITIES = _get_model_capabilities()
     PROVIDER_CONFIGS = _get_provider_configs()
 
 
@@ -136,6 +161,32 @@ def _has_resolved_base_url(provider_config: Dict[str, Any]) -> bool:
 
     # Literal URLs are also valid configuration.
     return "://" in base_url
+
+
+def get_model_capabilities(model_name: str) -> set[str]:
+    """Return normalized capability set for a model alias."""
+    model_key = model_name.lower().strip()
+    if model_key not in MODEL_MAPPINGS:
+        available_models = ", ".join(sorted(MODEL_MAPPINGS.keys()))
+        raise ValueError(
+            f"Unknown model '{model_name}'. Available models: {available_models}"
+        )
+    return set(MODEL_CAPABILITIES.get(model_key, {"text"}))
+
+
+def model_supports_capability(model_name: str, capability: str) -> bool:
+    """Return True when model alias includes the requested capability."""
+    requested = capability.lower().strip()
+    if not requested:
+        return False
+    execution = resolve_model_execution_spec(model_name)
+    if execution.mode == "skip" or not execution.base_alias:
+        return False
+    # Validation-only built-in model alias handled by ModelDirective.
+    # It is not in settings model mappings and should be treated as text-only.
+    if execution.base_alias == "test":
+        return requested == "text"
+    return requested in get_model_capabilities(model_name)
 
 
 def validate_api_keys(model_name: str) -> None:
