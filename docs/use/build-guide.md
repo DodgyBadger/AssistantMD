@@ -203,7 +203,7 @@ Here each step is isolated: its own input, output, model, and prompt. The system
 | `@run_on` | Limit which days a step runs | When some steps should only run on certain days |
 | `@input variable:` / `@output variable:` | Pass data between steps in memory | When one step needs another step's output but you don't want an intermediate file |
 
-For the full directive reference including all parameters, patterns like `{today}`, `{pending}`, `{latest}`, and advanced features like routing and buffering, see the [Reference](docs/use/reference.md).
+For the full directive reference including all parameters, patterns like `{today}`, selector modes like `pending/latest` on `@input`, and advanced features like routing and buffering, see the [Reference](docs/use/reference.md).
 
 ---
 

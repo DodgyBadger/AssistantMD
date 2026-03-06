@@ -286,6 +286,6 @@ tools:
     user_editable: false
   workflow_run:
     module: core.tools.workflow_run
-    description: "List and run workflows in the current vault"
+    description: "List, run, enable, and disable workflows in the current vault"
     requires_secrets: []
     user_editable: false

@@ -134,15 +134,9 @@ class InputFileDirective(DirectiveProcessor):
         {next-week}       - Files from next week  
         {this-month}      - Files from current month
         {last-month}      - Files from previous month
-        {latest}          - Most recent file by date
-        {latest:N}        - N most recent files by date
         {yesterday:N}     - Files from last N days
         {this-week:N}     - Up to N files from current week
         {last-week:N}     - Up to N files from previous week
-        
-        # Stateful patterns (require state management)
-        {pending}         - Unprocessed files (oldest first, default limit 10)
-        {pending:N}       - Up to N oldest unprocessed files
         
         # Glob patterns (single directory only, no recursion)
         *.md              - All .md files in vault root
@@ -153,8 +147,8 @@ class InputFileDirective(DirectiveProcessor):
     Examples:
         @input file:goals.md                    # Direct file reference
         @input file:journal/{today}             # Today's journal entry
-        @input file:journal/{latest:3}          # 3 most recent journal files
-        @input file:notes/{pending:5}           # 5 oldest unprocessed notes
+        @input file:journal/* (latest, limit=3) # 3 most recent journal files
+        @input file:notes/* (pending, limit=5)  # 5 oldest unprocessed notes
         @input file:projects/{this-week}        # All files from current week
         @input file:*.md                        # All markdown files in root
         @input file:journal/*.md                # All journal files
@@ -185,6 +179,13 @@ class InputFileDirective(DirectiveProcessor):
             "write-mode",
             "write_mode",
             "scope",
+            "pending",
+            "latest",
+            "limit",
+            "order",
+            "dir",
+            "dt_pattern",
+            "dt_format",
         }
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
@@ -275,13 +276,32 @@ class InputFileDirective(DirectiveProcessor):
                 'write-mode',
                 'write_mode',
                 'scope',
+                'pending',
+                'latest',
+                'limit',
+                'order',
+                'dir',
+                'dt_pattern',
+                'dt_format',
             }:
                 return False
-            if param_name in {'required', 'refs_only', 'refs-only'}:
+            if param_name in {'required', 'refs_only', 'refs-only', 'pending', 'latest'}:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
                     return False
             if param_name == 'images':
                 if param_value.lower() not in {'auto', 'ignore'}:
+                    return False
+            if param_name == 'limit':
+                try:
+                    if int(param_value) <= 0:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            if param_name == 'order':
+                if param_value.lower() not in {'mtime', 'ctime', 'alphanum', 'filename_dt'}:
+                    return False
+            if param_name == 'dir':
+                if param_value.lower() not in {'asc', 'desc'}:
                     return False
             if param_name == 'head':
                 try:
@@ -323,6 +343,10 @@ class InputFileDirective(DirectiveProcessor):
         output_target_value = parameters.get('output')
         write_mode_param = parameters.get('write-mode') or parameters.get('write_mode')
         scope_value = parameters.get('scope')
+        selector_options = self._parse_selector_options(parameters)
+
+        if base_value.startswith("variable:") and selector_options.get("mode"):
+            raise ValueError("pending/latest selectors are only supported for @input file targets")
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
@@ -413,6 +437,16 @@ class InputFileDirective(DirectiveProcessor):
             # Direct file reference
             result_files = [load_file_with_metadata(file_path, vault_path)]
 
+        # Apply selector mode to resolved candidate files.
+        if selector_options.get("mode"):
+            result_files = self._apply_selector_mode(
+                result_files=result_files,
+                input_expression=file_path,
+                vault_path=vault_path,
+                selector_options=selector_options,
+                state_manager=context.get("state_manager"),
+            )
+
         # If required=true and no files found, return skip signal
         # Check both: empty list OR all files have found=False
         if required:
@@ -492,6 +526,88 @@ class InputFileDirective(DirectiveProcessor):
             raise ValueError("properties must be true/false or a comma-separated key list")
         return True, keys
 
+    def _parse_selector_options(self, parameters: Dict[str, str]) -> Dict[str, Any]:
+        """Parse and validate selector-mode options for @input file targets."""
+
+        def _truthy_param(name: str) -> bool:
+            if name not in parameters:
+                return False
+            return DirectiveValueParser.parse_boolean(parameters.get(name, "true"))
+
+        pending_enabled = _truthy_param("pending")
+        latest_enabled = _truthy_param("latest")
+
+        selector_mode: Optional[str] = None
+        if pending_enabled and latest_enabled:
+            raise ValueError("Only one selector mode is supported: choose either pending or latest")
+        if pending_enabled:
+            selector_mode = "pending"
+        elif latest_enabled:
+            selector_mode = "latest"
+
+        raw_limit = (parameters.get("limit") or "").strip()
+        raw_order = (parameters.get("order") or "").strip().lower()
+        raw_dir = (parameters.get("dir") or "").strip().lower()
+        dt_pattern = (parameters.get("dt_pattern") or "").strip() or None
+        dt_format = (parameters.get("dt_format") or "").strip() or None
+
+        selector_modifiers_provided = any(
+            key in parameters for key in {"limit", "order", "dir", "dt_pattern", "dt_format"}
+        )
+        if selector_mode is None and selector_modifiers_provided:
+            raise ValueError("Selector modifiers (limit/order/dir/dt_*) require pending or latest")
+
+        if selector_mode is None:
+            return {"mode": None}
+
+        limit: Optional[int] = None
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                raise ValueError("limit must be a positive integer") from None
+            if limit <= 0:
+                raise ValueError("limit must be a positive integer")
+
+        if selector_mode == "pending":
+            if not raw_order:
+                raw_order = "ctime"
+            if not raw_dir:
+                raw_dir = "asc"
+            if limit is None:
+                limit = 10
+            valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+        else:
+            if not raw_order:
+                raw_order = "mtime"
+            if not raw_dir:
+                raw_dir = "desc"
+            if limit is None:
+                limit = 1
+            valid_orders = {"mtime", "ctime", "filename_dt"}
+
+        if raw_order not in valid_orders:
+            allowed = ", ".join(sorted(valid_orders))
+            raise ValueError(f"order '{raw_order}' is not supported for {selector_mode}; use: {allowed}")
+
+        if raw_dir not in {"asc", "desc"}:
+            raise ValueError("dir must be 'asc' or 'desc'")
+
+        if raw_order == "filename_dt":
+            if not dt_pattern or not dt_format:
+                raise ValueError("filename_dt ordering requires dt_pattern and dt_format")
+        elif dt_pattern or dt_format:
+            raise ValueError("dt_pattern/dt_format require order=filename_dt")
+
+        return {
+            "mode": selector_mode,
+            "limit": limit,
+            "order": raw_order,
+            "dir": raw_dir,
+            "dt_pattern": dt_pattern,
+            "dt_format": dt_format,
+        }
+
     def _apply_properties_mode(
         self,
         file_data: Dict[str, Any],
@@ -548,6 +664,118 @@ class InputFileDirective(DirectiveProcessor):
         file_data["content"] = content[:head_chars]
         file_data["content_truncated"] = True
         return file_data
+
+    def _apply_selector_mode(
+        self,
+        *,
+        result_files: List[Dict[str, Any]],
+        input_expression: str,
+        vault_path: str,
+        selector_options: Dict[str, Any],
+        state_manager,
+    ) -> List[Dict[str, Any]]:
+        """Apply pending/latest selector mode to resolved file candidates."""
+        candidate_paths: List[str] = []
+        for file_data in result_files:
+            if not isinstance(file_data, dict) or not file_data.get("found", True):
+                continue
+
+            source_path = file_data.get("source_path") or file_data.get("filepath")
+            if not isinstance(source_path, str) or not source_path.strip():
+                continue
+
+            normalized_source = source_path.strip()
+            if "." not in os.path.basename(normalized_source):
+                normalized_source = f"{normalized_source}.md"
+
+            candidate_path = (
+                normalized_source
+                if os.path.isabs(normalized_source)
+                else os.path.join(vault_path, normalized_source)
+            )
+
+            if os.path.isdir(candidate_path):
+                raise ValueError(
+                    f"Input pattern '{input_expression}' resolved to directories; "
+                    "use an explicit file pattern like 'projects/*/*.md' or 'projects/*/notes.md'"
+                )
+            if os.path.isfile(candidate_path):
+                candidate_paths.append(candidate_path)
+
+        if not candidate_paths:
+            return []
+
+        mode = selector_options["mode"]
+        selected_paths: List[str]
+        if mode == "latest":
+            sorted_paths = self.pattern_utils.sort_files(
+                candidate_paths,
+                order=selector_options["order"],
+                direction=selector_options["dir"],
+                filename_dt_pattern=selector_options.get("dt_pattern"),
+                filename_dt_format=selector_options.get("dt_format"),
+            )
+            selected_paths = sorted_paths[: selector_options["limit"]]
+        elif mode == "pending":
+            if state_manager:
+                selected_paths = state_manager.get_pending_files(
+                    candidate_paths,
+                    self._build_pending_state_pattern(input_expression, selector_options),
+                    selector_options["limit"],
+                    order=selector_options["order"],
+                    direction=selector_options["dir"],
+                    filename_dt_pattern=selector_options.get("dt_pattern"),
+                    filename_dt_format=selector_options.get("dt_format"),
+                )
+            else:
+                sorted_paths = self.pattern_utils.sort_files(
+                    candidate_paths,
+                    order=selector_options["order"],
+                    direction=selector_options["dir"],
+                    filename_dt_pattern=selector_options.get("dt_pattern"),
+                    filename_dt_format=selector_options.get("dt_format"),
+                )
+                selected_paths = sorted_paths[: selector_options["limit"]]
+        else:
+            raise ValueError(f"Unsupported selector mode: {mode}")
+
+        selected_results: List[Dict[str, Any]] = []
+        for file_path in selected_paths:
+            relative_path = os.path.relpath(file_path, vault_path).replace("\\", "/")
+            if relative_path.endswith(".md"):
+                relative_path = relative_path[:-3]
+            selected_results.append(load_file_with_metadata(relative_path, vault_path))
+
+        if mode == "pending" and selected_results:
+            file_records = []
+            for file_data in selected_results:
+                if file_data.get("found") and file_data.get("content"):
+                    file_records.append(
+                        {
+                            "content_hash": hash_file_content(file_data["content"]),
+                            "filepath": file_data["filepath"],
+                        }
+                    )
+            selected_results[0]["_state_metadata"] = {
+                "requires_tracking": True,
+                "pattern": self._build_pending_state_pattern(input_expression, selector_options),
+                "file_records": file_records,
+            }
+
+        return selected_results
+
+    def _build_pending_state_pattern(
+        self,
+        input_expression: str,
+        selector_options: Dict[str, Any],
+    ) -> str:
+        """Build canonical selector fingerprint for pending state tracking."""
+        return (
+            f"target={input_expression}|mode=pending|limit={selector_options.get('limit')}"
+            f"|order={selector_options.get('order')}|dir={selector_options.get('dir')}"
+            f"|dt_pattern={selector_options.get('dt_pattern') or ''}"
+            f"|dt_format={selector_options.get('dt_format') or ''}"
+        )
 
     def _route_input_results(
         self,
@@ -786,7 +1014,7 @@ class InputFileDirective(DirectiveProcessor):
         return result_files
     
     def _resolve_brace_pattern(self, value: str, vault_path: str, **context) -> List[Dict[str, Any]]:
-        """Handle brace patterns like {latest:3}, {pending:5}, {today}."""
+        """Handle brace patterns like {today}, {yesterday:3}."""
         brace_patterns = re.findall(r'\{([^}]+)\}', value)
         
         if len(brace_patterns) != 1:
@@ -797,43 +1025,28 @@ class InputFileDirective(DirectiveProcessor):
         fmt = None
         if count is None:
             base_pattern, fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
-        
-        # Extract directory path from parameter value
+        if base_pattern == "pending":
+            raise ValueError(
+                "Legacy '{pending}' syntax is no longer supported. "
+                "Use selector parameters, e.g. @input file: tasks/* (pending, limit=5)"
+            )
+        if base_pattern == "latest":
+            raise ValueError(
+                "Legacy '{latest}' syntax is no longer supported. "
+                "Use selector parameters, e.g. @input file: journal/* (latest, limit=1)"
+            )
+
         pattern_start = value.find(f"{{{pattern}}}")
-        pattern_end = pattern_start + len(pattern) + 2
-        is_dir_mode = (
-            base_pattern == 'latest'
-            and fmt is None
-            and pattern_end < len(value)
-            and value[pattern_end] == '/'
-        )
         if pattern_start > 0:
-            # Path prefix exists (e.g., "journal/{latest:3}")
             path_prefix = value[:pattern_start]
             search_directory = os.path.join(vault_path, path_prefix)
         else:
-            # No path prefix (e.g., "{latest:3}")
             search_directory = vault_path
-        
-        # Handle {pending} pattern with state management
-        if base_pattern == 'pending' and fmt is None:
-            return self._resolve_pending_pattern(value, search_directory, vault_path, count, context.get('state_manager'))
-        
-        # Handle time-based patterns
-        elif base_pattern == 'latest' and is_dir_mode:
-            return self._resolve_latest_directory_pattern(
-                value,
-                vault_path,
-                path_prefix if pattern_start > 0 else "",
-                pattern_end,
-                count,
-            )
-        elif count is not None or (base_pattern == 'latest' and fmt is None):
-            # Multi-file patterns like {latest:3} (or {latest} -> {latest:1})
-            resolved_count = count if count is not None else 1
+
+        if count is not None:
             return self._resolve_time_based_multi_pattern(
                 base_pattern,
-                resolved_count,
+                count,
                 search_directory,
                 vault_path,
                 value,
@@ -841,9 +1054,7 @@ class InputFileDirective(DirectiveProcessor):
                 context.get('reference_date'),
                 context.get('week_start_day', 0),
             )
-        else:
-            # Single file patterns like {today}
-            return self._resolve_single_time_pattern(value, vault_path, **context)
+        return self._resolve_single_time_pattern(value, vault_path, **context)
 
     def _resolve_latest_directory_pattern(
         self,

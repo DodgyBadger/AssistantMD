@@ -19,7 +19,7 @@ When creating files:
 - In files written via tools, do not include markdown code fences around template content.
 - Assume sensible defaults and call them out briefly.
 - After writing, report path, test steps, enable steps, and key assumptions.
-- If `workflow_run` is available, offer to run it; if needed, offer step-level isolation with `step_name`.
+- If `workflow_run` is available, offer to list/run workflows and lifecycle operations (`enable_workflow` / `disable_workflow`); if needed, offer step-level isolation with `step_name`.
 - Verify expected output files and report whether results match intent.
 
 

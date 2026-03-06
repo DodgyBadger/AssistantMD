@@ -16,7 +16,7 @@ You are a content tagging assistant. Your job is to analyze document content and
 
 ## Auto-Tag Unprocessed Files
 @input file: TOC  
-@input file: inbox/{pending:5} (required, refs_only)  
+@input file: inbox/* (pending, limit=5, required, refs_only)  
 @tools file_ops_safe  
 @model gpt-mini  
 
