@@ -39,7 +39,10 @@ class WorkflowConfigSchema(BaseModel):
     
     # Optional fields with defaults
     schedule: Optional[str] = Field(None, description="Schedule string for when the workflow runs, None for manual-only")
-    enabled: bool = Field(True, description="Whether the workflow is enabled (only relevant if scheduled)")
+    enabled: bool = Field(
+        False,
+        description="Whether the workflow is enabled (only relevant if scheduled)",
+    )
     week_start_day: str = Field("monday", description="Week start day for weekly patterns")
     description: str = Field("", description="Human-readable description")
     

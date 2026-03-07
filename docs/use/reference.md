@@ -91,10 +91,10 @@ File-selection selector modes. Exactly one selector mode may be active.
 Maximum files returned after selector ordering. Requires `pending` or `latest`.
 
 `order=mtime|ctime|alphanum|filename_dt`  
-Selector ordering strategy. `latest` supports `mtime|ctime|filename_dt`; `pending` supports all four.
+Selector ordering strategy. `latest` supports `mtime|ctime|filename_dt`; `pending` supports all four. Defaults: `pending=ctime`, `latest=mtime`.
 
 `dir=asc|desc`  
-Selector direction (default `pending=asc`, `latest=desc`).
+Selector direction. Defaults: `pending=asc`, `latest=desc`.
 
 `dt_pattern=REGEX`, `dt_format=FORMAT`  
 Required together when `order=filename_dt`.
@@ -429,6 +429,7 @@ No optional parameters.
 
 ### Notes:
 - Affects scheduled runs only; manual runs still work.
+- If omitted, defaults to `false` (disabled) for scheduled execution.
 - Changing value requires vault rescan to take effect.
 
 ### Examples:

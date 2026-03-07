@@ -189,8 +189,12 @@ Notes:
         lines = [f"Workflows in vault '{vault_name}':"]
         for workflow in sorted(current_vault, key=lambda item: item.name.lower()):
             description = (workflow.description or "").strip() or "(no description)"
+            enabled_display = WorkflowRun._resolve_enabled_state_from_frontmatter(
+                file_path=workflow.file_path,
+                fallback=bool(workflow.enabled),
+            )
             lines.append(
-                f"- workflow_name: {workflow.name} | workflow_id: {workflow.global_id} | enabled: {workflow.enabled} | description: {description}"
+                f"- workflow_name: {workflow.name} | workflow_id: {workflow.global_id} | enabled: {enabled_display} | description: {description}"
             )
         return "\n".join(lines)
 
@@ -348,7 +352,10 @@ Notes:
             )
             return result
 
-        enabled_before = bool(target.enabled)
+        enabled_before = WorkflowRun._resolve_enabled_state_from_frontmatter(
+            file_path=target.file_path,
+            fallback=bool(target.enabled),
+        )
         if enabled_before == desired_enabled:
             status = "already_enabled" if desired_enabled else "already_disabled"
             result = {
@@ -417,6 +424,47 @@ Notes:
         return result
 
     @staticmethod
+    def _resolve_enabled_state_from_frontmatter(*, file_path: str, fallback: bool) -> bool:
+        """Read explicit enabled state from frontmatter.
+
+        Missing `enabled` is treated as disabled for lifecycle/list semantics.
+        If parsing fails, fallback preserves current behavior.
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                content = file.read()
+        except OSError:
+            return fallback
+
+        if not content.startswith("---"):
+            return fallback
+
+        lines = content.splitlines()
+        closing_index = None
+        for idx in range(1, len(lines)):
+            if lines[idx].strip() == "---":
+                closing_index = idx
+                break
+
+        if closing_index is None:
+            return fallback
+
+        enabled_pattern = re.compile(r"^\s*enabled\s*:\s*([^\n#]+)", re.IGNORECASE)
+        for line in lines[1:closing_index]:
+            match = enabled_pattern.match(line)
+            if not match:
+                continue
+            value = match.group(1).strip().strip("'\"").lower()
+            if value in {"true", "yes", "on", "1"}:
+                return True
+            if value in {"false", "no", "off", "0"}:
+                return False
+            return fallback
+
+        # Missing key is treated as disabled for lifecycle/list operations.
+        return False
+
+    @staticmethod
     def _write_enabled_frontmatter(
         *,
         file_path: str,
@@ -453,17 +501,16 @@ Notes:
 
         frontmatter_lines = lines[1:closing_index]
         replacement = "true" if enabled else "false"
-        enabled_pattern = re.compile(r"^(\s*enabled\s*:\s*)(true|false)(\s*(#.*)?)$", re.IGNORECASE)
+        enabled_pattern = re.compile(r"^(\s*enabled\s*:\s*)([^\n#]*)(\s*(#.*)?)$", re.IGNORECASE)
         replaced = False
         for idx, line in enumerate(frontmatter_lines):
-            if enabled_pattern.match(line.strip()):
+            line_no_newline = line.rstrip("\n")
+            match = enabled_pattern.match(line_no_newline)
+            if match:
                 newline = "\n" if line.endswith("\n") else ""
-                comment = ""
-                hash_index = line.find("#")
-                if hash_index != -1:
-                    comment = " " + line[hash_index:].rstrip("\n")
-                prefix = line.split(":", 1)[0]
-                frontmatter_lines[idx] = f"{prefix}: {replacement}{comment}{newline}"
+                prefix = match.group(1)
+                comment = match.group(3) or ""
+                frontmatter_lines[idx] = f"{prefix}{replacement}{comment}{newline}"
                 replaced = True
                 break
 
