@@ -7,3 +7,4 @@ Progressive-disclosure guidance for contributors and coding agents.
 - [Testing and Validation](/app/docs/agent-guides/testing-and-validation.md)
 - [Git and Review Workflow](/app/docs/agent-guides/git-and-review.md)
 - [Security and Runtime State](/app/docs/agent-guides/security-and-state.md)
+- [Refactor Pass Playbook](/app/docs/agent-guides/refactor.md)

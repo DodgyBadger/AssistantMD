@@ -1,7 +1,7 @@
 
 from datetime import datetime
 import re
-from typing import Dict, Optional
+from typing import Dict
 from types import SimpleNamespace
 
 from core.logger import UnifiedLogger
@@ -109,6 +109,7 @@ async def run_workflow(job_args: dict, **kwargs):
     
     # Extract parameters from kwargs
     step_name = kwargs.get('step_name')
+    expected_failure = bool(kwargs.get('expected_failure', False))
     
     workflow_steps = []
 
@@ -190,17 +191,24 @@ async def run_workflow(job_args: dict, **kwargs):
         template_pointer = getattr(e, "template_pointer", "")
         failed_step_name = getattr(e, "step_name", "")
         phase = getattr(e, "phase", "")
-        logger.error(
-            "Workflow execution failed",
-            data={
-                "vault": services.workflow_id,
-                "error_message": str(e),
-                "steps_attempted": len(workflow_steps),
-                "template_pointer": template_pointer,
-                "step_name": failed_step_name,
-                "phase": phase,
-            },
-        )
+        failure_data = {
+            "vault": services.workflow_id,
+            "error_message": str(e),
+            "steps_attempted": len(workflow_steps),
+            "template_pointer": template_pointer,
+            "step_name": failed_step_name,
+            "phase": phase,
+        }
+        if expected_failure:
+            logger.info(
+                "Workflow execution failed (expected)",
+                data=failure_data,
+            )
+        else:
+            logger.error(
+                "Workflow execution failed",
+                data=failure_data,
+            )
         raise
 
 

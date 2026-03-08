@@ -528,7 +528,11 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         request: ExecuteWorkflowRequest with global_id and optional step selection
     """
     try:
-        result = await execute_workflow_manually(request.global_id, request.step_name)
+        result = await execute_workflow_manually(
+            request.global_id,
+            request.step_name,
+            request.expect_failure,
+        )
         response = ExecuteWorkflowResponse(**result)
         return response
     except Exception as e:

@@ -149,7 +149,6 @@ def validate_settings(
     Returns:
         ConfigurationStatus describing any issues discovered.
     """
-    active_settings = settings or get_app_settings()
     status = ConfigurationStatus()
     template_sections = _load_template_sections()
 

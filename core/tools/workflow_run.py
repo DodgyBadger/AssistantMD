@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import traceback
 import os
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from core.logger import UnifiedLogger
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.scheduling.jobs import create_job_args
 from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR
+from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
 from .base import BaseTool
 
 
@@ -61,13 +61,9 @@ class WorkflowRun(BaseTool):
                     return await cls._list_workflows(vault_name)
 
                 if op == "run":
-                    name = cls._normalize_workflow_name_input(workflow_name)
-                    if not name:
-                        return "workflow_name is required for operation='run'."
-                    if "/app/data/" in name:
-                        return "Invalid workflow_name. Runtime filesystem roots are not allowed; pass vault-internal workflow names from workflow_run(operation=\"list\")."
-                    if cls._is_invalid_workflow_name(name):
-                        return "Invalid workflow_name. Use a vault-relative name (e.g. 'daily' or 'folder/daily') without '..'."
+                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
+                    if error:
+                        return error
 
                     global_id = f"{vault_name}/{name}"
                     single_step = (step_name or "").strip() or None
@@ -75,16 +71,16 @@ class WorkflowRun(BaseTool):
                         result = await cls._execute_workflow(global_id, single_step)
                         return cls._format_run_result(result)
                     except Exception as exc:  # pylint: disable=broad-except
+                        logger.exception(
+                            "workflow_run execution failed",
+                            metadata={"operation": op, "global_id": global_id, "step_name": single_step},
+                        )
                         return cls._format_run_error(global_id, single_step, exc)
 
                 if op in {"enable_workflow", "disable_workflow"}:
-                    name = cls._normalize_workflow_name_input(workflow_name)
-                    if not name:
-                        return f"workflow_name is required for operation='{op}'."
-                    if "/app/data/" in name:
-                        return "Invalid workflow_name. Runtime filesystem roots are not allowed; pass vault-internal workflow names from workflow_run(operation=\"list\")."
-                    if cls._is_invalid_workflow_name(name):
-                        return "Invalid workflow_name. Use a vault-relative name (e.g. 'daily' or 'folder/daily') without '..'."
+                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
+                    if error:
+                        return error
                     result = await cls._set_workflow_enabled_state(
                         operation=op,
                         vault_name=vault_name,
@@ -96,6 +92,10 @@ class WorkflowRun(BaseTool):
             except RuntimeStateError as exc:
                 return f"Runtime unavailable: {exc}"
             except Exception as exc:  # pylint: disable=broad-except
+                logger.exception(
+                    "workflow_run operation failed",
+                    metadata={"operation": operation, "workflow_name": workflow_name},
+                )
                 return f"Error performing '{operation}' operation: {exc}"
 
         return Tool(workflow_run, name="workflow_run")
@@ -176,6 +176,27 @@ Notes:
             normalized = normalized[:-3]
 
         return normalized.strip("/")
+
+    @classmethod
+    def _resolve_valid_workflow_name(
+        cls,
+        operation: str,
+        workflow_name: str,
+    ) -> tuple[str, str | None]:
+        normalized = cls._normalize_workflow_name_input(workflow_name)
+        if not normalized:
+            return "", f"workflow_name is required for operation='{operation}'."
+        if "/app/data/" in normalized:
+            return "", (
+                "Invalid workflow_name. Runtime filesystem roots are not allowed; "
+                "pass vault-internal workflow names from workflow_run(operation=\"list\")."
+            )
+        if cls._is_invalid_workflow_name(normalized):
+            return "", (
+                "Invalid workflow_name. Use a vault-relative name "
+                "(e.g. 'daily' or 'folder/daily') without '..'."
+            )
+        return normalized, None
 
     @staticmethod
     async def _list_workflows(vault_name: str) -> str:
@@ -315,8 +336,9 @@ Notes:
             "message": f"Workflow '{target.global_id}' executed successfully in {elapsed:.2f} seconds",
         }
 
-    @staticmethod
+    @classmethod
     async def _set_workflow_enabled_state(
+        cls,
         *,
         operation: str,
         vault_name: str,
@@ -332,55 +354,47 @@ Notes:
         attempted_global_id = f"{vault_name}/{workflow_name}"
         if not target:
             status = "not_found"
-            result = {
-                "success": False,
-                "operation": operation,
-                "workflow_name": workflow_name,
-                "global_id": attempted_global_id,
-                "status": status,
-                "enabled_before": "",
-                "enabled_after": "",
-                "message": f"Workflow not found: {attempted_global_id}",
-            }
-            logger.set_sinks(["validation"]).info(
-                "workflow_lifecycle_changed",
-                data={
-                    "operation": operation,
-                    "workflow_id": attempted_global_id,
-                    "status": status,
-                },
+            cls._emit_lifecycle_event(
+                operation=operation,
+                workflow_id=attempted_global_id,
+                status=status,
             )
-            return result
+            return cls._build_lifecycle_result(
+                success=False,
+                operation=operation,
+                workflow_name=workflow_name,
+                global_id=attempted_global_id,
+                status=status,
+                enabled_before=None,
+                enabled_after=None,
+                message=f"Workflow not found: {attempted_global_id}",
+            )
 
-        enabled_before = WorkflowRun._resolve_enabled_state_from_frontmatter(
+        enabled_before = cls._resolve_enabled_state_from_frontmatter(
             file_path=target.file_path,
             fallback=bool(target.enabled),
         )
         if enabled_before == desired_enabled:
             status = "already_enabled" if desired_enabled else "already_disabled"
-            result = {
-                "success": True,
-                "operation": operation,
-                "workflow_name": workflow_name,
-                "global_id": target.global_id,
-                "status": status,
-                "enabled_before": enabled_before,
-                "enabled_after": enabled_before,
-                "message": f"Workflow '{target.global_id}' is already {'enabled' if desired_enabled else 'disabled'}.",
-            }
-            logger.set_sinks(["validation"]).info(
-                "workflow_lifecycle_changed",
-                data={
-                    "operation": operation,
-                    "workflow_id": target.global_id,
-                    "status": status,
-                    "enabled_before": enabled_before,
-                    "enabled_after": enabled_before,
-                },
+            cls._emit_lifecycle_event(
+                operation=operation,
+                workflow_id=target.global_id,
+                status=status,
+                enabled_before=enabled_before,
+                enabled_after=enabled_before,
             )
-            return result
+            return cls._build_lifecycle_result(
+                success=True,
+                operation=operation,
+                workflow_name=workflow_name,
+                global_id=target.global_id,
+                status=status,
+                enabled_before=enabled_before,
+                enabled_after=enabled_before,
+                message=f"Workflow '{target.global_id}' is already {'enabled' if desired_enabled else 'disabled'}.",
+            )
 
-        WorkflowRun._write_enabled_frontmatter(
+        cls._write_enabled_frontmatter(
             file_path=target.file_path,
             enabled=desired_enabled,
             vault_name=vault_name,
@@ -401,27 +415,69 @@ Notes:
             )
 
         status = "enabled_now" if desired_enabled else "disabled_now"
-        result = {
-            "success": True,
+        cls._emit_lifecycle_event(
+            operation=operation,
+            workflow_id=target.global_id,
+            status=status,
+            enabled_before=enabled_before,
+            enabled_after=enabled_after,
+        )
+        return cls._build_lifecycle_result(
+            success=True,
+            operation=operation,
+            workflow_name=workflow_name,
+            global_id=target.global_id,
+            status=status,
+            enabled_before=enabled_before,
+            enabled_after=enabled_after,
+            message=f"Workflow '{target.global_id}' {'enabled' if desired_enabled else 'disabled'} successfully.",
+        )
+
+    @staticmethod
+    def _build_lifecycle_result(
+        *,
+        success: bool,
+        operation: str,
+        workflow_name: str,
+        global_id: str,
+        status: str,
+        enabled_before: bool | None,
+        enabled_after: bool | None,
+        message: str,
+    ) -> dict:
+        return {
+            "success": success,
             "operation": operation,
             "workflow_name": workflow_name,
-            "global_id": target.global_id,
+            "global_id": global_id,
             "status": status,
-            "enabled_before": enabled_before,
-            "enabled_after": enabled_after,
-            "message": f"Workflow '{target.global_id}' {'enabled' if desired_enabled else 'disabled'} successfully.",
+            "enabled_before": "" if enabled_before is None else enabled_before,
+            "enabled_after": "" if enabled_after is None else enabled_after,
+            "message": message,
         }
+
+    @staticmethod
+    def _emit_lifecycle_event(
+        *,
+        operation: str,
+        workflow_id: str,
+        status: str,
+        enabled_before: bool | None = None,
+        enabled_after: bool | None = None,
+    ) -> None:
+        payload = {
+            "operation": operation,
+            "workflow_id": workflow_id,
+            "status": status,
+        }
+        if enabled_before is not None:
+            payload["enabled_before"] = enabled_before
+        if enabled_after is not None:
+            payload["enabled_after"] = enabled_after
         logger.set_sinks(["validation"]).info(
             "workflow_lifecycle_changed",
-            data={
-                "operation": operation,
-                "workflow_id": target.global_id,
-                "status": status,
-                "enabled_before": enabled_before,
-                "enabled_after": enabled_after,
-            },
+            data=payload,
         )
-        return result
 
     @staticmethod
     def _resolve_enabled_state_from_frontmatter(*, file_path: str, fallback: bool) -> bool:
@@ -436,28 +492,19 @@ Notes:
         except OSError:
             return fallback
 
-        if not content.startswith("---"):
+        try:
+            properties, _ = parse_simple_frontmatter(content, require_frontmatter=False)
+        except ValueError:
             return fallback
 
-        lines = content.splitlines()
-        closing_index = None
-        for idx in range(1, len(lines)):
-            if lines[idx].strip() == "---":
-                closing_index = idx
-                break
-
-        if closing_index is None:
-            return fallback
-
-        enabled_pattern = re.compile(r"^\s*enabled\s*:\s*([^\n#]+)", re.IGNORECASE)
-        for line in lines[1:closing_index]:
-            match = enabled_pattern.match(line)
-            if not match:
-                continue
-            value = match.group(1).strip().strip("'\"").lower()
-            if value in {"true", "yes", "on", "1"}:
+        enabled_value = properties.get("enabled")
+        if isinstance(enabled_value, bool):
+            return enabled_value
+        if isinstance(enabled_value, str):
+            normalized = enabled_value.strip().lower()
+            if normalized in {"true", "yes", "on", "1"}:
                 return True
-            if value in {"false", "no", "off", "0"}:
+            if normalized in {"false", "no", "off", "0"}:
                 return False
             return fallback
 
@@ -486,39 +533,11 @@ Notes:
         with open(file_path, "r", encoding="utf-8") as file:
             content = file.read()
 
-        if not content.startswith("---"):
-            raise ValueError("Workflow file must start with YAML frontmatter")
-
-        lines = content.splitlines(keepends=True)
-        closing_index = None
-        for idx in range(1, len(lines)):
-            if lines[idx].strip() == "---":
-                closing_index = idx
-                break
-
-        if closing_index is None:
-            raise ValueError("Workflow file frontmatter is missing closing '---'")
-
-        frontmatter_lines = lines[1:closing_index]
-        replacement = "true" if enabled else "false"
-        enabled_pattern = re.compile(r"^(\s*enabled\s*:\s*)([^\n#]*)(\s*(#.*)?)$", re.IGNORECASE)
-        replaced = False
-        for idx, line in enumerate(frontmatter_lines):
-            line_no_newline = line.rstrip("\n")
-            match = enabled_pattern.match(line_no_newline)
-            if match:
-                newline = "\n" if line.endswith("\n") else ""
-                prefix = match.group(1)
-                comment = match.group(3) or ""
-                frontmatter_lines[idx] = f"{prefix}{replacement}{comment}{newline}"
-                replaced = True
-                break
-
-        if not replaced:
-            newline = "\n" if frontmatter_lines and frontmatter_lines[-1].endswith("\n") else "\n"
-            frontmatter_lines.append(f"enabled: {replacement}{newline}")
-
-        updated_content = "".join(lines[:1] + frontmatter_lines + lines[closing_index:])
+        updated_content = upsert_frontmatter_key(
+            content,
+            key="enabled",
+            value="true" if enabled else "false",
+        )
 
         temp_path = f"{file_path}.tmp"
         with open(temp_path, "w", encoding="utf-8") as file:

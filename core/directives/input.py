@@ -20,6 +20,27 @@ from core.constants import SUPPORTED_READ_FILE_TYPES
 
 logger = UnifiedLogger(tag="directive-input")
 
+INPUT_BOOLEAN_PARAMS = {"required", "refs_only", "refs-only", "pending", "latest"}
+INPUT_ALLOWED_PARAMETERS = {
+    "required",
+    "refs_only",
+    "refs-only",
+    "images",
+    "head",
+    "properties",
+    "output",
+    "write-mode",
+    "write_mode",
+    "scope",
+    "pending",
+    "latest",
+    "limit",
+    "order",
+    "dir",
+    "dt_pattern",
+    "dt_format",
+}
+
 
 def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
     """Load content from a single file with metadata."""
@@ -99,6 +120,10 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
             "error": f"File not found: {filename}"
         }
     except Exception as e:
+        logger.exception(
+            "Failed to load file metadata",
+            metadata={"file_path": normalized_path, "vault_root": vault_root},
+        )
         if get_virtual_mount_key(normalized_path):
             return {
                 "filepath": filepath_without_ext,
@@ -168,32 +193,13 @@ class InputFileDirective(DirectiveProcessor):
         return "input"
 
     def _parse_input_target_and_parameters(self, value: str) -> tuple[str, Dict[str, str]]:
-        allowed_parameters = {
-            "required",
-            "refs_only",
-            "refs-only",
-            "images",
-            "head",
-            "properties",
-            "output",
-            "write-mode",
-            "write_mode",
-            "scope",
-            "pending",
-            "latest",
-            "limit",
-            "order",
-            "dir",
-            "dt_pattern",
-            "dt_format",
-        }
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters=allowed_parameters,
+            allowed_parameters=INPUT_ALLOWED_PARAMETERS,
         )
         if self._has_unparsed_known_param_assignment(
             value=value,
-            allowed_parameters=allowed_parameters,
+            allowed_parameters=INPUT_ALLOWED_PARAMETERS,
             parsed_parameters={k.lower() for k in parameters.keys()},
         ):
             raise ValueError(
@@ -265,27 +271,9 @@ class InputFileDirective(DirectiveProcessor):
         # Validate parameters
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {
-                'required',
-                'refs_only',
-                'refs-only',
-                'images',
-                'head',
-                'properties',
-                'output',
-                'write-mode',
-                'write_mode',
-                'scope',
-                'pending',
-                'latest',
-                'limit',
-                'order',
-                'dir',
-                'dt_pattern',
-                'dt_format',
-            }:
+            if param_name not in INPUT_ALLOWED_PARAMETERS:
                 return False
-            if param_name in {'required', 'refs_only', 'refs-only', 'pending', 'latest'}:
+            if param_name in INPUT_BOOLEAN_PARAMS:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
                     return False
             if param_name == 'images':
@@ -332,10 +320,10 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse optional parameters
         base_value, parameters = self._parse_input_target_and_parameters(value)
-        required = parameters.get('required', '').lower() in ['true', 'yes', '1']
+        required = self._is_truthy_param(parameters, "required")
         refs_only = (
-            parameters.get('refs_only', parameters.get('refs-only', '')).lower()
-            in ['true', 'yes', '1']
+            self._is_truthy_param(parameters, "refs_only")
+            or self._is_truthy_param(parameters, "refs-only")
         )
         images_policy = parameters.get("images", "auto").strip().lower() or "auto"
         head_chars = self._parse_head_chars(parameters.get('head'))
@@ -354,61 +342,19 @@ class InputFileDirective(DirectiveProcessor):
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
-            buffer_store = get_buffer_store_for_scope(
-                scope=scope_value,
-                default_scope=context.get("buffer_scope", "run"),
-                buffer_store=context.get("buffer_store"),
-                buffer_store_registry=context.get("buffer_store_registry"),
+            results = self._resolve_variable_target(
+                variable_name=variable_name,
+                required=required,
+                refs_only=refs_only,
+                images_policy=images_policy,
+                properties_enabled=properties_enabled,
+                properties_keys=properties_keys,
+                head_chars=head_chars,
+                context=context,
+                scope_value=scope_value,
             )
-            display_name = f"variable: {variable_name}"
-            if buffer_store is None:
-                if required:
-                    return [{
-                        '_workflow_signal': 'skip_step',
-                        'reason': f"Required input variable not available: {variable_name}",
-                    }]
-                return [{
-                    "filepath": display_name,
-                    "filename": variable_name,
-                    "content": "",
-                    "found": False,
-                    "error": "Variable store unavailable",
-                    "images_policy": images_policy,
-                }]
-
-            entry = buffer_store.get(variable_name)
-            if entry is None:
-                if required:
-                    return [{
-                        '_workflow_signal': 'skip_step',
-                        'reason': f"Required input variable not found: {variable_name}",
-                    }]
-                return [{
-                    "filepath": display_name,
-                    "filename": variable_name,
-                    "content": "",
-                    "found": False,
-                    "error": "Variable not found",
-                    "images_policy": images_policy,
-                }]
-
-            content_value = entry.content or ""
-            result = {
-                "filepath": display_name,
-                "filename": variable_name,
-                "content": "" if refs_only else content_value,
-                "found": True,
-                "error": None,
-                "images_policy": images_policy,
-            }
-            if refs_only:
-                result["refs_only"] = True
-            else:
-                if properties_enabled:
-                    result = self._apply_properties_mode(result, properties_keys)
-                if head_chars is not None:
-                    result = self._truncate_result_content(result, head_chars)
-            results = [result]
+            if results and results[0].get("_workflow_signal") == "skip_step":
+                return results
             if output_target_value:
                 return self._route_input_results(
                     results,
@@ -454,16 +400,10 @@ class InputFileDirective(DirectiveProcessor):
         # Check both: empty list OR all files have found=False
         if required:
             if len(result_files) == 0:
-                return [{
-                    '_workflow_signal': 'skip_step',
-                    'reason': f'No required input files found: {file_path}'
-                }]
+                return [self._skip_step_result(f"No required input files found: {file_path}")]
             # Check if all files have found=False
             if all(not file_data.get('found', True) for file_data in result_files):
-                return [{
-                    '_workflow_signal': 'skip_step',
-                    'reason': f'No required input files found: {file_path}'
-                }]
+                return [self._skip_step_result(f"No required input files found: {file_path}")]
 
         # If refs_only=true, strip content to reduce prompt size but retain metadata
         if refs_only:
@@ -513,6 +453,80 @@ class InputFileDirective(DirectiveProcessor):
             raise ValueError("head must be a positive integer")
         return parsed
 
+    def _is_truthy_param(self, parameters: Dict[str, str], name: str) -> bool:
+        if name not in parameters:
+            return False
+        return DirectiveValueParser.parse_boolean(parameters.get(name, "true"))
+
+    def _skip_step_result(self, reason: str) -> Dict[str, Any]:
+        return {
+            "_workflow_signal": "skip_step",
+            "reason": reason,
+        }
+
+    def _resolve_variable_target(
+        self,
+        *,
+        variable_name: str,
+        required: bool,
+        refs_only: bool,
+        images_policy: str,
+        properties_enabled: bool,
+        properties_keys: Optional[List[str]],
+        head_chars: Optional[int],
+        context: Dict[str, Any],
+        scope_value: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        buffer_store = get_buffer_store_for_scope(
+            scope=scope_value,
+            default_scope=context.get("buffer_scope", "run"),
+            buffer_store=context.get("buffer_store"),
+            buffer_store_registry=context.get("buffer_store_registry"),
+        )
+        display_name = f"variable: {variable_name}"
+        if buffer_store is None:
+            if required:
+                return [self._skip_step_result(f"Required input variable not available: {variable_name}")]
+            return [{
+                "filepath": display_name,
+                "filename": variable_name,
+                "content": "",
+                "found": False,
+                "error": "Variable store unavailable",
+                "images_policy": images_policy,
+            }]
+
+        entry = buffer_store.get(variable_name)
+        if entry is None:
+            if required:
+                return [self._skip_step_result(f"Required input variable not found: {variable_name}")]
+            return [{
+                "filepath": display_name,
+                "filename": variable_name,
+                "content": "",
+                "found": False,
+                "error": "Variable not found",
+                "images_policy": images_policy,
+            }]
+
+        content_value = entry.content or ""
+        result = {
+            "filepath": display_name,
+            "filename": variable_name,
+            "content": "" if refs_only else content_value,
+            "found": True,
+            "error": None,
+            "images_policy": images_policy,
+        }
+        if refs_only:
+            result["refs_only"] = True
+        else:
+            if properties_enabled:
+                result = self._apply_properties_mode(result, properties_keys)
+            if head_chars is not None:
+                result = self._truncate_result_content(result, head_chars)
+        return [result]
+
     def _parse_properties_mode(self, properties_value: Optional[str]) -> tuple[bool, Optional[List[str]]]:
         if properties_value is None:
             return False, None
@@ -531,14 +545,8 @@ class InputFileDirective(DirectiveProcessor):
 
     def _parse_selector_options(self, parameters: Dict[str, str]) -> Dict[str, Any]:
         """Parse and validate selector-mode options for @input file targets."""
-
-        def _truthy_param(name: str) -> bool:
-            if name not in parameters:
-                return False
-            return DirectiveValueParser.parse_boolean(parameters.get(name, "true"))
-
-        pending_enabled = _truthy_param("pending")
-        latest_enabled = _truthy_param("latest")
+        pending_enabled = self._is_truthy_param(parameters, "pending")
+        latest_enabled = self._is_truthy_param(parameters, "latest")
 
         selector_mode: Optional[str] = None
         if pending_enabled and latest_enabled:
@@ -703,7 +711,8 @@ class InputFileDirective(DirectiveProcessor):
                 candidate_paths.append(candidate_path)
 
         if not candidate_paths:
-            return []
+            # Preserve unresolved file diagnostics instead of collapsing to an empty result.
+            return [file_data for file_data in result_files if isinstance(file_data, dict)]
 
         mode = selector_options.get("mode")
         selected_paths: List[str]

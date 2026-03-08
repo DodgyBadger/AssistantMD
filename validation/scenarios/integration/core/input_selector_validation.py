@@ -83,7 +83,12 @@ class InputSelectorValidationScenario(BaseScenario):
         self.teardown_scenario()
 
     async def _assert_step_fails_with(self, vault, step_name: str, expected_substring: str):
-        result = await self.run_workflow(vault, "input_selector_validation", step_name=step_name)
+        result = await self.run_workflow(
+            vault,
+            "input_selector_validation",
+            step_name=step_name,
+            expect_failure=True,
+        )
         self.soft_assert_equal(
             result.status,
             "failed",

@@ -180,6 +180,7 @@ class BaseScenario(ABC):
         vault: VaultPath,
         workflow_name: str,
         step_name: str = None,
+        expect_failure: bool = False,
     ) -> WorkflowResult:
         """Manually trigger workflow execution via the public API."""
         self._log_timeline(f"Running workflow: {workflow_name} in vault {vault.name}")
@@ -188,11 +189,16 @@ class BaseScenario(ABC):
         payload = {"global_id": f"{vault.name}/{workflow_name}"}
         if step_name:
             payload["step_name"] = step_name
+        if expect_failure:
+            payload["expect_failure"] = True
 
         response = self.call_api("/api/workflows/execute", method="POST", data=payload)
         if response.status_code != 200:
             error_message = response.text or str(response.data) or "Workflow execution failed"
-            self._log_timeline(f"❌ Workflow failed: {error_message}")
+            if expect_failure:
+                self._log_timeline(f"✅ Workflow failed as expected: {error_message}")
+            else:
+                self._log_timeline(f"❌ Workflow failed: {error_message}")
             return WorkflowResult(status="failed", error_message=error_message)
 
         files_after = self._collect_vault_files(vault)

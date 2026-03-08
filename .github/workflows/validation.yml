@@ -10,7 +10,89 @@ permissions:
   contents: read
 
 jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    env:
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+      UV_LINK_MODE: copy
+      UV_COMPILE_BYTECODE: "1"
+      UV_CACHE_DIR: ./.uv-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # paths-filter requires the base ref to detect docs-only changes correctly
+          fetch-depth: 0
+
+      - name: Detect docs-only changes
+        id: docs-filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - '**/*.md'
+            code:
+              - '**'
+              - '!**/*.md'
+
+      - name: Determine if security checks can be skipped
+        id: skip-check
+        run: |
+          docs="${{ steps.docs-filter.outputs.docs }}"
+          code="${{ steps.docs-filter.outputs.code }}"
+          if [[ "$docs" == "true" && "$code" != "true" ]]; then
+            echo "only_docs=true" >> "$GITHUB_OUTPUT"
+            echo "Docs-only change detected; skipping security audit. ✅"
+          else
+            echo "only_docs=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Docs-only summary
+        if: ${{ steps.skip-check.outputs.only_docs == 'true' }}
+        run: echo "Documentation-only update; no dependency security audit required."
+
+      - name: Set up Node.js
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install npm dependencies from lockfile
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        run: npm ci
+
+      - name: Audit npm dependencies (high+)
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        run: npm audit --audit-level=high
+
+      - name: Set up Python
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        uses: astral-sh/setup-uv@v2
+
+      - name: Sync Python dependencies
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        working-directory: docker
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
+        run: uv sync --frozen --all-extras --no-install-project
+
+      - name: Install pip-audit
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        run: ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -m pip install pip-audit
+
+      - name: Audit Python dependencies
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        run: ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pip-audit --progress-spinner=off
+
   validation:
+    needs: security-audit
     runs-on: ubuntu-latest
     env:
       UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
