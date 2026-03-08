@@ -345,8 +345,12 @@ class InputFileDirective(DirectiveProcessor):
         scope_value = parameters.get('scope')
         selector_options = self._parse_selector_options(parameters)
 
-        if base_value.startswith("variable:") and selector_options.get("mode"):
-            raise ValueError("pending/latest selectors are only supported for @input file targets")
+        selection_param_keys = {"pending", "latest", "limit", "order", "dir", "dt_pattern", "dt_format"}
+        if base_value.startswith("variable:") and any(key in parameters for key in selection_param_keys):
+            raise ValueError(
+                "Selection parameters (pending/latest/limit/order/dir/dt_*) "
+                "are only supported for @input file targets"
+            )
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
@@ -437,15 +441,14 @@ class InputFileDirective(DirectiveProcessor):
             # Direct file reference
             result_files = [load_file_with_metadata(file_path, vault_path)]
 
-        # Apply selector mode to resolved candidate files.
-        if selector_options.get("mode"):
-            result_files = self._apply_selector_mode(
-                result_files=result_files,
-                input_expression=file_path,
-                vault_path=vault_path,
-                selector_options=selector_options,
-                state_manager=context.get("state_manager"),
-            )
+        # Apply selection pipeline (mode filter, ordering, limit) to resolved file candidates.
+        result_files = self._apply_selector_mode(
+            result_files=result_files,
+            input_expression=file_path,
+            vault_path=vault_path,
+            selector_options=selector_options,
+            state_manager=context.get("state_manager"),
+        )
 
         # If required=true and no files found, return skip signal
         # Check both: empty list OR all files have found=False
@@ -551,15 +554,6 @@ class InputFileDirective(DirectiveProcessor):
         dt_pattern = (parameters.get("dt_pattern") or "").strip() or None
         dt_format = (parameters.get("dt_format") or "").strip() or None
 
-        selector_modifiers_provided = any(
-            key in parameters for key in {"limit", "order", "dir", "dt_pattern", "dt_format"}
-        )
-        if selector_mode is None and selector_modifiers_provided:
-            raise ValueError("Selector modifiers (limit/order/dir/dt_*) require pending or latest")
-
-        if selector_mode is None:
-            return {"mode": None}
-
         limit: Optional[int] = None
         if raw_limit:
             try:
@@ -577,7 +571,7 @@ class InputFileDirective(DirectiveProcessor):
             if limit is None:
                 limit = 10
             valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
-        else:
+        elif selector_mode == "latest":
             if not raw_order:
                 raw_order = "mtime"
             if not raw_dir:
@@ -585,6 +579,12 @@ class InputFileDirective(DirectiveProcessor):
             if limit is None:
                 limit = 1
             valid_orders = {"mtime", "ctime", "filename_dt"}
+        else:
+            if not raw_order:
+                raw_order = "alphanum"
+            if not raw_dir:
+                raw_dir = "asc"
+            valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
 
         if raw_order not in valid_orders:
             allowed = ", ".join(sorted(valid_orders))
@@ -674,7 +674,7 @@ class InputFileDirective(DirectiveProcessor):
         selector_options: Dict[str, Any],
         state_manager,
     ) -> List[Dict[str, Any]]:
-        """Apply pending/latest selector mode to resolved file candidates."""
+        """Apply selection options to resolved file candidates."""
         candidate_paths: List[str] = []
         for file_data in result_files:
             if not isinstance(file_data, dict) or not file_data.get("found", True):
@@ -705,7 +705,7 @@ class InputFileDirective(DirectiveProcessor):
         if not candidate_paths:
             return []
 
-        mode = selector_options["mode"]
+        mode = selector_options.get("mode")
         selected_paths: List[str]
         if mode == "latest":
             sorted_paths = self.pattern_utils.sort_files(
@@ -736,6 +736,16 @@ class InputFileDirective(DirectiveProcessor):
                     filename_dt_format=selector_options.get("dt_format"),
                 )
                 selected_paths = sorted_paths[: selector_options["limit"]]
+        elif mode is None:
+            sorted_paths = self.pattern_utils.sort_files(
+                candidate_paths,
+                order=selector_options["order"],
+                direction=selector_options["dir"],
+                filename_dt_pattern=selector_options.get("dt_pattern"),
+                filename_dt_format=selector_options.get("dt_format"),
+            )
+            limit = selector_options.get("limit")
+            selected_paths = sorted_paths if limit is None else sorted_paths[:limit]
         else:
             raise ValueError(f"Unsupported selector mode: {mode}")
 

@@ -37,6 +37,16 @@ class InputSelectorValidationScenario(BaseScenario):
         # Baseline valid selector behavior should still execute successfully.
         ok = await self.run_workflow(vault, "input_selector_validation", step_name="VALID_BASELINE")
         self.soft_assert_equal(ok.status, "completed", "Baseline selector step should succeed")
+        no_selector_mods = await self.run_workflow(
+            vault,
+            "input_selector_validation",
+            step_name="NO_SELECTOR_MODIFIERS",
+        )
+        self.soft_assert_equal(
+            no_selector_mods.status,
+            "completed",
+            "Non-selector order/dir/limit step should succeed",
+        )
 
         await self._assert_step_fails_with(
             vault,
@@ -97,6 +107,13 @@ description: Input selector validation coverage
 @output variable: baseline
 
 Baseline selector step should succeed.
+
+## NO_SELECTOR_MODIFIERS
+@model test
+@input file: timeline/* (order=ctime, dir=desc, limit=1)
+@output variable: no_selector_mods
+
+Glob ordering and limit without pending/latest should succeed.
 
 ## LEGACY_PENDING
 @model test
