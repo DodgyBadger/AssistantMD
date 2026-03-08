@@ -279,6 +279,11 @@ tools:
     requires_secrets:
       - TAVILY_API_KEY
     user_editable: false
+  browser:
+    module: core.tools.browser
+    description: "Browser-based page extraction using Playwright"
+    requires_secrets: []
+    user_editable: false
   code_execution:
     module: core.tools.code_execution_piston
     description: "Multi-language code execution via Piston API"

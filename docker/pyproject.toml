@@ -23,6 +23,7 @@ dependencies = [
     "httpx>=0.27.0",
     "anyio>=3.7.0",
     "markdownify>=1.2.2",
+    "playwright>=1.57.0",
     "pymupdf>=1.24.10",
 ]
 

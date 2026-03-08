@@ -35,7 +35,15 @@ When AI models process web content using tools like search, extract or crawl, ma
 **2. Tavily reduces exposure to hidden content**
 - Web searches, page extractions and site crawls that use Tavily are further protected by Tavily's firewall that blocks PII leakage, prompt injection, and malicious sources.
 
-**3. No data exfiltration possible**
+**3. Browser tool applies stricter runtime boundaries**
+- The `browser` tool blocks downloads by default.
+- The `browser` tool blocks local/private network targets.
+- Browser state is isolated per call by default.
+- Browser extraction tries to focus on the main content region instead of dumping the entire page when possible.
+
+These controls reduce the blast radius, but they do **not** make browser-fetched content trusted. A browser can still render hostile page text that attempts to manipulate the model.
+
+**4. No data exfiltration possible**
 - No workflow tool can send data to external servers or download additional content beyond their providers.
 - The `code_execution` tool uses Piston (public endpoint by default). The public instance is sandboxed for untrusted code, and you can self-host Piston for stricter network isolation if needed.
 - Even if a model is compromised, your data stays local.
@@ -44,6 +52,12 @@ When AI models process web content using tools like search, extract or crawl, ma
 
 - Review outputs from workflows and context templates that process web content
 - Use `file_ops_safe` tool by default - only enable `file_ops_unsafe` when you need write/delete capabilities
-- Be cautious when combining `file_ops_unsafe` with web tools on untrusted websites, and test your runs
+- Be especially cautious when combining `file_ops_unsafe` with `browser` or other web tools on untrusted websites
+- Prefer the least powerful web tool that can do the job:
+  - search when you need discovery
+  - extract when you already know the page URL
+  - browser only when simpler web retrieval is insufficient
+- For browser usage, start with a single extraction pass before attempting narrower selectors or follow-up actions
+- Test prompt-injection-sensitive workflows before trusting them with write/delete capabilities
 - Keep backups of important vault data
 - API keys are kept in the built-in secrets store (`system/secrets.yaml`). The file is ignored by git - keep it that way.

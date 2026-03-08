@@ -557,6 +557,7 @@ function populateSelectors() {
     const toolOrder = [
         'web_search_duckduckgo',
         'web_search_tavily',
+        'browser',
         'file_ops_safe',
         'file_ops_unsafe',
         'buffer_ops',

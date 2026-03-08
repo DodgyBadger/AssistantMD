@@ -46,6 +46,7 @@ class ToolSuiteScenario(BaseScenario):
             "file_ops_safe",
             "file_ops_unsafe",
             "web_search_duckduckgo",
+            "browser",
             "code_execution",
         ]:
             self.assert_event_contains(
@@ -58,6 +59,7 @@ class ToolSuiteScenario(BaseScenario):
             "tool-outputs/file-ops-safe.md",
             "tool-outputs/file-ops-unsafe.md",
             "tool-outputs/web-search-duckduckgo.md",
+            "tool-outputs/browser.md",
             "tool-outputs/code-execution.md",
             "tool-outputs/import-url.md"
         ]
@@ -113,6 +115,15 @@ You must call the web search tool before responding.
 
 Import the webpage https://example.com.
 You must call the import tool before responding.
+
+## BROWSER
+@model gpt-mini
+@tools browser
+@output file: tool-outputs/browser
+
+Use the browser tool to extract the content from this page:
+data:text/html,%3Chtml%3E%3Chead%3E%3Ctitle%3EBrowser%20Tool%20Validation%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3Cmain%3E%3Ch1%3EBrowser%20Tool%20Validation%3C%2Fh1%3E%3Cp%3EThis%20page%20confirms%20the%20browser%20tool%20can%20extract%20content.%3C%2Fp%3E%3Ca%20href%3D%22https%3A%2F%2Fexample.com%22%3EExample%20Link%3C%2Fa%3E%3C%2Fmain%3E%3C%2Fbody%3E%3C%2Fhtml%3E
+Report the page title and the main heading. You must call the browser tool before responding.
 
 ## CODE_EXECUTION
 @model gpt-mini
