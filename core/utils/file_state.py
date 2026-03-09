@@ -12,7 +12,7 @@ from sqlalchemy import Column, String, DateTime
 from core.database import Base, create_engine_from_system_db, create_session_factory
 from core.runtime.paths import get_data_root
 from core.logger import UnifiedLogger
-from core.utils.hash import hash_file_content
+from core.utils.hash import hash_file_bytes
 from core.utils.patterns import PatternUtilities
 
 logger = UnifiedLogger(tag="file-state")
@@ -170,10 +170,7 @@ class WorkflowFileStateManager:
         for filepath in all_files:
             normalized_path = self._normalize_path_for_state(filepath)
             try:
-                # Read file content and hash it
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                file_hash = hash_file_content(content)
+                file_hash = hash_file_bytes(filepath, length=None)
 
                 if file_hash in processed_hashes:
                     continue

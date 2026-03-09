@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 from .base import DirectiveProcessor
 from core.utils.patterns import PatternUtilities
 from .parser import DirectiveValueParser
-from core.utils.file_state import hash_file_content
+from core.utils.hash import hash_file_bytes, hash_file_content
 from core.utils.frontmatter import parse_simple_frontmatter
 from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
 from core.runtime.buffers import get_buffer_store_for_scope
@@ -768,10 +768,32 @@ class InputFileDirective(DirectiveProcessor):
         if mode == "pending" and selected_results:
             file_records = []
             for file_data in selected_results:
-                if file_data.get("found") and file_data.get("content"):
+                if not file_data.get("found"):
+                    continue
+                source_path = str(file_data.get("source_path") or file_data.get("filepath") or "").strip()
+                if source_path:
+                    normalized_source = source_path
+                    if "." not in os.path.basename(normalized_source):
+                        normalized_source = f"{normalized_source}.md"
+                    full_path = (
+                        normalized_source
+                        if os.path.isabs(normalized_source)
+                        else os.path.join(vault_path, normalized_source)
+                    )
+                else:
+                    full_path = ""
+
+                if full_path and os.path.isfile(full_path):
+                    content_hash = hash_file_bytes(full_path, length=None)
+                elif file_data.get("content"):
+                    content_hash = hash_file_content(file_data["content"], length=None)
+                else:
+                    continue
+
+                if content_hash:
                     file_records.append(
                         {
-                            "content_hash": hash_file_content(file_data["content"]),
+                            "content_hash": content_hash,
                             "filepath": file_data["filepath"],
                         }
                     )

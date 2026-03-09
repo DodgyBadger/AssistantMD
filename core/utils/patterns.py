@@ -10,6 +10,8 @@ import glob
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 
+from core.constants import SUPPORTED_READ_FILE_TYPES
+
 
 class PatternUtilities:
     """Shared utilities for date/time calculations and file operations."""
@@ -150,16 +152,31 @@ class PatternUtilities:
 
         matched_dirs = [f for f in matched_files if os.path.isdir(f)]
 
-        # Filter to only .md files and sort alphabetically.
-        md_files = [f for f in matched_files if f.endswith('.md') and os.path.isfile(f)]
-        if not md_files and matched_dirs:
+        basename = os.path.basename(pattern.rstrip("/"))
+        has_explicit_extension = "." in basename
+        supported_matches = [
+            f
+            for f in matched_files
+            if os.path.isfile(f)
+            and os.path.splitext(f)[1].lower() in SUPPORTED_READ_FILE_TYPES
+        ]
+        if has_explicit_extension:
+            filtered_files = supported_matches
+        else:
+            filtered_files = [
+                f
+                for f in supported_matches
+                if SUPPORTED_READ_FILE_TYPES.get(os.path.splitext(f)[1].lower()) == "markdown"
+            ]
+
+        if not filtered_files and matched_dirs:
             raise ValueError(
                 f"Pattern '{pattern}' resolved to directories only; "
                 "use an explicit file pattern like 'folder/*/*.md' or 'folder/*/notes.md'"
             )
-        md_files.sort()
+        filtered_files.sort()
 
-        return md_files
+        return filtered_files
 
     @staticmethod
     def sort_files(

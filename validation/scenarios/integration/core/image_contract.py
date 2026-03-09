@@ -39,6 +39,30 @@ class ImageContractScenario(BaseScenario):
             "images",
             dest_filename="ignored_image.jpg",
         )
+        self.copy_files(
+            "validation/templates/files/test_image.jpg",
+            vault,
+            "pages",
+            dest_filename="2026-03-01.jpg",
+        )
+        self.copy_files(
+            "validation/templates/files/test_image.jpg",
+            vault,
+            "pages",
+            dest_filename="2026-03-02.jpg",
+        )
+        self.copy_files(
+            "validation/templates/files/test_image.jpg",
+            vault,
+            "pending-pages",
+            dest_filename="page-01.jpg",
+        )
+        self.copy_files(
+            "validation/templates/files/test_image.jpg",
+            vault,
+            "pending-pages",
+            dest_filename="page-02.jpg",
+        )
 
         self.create_file(vault, "notes/with_image.md", WITH_IMAGE_MD)
         self.create_file(vault, "notes/missing_image.md", MISSING_IMAGE_MD)
@@ -80,6 +104,65 @@ class ImageContractScenario(BaseScenario):
             "images=ignore should suppress image attachment for direct image inputs"
         )
 
+        step3_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "STEP3_LATEST_SELECTOR"},
+        )
+        step3_data = step3_event.get("data", {})
+        step3_prompt = step3_data.get("prompt", "")
+        step3_attached = step3_data.get("attached_image_count", 0)
+        assert "pages/2026-03-02.jpg" in step3_prompt
+        assert "pages/2026-03-01.jpg" in step3_prompt
+        assert "(deduped)" in step3_prompt
+        assert step3_attached == 1
+
+        step4_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "STEP4_PENDING_SELECTOR"},
+        )
+        step4_data = step4_event.get("data", {})
+        step4_prompt = step4_data.get("prompt", "")
+        step4_attached = step4_data.get("attached_image_count", 0)
+        assert "pending-pages/page-01.jpg" in step4_prompt
+        assert "pending-pages/page-02.jpg" in step4_prompt
+        assert "(deduped)" in step4_prompt
+        assert step4_attached == 1
+
+        pending_resolved = self.assert_event_contains(
+            events,
+            name="pending_files_resolved",
+            expected={"pending_count": 2},
+        )
+        pending_paths = pending_resolved.get("data", {}).get("pending_paths", [])
+        assert "pending-pages/page-01.jpg" in pending_paths
+        assert "pending-pages/page-02.jpg" in pending_paths
+
+        second_checkpoint = self.event_checkpoint()
+        second_result = await self.run_workflow(
+            vault,
+            "image_contract",
+            step_name="STEP4_PENDING_SELECTOR",
+        )
+        assert second_result.status == "completed", second_result.error_message
+
+        second_events = self.events_since(second_checkpoint)
+        second_step4 = self.assert_event_contains(
+            second_events,
+            name="workflow_step_prompt",
+            expected={"step_name": "STEP4_PENDING_SELECTOR"},
+        )
+        second_step4_data = second_step4.get("data", {})
+        assert second_step4_data.get("attached_image_count", 0) == 0
+
+        second_pending = self.assert_event_contains(
+            second_events,
+            name="pending_files_resolved",
+            expected={"pending_count": 0},
+        )
+        assert second_pending.get("data", {}).get("pending_paths", []) == []
+
         await self.stop_system()
         self.teardown_scenario()
 
@@ -106,6 +189,20 @@ Write a short note acknowledging receipt of the inputs.
 @output variable: ignored_only_buffer
 
 Confirm the ignored image input was processed as reference-only.
+
+## STEP3_LATEST_SELECTOR
+@model test
+@input file: pages/*.jpg (latest, limit=2, order=filename_dt, dt_pattern="(\\d{4}-\\d{2}-\\d{2})", dt_format="YYYY-MM-DD")
+@output variable: latest_selector_buffer
+
+Confirm the latest image selector included both page images.
+
+## STEP4_PENDING_SELECTOR
+@model test
+@input file: pending-pages/*.jpg (pending, order=alphanum, dir=asc, limit=10)
+@output variable: pending_selector_buffer
+
+Confirm the pending image selector included all unprocessed page images.
 """
 
 
