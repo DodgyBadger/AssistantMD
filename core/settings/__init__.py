@@ -352,6 +352,28 @@ def get_default_api_timeout() -> float:
         return 120.0
 
 
+def get_browser_navigation_timeout_seconds() -> float:
+    """Return browser navigation timeout seconds, falling back to 20 seconds."""
+    entry = get_general_settings().get("browser_navigation_timeout_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 20.0
+    return timeout if timeout > 0 else 20.0
+
+
+def get_browser_selector_timeout_seconds() -> float:
+    """Return browser selector timeout seconds, falling back to 4 seconds."""
+    entry = get_general_settings().get("browser_selector_timeout_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 4.0
+    return timeout if timeout > 0 else 4.0
+
+
 def get_default_max_output_tokens() -> int:
     """Return the configured max output tokens, falling back to 0 (provider default)."""
     entry = get_general_settings().get("max_output_tokens")

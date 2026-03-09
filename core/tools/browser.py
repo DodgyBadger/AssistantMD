@@ -2,12 +2,16 @@
 Browser tool backed by Playwright for resilient page extraction.
 
 Provides conservative browser-driven extraction for pages where simple crawlers
-or extract APIs fail, especially on JavaScript-heavy sites.
+or extract APIs fail, especially on JavaScript-heavy sites. Browser policy is
+deliberately narrow: downloads are blocked, local/private network targets are
+blocked, and browser state is isolated per call.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import socket
+from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,7 +20,11 @@ from pydantic_ai.tools import Tool
 
 from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.logger import UnifiedLogger
-from core.settings import get_default_api_timeout
+from core.settings import (
+    get_browser_navigation_timeout_seconds,
+    get_browser_selector_timeout_seconds,
+    get_default_api_timeout,
+)
 from .base import BaseTool
 
 
@@ -24,15 +32,19 @@ logger = UnifiedLogger(tag="browser-tool")
 
 
 class BrowserTool(BaseTool):
-    """Playwright-backed browser tool for targeted extraction."""
+    """Playwright-backed browser tool for targeted extraction with strict network guards."""
 
     _MAX_LINKS = 20
-    _MAX_NAVIGATION_TIMEOUT_MS = 20_000
-    _MAX_SELECTOR_TIMEOUT_MS = 4_000
     _ROOT_SELECTORS = ("main", "article", "[role='main']", "body")
     _FALLBACK_CANDIDATE_SELECTORS = ("section", "div", "article", "main", "table", "td")
     _VALID_WAIT_UNTIL = {"load", "domcontentloaded", "networkidle"}
     _BLOCKED_RESOURCE_TYPES = {"image", "media", "font"}
+    _ALLOWED_HTTP_METHODS = {"GET", "HEAD"}
+
+    @classmethod
+    def _log_event(cls, event: str, **data: Any) -> None:
+        """Emit browser lifecycle events to both activity and validation logs."""
+        logger.add_sink("validation").info(event, data=data)
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -55,10 +67,23 @@ class BrowserTool(BaseTool):
             :param wait_for_selector: Optional selector to wait for after navigation
             :param extract_selector: Optional selector to extract instead of the main content area
             :param include_links: Include a short list of visible links from the extracted region
+
+Policy notes:
+            - Only public http/https URLs are allowed by default; `data:` is allowed for testing.
+            - Redirects or subrequests to local/private network targets are blocked.
+            - Only read-oriented HTTP methods are allowed (`GET`, `HEAD`).
+            - Downloads are blocked.
+            - Browser state is isolated per call.
             """
-            logger.set_sinks(["validation"]).info(
+            cls._log_event(
                 "tool_invoked",
-                data={"tool": "browser"},
+                tool="browser",
+                url=url,
+                goal=goal.strip() or None,
+                wait_until=wait_until,
+                wait_for_selector=wait_for_selector.strip() or None,
+                extract_selector=extract_selector.strip() or None,
+                include_links=include_links,
             )
 
             try:
@@ -71,15 +96,14 @@ class BrowserTool(BaseTool):
                     include_links=include_links,
                 )
             except Exception as exc:  # pylint: disable=broad-except
-                logger.set_sinks(["validation"]).info(
+                cls._log_event(
                     "browser_navigation_failed",
-                    data={
-                        "tool": "browser",
-                        "url": url,
-                        "error": str(exc),
-                    },
+                    tool="browser",
+                    url=url,
+                    result_type=cls._extract_result_type(str(exc)),
+                    error=str(exc),
                 )
-                return f"Browser error: {exc}"
+                return cls._format_error(str(exc))
 
         return Tool(
             browser,
@@ -99,7 +123,7 @@ class BrowserTool(BaseTool):
 Use when you need a real browser to load and extract content from a known URL,
 especially after simple extraction fails or when the site depends on JavaScript.
 
-Prefer this escalation ladder:
+Prefer this order:
 - Search tools when you do not know the URL yet
 - `tavily_extract` first when you know the URL and only need page content
 - `browser` when Tavily fails, returns thin content, or the page is clearly JS-heavy
@@ -112,7 +136,7 @@ Operate conservatively:
 - Use `wait_for_selector` only when the page clearly loads content asynchronously
 - Set `include_links=True` only when links are important to the task
 
-Failure handling:
+If a call fails:
 - If the tool says the URL starts a download, switch to a different page URL; selector retries will not help
 - If the tool says your selector was not found, retry without selectors or with one of the suggested candidate roots
 - Prefer one clean retry over repeated selector guesses
@@ -147,110 +171,167 @@ Examples:
                 "`playwright install chromium` on the host."
             ) from exc
 
-        timeout_ms = min(
-            max(int(get_default_api_timeout() * 1000), 1_000),
-            cls._MAX_NAVIGATION_TIMEOUT_MS,
-        )
-        final_url = url
-        status_code: int | None = None
+        timeout_ms, selector_timeout_ms = cls._get_timeout_settings()
 
         try:
             async with async_playwright() as playwright:
-                browser_instance = await playwright.chromium.launch(headless=True)
-                context = None
-                try:
-                    context = await browser_instance.new_context(accept_downloads=False)
-                    page = await context.new_page()
-                    page.set_default_timeout(timeout_ms)
-                    await page.route("**/*", cls._route_request)
-                    response = await page.goto(
-                        url,
-                        wait_until=normalized_wait_until,
-                        timeout=timeout_ms,
-                    )
-                    if wait_for_selector.strip():
-                        await cls._wait_for_selector(
-                            page=page,
-                            selector=wait_for_selector.strip(),
-                            timeout_ms=min(timeout_ms, cls._MAX_SELECTOR_TIMEOUT_MS),
-                        )
-
-                    if extract_selector.strip():
-                        target_selector = extract_selector.strip()
-                        await cls._ensure_selector_present(
-                            page=page,
-                            selector=target_selector,
-                        )
-                        locator = page.locator(target_selector).first
-                    else:
-                        locator, target_selector = await cls._resolve_best_root(page)
-                    title = (await page.title()).strip()
-                    extracted = await cls._extract_region(
-                        locator=locator,
-                        include_links=include_links,
-                    )
-                    final_url = page.url
-                    status_code = response.status if response else None
-                finally:
-                    if context is not None:
-                        await context.close()
-                    await browser_instance.close()
+                extraction = await cls._run_browser_session(
+                    playwright=playwright,
+                    url=url,
+                    normalized_wait_until=normalized_wait_until,
+                    timeout_ms=timeout_ms,
+                    selector_timeout_ms=selector_timeout_ms,
+                    wait_for_selector=wait_for_selector,
+                    extract_selector=extract_selector,
+                    include_links=include_links,
+                )
         except PlaywrightTimeoutError as exc:
-            raise RuntimeError(f"navigation timed out after {timeout_ms} ms") from exc
+            raise RuntimeError(
+                f"result_type: timeout\nnavigation timed out after {timeout_ms} ms"
+            ) from exc
         except PlaywrightError as exc:
-            if "Download is starting" in str(exc):
-                raise RuntimeError(
-                    "URL initiates a download instead of rendering an HTML page. "
-                    "Try a different document URL; selector retries will not help."
-                ) from exc
-            raise RuntimeError(str(exc)) from exc
+            raise cls._translate_playwright_error(exc) from exc
 
-        logger.set_sinks(["validation"]).info(
+        cls._log_event(
             "browser_navigation_succeeded",
-            data={
-                "tool": "browser",
-                "url": url,
-                "final_url": final_url,
-                "status_code": status_code,
-            },
+            tool="browser",
+            url=url,
+            final_url=extraction["final_url"],
+            status_code=extraction["status_code"],
         )
-        logger.set_sinks(["validation"]).info(
+        cls._log_event(
             "browser_extraction_succeeded",
-            data={
-                "tool": "browser",
-                "url": url,
-                "selector": target_selector,
-                "title": title,
-                "include_links": include_links,
-            },
+            tool="browser",
+            url=url,
+            selector=extraction["selector"],
+            root_strategy=extraction["root_strategy"],
+            title=extraction["title"],
+            include_links=include_links,
+            content_chars=len(extraction["content"]),
+            link_count=len(extraction["links"]),
         )
 
         return cls._format_result(
             url=url,
-            final_url=final_url,
-            status_code=status_code,
-            title=title,
-            selector=target_selector,
+            final_url=extraction["final_url"],
+            status_code=extraction["status_code"],
+            title=extraction["title"],
+            selector=extraction["selector"],
             goal=goal,
-            content=extracted["content"],
-            links=extracted["links"],
+            content=extraction["content"],
+            links=extraction["links"],
         )
 
     @classmethod
-    async def _resolve_root_selector(cls, page: Any) -> str:
-        """Return the first content root selector that exists on the page."""
-        for selector in cls._ROOT_SELECTORS:
-            if await page.locator(selector).count():
-                return selector
-        return "body"
+    def _get_timeout_settings(cls) -> tuple[int, int]:
+        """Return bounded navigation and selector timeouts in milliseconds."""
+        navigation_timeout_ms = min(
+            max(int(get_default_api_timeout() * 1000), 1_000),
+            max(int(get_browser_navigation_timeout_seconds() * 1000), 1_000),
+        )
+        selector_timeout_ms = min(
+            navigation_timeout_ms,
+            max(int(get_browser_selector_timeout_seconds() * 1000), 1_000),
+        )
+        return navigation_timeout_ms, selector_timeout_ms
 
     @classmethod
-    async def _resolve_best_root(cls, page: Any) -> tuple[Any, str]:
+    async def _run_browser_session(
+        cls,
+        *,
+        playwright: Any,
+        url: str,
+        normalized_wait_until: str,
+        timeout_ms: int,
+        selector_timeout_ms: int,
+        wait_for_selector: str,
+        extract_selector: str,
+        include_links: bool,
+    ) -> dict[str, Any]:
+        """Launch a browser session, navigate, extract a region, and return structured results."""
+        browser_instance = await playwright.chromium.launch(headless=True)
+        context = None
+        try:
+            context = await browser_instance.new_context(accept_downloads=False)
+            page = await context.new_page()
+            page.set_default_timeout(timeout_ms)
+            await page.route("**/*", cls._route_request)
+            response = await page.goto(
+                url,
+                wait_until=normalized_wait_until,
+                timeout=timeout_ms,
+            )
+            if wait_for_selector.strip():
+                await cls._wait_for_selector(
+                    page=page,
+                    selector=wait_for_selector.strip(),
+                    timeout_ms=selector_timeout_ms,
+                )
+
+            locator, target_selector, root_strategy = await cls._resolve_target_region(
+                page=page,
+                extract_selector=extract_selector,
+            )
+            extracted = await cls._extract_region(
+                locator=locator,
+                include_links=include_links,
+            )
+            final_url = page.url
+            cls._validate_url(final_url)
+            return {
+                "final_url": final_url,
+                "status_code": response.status if response else None,
+                "title": (await page.title()).strip(),
+                "selector": target_selector,
+                "root_strategy": root_strategy,
+                "content": extracted["content"],
+                "links": extracted["links"],
+            }
+        finally:
+            if context is not None:
+                await context.close()
+            await browser_instance.close()
+
+    @classmethod
+    async def _resolve_target_region(
+        cls,
+        *,
+        page: Any,
+        extract_selector: str,
+    ) -> tuple[Any, str, str]:
+        """Resolve the locator and metadata for the extraction target."""
+        if extract_selector.strip():
+            target_selector = extract_selector.strip()
+            await cls._ensure_selector_present(
+                page=page,
+                selector=target_selector,
+            )
+            return page.locator(target_selector).first, target_selector, "explicit_selector"
+        return await cls._resolve_best_root(page)
+
+    @staticmethod
+    def _translate_playwright_error(exc: Exception) -> RuntimeError:
+        """Map Playwright errors into stable tool-facing error messages."""
+        message = str(exc)
+        if "Download is starting" in message:
+            return RuntimeError(
+                "result_type: download\nURL initiates a download instead of rendering an HTML page. "
+                "Try a different document URL; selector retries will not help."
+            )
+        if "ERR_BLOCKED_BY_CLIENT" in message:
+            return RuntimeError(
+                "result_type: blocked\nNavigation was blocked by browser policy. "
+                "Local/private network targets and related redirects are not allowed."
+            )
+        return RuntimeError(f"result_type: error\n{message}")
+
+    @classmethod
+    async def _resolve_best_root(cls, page: Any) -> tuple[Any, str, str]:
         """Choose the best extraction root using semantic selectors first, then a content heuristic."""
         for selector in cls._ROOT_SELECTORS[:-1]:
             locator = page.locator(selector).first
             if await locator.count():
-                return locator, selector
+                return locator, selector, "semantic_selector"
 
         best_handle = await page.evaluate_handle(
             """(candidateSelectors) => {
@@ -329,7 +410,7 @@ Examples:
         locator = best_handle.as_element()
         if locator is None:
             await best_handle.dispose()
-            return page.locator("body").first, "body"
+            return page.locator("body").first, "body", "body_fallback"
         element_locator = locator
         tag_name = (
             await element_locator.evaluate("(node) => node.tagName.toLowerCase()")
@@ -343,7 +424,7 @@ Examples:
             )
         ).strip()
         target_selector = cls._describe_element_selector(tag_name, element_id, class_name)
-        return element_locator, target_selector
+        return element_locator, target_selector, "heuristic_fallback"
 
     @classmethod
     async def _extract_region(cls, *, locator: Any, include_links: bool) -> dict[str, Any]:
@@ -412,6 +493,7 @@ Examples:
         lines = [
             "# Browser Extraction",
             "",
+            "- Result type: success",
             f"- Requested URL: {url}",
             f"- Final URL: {final_url}",
             f"- Page title: {title or '(untitled)'}",
@@ -429,7 +511,33 @@ Examples:
 
     @classmethod
     async def _route_request(cls, route: Any) -> None:
-        """Abort non-essential asset requests to keep extraction fast."""
+        """Abort blocked or non-essential requests to keep extraction safe and fast."""
+        request_url = route.request.url
+        method = (route.request.method or "GET").upper()
+        if method not in cls._ALLOWED_HTTP_METHODS:
+            cls._log_event(
+                "browser_request_blocked",
+                tool="browser",
+                request_url=request_url,
+                resource_type=route.request.resource_type,
+                method=method,
+                reason="HTTP method not allowed",
+            )
+            await route.abort("blockedbyclient")
+            return
+        try:
+            cls._validate_url(request_url)
+        except ValueError as exc:
+            cls._log_event(
+                "browser_request_blocked",
+                tool="browser",
+                request_url=request_url,
+                resource_type=route.request.resource_type,
+                method=method,
+                reason=str(exc),
+            )
+            await route.abort("blockedbyclient")
+            return
         if route.request.resource_type in cls._BLOCKED_RESOURCE_TYPES:
             await route.abort()
             return
@@ -447,11 +555,10 @@ Examples:
         try:
             await page.wait_for_selector(selector, timeout=timeout_ms)
         except Exception as exc:
-            candidates = await cls._candidate_root_selectors(page)
-            candidate_text = ", ".join(candidates) if candidates else "body"
-            raise RuntimeError(
-                f"Requested wait_for_selector '{selector}' was not found. "
-                f"Retry without selectors or use one of: {candidate_text}."
+            raise await cls._selector_not_found_error(
+                page=page,
+                parameter_name="wait_for_selector",
+                selector=selector,
             ) from exc
 
     @classmethod
@@ -466,17 +573,15 @@ Examples:
             if await page.locator(selector).count():
                 return
         except Exception as exc:
-            candidates = await cls._candidate_root_selectors(page)
-            candidate_text = ", ".join(candidates) if candidates else "body"
-            raise RuntimeError(
-                f"Requested extract_selector '{selector}' was not found. "
-                f"Retry without selectors or use one of: {candidate_text}."
+            raise await cls._selector_not_found_error(
+                page=page,
+                parameter_name="extract_selector",
+                selector=selector,
             ) from exc
-        candidates = await cls._candidate_root_selectors(page)
-        candidate_text = ", ".join(candidates) if candidates else "body"
-        raise RuntimeError(
-            f"Requested extract_selector '{selector}' was not found. "
-            f"Retry without selectors or use one of: {candidate_text}."
+        raise await cls._selector_not_found_error(
+            page=page,
+            parameter_name="extract_selector",
+            selector=selector,
         )
 
     @classmethod
@@ -487,6 +592,23 @@ Examples:
             if await page.locator(selector).count():
                 candidates.append(selector)
         return candidates or ["body"]
+
+    @classmethod
+    async def _selector_not_found_error(
+        cls,
+        *,
+        page: Any,
+        parameter_name: str,
+        selector: str,
+    ) -> RuntimeError:
+        """Build a consistent selector guidance error for missing selectors."""
+        candidates = await cls._candidate_root_selectors(page)
+        candidate_text = ", ".join(candidates) if candidates else "body"
+        return RuntimeError(
+            "result_type: selector_not_found\n"
+            f"Requested {parameter_name} '{selector}' was not found. "
+            f"Retry without selectors or use one of: {candidate_text}."
+        )
 
     @staticmethod
     def _describe_element_selector(tag_name: str, element_id: str, class_name: str) -> str:
@@ -504,36 +626,93 @@ Examples:
         normalized = (wait_until or "").strip().lower() or "domcontentloaded"
         if normalized not in cls._VALID_WAIT_UNTIL:
             allowed = ", ".join(sorted(cls._VALID_WAIT_UNTIL))
-            raise ValueError(f"wait_until must be one of: {allowed}")
+            raise ValueError(
+                f"result_type: invalid_request\nwait_until must be one of: {allowed}"
+            )
         return normalized
 
     @staticmethod
     def _validate_url(url: str) -> None:
-        """Reject non-web schemes and obvious local-network targets."""
+        """Reject non-web schemes and local/private network targets."""
         parsed = urlparse((url or "").strip())
         if parsed.scheme not in {"http", "https", "data"}:
-            raise ValueError("Only http, https, and data URLs are supported")
+            raise ValueError(
+                "result_type: blocked\nOnly http, https, and data URLs are supported"
+            )
         if parsed.scheme == "data":
             return
 
         hostname = (parsed.hostname or "").strip().lower()
         if not hostname:
-            raise ValueError("URL must include a hostname")
+            raise ValueError("result_type: invalid_request\nURL must include a hostname")
         if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(
             ".local"
         ):
-            raise ValueError("Local network targets are not allowed")
+            raise ValueError("result_type: blocked\nLocal network targets are not allowed")
 
         try:
             address = ipaddress.ip_address(hostname)
         except ValueError:
+            for resolved_address in BrowserTool._resolve_hostname_addresses(hostname):
+                if BrowserTool._is_blocked_address(resolved_address):
+                    raise ValueError(
+                        "result_type: blocked\nPrivate or local network targets are not allowed"
+                    )
             return
 
-        if (
+        if BrowserTool._is_blocked_address(address):
+            raise ValueError(
+                "result_type: blocked\nPrivate or local network targets are not allowed"
+            )
+
+    @staticmethod
+    def _format_error(message: str) -> str:
+        """Render browser failures with a compact machine-readable result type."""
+        if message.startswith("result_type:"):
+            return f"Browser error\n{message}"
+        return f"Browser error\nresult_type: error\n{message}"
+
+    @staticmethod
+    def _extract_result_type(message: str) -> str:
+        """Parse a `result_type:` prefix from an error message for structured logs."""
+        first_line = (message or "").splitlines()[0].strip()
+        if first_line.startswith("result_type:"):
+            return first_line.split(":", 1)[1].strip() or "error"
+        return "error"
+
+    @staticmethod
+    def _is_blocked_address(address: ipaddress._BaseAddress) -> bool:
+        """Return True when an address falls within the blocked local/private ranges."""
+        return (
             address.is_private
             or address.is_loopback
             or address.is_link_local
             or address.is_reserved
             or address.is_multicast
-        ):
-            raise ValueError("Private or local network targets are not allowed")
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=256)
+    def _resolve_hostname_addresses(hostname: str) -> tuple[ipaddress._BaseAddress, ...]:
+        """Resolve hostname addresses so hostnames that land on private IPs are also blocked."""
+        try:
+            infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+        except socket.gaierror:
+            return ()
+
+        addresses: list[ipaddress._BaseAddress] = []
+        seen: set[str] = set()
+        for family, _, _, _, sockaddr in infos:
+            raw_address = ""
+            if family == socket.AF_INET:
+                raw_address = sockaddr[0]
+            elif family == socket.AF_INET6:
+                raw_address = sockaddr[0]
+            if not raw_address or raw_address in seen:
+                continue
+            seen.add(raw_address)
+            try:
+                addresses.append(ipaddress.ip_address(raw_address))
+            except ValueError:
+                continue
+        return tuple(addresses)

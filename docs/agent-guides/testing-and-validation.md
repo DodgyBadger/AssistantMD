@@ -32,6 +32,7 @@ Only add events at decision boundaries; avoid noisy instrumentation.
 - build the smallest increment that satisfies the next failing assertion
 - keep assertions behavior-focused (avoid coupling to internals)
 - prefer deterministic scenarios (`@model test`) unless real model behavior is explicitly required
+- do not assert on free-form LLM wording; assert on validation events you control, exact API/file artifacts, and other deterministic outputs instead
 
 ### 5) Tighten and keep
 - keep contract assertions as long-term regression guards

@@ -16,6 +16,14 @@ settings:
     value: 120
     description: "Default timeout in seconds for external API calls."
     restart_required: false
+  browser_navigation_timeout_seconds:
+    value: 20
+    description: "Navigation timeout in seconds for the browser extraction tool."
+    restart_required: false
+  browser_selector_timeout_seconds:
+    value: 4
+    description: "Selector wait timeout in seconds for the browser extraction tool."
+    restart_required: false
   max_output_tokens:
     value: 0
     description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."

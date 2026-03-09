@@ -38,15 +38,18 @@ When AI models process web content using tools like search, extract or crawl, ma
 **3. Browser tool applies stricter runtime boundaries**
 - The `browser` tool blocks downloads by default.
 - The `browser` tool blocks local/private network targets.
+- The `browser` tool blocks redirects and subrequests to local/private network targets.
+- The `browser` tool allows only read-oriented HTTP methods (`GET`, `HEAD`).
 - Browser state is isolated per call by default.
 - Browser extraction tries to focus on the main content region instead of dumping the entire page when possible.
 
 These controls reduce the blast radius, but they do **not** make browser-fetched content trusted. A browser can still render hostile page text that attempts to manipulate the model.
 
-**4. No data exfiltration possible**
-- No workflow tool can send data to external servers or download additional content beyond their providers.
+**4. External communication remains limited, not impossible**
+- The built-in web and browser tools are constrained to narrow retrieval-oriented behavior rather than arbitrary outbound actions.
+- The `browser` tool is restricted to public-network, read-oriented requests and cannot upload files or initiate downloads.
 - The `code_execution` tool uses Piston (public endpoint by default). The public instance is sandboxed for untrusted code, and you can self-host Piston for stricter network isolation if needed.
-- Even if a model is compromised, your data stays local.
+- Residual risk still exists wherever the application is intentionally configured to communicate with external providers or websites.
 
 ### Best Practices
 

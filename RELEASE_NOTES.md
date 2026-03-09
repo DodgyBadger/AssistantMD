@@ -1,5 +1,44 @@
 # Release Notes
 
+## 2026-03-09 - v0.5.0.
+
+### BREAKING CHANGE: new selector/filter structure for the `@input` directive 
+- The new mental model is: glob/file patterns select the candidate file set, `pending` or `latest` can filter that set, `order` sorts it, and `limit` is applied last. This allows greater flexibility. For example, previously, there was no way to fetch pending files in alphanumeric order - now there is.
+- If your templates currently use substitution patterns `{pending}` or `{latest}`, you must update them.
+- Old style:
+  - `@input file: tasks/{pending:5}`
+  - `@input file: journal/{latest:3}`
+  - `@input file: projects/{latest}/notes.md`
+- New style:
+  - `@input file: tasks/* (pending, order=alphanum, dir=desc, limit=5)`
+  - `@input file: journal/* (latest, limit=3)`
+  - `@input file: projects/*/notes.md (latest, order=ctime, limit=1)`
+  - `@input file: inbox/*.md (order=mtime, dir=desc, limit=10)`
+
+### Added enable / disable operation to `workflow_run` tool
+- You can now manage workflow state through the `workflow_run` tool with:
+  - `enable_workflow`
+  - `disable_workflow`
+- Your workflows can include a step that disables the workflow when a condition is met so they don't run forever. Chat can also enable/disable workflows.
+- **BREAKING CHANGE**: Previously, `enabled=true` was optional. If a schedule was present and `enabled` was missing, it would default `true`. New workflows now default to `enabled: false` if missing. If you create or copy in a workflow and expect it to start running on its schedule immediately, you will need to enable it explicitly.
+
+### New tool: `browser`
+- Added a Playwright-backed `browser` tool for extraction from known URLs when simple web extraction fails or pages depend on JavaScript.
+- Intended usage order is: search first, `tavily_extract` second, `browser` as the heavier fallback.
+- Browser policy is intentionally narrow:
+  - downloads blocked
+  - local/private network blocked, including redirects and subrequests
+  - only read-oriented requests (`GET`/`HEAD`)
+  - stateless per call
+- Added browser-specific settings:
+  - `browser_navigation_timeout_seconds`
+  - `browser_selector_timeout_seconds`
+
+### Other improvements
+- Strengthened prompt-injection guidance for web tools so suspicious web content is treated as untrusted data and attacker strings are less likely to be echoed back verbatim.
+- Refreshed frontend/build dependencies to address npm vulnerability warnings, switched setup to `npm ci` for lockfile-based installs, and added dependency audit checks in CI.
+- Documentation updates
+
 ## 2026-03-27 - v0.4.3.
 
 ### Added images as first-class input type

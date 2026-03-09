@@ -7,6 +7,7 @@ AssistantMD is a single-user, markdown-first agent system with a Python backend,
 - Non-standard build command: `npm run build:css` compiles `static/input.css` to `static/output.css`.
 - Validation ownership: maintainers run full validation (`python validation/run_validation.py ...`); agents should request results instead of running the suite.
 - Validation-first delivery: follow [Testing and Validation](/app/docs/agent-guides/testing-and-validation.md#validation-first-workflow).
+- Commit message expectations live in [Git and Review Workflow](/app/docs/agent-guides/git-and-review.md).
 
 ## Detailed Guides
 - [Project Structure](/app/docs/agent-guides/project-structure.md)
