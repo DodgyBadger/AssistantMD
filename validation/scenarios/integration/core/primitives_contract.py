@@ -147,6 +147,20 @@ class PrimitivesContractScenario(BaseScenario):
         self._assert_contains(tail_prompt, "OPQRSTUVWXYZ", "Expected tail=12 content in prompt")
         self._assert_not_contains(tail_prompt, "ABCDEFGHIJKLMN", "Expected prompt to exclude characters before tail=12")
 
+        # fenced directive block mode.
+        fenced_prompt = self._prompt_for_step(events, "INPUT_FENCED")
+        self._assert_contains(fenced_prompt, "PLAIN_BODY", "Expected fenced directive block to resolve input")
+        self._assert_contains(
+            fenced_prompt,
+            "```",
+            "Expected later prompt code block to remain literal prompt content",
+        )
+        self._assert_contains(
+            fenced_prompt,
+            "@model not-a-directive",
+            "Expected prompt code block content to remain visible after fenced directive parsing",
+        )
+
         # @input refs_only mode.
         refs_prompt = self._prompt_for_step(events, "INPUT_REFS_ONLY")
         self._assert_contains(refs_prompt, "- notes/plain", "Expected refs-only path listing")
@@ -533,6 +547,19 @@ Summarize head slice.
 @output variable: tail_buffer
 
 Summarize tail slice.
+
+## INPUT_FENCED
+```
+@model test
+@input file: notes/plain
+@output variable: fenced_buffer
+```
+
+Summarize fenced directives.
+
+```md
+@model not-a-directive
+```
 
 ## INPUT_REFS_ONLY
 @model test

@@ -6,10 +6,23 @@
 
 Syntax: `@directive value (optional params)` or `@directive: value (optional params)`  
 Directives must be at the start of a step/section, before normal prompt text.  
+Optionally, the directive section may be wrapped in a code block to avoid Obsidian auto-formatting. The code block must appear at the very start of the step and every non-empty line inside it must be a directive line.  
 File paths are vault-relative. For `file:` targets, `.md` is auto-added if missing.  
 Parameters are comma-separated. If a parameter value contains commas, wrap that value in quotes.  
 Bare parameters are treated as booleans, e.g. `required` is equivalent to `required=true`.  
 Paths with special characters can be quoted or written as Obsidian wikilinks (`[[...]]`).  
+
+Example:
+
+````md
+## Step Name
+```
+@input file: inbox/* (pending, limit=5)
+@output variable: batch
+```
+
+Process pending notes.
+````
 
 <details>
 <summary>@output</summary>
