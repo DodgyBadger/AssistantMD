@@ -142,6 +142,11 @@ class PrimitivesContractScenario(BaseScenario):
         self._assert_contains(head_prompt, "ABCDEFGHIJKL", "Expected head=12 content in prompt")
         self._assert_not_contains(head_prompt, "MNOPQRSTUVWXYZ", "Expected prompt to exclude characters beyond head=12")
 
+        # @input tail mode.
+        tail_prompt = self._prompt_for_step(events, "INPUT_TAIL")
+        self._assert_contains(tail_prompt, "OPQRSTUVWXYZ", "Expected tail=12 content in prompt")
+        self._assert_not_contains(tail_prompt, "ABCDEFGHIJKLMN", "Expected prompt to exclude characters before tail=12")
+
         # @input refs_only mode.
         refs_prompt = self._prompt_for_step(events, "INPUT_REFS_ONLY")
         self._assert_contains(refs_prompt, "- notes/plain", "Expected refs-only path listing")
@@ -521,6 +526,13 @@ Summarize properties.
 @output variable: head_buffer
 
 Summarize head slice.
+
+## INPUT_TAIL
+@model test
+@input file: notes/long_note (tail=12)
+@output variable: tail_buffer
+
+Summarize tail slice.
 
 ## INPUT_REFS_ONLY
 @model test

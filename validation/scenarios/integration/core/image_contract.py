@@ -66,6 +66,8 @@ class ImageContractScenario(BaseScenario):
 
         self.create_file(vault, "notes/with_image.md", WITH_IMAGE_MD)
         self.create_file(vault, "notes/missing_image.md", MISSING_IMAGE_MD)
+        self.create_file(vault, "notes/head_embedded.md", HEAD_EMBEDDED_MD)
+        self.create_file(vault, "notes/tail_embedded.md", TAIL_EMBEDDED_MD)
 
         checkpoint = self.event_checkpoint()
         await self.start_system()
@@ -103,6 +105,32 @@ class ImageContractScenario(BaseScenario):
         assert step2_attached == 0, (
             "images=ignore should suppress image attachment for direct image inputs"
         )
+
+        step2b_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "STEP2B_HEAD_EMBEDDED_MARKDOWN"},
+        )
+        step2b_data = step2b_event.get("data", {})
+        step2b_prompt = step2b_data.get("prompt", "")
+        step2b_attached = step2b_data.get("attached_image_count", 0)
+        assert "HEAD" in step2b_prompt
+        assert "embedded_image.jpg" in step2b_prompt
+        assert "TRUNCATED_HEAD_BODY" not in step2b_prompt
+        assert step2b_attached == 1
+
+        step2c_event = self.assert_event_contains(
+            events,
+            name="workflow_step_prompt",
+            expected={"step_name": "STEP2C_TAIL_EMBEDDED_MARKDOWN"},
+        )
+        step2c_data = step2c_event.get("data", {})
+        step2c_prompt = step2c_data.get("prompt", "")
+        step2c_attached = step2c_data.get("attached_image_count", 0)
+        assert "TAIL" in step2c_prompt
+        assert "embedded_image.jpg" in step2c_prompt
+        assert "LEAD" not in step2c_prompt
+        assert step2c_attached == 1
 
         step3_event = self.assert_event_contains(
             events,
@@ -190,6 +218,20 @@ Write a short note acknowledging receipt of the inputs.
 
 Confirm the ignored image input was processed as reference-only.
 
+## STEP2B_HEAD_EMBEDDED_MARKDOWN
+@model test
+@input file: notes/head_embedded.md (head=38)
+@output variable: head_embedded_buffer
+
+Confirm head-truncated markdown still preserves the embedded image.
+
+## STEP2C_TAIL_EMBEDDED_MARKDOWN
+@model test
+@input file: notes/tail_embedded.md (tail=38)
+@output variable: tail_embedded_buffer
+
+Confirm tail-truncated markdown still preserves the embedded image.
+
 ## STEP3_LATEST_SELECTOR
 @model test
 @input file: pages/*.jpg (latest, limit=2, order=filename_dt, dt_pattern="(\\d{4}-\\d{2}-\\d{2})", dt_format="YYYY-MM-DD")
@@ -218,3 +260,14 @@ MISSING_IMAGE_MD = """Here is a missing embedded image.
 
 ![Missing test image](images/missing.jpg)
 """
+
+
+HEAD_EMBEDDED_MD = """HEAD
+![](../images/embedded_image.jpg)
+TRUNCATED_HEAD_BODY
+"""
+
+
+TAIL_EMBEDDED_MD = """LEAD
+![](../images/embedded_image.jpg)
+TAIL"""

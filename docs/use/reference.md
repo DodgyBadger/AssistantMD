@@ -71,6 +71,9 @@ Control image attachment behavior for file inputs.
 `head=N`  
 Inline only the first `N` characters per resolved input (file or variable).
 
+`tail=N`  
+Inline only the last `N` characters per resolved input (file or variable).
+
 `properties` or `properties="KEY1,KEY2"`  
 Inline frontmatter properties only. With no value, includes all properties. With keys, includes only matching properties.
 

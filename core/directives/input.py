@@ -27,6 +27,7 @@ INPUT_ALLOWED_PARAMETERS = {
     "refs-only",
     "images",
     "head",
+    "tail",
     "properties",
     "output",
     "write-mode",
@@ -291,7 +292,7 @@ class InputFileDirective(DirectiveProcessor):
             if param_name == 'dir':
                 if param_value.lower() not in {'asc', 'desc'}:
                     return False
-            if param_name == 'head':
+            if param_name in {'head', 'tail'}:
                 try:
                     if int(param_value) <= 0:
                         return False
@@ -308,6 +309,11 @@ class InputFileDirective(DirectiveProcessor):
                 if not keys:
                     return False
 
+        try:
+            self._validate_parameter_combinations(base_value, parameters)
+        except ValueError:
+            return False
+
         return True
     
     def process_value(self, value: str, vault_path: str, **context) -> List[Dict[str, Any]]:
@@ -320,25 +326,19 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse optional parameters
         base_value, parameters = self._parse_input_target_and_parameters(value)
+        self._validate_parameter_combinations(base_value, parameters)
         required = self._is_truthy_param(parameters, "required")
         refs_only = (
             self._is_truthy_param(parameters, "refs_only")
             or self._is_truthy_param(parameters, "refs-only")
         )
         images_policy = parameters.get("images", "auto").strip().lower() or "auto"
-        head_chars = self._parse_head_chars(parameters.get('head'))
+        head_chars, tail_chars = self._parse_truncation_parameters(parameters)
         properties_enabled, properties_keys = self._parse_properties_mode(parameters.get('properties'))
         output_target_value = parameters.get('output')
         write_mode_param = parameters.get('write-mode') or parameters.get('write_mode')
         scope_value = parameters.get('scope')
         selector_options = self._parse_selector_options(parameters)
-
-        selection_param_keys = {"pending", "latest", "limit", "order", "dir", "dt_pattern", "dt_format"}
-        if base_value.startswith("variable:") and any(key in parameters for key in selection_param_keys):
-            raise ValueError(
-                "Selection parameters (pending/latest/limit/order/dir/dt_*) "
-                "are only supported for @input file targets"
-            )
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
@@ -350,6 +350,7 @@ class InputFileDirective(DirectiveProcessor):
                 properties_enabled=properties_enabled,
                 properties_keys=properties_keys,
                 head_chars=head_chars,
+                tail_chars=tail_chars,
                 context=context,
                 scope_value=scope_value,
             )
@@ -419,9 +420,13 @@ class InputFileDirective(DirectiveProcessor):
                     if isinstance(file_data, dict) else file_data
                     for file_data in result_files
                 ]
-            if head_chars is not None:
+            if head_chars is not None or tail_chars is not None:
                 result_files = [
-                    self._truncate_result_content(file_data, head_chars)
+                    self._truncate_result_content(
+                        file_data,
+                        head_chars=head_chars,
+                        tail_chars=tail_chars,
+                    )
                     if isinstance(file_data, dict) else file_data
                     for file_data in result_files
                 ]
@@ -442,16 +447,67 @@ class InputFileDirective(DirectiveProcessor):
 
         return result_files
 
-    def _parse_head_chars(self, head_value: Optional[str]) -> Optional[int]:
-        if head_value is None or str(head_value).strip() == "":
+    def _parse_positive_int_param(self, raw_value: Optional[str], param_name: str) -> Optional[int]:
+        if raw_value is None or str(raw_value).strip() == "":
             return None
         try:
-            parsed = int(head_value)
+            parsed = int(raw_value)
         except (TypeError, ValueError):
-            raise ValueError("head must be a positive integer") from None
+            raise ValueError(f"{param_name} must be a positive integer") from None
         if parsed <= 0:
-            raise ValueError("head must be a positive integer")
+            raise ValueError(f"{param_name} must be a positive integer")
         return parsed
+
+    def _parse_truncation_parameters(self, parameters: Dict[str, str]) -> tuple[Optional[int], Optional[int]]:
+        head_chars = self._parse_positive_int_param(parameters.get("head"), "head")
+        tail_chars = self._parse_positive_int_param(parameters.get("tail"), "tail")
+        return head_chars, tail_chars
+
+    def _validate_parameter_combinations(self, base_value: str, parameters: Dict[str, str]) -> None:
+        """Validate cross-parameter rules in one place."""
+        selection_param_keys = {"pending", "latest", "limit", "order", "dir", "dt_pattern", "dt_format"}
+
+        if parameters.get("head") and parameters.get("tail"):
+            raise ValueError("head and tail cannot be used together")
+
+        if base_value.startswith("variable:") and any(key in parameters for key in selection_param_keys):
+            raise ValueError(
+                "Selection parameters (pending/latest/limit/order/dir/dt_*) "
+                "are only supported for @input file targets"
+            )
+
+        pending_enabled = self._is_truthy_param(parameters, "pending")
+        latest_enabled = self._is_truthy_param(parameters, "latest")
+        if pending_enabled and latest_enabled:
+            raise ValueError("Only one selector mode is supported: choose either pending or latest")
+
+        selector_mode: Optional[str] = None
+        if pending_enabled:
+            selector_mode = "pending"
+        elif latest_enabled:
+            selector_mode = "latest"
+
+        raw_order = (parameters.get("order") or "").strip().lower()
+        if raw_order:
+            if selector_mode == "pending":
+                valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+            elif selector_mode == "latest":
+                valid_orders = {"mtime", "ctime", "filename_dt"}
+            else:
+                valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+            if raw_order not in valid_orders:
+                allowed = ", ".join(sorted(valid_orders))
+                raise ValueError(
+                    f"order '{raw_order}' is not supported for {selector_mode}; use: {allowed}"
+                )
+
+        dt_pattern = (parameters.get("dt_pattern") or "").strip()
+        dt_format = (parameters.get("dt_format") or "").strip()
+        if raw_order == "filename_dt":
+            if not dt_pattern or not dt_format:
+                raise ValueError("filename_dt ordering requires dt_pattern and dt_format")
+        elif dt_pattern or dt_format:
+            raise ValueError("dt_pattern/dt_format require order=filename_dt")
 
     def _is_truthy_param(self, parameters: Dict[str, str], name: str) -> bool:
         if name not in parameters:
@@ -474,6 +530,7 @@ class InputFileDirective(DirectiveProcessor):
         properties_enabled: bool,
         properties_keys: Optional[List[str]],
         head_chars: Optional[int],
+        tail_chars: Optional[int],
         context: Dict[str, Any],
         scope_value: Optional[str],
     ) -> List[Dict[str, Any]]:
@@ -523,8 +580,12 @@ class InputFileDirective(DirectiveProcessor):
         else:
             if properties_enabled:
                 result = self._apply_properties_mode(result, properties_keys)
-            if head_chars is not None:
-                result = self._truncate_result_content(result, head_chars)
+            if head_chars is not None or tail_chars is not None:
+                result = self._truncate_result_content(
+                    result,
+                    head_chars=head_chars,
+                    tail_chars=tail_chars,
+                )
         return [result]
 
     def _parse_properties_mode(self, properties_value: Optional[str]) -> tuple[bool, Optional[List[str]]]:
@@ -544,13 +605,11 @@ class InputFileDirective(DirectiveProcessor):
         return True, keys
 
     def _parse_selector_options(self, parameters: Dict[str, str]) -> Dict[str, Any]:
-        """Parse and validate selector-mode options for @input file targets."""
+        """Parse selector-mode options for @input file targets after validation."""
         pending_enabled = self._is_truthy_param(parameters, "pending")
         latest_enabled = self._is_truthy_param(parameters, "latest")
 
         selector_mode: Optional[str] = None
-        if pending_enabled and latest_enabled:
-            raise ValueError("Only one selector mode is supported: choose either pending or latest")
         if pending_enabled:
             selector_mode = "pending"
         elif latest_enabled:
@@ -594,18 +653,13 @@ class InputFileDirective(DirectiveProcessor):
                 raw_dir = "asc"
             valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
 
+        # Cross-parameter order compatibility is validated in _validate_parameter_combinations.
         if raw_order not in valid_orders:
             allowed = ", ".join(sorted(valid_orders))
-            raise ValueError(f"order '{raw_order}' is not supported for {selector_mode}; use: {allowed}")
+            raise ValueError(f"order must be one of: {allowed}")
 
         if raw_dir not in {"asc", "desc"}:
             raise ValueError("dir must be 'asc' or 'desc'")
-
-        if raw_order == "filename_dt":
-            if not dt_pattern or not dt_format:
-                raise ValueError("filename_dt ordering requires dt_pattern and dt_format")
-        elif dt_pattern or dt_format:
-            raise ValueError("dt_pattern/dt_format require order=filename_dt")
 
         return {
             "mode": selector_mode,
@@ -655,7 +709,13 @@ class InputFileDirective(DirectiveProcessor):
             return "true" if value else "false"
         return str(value)
 
-    def _truncate_result_content(self, file_data: Dict[str, Any], head_chars: int) -> Dict[str, Any]:
+    def _truncate_result_content(
+        self,
+        file_data: Dict[str, Any],
+        *,
+        head_chars: Optional[int],
+        tail_chars: Optional[int],
+    ) -> Dict[str, Any]:
         if not file_data.get("found", True):
             return file_data
         if file_data.get("refs_only"):
@@ -664,12 +724,23 @@ class InputFileDirective(DirectiveProcessor):
         if not isinstance(content, str):
             return file_data
         original_chars = len(content)
-        file_data["head"] = head_chars
         file_data["content_original_chars"] = original_chars
-        if original_chars <= head_chars:
+        truncate_chars = head_chars if head_chars is not None else tail_chars
+        if truncate_chars is None:
+            return file_data
+
+        if head_chars is not None:
+            file_data["head"] = head_chars
+        if tail_chars is not None:
+            file_data["tail"] = tail_chars
+
+        if original_chars <= truncate_chars:
             file_data["content_truncated"] = False
             return file_data
-        file_data["content"] = content[:head_chars]
+        if head_chars is not None:
+            file_data["content"] = content[:head_chars]
+        else:
+            file_data["content"] = content[-tail_chars:]
         file_data["content_truncated"] = True
         return file_data
 
