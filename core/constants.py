@@ -110,6 +110,10 @@ Vault context:
 Tool calls (all tools):
 - Always use named parameters (keyword arguments). Positional arguments and args arrays are not supported.
 - If tool output is very large, the system may route to a variable and pass you the variable name. Explore using the buffer_ops tool.
+
+Grounding:
+- When the answer depends on current information, external sources, or the user's files, use available tools to verify it instead of relying on memory alone.
+- If the answer is stable common knowledge and does not need verification, answer directly.
 """
 
 # Routing guidance shown only when routing is enabled
