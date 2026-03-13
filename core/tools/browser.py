@@ -313,6 +313,13 @@ Examples:
     def _translate_playwright_error(exc: Exception) -> RuntimeError:
         """Map Playwright errors into stable tool-facing error messages."""
         message = str(exc)
+        if "Executable doesn't exist" in message:
+            return RuntimeError(
+                "result_type: error\nBrowser runtime is missing. Install the Playwright "
+                "Chromium bundle for this environment with `python -m playwright install "
+                "--with-deps chromium`, or rebuild the container image with browser "
+                "binaries included."
+            )
         if "Download is starting" in message:
             return RuntimeError(
                 "result_type: download\nURL initiates a download instead of rendering an HTML page. "

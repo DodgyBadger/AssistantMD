@@ -76,9 +76,16 @@ RUN set -eux; \
 # Set up application directory
 WORKDIR /app
 
+# Store Playwright browser binaries outside any specific user's home directory.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # Copy system Python packages from builder stage
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Install Chromium and OS dependencies required by Playwright at runtime.
+RUN python -m playwright install --with-deps chromium && \
+    chmod -R a+rX /ms-playwright
 
 # Drop build-only tooling and caches to keep runtime image lean
 RUN rm -f /usr/local/bin/uv && rm -rf /root/.cache
