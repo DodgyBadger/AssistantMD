@@ -657,7 +657,6 @@ function displaySystemStatus() {
             .badge-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
         </style>
 
-        <h3 class="text-lg font-semibold mb-2">🗂️ Vaults</h3>
         <table class="dashboard-table">
             <thead>
                 <tr>
