@@ -115,8 +115,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Install Chromium after its runtime libraries are present.
-RUN python -m playwright install chromium && \
+# Install Chromium without the legacy headless shell; the app launches channel="chromium".
+RUN python -m playwright install --no-shell chromium && \
     chmod -R a+rX /ms-playwright
 
 # Drop build-only tooling and caches to keep runtime image lean

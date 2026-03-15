@@ -249,7 +249,11 @@ Examples:
         include_links: bool,
     ) -> dict[str, Any]:
         """Launch a browser session, navigate, extract a region, and return structured results."""
-        browser_instance = await playwright.chromium.launch(headless=True)
+        # Use Chromium's newer headless mode for closer parity with full browser behavior.
+        browser_instance = await playwright.chromium.launch(
+            headless=True,
+            channel="chromium",
+        )
         context = None
         try:
             context = await browser_instance.new_context(accept_downloads=False)
