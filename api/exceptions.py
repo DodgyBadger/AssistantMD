@@ -91,3 +91,15 @@ class FileSystemError(APIException):
             message=f"File system error: {message}",
             details=details
         )
+
+
+class ChatCapabilityMismatchError(APIException):
+    """Raised when a chat request needs capabilities the selected model lacks."""
+
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            status_code=400,
+            error_type="ChatCapabilityMismatch",
+            message=message,
+            details=details,
+        )

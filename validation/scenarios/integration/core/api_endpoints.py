@@ -3,6 +3,8 @@ Integration scenario that exercises every documented API endpoint using the
 validation harness' shared FastAPI TestClient.
 """
 
+import base64
+
 import sys
 from pathlib import Path
 
@@ -189,6 +191,28 @@ class ApiEndpointsScenario(BaseScenario):
             },
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
+
+        image_path = vault / "tiny.png"
+        image_path.write_bytes(
+            base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p6b8AAAAASUVORK5CYII="
+            )
+        )
+        capability_mismatch = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                "vault_name": vault.name,
+                "prompt": "Describe this image.",
+                "tools": [],
+                "model": "test",
+                "image_paths": [str(image_path)],
+            },
+        )
+        assert capability_mismatch.status_code == 400, "Vision mismatch returns client error"
+        mismatch_payload = capability_mismatch.json()
+        assert mismatch_payload.get("error") == "ChatCapabilityMismatch", "Capability mismatch error type is explicit"
+        assert "vision" in (mismatch_payload.get("message") or "").lower(), "Capability mismatch guidance mentions vision"
 
         await self.stop_system()
         self.teardown_scenario()

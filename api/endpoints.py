@@ -13,6 +13,7 @@ from pydantic_ai import BinaryContent
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.llm.session_manager import SessionManager
 from core.llm.chat_executor import (
+    ChatCapabilityError,
     UploadedImageAttachment,
     execute_chat_prompt,
     execute_chat_prompt_stream,
@@ -41,7 +42,7 @@ from .models import (
     MetadataResponse,
     TemplateInfo,
 )
-from .exceptions import APIException
+from .exceptions import APIException, ChatCapabilityMismatchError
 from .utils import create_error_response, generate_session_id
 from .services import (
     rescan_vaults_and_update_scheduler,
@@ -170,8 +171,34 @@ async def _execute_chat_request(
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
     session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
 
-    if chat_request.stream:
-        stream = execute_chat_prompt_stream(
+    try:
+        if chat_request.stream:
+            stream = execute_chat_prompt_stream(
+                vault_name=chat_request.vault_name,
+                vault_path=vault_path,
+                prompt=chat_request.prompt,
+                image_paths=chat_request.image_paths,
+                image_uploads=image_uploads,
+                session_id=session_id,
+                tools=chat_request.tools,
+                model=chat_request.model,
+                session_manager=session_manager,
+                context_template=chat_request.context_template,
+            )
+
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                    "Content-Encoding": "identity",
+                    "X-Accel-Buffering": "no",
+                    "X-Session-ID": session_id,
+                },
+            )
+
+        result = await execute_chat_prompt(
             vault_name=chat_request.vault_name,
             vault_path=vault_path,
             prompt=chat_request.prompt,
@@ -183,31 +210,8 @@ async def _execute_chat_request(
             session_manager=session_manager,
             context_template=chat_request.context_template,
         )
-
-        return StreamingResponse(
-            stream,
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "Content-Encoding": "identity",
-                "X-Accel-Buffering": "no",
-                "X-Session-ID": session_id,
-            },
-        )
-
-    result = await execute_chat_prompt(
-        vault_name=chat_request.vault_name,
-        vault_path=vault_path,
-        prompt=chat_request.prompt,
-        image_paths=chat_request.image_paths,
-        image_uploads=image_uploads,
-        session_id=session_id,
-        tools=chat_request.tools,
-        model=chat_request.model,
-        session_manager=session_manager,
-        context_template=chat_request.context_template,
-    )
+    except ChatCapabilityError as exc:
+        raise ChatCapabilityMismatchError(str(exc), details=exc.details) from exc
 
     return ChatExecuteResponse(
         response=result.response,
