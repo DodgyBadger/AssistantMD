@@ -36,6 +36,8 @@
 
 ### Other improvements
 - Strengthened prompt-injection guidance for web tools so suspicious web content is treated as untrusted data and attacker strings are less likely to be echoed back verbatim.
+- Chat now surfaces known model capability mismatches, such as attaching images to a non-vision model, as explicit client errors with actionable guidance instead of generic network/internal failures.
+- Simplified the Workflows dashboard by making the main sections collapsible and unifying scheduled and unscheduled workflows into one clearer table with status and next-run information.
 - Refreshed frontend/build dependencies to address npm vulnerability warnings, switched setup to `npm ci` for lockfile-based installs, and added dependency audit checks in CI.
 - Documentation updates
 

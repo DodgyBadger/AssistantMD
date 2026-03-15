@@ -619,27 +619,11 @@ function displaySystemStatus() {
     const enabledWorkflows = status.enabled_workflows || [];
     const disabledWorkflows = status.disabled_workflows || [];
     const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows];
-    const workflowTypes = [...new Set(combinedWorkflows.map(a => a.workflow_engine))];
-
-    const badgeColors = [
-        { bg: 'rgb(var(--accent-primary) / 0.14)', color: 'rgb(var(--accent-primary))' },
-        { bg: 'rgb(var(--accent-hover) / 0.14)', color: 'rgb(var(--accent-hover))' },
-        { bg: 'rgb(var(--border-primary) / 0.65)', color: 'rgb(var(--text-primary))' },
-        { bg: 'rgb(var(--text-secondary) / 0.14)', color: 'rgb(var(--text-secondary))' },
-        { bg: 'rgb(var(--bg-elevated))', color: 'rgb(var(--text-primary))' },
-        { bg: 'rgb(var(--accent-primary) / 0.22)', color: 'rgb(var(--text-on-accent))' }
-    ];
-
-    const workflowColorMap = {};
-    workflowTypes.forEach((type, index) => {
-        const colors = badgeColors[index % badgeColors.length];
-        workflowColorMap[type] = colors;
-    });
-
-    const badgeStyles = workflowTypes.map(type => {
-        const colors = workflowColorMap[type];
-        return `.badge-${type} { background: ${colors.bg}; color: ${colors.color}; }`;
-    }).join('\n            ');
+    const schedulerJobs = status.scheduler?.job_details || [];
+    const schedulerRunning = Boolean(status.scheduler?.running);
+    const jobByWorkflowId = new Map(
+        schedulerJobs.map(job => [job.id.replace('__', '/'), job])
+    );
 
     let html = `
         <style>
@@ -652,16 +636,18 @@ function displaySystemStatus() {
             .dashboard-table .cell-xs { font-size: 11px; }
             .dashboard-table .cell-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
             .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-            ${badgeStyles}
-            .badge-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
-            .badge-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
+            .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
+            .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
+            .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
+            .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
+            .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
         </style>
 
         <table class="dashboard-table">
             <thead>
                 <tr>
                     <th>Name</th>
-                    <th>Path</th>
+                    <th>Path inside container</th>
                     <th class="cell-center">Workflows</th>
                 </tr>
             </thead>
@@ -677,63 +663,53 @@ function displaySystemStatus() {
         </table>
     `;
 
-    if (status.scheduler.job_details && status.scheduler.job_details.length > 0) {
-        const schedulerBadge = status.scheduler.running
-            ? '<span class="badge badge-running">RUNNING</span>'
-            : '<span class="badge badge-stopped">STOPPED</span>';
-
-        html += `
-            <h3 class="text-lg font-semibold mb-2 mt-6">⏰ Scheduled Jobs ${schedulerBadge}</h3>
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        <th>Workflow</th>
-                        <th>Next Run</th>
-                        <th>Interval</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${status.scheduler.job_details.map(job => {
-                        const workflowName = job.id.replace('__', '/');
-                        const nextRun = job.next_run_time ? new Date(job.next_run_time).toLocaleString('en-US', {
-                            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-                        }) : '—';
-                        return `
-                            <tr>
-                                <td><strong>${workflowName}</strong></td>
-                                <td>${nextRun}</td>
-                                <td class="cell-xs subtle">${job.trigger_description}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        `;
-    }
-
     if (combinedWorkflows.length > 0) {
+        const schedulerBadge = schedulerRunning
+            ? '<span class="badge badge-scheduler-running">SCHEDULER RUNNING</span>'
+            : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
+
         html += `
-            <h3 class="text-lg font-semibold mb-2 mt-6">🤖 Workflows</h3>
+            <h3 class="text-lg font-semibold mb-2 mt-6">Workflows ${schedulerBadge}</h3>
             <table class="dashboard-table">
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th style="text-align: center;">Type</th>
+                        <th>Status</th>
                         <th>Schedule</th>
+                        <th>Next Run</th>
                         <th>Description</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${combinedWorkflows.map(workflow => {
-                        const badgeClass = `badge-${workflow.workflow_engine}`;
+                        const job = jobByWorkflowId.get(workflow.global_id);
                         const schedule = workflow.schedule_cron || '—';
+                        const nextRun = job?.next_run_time
+                            ? new Date(job.next_run_time).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit'
+                            })
+                            : '—';
                         const description = workflow.description || '—';
+                        const statusLabel = !workflow.enabled
+                            ? 'disabled'
+                            : job
+                                ? 'scheduled'
+                                : 'enabled';
+                        const statusClass = !workflow.enabled
+                            ? 'badge-disabled'
+                            : job
+                                ? 'badge-scheduled'
+                                : 'badge-enabled';
                         return `
                             <tr>
                                 <td><strong>${workflow.global_id}</strong></td>
-                        <td class="cell-center"><span class="badge ${badgeClass}">${workflow.workflow_engine}</span></td>
-                        <td class="cell-xs">${schedule}</td>
-                        <td class="cell-xs subtle">${description}</td>
+                                <td><span class="badge ${statusClass}">${statusLabel}</span></td>
+                                <td class="cell-xs">${schedule}</td>
+                                <td class="cell-xs">${nextRun}</td>
+                                <td class="cell-xs subtle">${description}</td>
                             </tr>
                         `;
                     }).join('')}
