@@ -734,7 +734,7 @@ async def execute_chat_prompt_stream(
     session_manager: SessionManager,
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    """Preflight streaming chat execution and return an SSE iterator."""
+    """Preflight streaming chat execution and yield SSE chunks."""
     prepared = await _prepare_chat_execution(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -747,10 +747,11 @@ async def execute_chat_prompt_stream(
         session_manager=session_manager,
         context_template=context_template,
     )
-    return _stream_prepared_chat_prompt(
+    async for chunk in _stream_prepared_chat_prompt(
         prepared=prepared,
         vault_name=vault_name,
         vault_path=vault_path,
         session_id=session_id,
         session_manager=session_manager,
-    )
+    ):
+        yield chunk

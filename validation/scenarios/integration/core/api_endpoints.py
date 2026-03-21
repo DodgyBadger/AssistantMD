@@ -192,6 +192,20 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
 
+        chat_stream = self.call_api(
+            "/api/chat/execute",
+            method="POST",
+            data={
+                **chat_payload,
+                "stream": True,
+                "prompt": "Stream a short response for the integration test.",
+            },
+        )
+        assert chat_stream.status_code == 200, "Streaming chat execution succeeds"
+        assert "data: " in chat_stream.text, "Streaming chat returns SSE-formatted chunks"
+        assert '"event": "done"' in chat_stream.text, "Streaming chat returns a terminal SSE event"
+        assert '"event": "error"' not in chat_stream.text, "Streaming chat completes without an error event"
+
         image_path = vault / "tiny.png"
         image_path.write_bytes(
             base64.b64decode(
