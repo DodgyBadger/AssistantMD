@@ -17,6 +17,17 @@ from core.settings.store import get_general_settings
 logger = UnifiedLogger(tag="api")
 
 
+def serialize_exception(exception: Exception) -> dict:
+    """Return structured exception details safe for activity logging."""
+    return {
+        "error_type": type(exception).__name__,
+        "error": str(exception),
+        "traceback": "".join(
+            traceback.format_exception(type(exception), exception, exception.__traceback__)
+        ).strip(),
+    }
+
+
 def generate_session_id(vault_name: str) -> str:
     """
     Generate meaningful session ID from vault and timestamp.
@@ -110,16 +121,15 @@ def create_error_response(exception: Exception) -> JSONResponse:
         settings = get_general_settings()
         debug_setting = settings.get("debug")
         debug_mode = bool(debug_setting and getattr(debug_setting, "value", False))
+        exception_details = serialize_exception(exception)
         
         if debug_mode:
-            # Include full traceback for debugging
-            full_traceback = traceback.format_exc()
             error_response = ErrorResponse(
                 error="InternalServerError",
                 message=str(exception),
                 details={
-                    "error_type": type(exception).__name__,
-                    "traceback": full_traceback
+                    "error_type": exception_details["error_type"],
+                    "traceback": exception_details["traceback"],
                 }
             )
         else:
@@ -127,11 +137,14 @@ def create_error_response(exception: Exception) -> JSONResponse:
             error_response = ErrorResponse(
                 error="InternalServerError", 
                 message="An unexpected error occurred",
-                details={"error_type": type(exception).__name__}
+                details={"error_type": exception_details["error_type"]}
             )
         
         # Always log the full traceback server-side
-        logger.error(f"Unexpected API error: {traceback.format_exc()}")
+        logger.error(
+            "Unexpected API error",
+            data=exception_details,
+        )
         
         return JSONResponse(
             status_code=500,

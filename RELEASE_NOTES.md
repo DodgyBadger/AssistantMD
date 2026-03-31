@@ -1,6 +1,6 @@
 # Release Notes
 
-## 2026-03-09 - v0.5.0.
+## 2026-03-31 - v0.5.0.
 
 ### BREAKING CHANGE: new selector/filter structure for the `@input` directive 
 - The new mental model is: glob/file patterns select the candidate file set, `pending` or `latest` can filter that set, `order` sorts it, and `limit` is applied last. This allows greater flexibility. For example, previously, there was no way to fetch pending files in alphanumeric order - now there is.
@@ -37,6 +37,7 @@
 ### Other improvements
 - Strengthened prompt-injection guidance for web tools so suspicious web content is treated as untrusted data and attacker strings are less likely to be echoed back verbatim.
 - Chat now surfaces known model capability mismatches, such as attaching images to a non-vision model, as explicit client errors with actionable guidance instead of generic network/internal failures.
+- Hardened chat session error handling, especially for streaming execution, so unexpected failures now leave structured `activity.log` diagnostics with session context, execution phase, exception type, and traceback information.
 - Simplified the Workflows dashboard by making the main sections collapsible and unifying scheduled and unscheduled workflows into one clearer table with status and next-run information.
 - Refreshed frontend/build dependencies to address npm vulnerability warnings, switched setup to `npm ci` for lockfile-based installs, and added dependency audit checks in CI.
 - Documentation updates

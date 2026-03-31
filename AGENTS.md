@@ -8,7 +8,7 @@ Every shortcut becomes future maintenance cost.
 Fight entropy and leave the codebase better than you found it.
 
 ## Always True
-- Python version: `3.12`.
+- Python version: `3.13`.
 - Non-standard build command: `npm run build:css` compiles `static/input.css` to `static/output.css`.
 - Validation ownership: maintainers run full validation (`python validation/run_validation.py ...`); agents should request results instead of running the suite.
 - Validation-first delivery: follow [Testing and Validation](docs/agent-guides/testing-and-validation.md#validation-first-workflow).

@@ -54,4 +54,9 @@ else
   echo "WARNING: package.json not found; skipping npm install and Tailwind build."
 fi
 
+# 5. Install Playwright Chromium and required OS deps for browser-tool parity
+echo "Ensuring Playwright Chromium runtime is installed..."
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
+python3 -m playwright install --with-deps chromium || echo "WARNING: Playwright browser install failed"
+
 echo "=== setup.sh: finished ==="

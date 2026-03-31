@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 
+from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.llm.session_manager import SessionManager
 from core.llm.chat_executor import (
@@ -43,7 +44,7 @@ from .models import (
     TemplateInfo,
 )
 from .exceptions import APIException, ChatCapabilityMismatchError
-from .utils import create_error_response, generate_session_id
+from .utils import create_error_response, generate_session_id, serialize_exception
 from .services import (
     rescan_vaults_and_update_scheduler,
     get_system_status,
@@ -78,6 +79,7 @@ from api.import_models import (
 
 # Create API router
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
+logger = UnifiedLogger(tag="api-endpoints")
 
 # Create module-level session manager for chat conversations
 session_manager = SessionManager()
@@ -170,6 +172,21 @@ async def _execute_chat_request(
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
     session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
+    logger.info(
+        "Chat request accepted",
+        data={
+            "vault_name": chat_request.vault_name,
+            "session_id": session_id,
+            "streaming": chat_request.stream,
+            "model": chat_request.model,
+            "tools": list(chat_request.tools),
+            "tools_count": len(chat_request.tools),
+            "prompt_length": len(chat_request.prompt),
+            "image_path_count": len(chat_request.image_paths),
+            "image_upload_count": len(image_uploads),
+            "context_template": chat_request.context_template,
+        },
+    )
 
     try:
         if chat_request.stream:
@@ -211,7 +228,36 @@ async def _execute_chat_request(
             context_template=chat_request.context_template,
         )
     except ChatCapabilityError as exc:
+        logger.warning(
+            "Chat request capability mismatch",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
         raise ChatCapabilityMismatchError(str(exc), details=exc.details) from exc
+    except Exception as exc:
+        logger.error(
+            "Chat request failed before response",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "tools_count": len(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                "image_path_count": len(chat_request.image_paths),
+                "image_upload_count": len(image_uploads),
+                **serialize_exception(exc),
+            },
+        )
+        raise
 
     return ChatExecuteResponse(
         response=result.response,
@@ -563,6 +609,14 @@ async def chat_execute(request: Request):
         chat_request, image_uploads = await _parse_chat_execute_payload(request)
         return await _execute_chat_request(chat_request, image_uploads)
     except Exception as e:
+        logger.error(
+            "Chat endpoint request failed",
+            data={
+                "path": str(request.url.path),
+                "method": request.method,
+                **serialize_exception(e),
+            },
+        )
         return create_error_response(e)
 
 
