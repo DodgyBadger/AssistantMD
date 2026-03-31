@@ -7,6 +7,7 @@ Persists chat history to markdown files for auditability and testing.
 
 import json
 import re
+import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
@@ -28,9 +29,13 @@ from core.constants import (
     CHAT_SESSIONS_DIR,
 )
 from core.directives.model import ModelDirective
-from core.llm.model_selection import ModelExecutionSpec
+from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.directives.tools import ToolsDirective
-from core.llm.model_utils import model_supports_capability
+from core.llm.model_utils import (
+    get_model_capabilities,
+    model_supports_capability,
+    resolve_model,
+)
 from core.context.manager import build_context_manager_history_processor
 from core.context.templates import load_template
 from core.settings import (
@@ -55,6 +60,107 @@ class UploadedImageAttachment:
 
     display_name: str
     content: BinaryContent
+
+
+class ChatCapabilityError(ValueError):
+    """Raised when a chat request requires model capabilities that are unavailable."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+@dataclass
+class PreparedChatExecution:
+    """Preflighted chat execution state safe to reuse across sync and streaming paths."""
+
+    agent: Any
+    message_history: Optional[List[ModelMessage]]
+    prompt_for_history: str
+    user_prompt: PromptInput
+    attached_image_count: int
+    model: str
+    tools: List[str]
+
+
+def _serialize_exception(exc: Exception) -> dict[str, Any]:
+    """Return stable exception details for activity-log diagnostics."""
+    return {
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "traceback": "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        ).strip(),
+    }
+
+
+def _log_chat_lifecycle(
+    message: str,
+    *,
+    vault_name: str,
+    session_id: str,
+    model: str | None = None,
+    tools: Optional[List[str]] = None,
+    streaming: bool,
+    phase: str,
+    prompt_length: int | None = None,
+    attached_image_count: int | None = None,
+    extra: Optional[dict[str, Any]] = None,
+) -> None:
+    """Emit structured lifecycle logs for chat session execution."""
+    payload: dict[str, Any] = {
+        "vault_name": vault_name,
+        "session_id": session_id,
+        "streaming": streaming,
+        "phase": phase,
+    }
+    if model is not None:
+        payload["model"] = model
+    if tools is not None:
+        payload["tools"] = list(tools)
+        payload["tools_count"] = len(tools)
+    if prompt_length is not None:
+        payload["prompt_length"] = prompt_length
+    if attached_image_count is not None:
+        payload["attached_image_count"] = attached_image_count
+    if extra:
+        payload.update(extra)
+    logger.info(message, data=payload)
+
+
+def _log_chat_failure(
+    message: str,
+    *,
+    vault_name: str,
+    session_id: str,
+    model: str | None = None,
+    tools: Optional[List[str]] = None,
+    streaming: bool,
+    phase: str,
+    prompt_length: int | None = None,
+    attached_image_count: int | None = None,
+    extra: Optional[dict[str, Any]] = None,
+    exc: Exception,
+) -> None:
+    """Emit structured failure logs for chat session execution."""
+    payload = _serialize_exception(exc)
+    if extra:
+        payload.update(extra)
+    logger.error(
+        message,
+        data={
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "streaming": streaming,
+            "phase": phase,
+            "model": model,
+            "tools": list(tools or []),
+            "tools_count": len(tools or []),
+            "prompt_length": prompt_length,
+            "attached_image_count": attached_image_count,
+            **payload,
+        },
+    )
 
 
 def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
@@ -111,6 +217,43 @@ def _normalize_tool_result(result: Any) -> Optional[str]:
         return _truncate_preview(serialized, limit=240)
     except (TypeError, ValueError):
         return _truncate_preview(str(result), limit=240)
+
+
+def _build_model_capability_details(
+    model_alias: str,
+    requested_capability: str,
+    *,
+    image_paths: Optional[List[str]] = None,
+    image_uploads: Optional[List[UploadedImageAttachment]] = None,
+) -> dict[str, Any]:
+    """Collect stable context describing a model capability mismatch."""
+    execution = resolve_model_execution_spec(model_alias)
+    base_alias = execution.base_alias or model_alias.strip()
+    provider = None
+    model_string = None
+    declared_capabilities = ["text"] if base_alias == "test" else []
+
+    if base_alias and base_alias != "test":
+        try:
+            provider, model_string = resolve_model(base_alias)
+        except ValueError:
+            provider = None
+            model_string = None
+        try:
+            declared_capabilities = sorted(get_model_capabilities(base_alias))
+        except ValueError:
+            declared_capabilities = []
+
+    return {
+        "model_alias": model_alias,
+        "model_base_alias": base_alias,
+        "provider": provider,
+        "model_string": model_string,
+        "requested_capability": requested_capability,
+        "declared_capabilities": declared_capabilities,
+        "image_path_count": sum(1 for path in (image_paths or []) if (path or "").strip()),
+        "image_upload_count": len(image_uploads or []),
+    }
 
 
 def _get_default_context_template() -> Optional[str]:
@@ -318,9 +461,75 @@ def _validate_image_capability(
         return
     if model_supports_capability(model_alias, "vision"):
         return
-    raise ValueError(
-        f"Model '{model_alias}' does not declare 'vision' capability in settings.yaml. "
-        "Use a vision-capable model or remove image attachments."
+    details = _build_model_capability_details(
+        model_alias,
+        "vision",
+        image_paths=image_paths,
+        image_uploads=image_uploads,
+    )
+    logger.warning("Chat capability mismatch", data=details)
+    raise ChatCapabilityError(
+        (
+            f"Model '{model_alias}' does not declare 'vision' capability in settings.yaml. "
+            "Use a vision-capable model or remove image attachments."
+        ),
+        details=details,
+    )
+
+
+async def _prepare_chat_execution(
+    vault_name: str,
+    vault_path: str,
+    prompt: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
+    session_id: str,
+    tools: List[str],
+    model: str,
+    session_manager: SessionManager,
+    context_template: Optional[str] = None,
+) -> PreparedChatExecution:
+    """Perform chat preflight before either sync or streaming execution begins."""
+    _validate_image_capability(model, image_paths, image_uploads)
+    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
+        vault_name, vault_path, tools, model
+    )
+
+    resolved_template = _resolve_context_template_name(vault_path, context_template)
+    history_processors = [
+        build_context_manager_history_processor(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            model_alias=model,
+            template_name=resolved_template,
+        )
+    ]
+
+    agent = await create_agent(
+        model=model_instance,
+        tools=tool_functions if tool_functions else None,
+        history_processors=history_processors,
+    )
+    for inst in [base_instructions, tool_instructions]:
+        if inst:
+            agent.instructions(lambda _ctx, text=inst: text)
+
+    message_history = session_manager.get_history(session_id, vault_name)
+    user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
+        prompt_text=prompt,
+        image_paths=image_paths,
+        image_uploads=image_uploads,
+        vault_path=vault_path,
+    )
+    return PreparedChatExecution(
+        agent=agent,
+        message_history=message_history,
+        prompt_for_history=prompt_for_history,
+        user_prompt=user_prompt,
+        attached_image_count=attached_image_count,
+        model=model,
+        tools=list(tools),
     )
 
 
@@ -388,148 +597,112 @@ async def execute_chat_prompt(
     Returns:
         ChatExecutionResult with response and session metadata
     """
-    # Prepare agent configuration (shared logic)
-    _validate_image_capability(model, image_paths, image_uploads)
-    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model
+    phase = "preflight"
+    attached_image_count = 0
+    _log_chat_lifecycle(
+        "Chat execution started",
+        vault_name=vault_name,
+        session_id=session_id,
+        model=model,
+        tools=tools,
+        streaming=False,
+        phase=phase,
+        prompt_length=len(prompt),
     )
-
-    resolved_template = _resolve_context_template_name(vault_path, context_template)
-    history_processors = [
-        build_context_manager_history_processor(
-            session_id=session_id,
+    try:
+        prepared = await _prepare_chat_execution(
             vault_name=vault_name,
             vault_path=vault_path,
-            model_alias=model,
-            template_name=resolved_template,
+            prompt=prompt,
+            image_paths=image_paths,
+            image_uploads=image_uploads,
+            session_id=session_id,
+            tools=tools,
+            model=model,
+            session_manager=session_manager,
+            context_template=context_template,
         )
-    ]
-
-    # Create agent with user-selected configuration
-    agent = await create_agent(
-        model=model_instance,
-        tools=tool_functions if tool_functions else None,
-        history_processors=history_processors,
-    )
-    for inst in [base_instructions, tool_instructions]:
-        if inst:
-            agent.instructions(lambda _ctx, text=inst: text)
-
-    # Get message history (always tracked now)
-    message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
-
-    user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
-        prompt_text=prompt,
-        image_paths=image_paths,
-        image_uploads=image_uploads,
-        vault_path=vault_path,
-    )
-
-    # Run agent
-    session_buffer_store = get_session_buffer_store(session_id)
-    run_deps = ChatRunDeps(
-        context_manager_now=_resolve_context_manager_now(),
-        buffer_store=session_buffer_store,
-        buffer_store_registry={"session": session_buffer_store},
-    )
-    result = await agent.run(
-        user_prompt,
-        message_history=message_history,
-        deps=run_deps,
-    )
-
-    # Store new messages in session for next turn
-    session_manager.add_messages(session_id, vault_name, result.new_messages())
-
-    # Save chat history to markdown file
-    history_file = save_chat_history(vault_path, session_id, prompt_for_history, result.output)
-    logger.info(
-        "Chat executed",
-        data={
-            "vault_name": vault_name,
-            "session_id": session_id,
-            "model": model,
-            "tools_count": len(tools),
-            "prompt_length": len(prompt),
-            "attached_image_count": attached_image_count,
-            "history_file": history_file,
-        },
-    )
-
-    return ChatExecutionResult(
-        response=result.output,
-        session_id=session_id,
-        message_count=len(result.all_messages()),
-        history_file=history_file
+        attached_image_count = prepared.attached_image_count
+        _log_chat_lifecycle(
+            "Chat preflight completed",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=model,
+            tools=tools,
+            streaming=False,
+            phase=phase,
+            prompt_length=len(prompt),
+            attached_image_count=attached_image_count,
         )
 
+        phase = "agent_run"
+        session_buffer_store = get_session_buffer_store(session_id)
+        run_deps = ChatRunDeps(
+            context_manager_now=_resolve_context_manager_now(),
+            buffer_store=session_buffer_store,
+            buffer_store_registry={"session": session_buffer_store},
+        )
+        result = await prepared.agent.run(
+            prepared.user_prompt,
+            message_history=prepared.message_history,
+            deps=run_deps,
+        )
 
-async def execute_chat_prompt_stream(
+        phase = "session_persist"
+        session_manager.add_messages(session_id, vault_name, result.new_messages())
+        history_file = save_chat_history(
+            vault_path,
+            session_id,
+            prepared.prompt_for_history,
+            result.output,
+        )
+        _log_chat_lifecycle(
+            "Chat execution completed",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=model,
+            tools=tools,
+            streaming=False,
+            phase=phase,
+            prompt_length=len(prompt),
+            attached_image_count=attached_image_count,
+            extra={
+                "history_file": history_file,
+                "message_count": len(result.all_messages()),
+            },
+        )
+
+        return ChatExecutionResult(
+            response=result.output,
+            session_id=session_id,
+            message_count=len(result.all_messages()),
+            history_file=history_file,
+        )
+    except Exception as exc:
+        _log_chat_failure(
+            "Chat execution failed",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=model,
+            tools=tools,
+            streaming=False,
+            phase=phase,
+            prompt_length=len(prompt),
+            attached_image_count=attached_image_count,
+            exc=exc,
+        )
+        raise
+
+
+async def _stream_prepared_chat_prompt(
+    *,
+    prepared: PreparedChatExecution,
     vault_name: str,
     vault_path: str,
-    prompt: str,
-    image_paths: Optional[List[str]],
-    image_uploads: Optional[List[UploadedImageAttachment]],
     session_id: str,
-    tools: List[str],
-    model: str,
     session_manager: SessionManager,
-    context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    """
-    Execute chat prompt with streaming response.
-
-    Streams SSE-formatted chunks and captures conversation history for session storage.
-
-    Args:
-        vault_name: Vault name for session tracking
-        vault_path: Full path to vault directory
-        prompt: User's prompt text
-        session_id: Session identifier for conversation tracking
-        tools: List of tool names selected by user
-        model: Model name selected by user
-        session_manager: Session manager instance for history storage
-    Yields:
-        SSE-formatted chunks in OpenAI-compatible format
-    """
-    # Prepare agent configuration (shared logic)
-    _validate_image_capability(model, image_paths, image_uploads)
-    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model
-    )
-
-    resolved_template = _resolve_context_template_name(vault_path, context_template)
-    history_processors = [
-        build_context_manager_history_processor(
-            session_id=session_id,
-            vault_name=vault_name,
-            vault_path=vault_path,
-            model_alias=model,
-            template_name=resolved_template,
-        )
-    ]
-
-    # Create agent with user-selected configuration
-    agent = await create_agent(
-        model=model_instance,
-        tools=tool_functions if tool_functions else None,
-        history_processors=history_processors,
-    )
-    for inst in [base_instructions, tool_instructions]:
-        if inst:
-            agent.instructions(lambda _ctx, text=inst: text)
-
-    # Get message history
-    message_history: Optional[List[ModelMessage]] = session_manager.get_history(session_id, vault_name)
-
-    user_prompt, prompt_for_history, _attached_image_count = _resolve_image_prompt(
-        prompt_text=prompt,
-        image_paths=image_paths,
-        image_uploads=image_uploads,
-        vault_path=vault_path,
-    )
-
-    # Stream response and capture final result for history storage
+    """Stream a preflighted chat execution as SSE events."""
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
@@ -539,13 +712,24 @@ async def execute_chat_prompt_stream(
         buffer_store=session_buffer_store,
         buffer_store_registry={"session": session_buffer_store},
     )
+    _log_chat_lifecycle(
+        "Streaming chat execution started",
+        vault_name=vault_name,
+        session_id=session_id,
+        model=prepared.model,
+        tools=prepared.tools,
+        streaming=True,
+        phase="agent_stream",
+        prompt_length=len(prepared.prompt_for_history),
+        attached_image_count=prepared.attached_image_count,
+    )
 
     try:
         # Use run_stream_events() to properly handle tool calls
         # This runs the agent graph to completion and streams all events
-        async for event in agent.run_stream_events(
-            user_prompt,
-            message_history=message_history,
+        async for event in prepared.agent.run_stream_events(
+            prepared.user_prompt,
+            message_history=prepared.message_history,
             deps=run_deps,
         ):
             if isinstance(event, PartStartEvent):
@@ -644,12 +828,37 @@ async def execute_chat_prompt_stream(
         }
         yield f"data: {json.dumps(final_chunk)}\n\n"
 
-    except Exception as e:
-        logger.error(f"Streaming error: {e}")
+    except ChatCapabilityError as exc:
+        logger.warning("Streaming capability mismatch", data=exc.details)
         error_chunk = {
             "event": "error",
             "choices": [{
-                "delta": {"content": f"\n\n❌ Error: {str(e)}"},
+                "delta": {"content": f"\n\n❌ Error: {str(exc)}"},
+                "index": 0,
+                "finish_reason": "error"
+            }],
+            "details": exc.details,
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        return
+    except Exception as e:
+        _log_chat_failure(
+            "Streaming chat execution failed",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=prepared.model,
+            tools=prepared.tools,
+            streaming=True,
+            phase="agent_stream",
+            prompt_length=len(prepared.prompt_for_history),
+            attached_image_count=prepared.attached_image_count,
+            extra={"tool_activity": tool_activity},
+            exc=e,
+        )
+        error_chunk = {
+            "event": "error",
+            "choices": [{
+                "delta": {"content": "\n\n❌ Error: An unexpected error occurred"},
                 "index": 0,
                 "finish_reason": "error"
             }]
@@ -663,4 +872,73 @@ async def execute_chat_prompt_stream(
 
     # Save chat history to markdown file
     if final_result:
-        save_chat_history(vault_path, session_id, prompt_for_history, full_response)
+        history_file = save_chat_history(
+            vault_path,
+            session_id,
+            prepared.prompt_for_history,
+            full_response,
+        )
+        _log_chat_lifecycle(
+            "Streaming chat execution completed",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=prepared.model,
+            tools=prepared.tools,
+            streaming=True,
+            phase="session_persist",
+            prompt_length=len(prepared.prompt_for_history),
+            attached_image_count=prepared.attached_image_count,
+            extra={
+                "history_file": history_file,
+                "tool_activity": tool_activity,
+            },
+        )
+
+
+async def execute_chat_prompt_stream(
+    vault_name: str,
+    vault_path: str,
+    prompt: str,
+    image_paths: Optional[List[str]],
+    image_uploads: Optional[List[UploadedImageAttachment]],
+    session_id: str,
+    tools: List[str],
+    model: str,
+    session_manager: SessionManager,
+    context_template: Optional[str] = None,
+) -> AsyncIterator[str]:
+    """Preflight streaming chat execution and yield SSE chunks."""
+    try:
+        prepared = await _prepare_chat_execution(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            prompt=prompt,
+            image_paths=image_paths,
+            image_uploads=image_uploads,
+            session_id=session_id,
+            tools=tools,
+            model=model,
+            session_manager=session_manager,
+            context_template=context_template,
+        )
+    except Exception as exc:
+        _log_chat_failure(
+            "Streaming chat preflight failed",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=model,
+            tools=tools,
+            streaming=True,
+            phase="preflight",
+            prompt_length=len(prompt),
+            exc=exc,
+        )
+        raise
+    async for chunk in _stream_prepared_chat_prompt(
+        prepared=prepared,
+        vault_name=vault_name,
+        vault_path=vault_path,
+        session_id=session_id,
+        session_manager=session_manager,
+    ):
+        yield chunk

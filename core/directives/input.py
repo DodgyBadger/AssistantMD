@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 from .base import DirectiveProcessor
 from core.utils.patterns import PatternUtilities
 from .parser import DirectiveValueParser
-from core.utils.file_state import hash_file_content
+from core.utils.hash import hash_file_bytes, hash_file_content
 from core.utils.frontmatter import parse_simple_frontmatter
 from core.utils.routing import build_manifest, normalize_write_mode, parse_output_target, write_output
 from core.runtime.buffers import get_buffer_store_for_scope
@@ -19,6 +19,28 @@ from core.tools.utils import get_virtual_mount_key, resolve_virtual_path
 from core.constants import SUPPORTED_READ_FILE_TYPES
 
 logger = UnifiedLogger(tag="directive-input")
+
+INPUT_BOOLEAN_PARAMS = {"required", "refs_only", "refs-only", "pending", "latest"}
+INPUT_ALLOWED_PARAMETERS = {
+    "required",
+    "refs_only",
+    "refs-only",
+    "images",
+    "head",
+    "tail",
+    "properties",
+    "output",
+    "write-mode",
+    "write_mode",
+    "scope",
+    "pending",
+    "latest",
+    "limit",
+    "order",
+    "dir",
+    "dt_pattern",
+    "dt_format",
+}
 
 
 def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
@@ -99,6 +121,10 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> Dict[str, Any]:
             "error": f"File not found: {filename}"
         }
     except Exception as e:
+        logger.exception(
+            "Failed to load file metadata",
+            metadata={"file_path": normalized_path, "vault_root": vault_root},
+        )
         if get_virtual_mount_key(normalized_path):
             return {
                 "filepath": filepath_without_ext,
@@ -134,15 +160,9 @@ class InputFileDirective(DirectiveProcessor):
         {next-week}       - Files from next week  
         {this-month}      - Files from current month
         {last-month}      - Files from previous month
-        {latest}          - Most recent file by date
-        {latest:N}        - N most recent files by date
         {yesterday:N}     - Files from last N days
         {this-week:N}     - Up to N files from current week
         {last-week:N}     - Up to N files from previous week
-        
-        # Stateful patterns (require state management)
-        {pending}         - Unprocessed files (oldest first, default limit 10)
-        {pending:N}       - Up to N oldest unprocessed files
         
         # Glob patterns (single directory only, no recursion)
         *.md              - All .md files in vault root
@@ -153,8 +173,8 @@ class InputFileDirective(DirectiveProcessor):
     Examples:
         @input file:goals.md                    # Direct file reference
         @input file:journal/{today}             # Today's journal entry
-        @input file:journal/{latest:3}          # 3 most recent journal files
-        @input file:notes/{pending:5}           # 5 oldest unprocessed notes
+        @input file:journal/* (latest, limit=3) # 3 most recent journal files
+        @input file:notes/* (pending, limit=5)  # 5 oldest unprocessed notes
         @input file:projects/{this-week}        # All files from current week
         @input file:*.md                        # All markdown files in root
         @input file:journal/*.md                # All journal files
@@ -174,25 +194,13 @@ class InputFileDirective(DirectiveProcessor):
         return "input"
 
     def _parse_input_target_and_parameters(self, value: str) -> tuple[str, Dict[str, str]]:
-        allowed_parameters = {
-            "required",
-            "refs_only",
-            "refs-only",
-            "images",
-            "head",
-            "properties",
-            "output",
-            "write-mode",
-            "write_mode",
-            "scope",
-        }
         base_value, parameters = DirectiveValueParser.parse_value_with_parameters(
             value.strip(),
-            allowed_parameters=allowed_parameters,
+            allowed_parameters=INPUT_ALLOWED_PARAMETERS,
         )
         if self._has_unparsed_known_param_assignment(
             value=value,
-            allowed_parameters=allowed_parameters,
+            allowed_parameters=INPUT_ALLOWED_PARAMETERS,
             parsed_parameters={k.lower() for k in parameters.keys()},
         ):
             raise ValueError(
@@ -264,26 +272,27 @@ class InputFileDirective(DirectiveProcessor):
         # Validate parameters
         for param_name, param_value in parameters.items():
             param_name = param_name.lower()
-            if param_name not in {
-                'required',
-                'refs_only',
-                'refs-only',
-                'images',
-                'head',
-                'properties',
-                'output',
-                'write-mode',
-                'write_mode',
-                'scope',
-            }:
+            if param_name not in INPUT_ALLOWED_PARAMETERS:
                 return False
-            if param_name in {'required', 'refs_only', 'refs-only'}:
+            if param_name in INPUT_BOOLEAN_PARAMS:
                 if param_value.lower() not in ['true', 'false', 'yes', 'no', '1', '0']:
                     return False
             if param_name == 'images':
                 if param_value.lower() not in {'auto', 'ignore'}:
                     return False
-            if param_name == 'head':
+            if param_name == 'limit':
+                try:
+                    if int(param_value) <= 0:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            if param_name == 'order':
+                if param_value.lower() not in {'mtime', 'ctime', 'alphanum', 'filename_dt'}:
+                    return False
+            if param_name == 'dir':
+                if param_value.lower() not in {'asc', 'desc'}:
+                    return False
+            if param_name in {'head', 'tail'}:
                 try:
                     if int(param_value) <= 0:
                         return False
@@ -312,75 +321,36 @@ class InputFileDirective(DirectiveProcessor):
 
         # Parse optional parameters
         base_value, parameters = self._parse_input_target_and_parameters(value)
-        required = parameters.get('required', '').lower() in ['true', 'yes', '1']
+        self._validate_parameter_combinations(base_value, parameters)
+        required = self._is_truthy_param(parameters, "required")
         refs_only = (
-            parameters.get('refs_only', parameters.get('refs-only', '')).lower()
-            in ['true', 'yes', '1']
+            self._is_truthy_param(parameters, "refs_only")
+            or self._is_truthy_param(parameters, "refs-only")
         )
         images_policy = parameters.get("images", "auto").strip().lower() or "auto"
-        head_chars = self._parse_head_chars(parameters.get('head'))
+        head_chars, tail_chars = self._parse_truncation_parameters(parameters)
         properties_enabled, properties_keys = self._parse_properties_mode(parameters.get('properties'))
         output_target_value = parameters.get('output')
         write_mode_param = parameters.get('write-mode') or parameters.get('write_mode')
         scope_value = parameters.get('scope')
+        selector_options = self._parse_selector_options(parameters)
 
         if base_value.startswith("variable:"):
             variable_name = base_value[len("variable:"):].strip()
-            buffer_store = get_buffer_store_for_scope(
-                scope=scope_value,
-                default_scope=context.get("buffer_scope", "run"),
-                buffer_store=context.get("buffer_store"),
-                buffer_store_registry=context.get("buffer_store_registry"),
+            results = self._resolve_variable_target(
+                variable_name=variable_name,
+                required=required,
+                refs_only=refs_only,
+                images_policy=images_policy,
+                properties_enabled=properties_enabled,
+                properties_keys=properties_keys,
+                head_chars=head_chars,
+                tail_chars=tail_chars,
+                context=context,
+                scope_value=scope_value,
             )
-            display_name = f"variable: {variable_name}"
-            if buffer_store is None:
-                if required:
-                    return [{
-                        '_workflow_signal': 'skip_step',
-                        'reason': f"Required input variable not available: {variable_name}",
-                    }]
-                return [{
-                    "filepath": display_name,
-                    "filename": variable_name,
-                    "content": "",
-                    "found": False,
-                    "error": "Variable store unavailable",
-                    "images_policy": images_policy,
-                }]
-
-            entry = buffer_store.get(variable_name)
-            if entry is None:
-                if required:
-                    return [{
-                        '_workflow_signal': 'skip_step',
-                        'reason': f"Required input variable not found: {variable_name}",
-                    }]
-                return [{
-                    "filepath": display_name,
-                    "filename": variable_name,
-                    "content": "",
-                    "found": False,
-                    "error": "Variable not found",
-                    "images_policy": images_policy,
-                }]
-
-            content_value = entry.content or ""
-            result = {
-                "filepath": display_name,
-                "filename": variable_name,
-                "content": "" if refs_only else content_value,
-                "found": True,
-                "error": None,
-                "images_policy": images_policy,
-            }
-            if refs_only:
-                result["refs_only"] = True
-            else:
-                if properties_enabled:
-                    result = self._apply_properties_mode(result, properties_keys)
-                if head_chars is not None:
-                    result = self._truncate_result_content(result, head_chars)
-            results = [result]
+            if results and results[0].get("_workflow_signal") == "skip_step":
+                return results
             if output_target_value:
                 return self._route_input_results(
                     results,
@@ -413,20 +383,23 @@ class InputFileDirective(DirectiveProcessor):
             # Direct file reference
             result_files = [load_file_with_metadata(file_path, vault_path)]
 
+        # Apply selection pipeline (mode filter, ordering, limit) to resolved file candidates.
+        result_files = self._apply_selector_mode(
+            result_files=result_files,
+            input_expression=file_path,
+            vault_path=vault_path,
+            selector_options=selector_options,
+            state_manager=context.get("state_manager"),
+        )
+
         # If required=true and no files found, return skip signal
         # Check both: empty list OR all files have found=False
         if required:
             if len(result_files) == 0:
-                return [{
-                    '_workflow_signal': 'skip_step',
-                    'reason': f'No required input files found: {file_path}'
-                }]
+                return [self._skip_step_result(f"No required input files found: {file_path}")]
             # Check if all files have found=False
             if all(not file_data.get('found', True) for file_data in result_files):
-                return [{
-                    '_workflow_signal': 'skip_step',
-                    'reason': f'No required input files found: {file_path}'
-                }]
+                return [self._skip_step_result(f"No required input files found: {file_path}")]
 
         # If refs_only=true, strip content to reduce prompt size but retain metadata
         if refs_only:
@@ -442,9 +415,13 @@ class InputFileDirective(DirectiveProcessor):
                     if isinstance(file_data, dict) else file_data
                     for file_data in result_files
                 ]
-            if head_chars is not None:
+            if head_chars is not None or tail_chars is not None:
                 result_files = [
-                    self._truncate_result_content(file_data, head_chars)
+                    self._truncate_result_content(
+                        file_data,
+                        head_chars=head_chars,
+                        tail_chars=tail_chars,
+                    )
                     if isinstance(file_data, dict) else file_data
                     for file_data in result_files
                 ]
@@ -465,16 +442,146 @@ class InputFileDirective(DirectiveProcessor):
 
         return result_files
 
-    def _parse_head_chars(self, head_value: Optional[str]) -> Optional[int]:
-        if head_value is None or str(head_value).strip() == "":
+    def _parse_positive_int_param(self, raw_value: Optional[str], param_name: str) -> Optional[int]:
+        if raw_value is None or str(raw_value).strip() == "":
             return None
         try:
-            parsed = int(head_value)
+            parsed = int(raw_value)
         except (TypeError, ValueError):
-            raise ValueError("head must be a positive integer") from None
+            raise ValueError(f"{param_name} must be a positive integer") from None
         if parsed <= 0:
-            raise ValueError("head must be a positive integer")
+            raise ValueError(f"{param_name} must be a positive integer")
         return parsed
+
+    def _parse_truncation_parameters(self, parameters: Dict[str, str]) -> tuple[Optional[int], Optional[int]]:
+        head_chars = self._parse_positive_int_param(parameters.get("head"), "head")
+        tail_chars = self._parse_positive_int_param(parameters.get("tail"), "tail")
+        return head_chars, tail_chars
+
+    def _validate_parameter_combinations(self, base_value: str, parameters: Dict[str, str]) -> None:
+        """Validate cross-parameter rules in one place."""
+        selection_param_keys = {"pending", "latest", "limit", "order", "dir", "dt_pattern", "dt_format"}
+
+        if parameters.get("head") and parameters.get("tail"):
+            raise ValueError("head and tail cannot be used together")
+
+        if base_value.startswith("variable:") and any(key in parameters for key in selection_param_keys):
+            raise ValueError(
+                "Selection parameters (pending/latest/limit/order/dir/dt_*) "
+                "are only supported for @input file targets"
+            )
+
+        pending_enabled = self._is_truthy_param(parameters, "pending")
+        latest_enabled = self._is_truthy_param(parameters, "latest")
+        if pending_enabled and latest_enabled:
+            raise ValueError("Only one selector mode is supported: choose either pending or latest")
+
+        selector_mode: Optional[str] = None
+        if pending_enabled:
+            selector_mode = "pending"
+        elif latest_enabled:
+            selector_mode = "latest"
+
+        raw_order = (parameters.get("order") or "").strip().lower()
+        if raw_order:
+            if selector_mode == "pending":
+                valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+            elif selector_mode == "latest":
+                valid_orders = {"mtime", "ctime", "filename_dt"}
+            else:
+                valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+            if raw_order not in valid_orders:
+                allowed = ", ".join(sorted(valid_orders))
+                raise ValueError(
+                    f"order '{raw_order}' is not supported for {selector_mode}; use: {allowed}"
+                )
+
+        dt_pattern = (parameters.get("dt_pattern") or "").strip()
+        dt_format = (parameters.get("dt_format") or "").strip()
+        if raw_order == "filename_dt":
+            if not dt_pattern or not dt_format:
+                raise ValueError("filename_dt ordering requires dt_pattern and dt_format")
+        elif dt_pattern or dt_format:
+            raise ValueError("dt_pattern/dt_format require order=filename_dt")
+
+    def _is_truthy_param(self, parameters: Dict[str, str], name: str) -> bool:
+        if name not in parameters:
+            return False
+        return DirectiveValueParser.parse_boolean(parameters.get(name, "true"))
+
+    def _skip_step_result(self, reason: str) -> Dict[str, Any]:
+        return {
+            "_workflow_signal": "skip_step",
+            "reason": reason,
+        }
+
+    def _resolve_variable_target(
+        self,
+        *,
+        variable_name: str,
+        required: bool,
+        refs_only: bool,
+        images_policy: str,
+        properties_enabled: bool,
+        properties_keys: Optional[List[str]],
+        head_chars: Optional[int],
+        tail_chars: Optional[int],
+        context: Dict[str, Any],
+        scope_value: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        buffer_store = get_buffer_store_for_scope(
+            scope=scope_value,
+            default_scope=context.get("buffer_scope", "run"),
+            buffer_store=context.get("buffer_store"),
+            buffer_store_registry=context.get("buffer_store_registry"),
+        )
+        display_name = f"variable: {variable_name}"
+        if buffer_store is None:
+            if required:
+                return [self._skip_step_result(f"Required input variable not available: {variable_name}")]
+            return [{
+                "filepath": display_name,
+                "filename": variable_name,
+                "content": "",
+                "found": False,
+                "error": "Variable store unavailable",
+                "images_policy": images_policy,
+            }]
+
+        entry = buffer_store.get(variable_name)
+        if entry is None:
+            if required:
+                return [self._skip_step_result(f"Required input variable not found: {variable_name}")]
+            return [{
+                "filepath": display_name,
+                "filename": variable_name,
+                "content": "",
+                "found": False,
+                "error": "Variable not found",
+                "images_policy": images_policy,
+            }]
+
+        content_value = entry.content or ""
+        result = {
+            "filepath": display_name,
+            "filename": variable_name,
+            "content": "" if refs_only else content_value,
+            "found": True,
+            "error": None,
+            "images_policy": images_policy,
+        }
+        if refs_only:
+            result["refs_only"] = True
+        else:
+            if properties_enabled:
+                result = self._apply_properties_mode(result, properties_keys)
+            if head_chars is not None or tail_chars is not None:
+                result = self._truncate_result_content(
+                    result,
+                    head_chars=head_chars,
+                    tail_chars=tail_chars,
+                )
+        return [result]
 
     def _parse_properties_mode(self, properties_value: Optional[str]) -> tuple[bool, Optional[List[str]]]:
         if properties_value is None:
@@ -491,6 +598,72 @@ class InputFileDirective(DirectiveProcessor):
         if not keys:
             raise ValueError("properties must be true/false or a comma-separated key list")
         return True, keys
+
+    def _parse_selector_options(self, parameters: Dict[str, str]) -> Dict[str, Any]:
+        """Parse selector-mode options for @input file targets after validation."""
+        pending_enabled = self._is_truthy_param(parameters, "pending")
+        latest_enabled = self._is_truthy_param(parameters, "latest")
+
+        selector_mode: Optional[str] = None
+        if pending_enabled:
+            selector_mode = "pending"
+        elif latest_enabled:
+            selector_mode = "latest"
+
+        raw_limit = (parameters.get("limit") or "").strip()
+        raw_order = (parameters.get("order") or "").strip().lower()
+        raw_dir = (parameters.get("dir") or "").strip().lower()
+        dt_pattern = (parameters.get("dt_pattern") or "").strip() or None
+        dt_format = (parameters.get("dt_format") or "").strip() or None
+
+        limit: Optional[int] = None
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                raise ValueError("limit must be a positive integer") from None
+            if limit <= 0:
+                raise ValueError("limit must be a positive integer")
+
+        if selector_mode == "pending":
+            if not raw_order:
+                raw_order = "ctime"
+            if not raw_dir:
+                raw_dir = "asc"
+            if limit is None:
+                limit = 10
+            valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+        elif selector_mode == "latest":
+            if not raw_order:
+                raw_order = "mtime"
+            if not raw_dir:
+                raw_dir = "desc"
+            if limit is None:
+                limit = 1
+            valid_orders = {"mtime", "ctime", "filename_dt"}
+        else:
+            if not raw_order:
+                raw_order = "alphanum"
+            if not raw_dir:
+                raw_dir = "asc"
+            valid_orders = {"mtime", "ctime", "alphanum", "filename_dt"}
+
+        # Cross-parameter order compatibility is validated in _validate_parameter_combinations.
+        if raw_order not in valid_orders:
+            allowed = ", ".join(sorted(valid_orders))
+            raise ValueError(f"order must be one of: {allowed}")
+
+        if raw_dir not in {"asc", "desc"}:
+            raise ValueError("dir must be 'asc' or 'desc'")
+
+        return {
+            "mode": selector_mode,
+            "limit": limit,
+            "order": raw_order,
+            "dir": raw_dir,
+            "dt_pattern": dt_pattern,
+            "dt_format": dt_format,
+        }
 
     def _apply_properties_mode(
         self,
@@ -531,7 +704,13 @@ class InputFileDirective(DirectiveProcessor):
             return "true" if value else "false"
         return str(value)
 
-    def _truncate_result_content(self, file_data: Dict[str, Any], head_chars: int) -> Dict[str, Any]:
+    def _truncate_result_content(
+        self,
+        file_data: Dict[str, Any],
+        *,
+        head_chars: Optional[int],
+        tail_chars: Optional[int],
+    ) -> Dict[str, Any]:
         if not file_data.get("found", True):
             return file_data
         if file_data.get("refs_only"):
@@ -540,14 +719,170 @@ class InputFileDirective(DirectiveProcessor):
         if not isinstance(content, str):
             return file_data
         original_chars = len(content)
-        file_data["head"] = head_chars
         file_data["content_original_chars"] = original_chars
-        if original_chars <= head_chars:
+        truncate_chars = head_chars if head_chars is not None else tail_chars
+        if truncate_chars is None:
+            return file_data
+
+        if head_chars is not None:
+            file_data["head"] = head_chars
+        if tail_chars is not None:
+            file_data["tail"] = tail_chars
+
+        if original_chars <= truncate_chars:
             file_data["content_truncated"] = False
             return file_data
-        file_data["content"] = content[:head_chars]
+        if head_chars is not None:
+            file_data["content"] = content[:head_chars]
+        else:
+            file_data["content"] = content[-tail_chars:]
         file_data["content_truncated"] = True
         return file_data
+
+    def _apply_selector_mode(
+        self,
+        *,
+        result_files: List[Dict[str, Any]],
+        input_expression: str,
+        vault_path: str,
+        selector_options: Dict[str, Any],
+        state_manager,
+    ) -> List[Dict[str, Any]]:
+        """Apply selection options to resolved file candidates."""
+        candidate_paths: List[str] = []
+        for file_data in result_files:
+            if not isinstance(file_data, dict) or not file_data.get("found", True):
+                continue
+
+            source_path = file_data.get("source_path") or file_data.get("filepath")
+            if not isinstance(source_path, str) or not source_path.strip():
+                continue
+
+            normalized_source = source_path.strip()
+            if "." not in os.path.basename(normalized_source):
+                normalized_source = f"{normalized_source}.md"
+
+            candidate_path = (
+                normalized_source
+                if os.path.isabs(normalized_source)
+                else os.path.join(vault_path, normalized_source)
+            )
+
+            if os.path.isdir(candidate_path):
+                raise ValueError(
+                    f"Input pattern '{input_expression}' resolved to directories; "
+                    "use an explicit file pattern like 'projects/*/*.md' or 'projects/*/notes.md'"
+                )
+            if os.path.isfile(candidate_path):
+                candidate_paths.append(candidate_path)
+
+        if not candidate_paths:
+            # Preserve unresolved file diagnostics instead of collapsing to an empty result.
+            return [file_data for file_data in result_files if isinstance(file_data, dict)]
+
+        mode = selector_options.get("mode")
+        selected_paths: List[str]
+        if mode == "latest":
+            sorted_paths = self.pattern_utils.sort_files(
+                candidate_paths,
+                order=selector_options["order"],
+                direction=selector_options["dir"],
+                filename_dt_pattern=selector_options.get("dt_pattern"),
+                filename_dt_format=selector_options.get("dt_format"),
+            )
+            selected_paths = sorted_paths[: selector_options["limit"]]
+        elif mode == "pending":
+            if state_manager:
+                selected_paths = state_manager.get_pending_files(
+                    candidate_paths,
+                    self._build_pending_state_pattern(input_expression, selector_options),
+                    selector_options["limit"],
+                    order=selector_options["order"],
+                    direction=selector_options["dir"],
+                    filename_dt_pattern=selector_options.get("dt_pattern"),
+                    filename_dt_format=selector_options.get("dt_format"),
+                )
+            else:
+                sorted_paths = self.pattern_utils.sort_files(
+                    candidate_paths,
+                    order=selector_options["order"],
+                    direction=selector_options["dir"],
+                    filename_dt_pattern=selector_options.get("dt_pattern"),
+                    filename_dt_format=selector_options.get("dt_format"),
+                )
+                selected_paths = sorted_paths[: selector_options["limit"]]
+        elif mode is None:
+            sorted_paths = self.pattern_utils.sort_files(
+                candidate_paths,
+                order=selector_options["order"],
+                direction=selector_options["dir"],
+                filename_dt_pattern=selector_options.get("dt_pattern"),
+                filename_dt_format=selector_options.get("dt_format"),
+            )
+            limit = selector_options.get("limit")
+            selected_paths = sorted_paths if limit is None else sorted_paths[:limit]
+        else:
+            raise ValueError(f"Unsupported selector mode: {mode}")
+
+        selected_results: List[Dict[str, Any]] = []
+        for file_path in selected_paths:
+            relative_path = os.path.relpath(file_path, vault_path).replace("\\", "/")
+            if relative_path.endswith(".md"):
+                relative_path = relative_path[:-3]
+            selected_results.append(load_file_with_metadata(relative_path, vault_path))
+
+        if mode == "pending" and selected_results:
+            file_records = []
+            for file_data in selected_results:
+                if not file_data.get("found"):
+                    continue
+                source_path = str(file_data.get("source_path") or file_data.get("filepath") or "").strip()
+                if source_path:
+                    normalized_source = source_path
+                    if "." not in os.path.basename(normalized_source):
+                        normalized_source = f"{normalized_source}.md"
+                    full_path = (
+                        normalized_source
+                        if os.path.isabs(normalized_source)
+                        else os.path.join(vault_path, normalized_source)
+                    )
+                else:
+                    full_path = ""
+
+                if full_path and os.path.isfile(full_path):
+                    content_hash = hash_file_bytes(full_path, length=None)
+                elif file_data.get("content"):
+                    content_hash = hash_file_content(file_data["content"], length=None)
+                else:
+                    continue
+
+                if content_hash:
+                    file_records.append(
+                        {
+                            "content_hash": content_hash,
+                            "filepath": file_data["filepath"],
+                        }
+                    )
+            selected_results[0]["_state_metadata"] = {
+                "requires_tracking": True,
+                "pattern": self._build_pending_state_pattern(input_expression, selector_options),
+                "file_records": file_records,
+            }
+
+        return selected_results
+
+    def _build_pending_state_pattern(
+        self,
+        input_expression: str,
+        selector_options: Dict[str, Any],
+    ) -> str:
+        """Build canonical selector fingerprint for pending state tracking."""
+        return (
+            f"target={input_expression}|mode=pending|limit={selector_options.get('limit')}"
+            f"|order={selector_options.get('order')}|dir={selector_options.get('dir')}"
+            f"|dt_pattern={selector_options.get('dt_pattern') or ''}"
+            f"|dt_format={selector_options.get('dt_format') or ''}"
+        )
 
     def _route_input_results(
         self,
@@ -786,7 +1121,7 @@ class InputFileDirective(DirectiveProcessor):
         return result_files
     
     def _resolve_brace_pattern(self, value: str, vault_path: str, **context) -> List[Dict[str, Any]]:
-        """Handle brace patterns like {latest:3}, {pending:5}, {today}."""
+        """Handle brace patterns like {today}, {yesterday:3}."""
         brace_patterns = re.findall(r'\{([^}]+)\}', value)
         
         if len(brace_patterns) != 1:
@@ -797,43 +1132,28 @@ class InputFileDirective(DirectiveProcessor):
         fmt = None
         if count is None:
             base_pattern, fmt = self.pattern_utils.parse_pattern_with_optional_format(pattern)
-        
-        # Extract directory path from parameter value
+        if base_pattern == "pending":
+            raise ValueError(
+                "Legacy '{pending}' syntax is no longer supported. "
+                "Use selector parameters, e.g. @input file: tasks/* (pending, limit=5)"
+            )
+        if base_pattern == "latest":
+            raise ValueError(
+                "Legacy '{latest}' syntax is no longer supported. "
+                "Use selector parameters, e.g. @input file: journal/* (latest, limit=1)"
+            )
+
         pattern_start = value.find(f"{{{pattern}}}")
-        pattern_end = pattern_start + len(pattern) + 2
-        is_dir_mode = (
-            base_pattern == 'latest'
-            and fmt is None
-            and pattern_end < len(value)
-            and value[pattern_end] == '/'
-        )
         if pattern_start > 0:
-            # Path prefix exists (e.g., "journal/{latest:3}")
             path_prefix = value[:pattern_start]
             search_directory = os.path.join(vault_path, path_prefix)
         else:
-            # No path prefix (e.g., "{latest:3}")
             search_directory = vault_path
-        
-        # Handle {pending} pattern with state management
-        if base_pattern == 'pending' and fmt is None:
-            return self._resolve_pending_pattern(value, search_directory, vault_path, count, context.get('state_manager'))
-        
-        # Handle time-based patterns
-        elif base_pattern == 'latest' and is_dir_mode:
-            return self._resolve_latest_directory_pattern(
-                value,
-                vault_path,
-                path_prefix if pattern_start > 0 else "",
-                pattern_end,
-                count,
-            )
-        elif count is not None or (base_pattern == 'latest' and fmt is None):
-            # Multi-file patterns like {latest:3} (or {latest} -> {latest:1})
-            resolved_count = count if count is not None else 1
+
+        if count is not None:
             return self._resolve_time_based_multi_pattern(
                 base_pattern,
-                resolved_count,
+                count,
                 search_directory,
                 vault_path,
                 value,
@@ -841,9 +1161,7 @@ class InputFileDirective(DirectiveProcessor):
                 context.get('reference_date'),
                 context.get('week_start_day', 0),
             )
-        else:
-            # Single file patterns like {today}
-            return self._resolve_single_time_pattern(value, vault_path, **context)
+        return self._resolve_single_time_pattern(value, vault_path, **context)
 
     def _resolve_latest_directory_pattern(
         self,

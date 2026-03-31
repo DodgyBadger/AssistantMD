@@ -26,7 +26,7 @@ class WorkflowDefinition:
     workflow_name: str                  # Original workflow name string
     week_start_day: str
     description: str
-    enabled: bool = True
+    enabled: bool = False
 
     @property
     def global_id(self) -> str:
@@ -51,4 +51,3 @@ class WorkflowDefinition:
             'friday': 4, 'saturday': 5, 'sunday': 6
         }
         return day_mapping[self.week_start_day]
-

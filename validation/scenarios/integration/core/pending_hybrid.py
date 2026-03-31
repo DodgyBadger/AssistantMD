@@ -1,5 +1,5 @@
 """
-Integration scenario covering hybrid {pending} handling.
+Integration scenario covering hybrid pending-selector handling.
 
 Ensures in-place edits made during a run don't re-queue files, while later edits
 do re-queue.
@@ -49,7 +49,6 @@ class PendingHybridScenario(BaseScenario):
             expected={"workflow_id": "PendingHybridVault/pending_hybrid"},
         )
 
-        pattern = "tasks/{pending:5}"
         workflow_id = "PendingHybridVault/pending_hybrid"
 
         # Run 1: process both files
@@ -62,7 +61,6 @@ class PendingHybridScenario(BaseScenario):
             name="pending_files_resolved",
             expected={
                 "workflow_id": workflow_id,
-                "pattern": pattern,
                 "pending_count": 2,
             },
         )
@@ -83,7 +81,6 @@ class PendingHybridScenario(BaseScenario):
             name="pending_files_resolved",
             expected={
                 "workflow_id": workflow_id,
-                "pattern": pattern,
                 "pending_count": 0,
             },
         )
@@ -101,7 +98,6 @@ class PendingHybridScenario(BaseScenario):
             name="pending_files_resolved",
             expected={
                 "workflow_id": workflow_id,
-                "pattern": pattern,
                 "pending_count": 1,
                 "pending_paths": ["tasks/task1"],
             },
@@ -116,7 +112,6 @@ class PendingHybridScenario(BaseScenario):
             name="pending_files_resolved",
             expected={
                 "workflow_id": workflow_id,
-                "pattern": pattern,
                 "pending_count": 0,
             },
         )
@@ -134,7 +129,7 @@ description: Pending hybrid validation
 
 ## STEP1
 @model test
-@input file: tasks/{pending:5}
+@input file: tasks/* (pending, limit=5)
 @output file: logs/run-{today}
 
 Summarize the pending files encountered. Do not modify file contents.

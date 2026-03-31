@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict
 
 from core.logger import UnifiedLogger
-from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR, CHAT_SESSIONS_DIR, WORKFLOW_LOGS_DIR
+from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR, CHAT_SESSIONS_DIR
 
 
 class VaultManager:
@@ -33,10 +33,8 @@ class VaultManager:
         # Create basic directory structure
         workflows_dir = vault_path / ASSISTANTMD_ROOT_DIR / WORKFLOW_DEFINITIONS_DIR
         chat_sessions_dir = vault_path / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
-        logs_dir = vault_path / ASSISTANTMD_ROOT_DIR / WORKFLOW_LOGS_DIR
         workflows_dir.mkdir(parents=True, exist_ok=True)
         chat_sessions_dir.mkdir(parents=True, exist_ok=True)
-        logs_dir.mkdir(parents=True, exist_ok=True)
         
         self.created_vaults[name] = vault_path
         return vault_path

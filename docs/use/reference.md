@@ -6,10 +6,23 @@
 
 Syntax: `@directive value (optional params)` or `@directive: value (optional params)`  
 Directives must be at the start of a step/section, before normal prompt text.  
+Optionally, the directive section may be wrapped in a code block to avoid Obsidian auto-formatting. The code block must appear at the very start of the step and every non-empty line inside it must be a directive line.  
 File paths are vault-relative. For `file:` targets, `.md` is auto-added if missing.  
 Parameters are comma-separated. If a parameter value contains commas, wrap that value in quotes.  
 Bare parameters are treated as booleans, e.g. `required` is equivalent to `required=true`.  
 Paths with special characters can be quoted or written as Obsidian wikilinks (`[[...]]`).  
+
+Example:
+
+````md
+## Step Name
+```
+@input file: inbox/* (pending, limit=5)
+@output variable: batch
+```
+
+Process pending notes.
+````
 
 <details>
 <summary>@output</summary>
@@ -71,6 +84,9 @@ Control image attachment behavior for file inputs.
 `head=N`  
 Inline only the first `N` characters per resolved input (file or variable).
 
+`tail=N`  
+Inline only the last `N` characters per resolved input (file or variable).
+
 `properties` or `properties="KEY1,KEY2"`  
 Inline frontmatter properties only. With no value, includes all properties. With keys, includes only matching properties.
 
@@ -84,11 +100,28 @@ Applies when `output=` routes to `file:` or `variable:` destinations.
 If used with `output=`, behaviour matches `@output` directive for variable destinations. Otherwise it controls where input variable is read from (run or session scope).  
 E.g. `@input variable:foo (scope=session)` reads foo from  session scope. This can be used to pass data between chat agent and context manager.
 
+`pending` or `latest`  
+File-selection selector modes. Exactly one selector mode may be active.
+
+`limit=N`  
+Maximum files returned after selector ordering. Requires `pending` or `latest`.
+
+`order=mtime|ctime|alphanum|filename_dt`  
+Selector ordering strategy. `latest` supports `mtime|ctime|filename_dt`; `pending` supports all four. Defaults: `pending=ctime`, `latest=mtime`.
+
+`dir=asc|desc`  
+Selector direction. Defaults: `pending=asc`, `latest=desc`.
+
+`dt_pattern=REGEX`, `dt_format=FORMAT`  
+Required together when `order=filename_dt`.
+
 ### Notes:
 - Use multiple `@input` directives if you want to load multiple sources. Comma separated list on a single directive does not work.
 - In context templates, `@input file:myfile (output=context)` will route the file contents immediately into chat agent context, bypassing the LLM.  
 - Precedence is `refs_only` > `properties` > `head`.
 - If `properties` is enabled and no frontmatter properties are found, input falls back to refs-only for that item.
+- Selector pipeline is: path/glob/date substitution -> selector (`pending` or `latest`) -> order/dir -> limit.
+- `@input file:` selectors operate on files only. Directory-only matches are rejected; use explicit file patterns like `projects/*/*.md`.
 - Local image files are supported (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.tiff`, `.tif`).
 - Markdown files may include embedded images via `![alt](path)` or `![[image.png]]`; image refs are preserved in order.
 - Remote image URLs remain references by default (no automatic download/attach).
@@ -97,11 +130,11 @@ E.g. `@input variable:foo (scope=session)` reads foo from  session scope. This c
 - `@input file: notes/*.md`
 - `@input file: images/diagram.png`
 - `@input variable: foo`
-- `@input file: inbox/{pending:5} (required, refs_only)`
+- `@input file: inbox/* (pending, limit=5, required, refs_only)`
 - `@input file: notes/with-image.md (images=ignore)`
 - `@input file: notes/large.md (head=2000)`
 - `@input file: Projects/Plan (properties="status,owner")`
-- `@input file: inbox/{pending:3} (output=variable: batch, write_mode=new)`
+- `@input file: inbox/* (pending, limit=3, output=variable: batch, write_mode=new)`
 
 </details>
 
@@ -412,6 +445,7 @@ No optional parameters.
 
 ### Notes:
 - Affects scheduled runs only; manual runs still work.
+- If omitted, defaults to `false` (disabled) for scheduled execution.
 - Changing value requires vault rescan to take effect.
 
 ### Examples:
@@ -668,34 +702,6 @@ Supports `:FORMAT`. Default `MMMM`
 ### Examples:
 - `@header {month-name} Plan`
 - `@output file: plans/{month-name:MMM}`
-
-</details>
-
-<details>
-<summary>{latest}</summary>
-
-Applies to: `@input`  
-Description: Most recent file/folder by date in name. `{latest:N}` returns N recent files.  
-Does not support `:FORMAT`  
-Notes: `{latest:N}` is not supported in folder position (for example `myfiles/{latest:3}/*.md`).
-
-### Examples:
-- `@input file: journal/{latest}`
-- `@input file: journal/{latest:3}`
-
-</details>
-
-<details>
-<summary>{pending}</summary>
-
-Applies to: `@input`  
-Description: Resolves to unprocessed files. `{pending:N}` returns N unprocessed files (default 10 if omitted).  
-Does not support `:FORMAT`  
-Notes: Tracking is per workflow and per pattern string. Files are marked processed after a step that uses `{pending}`. Later edits can re-queue files. Within the same run, files already marked processed are not revisited by later `{pending}` resolutions.
-
-### Examples:
-- `@input file: tasks/{pending:5}`
-- `@input file: inbox/{pending} (required, refs_only)`
 
 </details>
 

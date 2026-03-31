@@ -39,7 +39,8 @@
 
   "containerEnv": {
     "CONTAINER_DATA_ROOT": "/app/data",
-    "CONTAINER_SYSTEM_ROOT": "/app/system"
+    "CONTAINER_SYSTEM_ROOT": "/app/system",
+    "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"
   },
 
   // Run setup once after container creation (avoid rerunning on every reopen)

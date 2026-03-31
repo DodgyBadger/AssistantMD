@@ -55,6 +55,38 @@ RUN apt-get update && apt-get install -y \
     tzdata \
     curl \
     ripgrep \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xvfb \
+    fonts-noto-color-emoji \
+    fonts-unifont \
+    libfontconfig1 \
+    libfreetype6 \
+    xfonts-scalable \
+    fonts-liberation \
+    fonts-ipafont-gothic \
+    fonts-wqy-zenhei \
+    fonts-tlwg-loma-otf \
+    fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -76,9 +108,16 @@ RUN set -eux; \
 # Set up application directory
 WORKDIR /app
 
+# Store Playwright browser binaries outside any specific user's home directory.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # Copy system Python packages from builder stage
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Install Chromium without the legacy headless shell; the app launches channel="chromium".
+RUN python -m playwright install --no-shell chromium && \
+    chmod -R a+rX /ms-playwright
 
 # Drop build-only tooling and caches to keep runtime image lean
 RUN rm -f /usr/local/bin/uv && rm -rf /root/.cache

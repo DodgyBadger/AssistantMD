@@ -16,6 +16,14 @@ settings:
     value: 120
     description: "Default timeout in seconds for external API calls."
     restart_required: false
+  browser_navigation_timeout_seconds:
+    value: 20
+    description: "Navigation timeout in seconds for the browser extraction tool."
+    restart_required: false
+  browser_selector_timeout_seconds:
+    value: 4
+    description: "Selector wait timeout in seconds for the browser extraction tool."
+    restart_required: false
   max_output_tokens:
     value: 0
     description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
@@ -279,6 +287,11 @@ tools:
     requires_secrets:
       - TAVILY_API_KEY
     user_editable: false
+  browser:
+    module: core.tools.browser
+    description: "Browser-based page extraction using Playwright"
+    requires_secrets: []
+    user_editable: false
   code_execution:
     module: core.tools.code_execution_piston
     description: "Multi-language code execution via Piston API"
@@ -286,6 +299,6 @@ tools:
     user_editable: false
   workflow_run:
     module: core.tools.workflow_run
-    description: "List and run workflows in the current vault"
+    description: "List, run, enable, and disable workflows in the current vault"
     requires_secrets: []
     user_editable: false

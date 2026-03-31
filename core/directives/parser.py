@@ -79,6 +79,70 @@ class ParsedDirectives:
 # Matches: @directive-name value or @directive-name: value
 # Groups: (directive-name, value)
 DIRECTIVE_PATTERN = re.compile(r'^@([a-zA-Z][a-zA-Z0-9\-_]*):?\s+(.+)$')
+FENCED_BLOCK_START_PATTERN = re.compile(r"^(?P<fence>`{3,})(?P<info>[^\n]*)$")
+
+
+def _build_cleaned_content(lines: List[str], start_idx: int) -> str:
+    """Return cleaned content from the first non-empty line at or after start_idx."""
+    if start_idx < len(lines):
+        content_start = start_idx
+        for i in range(start_idx, len(lines)):
+            if lines[i].strip():
+                content_start = i
+                break
+        cleaned_lines = lines[content_start:]
+        return '\n'.join(cleaned_lines)
+    return ""
+
+
+def _try_parse_initial_fenced_directives(lines: List[str]) -> Optional[ParsedDirectives]:
+    """Parse an initial fenced code block if it contains only directive lines."""
+    start_idx = 0
+    while start_idx < len(lines) and not lines[start_idx].strip():
+        start_idx += 1
+
+    if start_idx >= len(lines):
+        return None
+
+    opener_match = FENCED_BLOCK_START_PATTERN.match(lines[start_idx].strip())
+    if not opener_match:
+        return None
+
+    fence = opener_match.group("fence")
+    close_idx: Optional[int] = None
+    for i in range(start_idx + 1, len(lines)):
+        if lines[i].strip() == fence:
+            close_idx = i
+            break
+
+    block_lines = lines[start_idx + 1 : close_idx if close_idx is not None else len(lines)]
+    non_empty_block_lines = [line.strip() for line in block_lines if line.strip()]
+    if not non_empty_block_lines:
+        return None
+
+    if not all(is_valid_directive_line(line) for line in non_empty_block_lines):
+        return None
+
+    if close_idx is None:
+        raise DirectiveParsingError("Unclosed fenced directive block at start of step")
+
+    directives: Dict[str, List[str]] = {}
+    for line in non_empty_block_lines:
+        extracted = extract_directive_from_line(line)
+        if not extracted:
+            raise DirectiveParsingError("Invalid directive inside fenced directive block")
+        directive_name, directive_value = extracted
+        directives.setdefault(directive_name, []).append(directive_value)
+
+    cleaned_content = _build_cleaned_content(lines, close_idx + 1)
+    if cleaned_content:
+        first_cleaned_line = cleaned_content.split('\n', 1)[0].strip()
+        if is_valid_directive_line(first_cleaned_line):
+            raise DirectiveParsingError(
+                "Cannot mix fenced and inline directive syntax in the same step"
+            )
+
+    return ParsedDirectives(directives=directives, cleaned_content=cleaned_content)
 
 
 def parse_directives(content: str) -> ParsedDirectives:
@@ -114,6 +178,10 @@ def parse_directives(content: str) -> ParsedDirectives:
         return ParsedDirectives(directives={}, cleaned_content="")
     
     lines = content.split('\n')
+    fenced_result = _try_parse_initial_fenced_directives(lines)
+    if fenced_result is not None:
+        return fenced_result
+
     directives: Dict[str, List[str]] = {}
     directive_section_end = 0
     
@@ -143,18 +211,12 @@ def parse_directives(content: str) -> ParsedDirectives:
             break
     
     # Extract cleaned content (everything after directive section)
-    if directive_section_end < len(lines):
-        # Find first non-empty line after directives
-        content_start = directive_section_end
-        for i in range(directive_section_end, len(lines)):
-            if lines[i].strip():
-                content_start = i
-                break
-        
-        cleaned_lines = lines[content_start:]
-        cleaned_content = '\n'.join(cleaned_lines)
-    else:
-        cleaned_content = ""
+    cleaned_content = _build_cleaned_content(lines, directive_section_end)
+    if directives and cleaned_content:
+        cleaned_lines = cleaned_content.split('\n')
+        trailing_fenced_result = _try_parse_initial_fenced_directives(cleaned_lines)
+        if trailing_fenced_result is not None:
+            raise DirectiveParsingError("Cannot mix inline and fenced directive syntax in the same step")
     
     return ParsedDirectives(
         directives=directives,

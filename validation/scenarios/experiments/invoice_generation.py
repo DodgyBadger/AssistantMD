@@ -6,7 +6,7 @@ Tests critical billing reliability requirements:
 - No double-counting (no over-billing)
 - Accurate hour summation
 - Correct client grouping
-- Proper use of {pending} pattern to process all unprocessed timesheets
+- Proper use of pending selector to process all unprocessed timesheets
 """
 
 import sys
@@ -153,7 +153,7 @@ You are a precise invoice generator. Your job is to process ALL unprocessed bill
 @run-on sunday
 @model gpt
 @tools file_ops_safe, code_execution
-@input file: timesheets/{pending} (required)
+@input file: timesheets/* (pending, required)
 @input file: invoice-template.md
 
 Process all supplied billable hours logs and generate ONE CONSOLIDATED INVOICE per client.

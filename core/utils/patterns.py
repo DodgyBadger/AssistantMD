@@ -10,6 +10,8 @@ import glob
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 
+from core.constants import SUPPORTED_READ_FILE_TYPES
+
 
 class PatternUtilities:
     """Shared utilities for date/time calculations and file operations."""
@@ -147,12 +149,144 @@ class PatternUtilities:
         """Resolve glob patterns with security restrictions (no recursion)."""
         absolute_pattern = os.path.join(vault_root, pattern)
         matched_files = glob.glob(absolute_pattern)
-        
-        # Filter to only .md files and sort alphabetically  
-        md_files = [f for f in matched_files if f.endswith('.md') and os.path.isfile(f)]
-        md_files.sort()
-        
-        return md_files
+
+        matched_dirs = [f for f in matched_files if os.path.isdir(f)]
+
+        basename = os.path.basename(pattern.rstrip("/"))
+        has_explicit_extension = "." in basename
+        supported_matches = [
+            f
+            for f in matched_files
+            if os.path.isfile(f)
+            and os.path.splitext(f)[1].lower() in SUPPORTED_READ_FILE_TYPES
+        ]
+        if has_explicit_extension:
+            filtered_files = supported_matches
+        else:
+            filtered_files = [
+                f
+                for f in supported_matches
+                if SUPPORTED_READ_FILE_TYPES.get(os.path.splitext(f)[1].lower()) == "markdown"
+            ]
+
+        if not filtered_files and matched_dirs:
+            raise ValueError(
+                f"Pattern '{pattern}' resolved to directories only; "
+                "use an explicit file pattern like 'folder/*/*.md' or 'folder/*/notes.md'"
+            )
+        filtered_files.sort()
+
+        return filtered_files
+
+    @staticmethod
+    def sort_files(
+        files: List[str],
+        *,
+        order: str,
+        direction: str = "asc",
+        filename_dt_pattern: Optional[str] = None,
+        filename_dt_format: Optional[str] = None,
+    ) -> List[str]:
+        """Return files sorted with deterministic ordering options."""
+        normalized_order = (order or "").strip().lower()
+        normalized_direction = (direction or "").strip().lower() or "asc"
+        if normalized_direction not in {"asc", "desc"}:
+            raise ValueError("dir must be 'asc' or 'desc'")
+
+        reverse = normalized_direction == "desc"
+
+        if normalized_order == "mtime":
+            return sorted(
+                files,
+                key=lambda path: (os.path.getmtime(path), os.path.basename(path).lower()),
+                reverse=reverse,
+            )
+        if normalized_order == "ctime":
+            return sorted(
+                files,
+                key=lambda path: (os.path.getctime(path), os.path.basename(path).lower()),
+                reverse=reverse,
+            )
+        if normalized_order == "alphanum":
+            return sorted(files, key=PatternUtilities._alphanum_sort_key, reverse=reverse)
+        if normalized_order == "filename_dt":
+            if not filename_dt_pattern or not filename_dt_format:
+                raise ValueError(
+                    "filename_dt ordering requires dt_pattern and dt_format"
+                )
+
+            dated_files: List[tuple[datetime, str]] = []
+            failures: List[str] = []
+            for path in files:
+                parsed = PatternUtilities.extract_datetime_from_filename_with_format(
+                    path,
+                    pattern=filename_dt_pattern,
+                    fmt=filename_dt_format,
+                )
+                if parsed is None:
+                    failures.append(os.path.basename(path))
+                    continue
+                dated_files.append((parsed, path))
+
+            if failures:
+                sample = ", ".join(failures[:3])
+                raise ValueError(
+                    "filename_dt ordering could not parse one or more filenames "
+                    f"(examples: {sample})"
+                )
+
+            dated_files.sort(key=lambda item: item[0], reverse=reverse)
+            return [path for _, path in dated_files]
+
+        raise ValueError(
+            "order must be one of: mtime, ctime, alphanum, filename_dt"
+        )
+
+    @staticmethod
+    def extract_datetime_from_filename_with_format(
+        filepath: str,
+        *,
+        pattern: str,
+        fmt: str,
+    ) -> Optional[datetime]:
+        """Extract and parse datetime from filename via explicit regex + format."""
+        filename = os.path.basename(filepath)
+        match = re.search(pattern, filename)
+        if not match:
+            return None
+        if match.groups():
+            candidate = match.group(1)
+        else:
+            candidate = match.group(0)
+
+        strptime_fmt = PatternUtilities._custom_format_to_strptime(fmt)
+        return datetime.strptime(candidate, strptime_fmt)
+
+    @staticmethod
+    def _custom_format_to_strptime(fmt: str) -> str:
+        """Convert custom tokens (YYYY/MM/DD...) to Python strptime format."""
+        token_map = [
+            ("YYYY", "%Y"),
+            ("YY", "%y"),
+            ("MM", "%m"),
+            ("DD", "%d"),
+            ("HH", "%H"),
+            ("mm", "%M"),
+            ("ss", "%S"),
+        ]
+        converted = fmt
+        for token, replacement in token_map:
+            converted = converted.replace(token, replacement)
+        return converted
+
+    @staticmethod
+    def _alphanum_sort_key(filepath: str):
+        """Natural sort key for filenames (e.g., file2 before file10)."""
+        filename = os.path.basename(filepath).lower()
+        return [
+            int(part) if part.isdigit() else part
+            for part in re.split(r"(\d+)", filename)
+        ]
     
     @staticmethod
     def extract_date_from_filename(filepath: str) -> Optional[datetime]:

@@ -52,6 +52,8 @@ Access the web interface at `http://localhost:8000/` (or whichever host IP/port 
 
 **Web search**: The default web search tool uses the free duckduckgo library. This is enabled by default. To enable more advanced searches, web extraction and web crawling, you can add a [Tavily API key](https://www.tavily.com). The free tier will be sufficient for many users and is worth grabbing.
 
+**Browser tool**: The built-in browser tool requires the Playwright Chromium runtime in addition to the Python package. The published container image includes this. If you build your own image from source, rebuild after pulling the latest Dockerfile changes so the image runs `python -m playwright install --no-shell chromium` during the build.
+
 **Code execution**: The default code execution tool uses the public Piston API (free, no setup). The base URL lives in the Configuration tab as `piston_base_url` (defaults to the public endpoint). Piston supports many languages with fast, single-shot execution.
 
 To self-host Piston:

@@ -12,7 +12,8 @@ from sqlalchemy import Column, String, DateTime
 from core.database import Base, create_engine_from_system_db, create_session_factory
 from core.runtime.paths import get_data_root
 from core.logger import UnifiedLogger
-from core.utils.hash import hash_file_content
+from core.utils.hash import hash_file_bytes
+from core.utils.patterns import PatternUtilities
 
 logger = UnifiedLogger(tag="file-state")
 
@@ -137,7 +138,12 @@ class WorkflowFileStateManager:
         self,
         all_files: List[str],
         pattern: str,
-        count_limit: Optional[int] = None
+        count_limit: Optional[int] = None,
+        *,
+        order: str = "ctime",
+        direction: str = "asc",
+        filename_dt_pattern: Optional[str] = None,
+        filename_dt_format: Optional[str] = None,
     ) -> List[str]:
         """Filter list of files to return only pending (unprocessed) files.
 
@@ -164,10 +170,7 @@ class WorkflowFileStateManager:
         for filepath in all_files:
             normalized_path = self._normalize_path_for_state(filepath)
             try:
-                # Read file content and hash it
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                file_hash = hash_file_content(content)
+                file_hash = hash_file_bytes(filepath, length=None)
 
                 if file_hash in processed_hashes:
                     continue
@@ -190,7 +193,14 @@ class WorkflowFileStateManager:
                 )
                 pending_files.append(filepath)
 
-        # Preserve chronological order from input (no re-sorting needed)
+        pending_files = PatternUtilities.sort_files(
+            pending_files,
+            order=order,
+            direction=direction,
+            filename_dt_pattern=filename_dt_pattern,
+            filename_dt_format=filename_dt_format,
+        )
+
         # Apply count limit if specified
         if count_limit is not None:
             pending_files = pending_files[:count_limit]
@@ -213,6 +223,8 @@ class WorkflowFileStateManager:
                 "pattern": pattern,
                 "candidate_count": len(all_files),
                 "pending_count": pending_count,
+                "order": order,
+                "dir": direction,
                 "pending_paths": [self._normalize_path_for_state(path) for path in pending_files],
             },
         )

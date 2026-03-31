@@ -44,14 +44,19 @@ fi
 
 # 4. Install Node.js dependencies and build Tailwind CSS
 if [ -f "${REPO_DIR}/package.json" ]; then
-  echo "Installing npm dependencies..."
+  echo "Installing npm dependencies from lockfile..."
   cd "${REPO_DIR}"
-  npm install || echo "WARNING: npm install failed"
+  npm ci || echo "WARNING: npm ci failed"
   
   echo "Building Tailwind CSS..."
   npm run build:css || echo "WARNING: npm run build:css failed"
 else
   echo "WARNING: package.json not found; skipping npm install and Tailwind build."
 fi
+
+# 5. Install Playwright Chromium and required OS deps for browser-tool parity
+echo "Ensuring Playwright Chromium runtime is installed..."
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
+python3 -m playwright install --with-deps chromium || echo "WARNING: Playwright browser install failed"
 
 echo "=== setup.sh: finished ==="

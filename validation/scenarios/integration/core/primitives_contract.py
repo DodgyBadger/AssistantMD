@@ -142,6 +142,25 @@ class PrimitivesContractScenario(BaseScenario):
         self._assert_contains(head_prompt, "ABCDEFGHIJKL", "Expected head=12 content in prompt")
         self._assert_not_contains(head_prompt, "MNOPQRSTUVWXYZ", "Expected prompt to exclude characters beyond head=12")
 
+        # @input tail mode.
+        tail_prompt = self._prompt_for_step(events, "INPUT_TAIL")
+        self._assert_contains(tail_prompt, "OPQRSTUVWXYZ", "Expected tail=12 content in prompt")
+        self._assert_not_contains(tail_prompt, "ABCDEFGHIJKLMN", "Expected prompt to exclude characters before tail=12")
+
+        # fenced directive block mode.
+        fenced_prompt = self._prompt_for_step(events, "INPUT_FENCED")
+        self._assert_contains(fenced_prompt, "PLAIN_BODY", "Expected fenced directive block to resolve input")
+        self._assert_contains(
+            fenced_prompt,
+            "```",
+            "Expected later prompt code block to remain literal prompt content",
+        )
+        self._assert_contains(
+            fenced_prompt,
+            "@model not-a-directive",
+            "Expected prompt code block content to remain visible after fenced directive parsing",
+        )
+
         # @input refs_only mode.
         refs_prompt = self._prompt_for_step(events, "INPUT_REFS_ONLY")
         self._assert_contains(refs_prompt, "- notes/plain", "Expected refs-only path listing")
@@ -165,14 +184,14 @@ class PrimitivesContractScenario(BaseScenario):
             "Refs-only path with parentheses should not inline content",
         )
 
-        # @input pattern modes: latest + latest:N.
+        # @input selector modes: latest + latest(limit=N).
         latest_one_prompt = self._prompt_for_step(events, "LATEST_ONE")
         self._assert_contains(latest_one_prompt, "LATEST_ENTRY", "Expected latest file content")
-        self._assert_not_contains(latest_one_prompt, "OLDER_ENTRY", "Expected {latest} to resolve to a single most recent file")
+        self._assert_not_contains(latest_one_prompt, "OLDER_ENTRY", "Expected latest selector to resolve to a single most recent file")
 
         latest_two_prompt = self._prompt_for_step(events, "LATEST_TWO")
-        self._assert_contains(latest_two_prompt, "LATEST_ENTRY", "Expected newest entry in {latest:2}")
-        self._assert_contains(latest_two_prompt, "OLDER_ENTRY", "Expected older entry in {latest:2}")
+        self._assert_contains(latest_two_prompt, "LATEST_ENTRY", "Expected newest entry in latest(limit=2)")
+        self._assert_contains(latest_two_prompt, "OLDER_ENTRY", "Expected older entry in latest(limit=2)")
 
         # @input output routing.
         self._event(
@@ -187,12 +206,11 @@ class PrimitivesContractScenario(BaseScenario):
         routed_prompt = self._prompt_for_step(events, "INPUT_ROUTED")
         self._assert_contains(routed_prompt, "PLAIN_BODY", "Expected routed variable content in prompt")
 
-        # {pending} contract: first run resolves files, second run resolves none.
+        # pending selector contract: first run resolves files, second run resolves none.
         self._event(
             events,
             name="pending_files_resolved",
             expected={
-                "pattern": "tasks/{pending:2}",
                 "pending_count": 2,
             },
         )
@@ -200,7 +218,6 @@ class PrimitivesContractScenario(BaseScenario):
             events,
             name="pending_files_resolved",
             expected={
-                "pattern": "tasks/{pending:2}",
                 "pending_count": 0,
             },
         )
@@ -524,6 +541,26 @@ Summarize properties.
 
 Summarize head slice.
 
+## INPUT_TAIL
+@model test
+@input file: notes/long_note (tail=12)
+@output variable: tail_buffer
+
+Summarize tail slice.
+
+## INPUT_FENCED
+```
+@model test
+@input file: notes/plain
+@output variable: fenced_buffer
+```
+
+Summarize fenced directives.
+
+```md
+@model not-a-directive
+```
+
 ## INPUT_REFS_ONLY
 @model test
 @input file: notes/plain (refs_only)
@@ -548,14 +585,14 @@ Should skip due to required missing input.
 
 ## LATEST_ONE
 @model test
-@input file: timeline/{latest}
+@input file: timeline/* (latest)
 @output variable: latest_one
 
 Summarize latest file.
 
 ## LATEST_TWO
 @model test
-@input file: timeline/{latest:2}
+@input file: timeline/* (latest, limit=2)
 @output variable: latest_two
 
 Summarize latest two files.
@@ -570,14 +607,14 @@ Confirm routed input content.
 
 ## PENDING_FIRST
 @model test
-@input file: tasks/{pending:2}
+@input file: tasks/* (pending, limit=2)
 @output file: outputs/pending-first
 
 Process pending files once.
 
 ## PENDING_SECOND
 @model test
-@input file: tasks/{pending:2}
+@input file: tasks/* (pending, limit=2)
 @output file: outputs/pending-second
 
 Pending should now be empty.

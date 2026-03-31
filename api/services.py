@@ -1137,13 +1137,18 @@ def delete_secret_entry(name: str) -> OperationResult:
     )
 
 
-async def execute_workflow_manually(global_id: str, step_name: str = None) -> Dict[str, Any]:
+async def execute_workflow_manually(
+    global_id: str,
+    step_name: str = None,
+    expect_failure: bool = False,
+) -> Dict[str, Any]:
     """
     Execute a specific workflow manually.
     
     Args:
         global_id: Workflow global ID in format "vault/name"
         step_name: If provided, execute only the specified step (e.g. 'STEP1')
+        expect_failure: Whether workflow-level failures are expected (validation hint)
         
     Returns:
         Dictionary with execution results and timing information
@@ -1188,6 +1193,8 @@ async def execute_workflow_manually(global_id: str, step_name: str = None) -> Di
             kwargs = {}
             if step_name is not None:
                 kwargs['step_name'] = step_name
+            if expect_failure:
+                kwargs['expected_failure'] = True
             await workflow_function(job_args, **kwargs)
             execution_time = (datetime.now() - start_time).total_seconds()
             

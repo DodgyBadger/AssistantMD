@@ -6,7 +6,7 @@ authors = [
     { name = "AssistantMD Team" }
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "uvicorn[standard]>=0.22.0",
     "pydantic>=2.0.0",
@@ -23,6 +23,7 @@ dependencies = [
     "httpx>=0.27.0",
     "anyio>=3.7.0",
     "markdownify>=1.2.2",
+    "playwright>=1.57.0",
     "pymupdf>=1.24.10",
 ]
 
@@ -42,7 +43,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
@@ -64,11 +65,11 @@ ignore = [
 "__init__.py" = ["F401"]
 
 [tool.black]
-target-version = ['py312']
+target-version = ['py313']
 line-length = 88
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

@@ -10,6 +10,10 @@ This subsystem builds agents, resolves model aliases, loads tools, and routes to
 - `core/directives/tools.py`
 - `core/tools/`
 
+Current web-oriented tools under `core/tools/` include search (`web_search_*`),
+API-driven extraction (`tavily_extract`, `tavily_crawl`), and browser-backed
+extraction (`browser`).
+
 ## Responsibilities
 
 - Build configured Pydantic AI agents for chat/workflow/context runs.
