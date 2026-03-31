@@ -309,11 +309,6 @@ class InputFileDirective(DirectiveProcessor):
                 if not keys:
                     return False
 
-        try:
-            self._validate_parameter_combinations(base_value, parameters)
-        except ValueError:
-            return False
-
         return True
     
     def process_value(self, value: str, vault_path: str, **context) -> List[Dict[str, Any]]:
