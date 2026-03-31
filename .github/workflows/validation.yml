@@ -11,6 +11,7 @@ permissions:
 
 env:
   CI_PYTHON_VERSION: "3.13"
+  PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
 
 jobs:
   security-audit:
@@ -192,6 +193,10 @@ jobs:
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
         run: uv sync --frozen --all-extras --no-install-project
+
+      - name: Install Playwright Chromium
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        run: ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -m playwright install --with-deps chromium
 
       - name: Run validation scenarios (integration suite)
         if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
