@@ -11,7 +11,7 @@ permissions:
 
 env:
   CI_PYTHON_VERSION: "3.13"
-  PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+  PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
 
 jobs:
   security-audit:
