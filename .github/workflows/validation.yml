@@ -86,13 +86,9 @@ jobs:
           UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
         run: uv sync --frozen --all-extras --no-install-project
 
-      - name: Install pip-audit
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
-        run: ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -m pip install pip-audit
-
       - name: Audit Python dependencies
         if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
-        run: ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pip-audit --progress-spinner=off
+        run: uv tool run --from pip-audit pip-audit --progress-spinner=off
 
   validation:
     needs: security-audit
