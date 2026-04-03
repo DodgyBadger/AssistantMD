@@ -122,11 +122,37 @@ def validate_and_load_engine(engine_name: str) -> tuple[types.ModuleType, Callab
 
     return workflow_module, workflow_function
 
+def _validate_workflow_with_engine(
+    workflow_module: types.ModuleType,
+    *,
+    workflow_id: str,
+    file_path: str,
+    sections: Dict[str, Any],
+    validated_config: Dict[str, Any],
+) -> None:
+    """Let workflow engines validate file-specific structure during load."""
+    validator = getattr(workflow_module, "validate_workflow_definition", None)
+    if validator is None:
+        return
+    if not callable(validator):
+        raise TypeError(
+            f"'validate_workflow_definition' in workflow engine "
+            f"'{validated_config['workflow_engine']}' is not callable"
+        )
+    validator(
+        workflow_id=workflow_id,
+        file_path=file_path,
+        sections=sections,
+        validated_config=validated_config,
+    )
+
+
 def load_workflow_from_file(
     file_path: str,
     vault: str,
     name: str,
     validated_config: Dict[str, Any],
+    sections: Dict[str, Any],
 ) -> WorkflowDefinition:
     """Load a WorkflowDefinition from a parsed configuration."""
     # Parse schedule if provided and create actual trigger
@@ -138,6 +164,15 @@ def load_workflow_from_file(
 
     engine_name = validated_config['workflow_engine']
     workflow_module, workflow_function = validate_and_load_engine(engine_name)
+    workflow_id = f"{vault}/{name}"
+
+    _validate_workflow_with_engine(
+        workflow_module,
+        workflow_id=workflow_id,
+        file_path=file_path,
+        sections=sections,
+        validated_config=validated_config,
+    )
 
     workflow = WorkflowDefinition(
         vault=vault,
@@ -269,7 +304,13 @@ class WorkflowLoader:
                     # Validate configuration from template/user file
                     validated_config = validate_config(raw_config, vault, name)
 
-                    workflow = load_workflow_from_file(file_path, vault, name, validated_config)
+                    workflow = load_workflow_from_file(
+                        file_path,
+                        vault,
+                        name,
+                        validated_config,
+                        sections,
+                    )
 
                     # Check for global ID conflicts
                     if workflow.global_id in global_ids:
