@@ -21,6 +21,9 @@ from core.llm.chat_executor import (
 )
 
 from .models import (
+    AuthoringCompileRequest,
+    AuthoringCompileResponse,
+    TestWorkflowRequest,
     VaultRescanRequest,
     VaultRescanResponse,
     ExecuteWorkflowRequest,
@@ -68,6 +71,8 @@ from .services import (
     delete_secret_entry,
     scan_import_folder,
     import_url_direct,
+    compile_authoring_candidate,
+    test_workflow_candidate,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -585,6 +590,24 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         )
         response = ExecuteWorkflowResponse(**result)
         return response
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/workflows/test", response_model=AuthoringCompileResponse)
+async def test_workflow(request: TestWorkflowRequest):
+    """Compile-check an existing workflow without executing it."""
+    try:
+        return await test_workflow_candidate(request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/authoring/compile", response_model=AuthoringCompileResponse)
+async def compile_authoring(request: AuthoringCompileRequest):
+    """Compile candidate workflow text without executing it."""
+    try:
+        return compile_authoring_candidate(request)
     except Exception as e:
         return create_error_response(e)
 

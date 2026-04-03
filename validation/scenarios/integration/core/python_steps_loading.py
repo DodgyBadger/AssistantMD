@@ -44,7 +44,7 @@ class PythonStepsLoadingScenario(BaseScenario):
             name="python_steps_blocks_parsed",
             expected={
                 "workflow_id": "PythonStepsLoadingVault/python_steps_valid",
-                "step_count": 1,
+                "block_count": 1,
             },
         )
         self.assert_event_contains(
@@ -81,7 +81,7 @@ class PythonStepsLoadingScenario(BaseScenario):
             name="python_steps_semantic_validation_failed",
             expected={
                 "workflow_id": "PythonStepsLoadingVault/python_steps_bad_ref",
-                "step_name": "run_root",
+                "step_name": "workflow",
             },
         )
         self.assert_event_contains(
@@ -127,6 +127,8 @@ workflow_engine: python_steps
 enabled: false
 description: Invalid python_steps workflow for parse-failure coverage
 ---
+
+## Broken Step
 
 ```python
 broken_step = Step(

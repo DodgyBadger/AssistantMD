@@ -5,9 +5,11 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from core.authoring import AUTHORING_PRIMITIVE_NAMES, AUTHORING_TARGET_METHODS
 from core.logger import UnifiedLogger
+from core.utils.frontmatter import parse_simple_frontmatter
 
 if TYPE_CHECKING:
     from core.workflow.python_steps.models import CompiledPythonStepsWorkflow
@@ -16,49 +18,26 @@ if TYPE_CHECKING:
 logger = UnifiedLogger(tag="python-steps")
 
 PYTHON_FENCE_PATTERN = re.compile(r"```python\s*\n(.*?)\n```", re.DOTALL)
-ALLOWED_CALL_NAMES = {
-    "append_var",
-    "branch",
-    "file",
-    "files",
-    "foreach",
-    "from_field",
-    "run_step",
-    "step",
-    "var",
-    "when",
-    "write",
-}
-ALLOWED_EXPR_NODES = (
-    ast.Call,
+ALLOWED_LITERAL_NODES = (
     ast.Constant,
     ast.Dict,
-    ast.Expression,
-    ast.keyword,
     ast.List,
     ast.Load,
     ast.Name,
     ast.Tuple,
+    ast.UAdd,
     ast.UnaryOp,
     ast.USub,
-    ast.UAdd,
 )
-
-
-@dataclass(frozen=True)
-class ParsedPythonStepBlock:
-    """Single validated python step block discovered in markdown."""
-
-    section_name: str
-    code: str
-
 
 @dataclass(frozen=True)
 class ParsedPythonStepWorkflow:
-    """Validated set of python step blocks for a workflow file."""
+    """Validated python_steps workflow source extracted from markdown."""
 
     workflow_id: str
-    blocks: list[ParsedPythonStepBlock]
+    code: str
+    block_count: int
+    block_label: str | None = None
 
 
 class PythonStepsValidationError(ValueError):
@@ -78,19 +57,10 @@ def validate_python_steps_workflow_definition(
     validated_config: dict[str, Any],
 ) -> "CompiledPythonStepsWorkflow":
     """Validate markdown structure and Python AST constraints for python_steps."""
-    del file_path, validated_config
-
-    workflow_sections = {
-        name: content
-        for name, content in sections.items()
-        if name != "__FRONTMATTER_CONFIG__"
-    }
+    del sections, validated_config
 
     try:
-        workflow = _parse_python_step_workflow(
-            workflow_id=workflow_id,
-            sections=workflow_sections,
-        )
+        workflow = _parse_python_step_workflow(workflow_id=workflow_id, file_path=file_path)
     except PythonStepsValidationError as exc:
         logger.set_sinks(["validation"]).error(
             "python_steps_parse_failed",
@@ -107,7 +77,7 @@ def validate_python_steps_workflow_definition(
         "python_steps_blocks_parsed",
         data={
             "workflow_id": workflow_id,
-            "step_count": len(workflow.blocks),
+            "block_count": workflow.block_count,
         },
     )
 
@@ -130,48 +100,73 @@ def validate_python_steps_workflow_definition(
         "python_steps_compiled",
         data={
             "workflow_id": workflow_id,
-            "step_names": sorted(compiled.steps.keys()),
+            "step_names": compiled.workflow.step_names,
         },
     )
     return compiled
 
 
+def parse_python_steps_workflow_text(
+    *,
+    workflow_id: str,
+    content: str,
+) -> ParsedPythonStepWorkflow:
+    """Parse and validate python_steps workflow text without reading a file."""
+    _frontmatter, body = parse_simple_frontmatter(
+        content,
+        require_frontmatter=True,
+        missing_error="Workflow file must start with YAML frontmatter (---)",
+    )
+    return _parse_python_step_workflow_body(workflow_id=workflow_id, body=body)
+
+
 def _parse_python_step_workflow(
     *,
     workflow_id: str,
-    sections: dict[str, str],
+    file_path: str,
 ) -> ParsedPythonStepWorkflow:
-    blocks: list[ParsedPythonStepBlock] = []
+    with open(file_path, "r", encoding="utf-8") as handle:
+        content = handle.read()
 
-    for section_name, content in sections.items():
-        if not content.strip():
-            continue
+    _frontmatter, body = parse_simple_frontmatter(
+        content,
+        require_frontmatter=True,
+        missing_error="Workflow file must start with YAML frontmatter (---)",
+    )
+    return _parse_python_step_workflow_body(workflow_id=workflow_id, body=body)
 
-        matches = PYTHON_FENCE_PATTERN.findall(content)
-        if not matches:
-            continue
-        if len(matches) > 1:
-            raise PythonStepsValidationError(
-                "Python step sections must contain exactly one fenced ```python``` block",
-                section_name=section_name,
-                phase="markdown_structure",
-            )
 
-        code = matches[0].strip()
-        _validate_python_block(code, section_name=section_name)
-        blocks.append(ParsedPythonStepBlock(section_name=section_name, code=code))
-
-    if not blocks:
+def _parse_python_step_workflow_body(
+    *,
+    workflow_id: str,
+    body: str,
+) -> ParsedPythonStepWorkflow:
+    matches = list(PYTHON_FENCE_PATTERN.finditer(body))
+    if not matches:
         raise PythonStepsValidationError(
-            "python_steps workflows must include at least one fenced ```python``` step block",
+            "python_steps workflows must include exactly one fenced ```python``` block",
+            section_name=None,
+            phase="markdown_structure",
+        )
+    if len(matches) > 1:
+        raise PythonStepsValidationError(
+            "python_steps workflows support exactly one fenced ```python``` block",
             section_name=None,
             phase="markdown_structure",
         )
 
-    return ParsedPythonStepWorkflow(workflow_id=workflow_id, blocks=blocks)
+    code = matches[0].group(1).strip()
+    block_label = _nearest_heading(body, matches[0].start())
+    _validate_python_block(code, section_name=block_label)
+    return ParsedPythonStepWorkflow(
+        workflow_id=workflow_id,
+        code=code,
+        block_count=len(matches),
+        block_label=block_label,
+    )
 
 
-def _validate_python_block(code: str, *, section_name: str) -> None:
+def _validate_python_block(code: str, *, section_name: str | None) -> None:
     try:
         module = ast.parse(code, mode="exec")
     except SyntaxError as exc:
@@ -184,90 +179,145 @@ def _validate_python_block(code: str, *, section_name: str) -> None:
             phase="python_syntax",
         ) from exc
 
-    if len(module.body) != 1 or not isinstance(module.body[0], ast.Expr):
+    if not module.body:
         raise PythonStepsValidationError(
-            "Python step blocks must contain exactly one top-level expression",
+            "Python workflow block cannot be empty",
             section_name=section_name,
             phase="python_syntax",
         )
 
-    expression = module.body[0].value
-    if not isinstance(expression, ast.Call) or not _is_name(expression.func, "step"):
+    for statement in module.body[:-1]:
+        _validate_top_level_statement(statement, section_name=section_name)
+
+    terminal = module.body[-1]
+    if not _is_terminal_run_call(terminal):
         raise PythonStepsValidationError(
-            "Python step blocks must call step(...) as the top-level expression",
+            "Python workflow blocks must end with workflow.run()",
             section_name=section_name,
             phase="python_syntax",
         )
 
-    _validate_expr(expression, section_name=section_name)
+
+def _validate_top_level_statement(statement: ast.stmt, *, section_name: str | None) -> None:
+    if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+        raise PythonStepsValidationError(
+            "Top-level statements must be simple assignments before workflow.run()",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+
+    target = statement.targets[0]
+    if not isinstance(target, ast.Name):
+        raise PythonStepsValidationError(
+            "Top-level assignments must target a simple name",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+
+    _validate_assignment_value(statement.value, section_name=section_name)
 
 
-def _validate_expr(node: ast.AST, *, section_name: str) -> None:
+def _validate_assignment_value(node: ast.AST, *, section_name: str | None) -> None:
     if isinstance(node, ast.Call):
-        if not isinstance(node.func, ast.Name):
-            raise PythonStepsValidationError(
-                "Only direct SDK function calls are allowed in python step blocks",
-                section_name=section_name,
-                phase="ast_safety",
-            )
-        if node.func.id not in ALLOWED_CALL_NAMES:
-            raise PythonStepsValidationError(
-                f"Unsupported SDK function '{node.func.id}'",
-                section_name=section_name,
-                phase="ast_safety",
-            )
-        for arg in node.args:
-            _validate_expr(arg, section_name=section_name)
-        for keyword in node.keywords:
-            if keyword.arg is None:
-                raise PythonStepsValidationError(
-                    "Star-arguments are not allowed in python step blocks",
-                    section_name=section_name,
-                    phase="ast_safety",
-                )
-            _validate_expr(keyword.value, section_name=section_name)
-        return
+        if isinstance(node.func, ast.Name) and node.func.id in AUTHORING_PRIMITIVE_NAMES:
+            _validate_call_arguments(node, section_name=section_name)
+            return
+        if _is_target_method_call(node):
+            _validate_target_method_call(node, section_name=section_name)
+            return
+        raise PythonStepsValidationError(
+            "Only Step(...), Workflow(...), File(...), Var(...), and target methods are allowed",
+            section_name=section_name,
+            phase="ast_safety",
+        )
 
+    _validate_literal_expr(node, section_name=section_name)
+
+
+def _validate_call_arguments(node: ast.Call, *, section_name: str | None) -> None:
+    for arg in node.args:
+        _validate_argument_expr(arg, section_name=section_name)
+    for keyword in node.keywords:
+        if keyword.arg is None:
+            raise PythonStepsValidationError(
+                "Star-arguments are not allowed in python_steps workflows",
+                section_name=section_name,
+                phase="ast_safety",
+            )
+        _validate_argument_expr(keyword.value, section_name=section_name)
+
+
+def _validate_argument_expr(node: ast.AST, *, section_name: str | None) -> None:
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id in AUTHORING_PRIMITIVE_NAMES:
+            _validate_call_arguments(node, section_name=section_name)
+            return
+        if _is_target_method_call(node):
+            _validate_target_method_call(node, section_name=section_name)
+            return
+        raise PythonStepsValidationError(
+            "Unsupported SDK call in workflow block",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+
+    _validate_literal_expr(node, section_name=section_name)
+
+
+def _validate_target_method_call(node: ast.Call, *, section_name: str | None) -> None:
+    if not isinstance(node.func, ast.Attribute):
+        raise PythonStepsValidationError(
+            "Invalid target method call",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    if node.func.attr not in AUTHORING_TARGET_METHODS:
+        raise PythonStepsValidationError(
+            f"Unsupported target method '{node.func.attr}'",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    if node.args or node.keywords:
+        raise PythonStepsValidationError(
+            f"{node.func.attr}() does not accept arguments",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    if not isinstance(node.func.value, ast.Call):
+        raise PythonStepsValidationError(
+            "Target methods must be called on File(...) or Var(...)",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    _validate_assignment_value(node.func.value, section_name=section_name)
+
+
+def _validate_literal_expr(node: ast.AST, *, section_name: str | None) -> None:
     if isinstance(node, ast.Name):
-        if node.id not in ALLOWED_CALL_NAMES:
-            raise PythonStepsValidationError(
-                f"Unsupported name '{node.id}'",
-                section_name=section_name,
-                phase="ast_safety",
-            )
         return
-
     if isinstance(node, ast.List | ast.Tuple):
         for item in node.elts:
-            _validate_expr(item, section_name=section_name)
+            _validate_argument_expr(item, section_name=section_name)
         return
-
     if isinstance(node, ast.Dict):
         for key in node.keys:
             if key is not None:
-                _validate_expr(key, section_name=section_name)
+                _validate_literal_expr(key, section_name=section_name)
         for value in node.values:
-            _validate_expr(value, section_name=section_name)
+            _validate_argument_expr(value, section_name=section_name)
         return
-
-    if isinstance(node, ast.keyword):
-        _validate_expr(node.value, section_name=section_name)
-        return
-
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, ast.UAdd | ast.USub):
             raise PythonStepsValidationError(
-                "Only unary plus/minus are allowed in python step blocks",
+                "Only unary plus/minus are allowed in python_steps workflows",
                 section_name=section_name,
                 phase="ast_safety",
             )
-        _validate_expr(node.operand, section_name=section_name)
+        _validate_literal_expr(node.operand, section_name=section_name)
         return
-
     if isinstance(node, ast.Constant):
         return
-
-    if not isinstance(node, ALLOWED_EXPR_NODES):
+    if not isinstance(node, ALLOWED_LITERAL_NODES):
         raise PythonStepsValidationError(
             f"Unsupported Python syntax node '{type(node).__name__}'",
             section_name=section_name,
@@ -275,11 +325,40 @@ def _validate_expr(node: ast.AST, *, section_name: str) -> None:
         )
 
 
-def _is_name(node: ast.AST, expected: str) -> bool:
-    return isinstance(node, ast.Name) and node.id == expected
+def _is_target_method_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Call)
+        and isinstance(node.func.value.func, ast.Name)
+        and node.func.value.func.id in {"File", "Var"}
+    )
+
+
+def _is_terminal_run_call(statement: ast.stmt) -> bool:
+    if not isinstance(statement, ast.Expr):
+        return False
+    value = statement.value
+    return (
+        isinstance(value, ast.Call)
+        and not value.args
+        and not value.keywords
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == "run"
+        and isinstance(value.func.value, ast.Name)
+    )
+
+
+def _nearest_heading(markdown_body: str, code_start: int) -> str | None:
+    preceding = markdown_body[:code_start]
+    matches = re.findall(r"^##\s+(.+?)\s*$", preceding, re.MULTILINE)
+    if not matches:
+        return None
+    return matches[-1].strip()
 
 
 def _format_parse_error(exc: PythonStepsValidationError) -> str:
+    prefix = exc.phase.replace("_", " ").capitalize()
     if exc.section_name:
-        return f"{exc} [section: {exc.section_name}, phase: {exc.phase}]"
-    return f"{exc} [phase: {exc.phase}]"
+        return f"{prefix} in section '{exc.section_name}': {exc}"
+    return f"{prefix}: {exc}"

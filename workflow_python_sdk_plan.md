@@ -2,24 +2,39 @@
 
 ### Status Snapshot
 - Current branch: `feature/workflow_python_sdk`
-- Work completed so far:
-  - added `python_steps` engine loading hook to [core/workflow/loader.py](/app/core/workflow/loader.py)
-  - created experimental core package under `core/workflow/python_steps/`
-  - added thin compatibility shim at `workflow_engines/python_steps/workflow.py`
-  - implemented Phase 1 style load-time parsing and validation events
-  - implemented Phase 2 style typed compilation and semantic validation events
-  - implemented an initial Phase 3 executor for the earlier multi-step / `run_root` design
-  - added validation scenarios for loading and execution
-- Important note:
-  - the implementation currently reflects the earlier design (`step(...)`, `run_root`, explicit `run_step(...)`, multi-section workflow shape)
-  - the plan below now reflects the newer and preferred MVP direction:
+- Current state:
+  - `python_steps` now uses the intended MVP authoring shape:
     - one executable Python block
-    - declarative `Step` objects
-    - one `Workflow` object
-    - sequential `workflow.run()`
+    - declarative `Step(...)`
+    - one `Workflow(...)`
+    - terminal `workflow.run()`
     - constrained top-level constants
-    - `Workflow(instructions=...)`
-- That means the next work session should be a controlled refactor, not a fresh start.
+    - workflow-level `instructions=...`
+  - shared authoring surface now lives in [core/authoring/](/app/core/authoring):
+    - canonical primitives in [core/authoring/primitives.py](/app/core/authoring/primitives.py)
+    - SDK introspection in [core/authoring/introspection.py](/app/core/authoring/introspection.py)
+    - compile-only checks in [core/authoring/service.py](/app/core/authoring/service.py)
+  - `python_steps` parser/compiler/executor are refactored around that shape under [core/workflow/python_steps/](/app/core/workflow/python_steps)
+  - compile-only authoring checks are exposed through:
+    - `POST /api/authoring/compile`
+    - `POST /api/workflows/test`
+  - dashboard support now exists for:
+    - `Test Workflow` on already loaded workflows
+    - surfacing workflow load failures in the rescan result area
+- Current limitation:
+  - compile diagnostics for invalid new workflows are visible in rescan feedback and logs, but are not yet directly available to the authoring LLM through a dedicated tool or file-targeted draft test flow.
+- Immediate next work:
+  1. Improve authoring diagnostics for invalid draft workflows that fail before load:
+     - likely by testing workflow files by path/name instead of only loaded `global_id`
+     - keep this compile-only
+  2. Extract shared semantic services below both directives and SDK adapters:
+     - input selection
+     - output target normalization
+     - write mode handling
+  3. Continue Phase 4 parity only after the shared-semantic path is clearer:
+     - `File(...)` selector options
+     - `Var(...)` routing/scope options
+     - required-input behavior
 
 ### Goal
 - Add an experimental `python_steps` workflow engine that lives beside the existing `step` engine.
@@ -269,6 +284,27 @@ Validation target:
 - Starting with too much parity and making the compiler/executor hard to reason about.
 - Trying to collapse engines before the Python-step path has proven its value and execution shape.
 - Allowing “just a little” extra Python until constant bindings quietly turn into general expression evaluation.
+- Leaving the SDK surface implicit in parser/compiler internals, which forces LLM authoring back onto prose docs and code spelunking.
+- Making authors validate workflows only through the full workflow runtime instead of a narrow sandbox loop with precise diagnostics.
+
+### Authoring-Loop Assessment
+- Current structure supports:
+  - deterministic parse/compile validation for stored workflow files
+  - deterministic minimal execution for checked-in workflows
+- Current structure does not yet support the full LLM-authoring goal:
+  - there is no canonical inspectable SDK module with real `Step` / `Workflow` / `File` / `Var` objects, signatures, and docstrings
+  - the accepted contract is split across parser allowlists and compiler branches
+  - there is no dedicated “compile this draft and sandbox-run it” service/tool for candidate workflow text
+  - diagnostics are workflow-engine oriented, not shaped as a tight authoring/repair loop API
+
+### Planning Conclusion
+- The current structure is a good execution core, but not yet enough for direct SDK inspection plus sandbox trial runs.
+- Before broad parity expansion, the architecture should add an explicit SDK contract and a narrow authoring sandbox boundary.
+- The first extraction step is now complete:
+  - canonical primitives live in [core/authoring/primitives.py](/app/core/authoring/primitives.py)
+  - SDK introspection lives in [core/authoring/introspection.py](/app/core/authoring/introspection.py)
+  - `python_steps` parser/compiler now consume authoring metadata from that shared module
+- Remaining work is to move from “inspectable package exists” to “authoring sandbox and shared semantics exist”.
 
 ### Terminology Note
 - Keep `step` as the author-facing unit across both engines.
@@ -276,29 +312,22 @@ Validation target:
 - The new Python engine MVP should also remain sequential by default, but through a typed `Workflow` object rather than implicit markdown section ordering.
 
 ### Next Concrete Step
-- Refactor the current experiment toward the simpler MVP:
-  - one executable Python block
-  - declarative `Step` objects
-  - one `Workflow` object
-  - `workflow.run()` as the primary execution path
-  - constrained reusable constant bindings
-  - explicit workflow-level system instructions
+- Define the inspectable SDK contract and authoring sandbox boundary before continuing broad parity work:
+  - keep moving parser/compiler/runtime assumptions onto `core/authoring`
+  - add a sandbox compile/run path for candidate workflows
+  - start extracting shared semantics below both directives and SDK adapters
 
 ### Pickup Point For Next Session
-1. Refactor the parser in `core/workflow/python_steps/` to accept:
-   - one executable Python block
-   - top-level constant bindings
-   - `Step(...)` and `Workflow(...)` declarations
-   - `workflow.run()` as the terminal executable call
-2. Replace the current old-shape compiler with a sequential workflow compiler:
-   - compile constants
-   - compile named `Step` objects
-   - compile one `Workflow` object with `instructions=` and `steps=[...]`
-3. Replace the old executor entry semantics:
-   - remove dependency on `run_root`
-   - execute `workflow.run()` in declared order
-   - keep `workflow.run_step("name")` only as a targeted helper
-4. Align validation events and scenarios with the new shape:
-   - update loading scenario expectations from `step_count` to single-block workflow semantics where needed
-   - make the execution scenario the primary Phase 3 contract
-5. After local smoke tests pass, stop and ask maintainers for full validation results.
+1. Continue moving the authoring contract into [core/authoring/](/app/core/authoring):
+   - keep `Step`, `Workflow`, `File`, and `Var` as the canonical inspectable primitives
+   - add explicit metadata for supported options, not just primitive/method names
+2. Refactor `python_steps` parser/compiler further so they derive constructor and option support from `core/authoring` wherever practical.
+3. Add a narrow authoring sandbox path that can:
+   - compile candidate workflow markdown or Python-block text without registering a workflow
+   - run it against a temp vault/temp runtime state using `model="test"`
+   - return structured parse/compile/runtime diagnostics for iterative repair
+4. Start extracting shared semantic services from directive-owned implementations:
+   - input selection
+   - output target normalization
+   - write-mode handling
+5. After that authoring loop and shared-semantic path exist, continue Phase 4 parity work on selectors/routing through the new contract.

@@ -63,6 +63,7 @@ const dashElements = {
     workflowSelector: document.getElementById('workflow-selector'),
     stepNameInput: document.getElementById('step-name-input'),
     executeWorkflowBtn: document.getElementById('execute-workflow-btn'),
+    testWorkflowBtn: document.getElementById('test-workflow-btn'),
     executeWorkflowResult: document.getElementById('execute-workflow-result')
 };
 
@@ -834,6 +835,10 @@ function setupEventListeners() {
 
     if (dashElements.executeWorkflowBtn) {
         dashElements.executeWorkflowBtn.addEventListener('click', executeWorkflow);
+    }
+
+    if (dashElements.testWorkflowBtn) {
+        dashElements.testWorkflowBtn.addEventListener('click', testWorkflow);
     }
 
     if (chatElements.chatMessages) {
@@ -1780,16 +1785,6 @@ async function rescanVaults() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
-        dashElements.rescanResult.innerHTML = `
-            <div class="state-surface-success p-3 rounded border">
-                <p class="font-medium">✅ Rescan Completed</p>
-                <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
-                <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
-                <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
-                <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
-                <p class="mt-2 text-sm">${data.message || ''}</p>
-            </div>
-        `;
 
         if (data.metadata) {
             state.metadata = data.metadata;
@@ -1801,6 +1796,7 @@ async function rescanVaults() {
         }
 
         await fetchSystemStatus();
+        renderRescanResult(data);
 
     } catch (error) {
         console.error('Error rescanning:', error);
@@ -1808,6 +1804,40 @@ async function rescanVaults() {
     } finally {
         dashElements.rescanBtn.disabled = false;
     }
+}
+
+function renderRescanResult(data) {
+    if (!dashElements.rescanResult) return;
+
+    const configurationErrors = state.systemStatus?.configuration_errors || [];
+    const workflowErrors = configurationErrors.filter((error) => {
+        const filePath = String(error.file_path || '');
+        return filePath.includes('/AssistantMD/Workflows/');
+    });
+
+    dashElements.rescanResult.innerHTML = `
+        <div class="state-surface-success p-3 rounded border">
+            <p class="font-medium">✅ Rescan Completed</p>
+            <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
+            <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
+            <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
+            <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
+            <p class="mt-2 text-sm">${data.message || ''}</p>
+        </div>
+        ${workflowErrors.length ? `
+            <div class="state-surface-error p-3 rounded border mt-3">
+                <p class="font-medium">⚠️ Workflows Failed To Load</p>
+                <ul class="list-disc list-inside mt-2 space-y-1">
+                    ${workflowErrors.map((error) => `
+                        <li>
+                            <span class="font-medium">${escapeHtml(error.workflow_name || error.file_path || 'workflow')}</span>:
+                            ${escapeHtml(error.error_message || 'Unknown load error')}
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        ` : ''}
+    `;
 }
 
 // Execute workflow manually
@@ -1822,6 +1852,9 @@ async function executeWorkflow() {
 
     dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Executing...</p>';
     dashElements.executeWorkflowBtn.disabled = true;
+    if (dashElements.testWorkflowBtn) {
+        dashElements.testWorkflowBtn.disabled = true;
+    }
 
     try {
         const payload = { global_id: globalId };
@@ -1861,6 +1894,98 @@ async function executeWorkflow() {
         dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
     } finally {
         dashElements.executeWorkflowBtn.disabled = false;
+        if (dashElements.testWorkflowBtn) {
+            dashElements.testWorkflowBtn.disabled = false;
+        }
+    }
+}
+
+function renderWorkflowTestResult(data) {
+    if (!data.ok) {
+        const diagnostics = data.diagnostics || [];
+        dashElements.executeWorkflowResult.innerHTML = `
+            <div class="state-surface-error p-3 rounded border">
+                <p class="font-medium">❌ Compile Check Failed</p>
+                <ul class="list-disc list-inside mt-2 space-y-1">
+                    ${diagnostics.map((item) => `
+                        <li>
+                            <span class="font-medium">${escapeHtml(item.phase || 'error')}</span>:
+                            ${escapeHtml(item.message || 'Unknown error')}
+                            ${item.section_name ? `<span class="text-txt-secondary"> (${escapeHtml(item.section_name)})</span>` : ''}
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+        return;
+    }
+
+    const summary = data.summary || {};
+    const outputTargets = Object.entries(summary.output_targets || {});
+    dashElements.executeWorkflowResult.innerHTML = `
+        <div class="state-surface-success p-3 rounded border">
+            <p class="font-medium">✅ Compile Check Passed</p>
+            <p>Workflow: ${escapeHtml(summary.workflow_id || '')}</p>
+            <p>Step count: ${Array.isArray(summary.step_names) ? summary.step_names.length : 0}</p>
+            ${summary.block_label ? `<p>Section: ${escapeHtml(summary.block_label)}</p>` : ''}
+            ${summary.instructions_present ? '<p>Workflow instructions: present</p>' : '<p>Workflow instructions: none</p>'}
+            ${Array.isArray(summary.step_names) && summary.step_names.length ? `
+                <p class="mt-2">Steps:</p>
+                <ul class="list-disc list-inside ml-4">
+                    ${summary.step_names.map((stepName) => `<li class="text-sm">${escapeHtml(stepName)}</li>`).join('')}
+                </ul>
+            ` : ''}
+            ${outputTargets.length ? `
+                <p class="mt-2">Outputs:</p>
+                <ul class="list-disc list-inside ml-4">
+                    ${outputTargets.map(([stepName, target]) => `
+                        <li class="text-sm">${escapeHtml(stepName)} → ${escapeHtml(target || 'none')}</li>
+                    `).join('')}
+                </ul>
+            ` : ''}
+        </div>
+    `;
+}
+
+async function testWorkflow() {
+    const globalId = dashElements.workflowSelector.value;
+
+    if (!globalId) {
+        alert('Please select a workflow');
+        return;
+    }
+
+    dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Testing...</p>';
+    if (dashElements.testWorkflowBtn) {
+        dashElements.testWorkflowBtn.disabled = true;
+    }
+    if (dashElements.executeWorkflowBtn) {
+        dashElements.executeWorkflowBtn.disabled = true;
+    }
+
+    try {
+        const response = await fetch('api/workflows/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ global_id: globalId })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.message || `HTTP ${response.status}`);
+        }
+
+        renderWorkflowTestResult(data);
+    } catch (error) {
+        console.error('Error testing workflow:', error);
+        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
+    } finally {
+        if (dashElements.testWorkflowBtn) {
+            dashElements.testWorkflowBtn.disabled = false;
+        }
+        if (dashElements.executeWorkflowBtn) {
+            dashElements.executeWorkflowBtn.disabled = false;
+        }
     }
 }
 

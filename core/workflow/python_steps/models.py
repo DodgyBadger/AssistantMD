@@ -44,50 +44,32 @@ OutputTarget = FileTarget | VarTarget
 
 
 @dataclass(frozen=True)
-class RunStepOp:
-    """Operation that references another step by name."""
-
-    step_name: str
-
-
-@dataclass(frozen=True)
-class WriteOp:
-    """Operation that writes literal content to an output target."""
-
-    target: OutputTarget
-    content: str
-
-
-@dataclass(frozen=True)
-class BranchOp:
-    """Operation that chooses one of two actions based on an input target."""
-
-    on: InputSource
-    if_empty: "Operation"
-    otherwise: "Operation"
-
-
-Operation = RunStepOp | WriteOp | BranchOp
-
-
-@dataclass(frozen=True)
 class StepDefinition:
     """Compiled python-authored workflow step."""
 
+    declaration_name: str
     name: str
-    section_name: str
     model: str | None = None
     prompt: str | None = None
     inputs: list[InputSource] = field(default_factory=list)
     output: OutputTarget | None = None
-    run: list[Operation] = field(default_factory=list)
     extras: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
+class WorkflowDefinition:
+    """Compiled sequential workflow definition."""
+
+    declaration_name: str
+    instructions: str | None = None
+    step_names: list[str] = field(default_factory=list)
+    step_declarations: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CompiledPythonStepsWorkflow:
-    """Compiled registry of workflow steps."""
+    """Compiled registry of workflow steps and workflow execution order."""
 
     workflow_id: str
+    workflow: WorkflowDefinition
     steps: dict[str, StepDefinition]
-

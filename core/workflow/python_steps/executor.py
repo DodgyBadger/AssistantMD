@@ -6,9 +6,12 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Sequence
 
-from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR, WORKFLOW_SYSTEM_INSTRUCTION
+from core.constants import (
+    ASSISTANTMD_ROOT_DIR,
+    WORKFLOW_DEFINITIONS_DIR,
+    WORKFLOW_SYSTEM_INSTRUCTION,
+)
 from core.directives.model import ModelDirective
 from core.llm.agents import PromptInput, create_agent, generate_response
 from core.llm.model_selection import resolve_model_execution_spec
@@ -17,18 +20,13 @@ from core.runtime.buffers import BufferStore
 from core.utils.routing import OutputTarget, write_output
 from core.workflow.parser import parse_workflow_file
 from core.workflow.python_steps.models import (
-    BranchOp,
     CompiledPythonStepsWorkflow,
     FileInput,
-    FileTarget,
     InputSource,
-    Operation,
     OutputTarget as PythonOutputTarget,
-    RunStepOp,
     StepDefinition,
     VarInput,
     VarTarget,
-    WriteOp,
 )
 from core.workflow.python_steps.parser import validate_python_steps_workflow_definition
 
@@ -101,12 +99,41 @@ async def run_python_steps_workflow(job_args: dict, **kwargs) -> None:
             requested_step_name=requested_step_name,
         )
 
-        entry_step = _select_entry_step(compiled, requested_step_name=requested_step_name)
-        await _execute_step(entry_step, context)
+        if requested_step_name:
+            step = compiled.steps.get(requested_step_name)
+            if step is None:
+                raise PythonStepsExecutionError(
+                    (
+                        f"Step '{requested_step_name}' not found. Available steps: "
+                        f"{', '.join(compiled.workflow.step_names)}"
+                    ),
+                    step_name=requested_step_name,
+                    phase="entry_selection",
+                )
+            await _execute_step(step, context)
+        else:
+            logger.set_sinks(["validation"]).info(
+                "python_workflow_started",
+                data={
+                    "workflow_id": context.workflow_id,
+                    "step_names": compiled.workflow.step_names,
+                },
+            )
+            for step_name in compiled.workflow.step_names:
+                await _execute_step(compiled.steps[step_name], context)
+            logger.set_sinks(["validation"]).info(
+                "python_workflow_completed",
+                data={
+                    "workflow_id": context.workflow_id,
+                    "step_count": len(compiled.workflow.step_names),
+                },
+            )
 
         created_files = sorted(context.created_files)
         output_files = [
-            path[len(context.vault_path) + 1 :] if path.startswith(f"{context.vault_path}/") else path
+            path[len(context.vault_path) + 1 :]
+            if path.startswith(f"{context.vault_path}/")
+            else path
             for path in created_files
         ]
         logger.info(
@@ -135,112 +162,31 @@ async def run_python_steps_workflow(job_args: dict, **kwargs) -> None:
         raise
 
 
-def _select_entry_step(
-    compiled: CompiledPythonStepsWorkflow,
-    requested_step_name: str | None,
-) -> str:
-    if requested_step_name:
-        if requested_step_name not in compiled.steps:
-            raise PythonStepsExecutionError(
-                f"Step '{requested_step_name}' not found. Available steps: {', '.join(sorted(compiled.steps))}",
-                step_name=requested_step_name,
-                phase="entry_selection",
-            )
-        return requested_step_name
-
-    if "run_root" in compiled.steps:
-        return "run_root"
-    if "run" in compiled.steps:
-        return "run"
-    if len(compiled.steps) == 1:
-        return next(iter(compiled.steps))
-
-    runnable_steps = [name for name, step in compiled.steps.items() if step.run]
-    if len(runnable_steps) == 1:
-        return runnable_steps[0]
-
-    raise PythonStepsExecutionError(
-        "Unable to determine entry step. Define 'run_root', provide step_name, or use a single-step workflow.",
-        step_name=None,
-        phase="entry_selection",
-    )
-
-
-async def _execute_step(step_name: str, context: PythonStepsExecutionContext) -> None:
-    if step_name in context.completed_steps:
+async def _execute_step(
+    step: StepDefinition,
+    context: PythonStepsExecutionContext,
+) -> None:
+    if step.name in context.completed_steps:
         return
 
-    step = context.compiled.steps[step_name]
     logger.set_sinks(["validation"]).info(
         "python_step_started",
         data={
             "workflow_id": context.workflow_id,
             "step_name": step.name,
-            "step_type": "run" if step.run else "prompt",
+            "step_type": "prompt",
         },
     )
 
-    if step.run:
-        for operation in step.run:
-            await _execute_operation(operation, step_name=step.name, context=context)
-    else:
-        await _execute_prompt_step(step, context)
+    await _execute_prompt_step(step, context)
 
-    context.completed_steps.add(step_name)
+    context.completed_steps.add(step.name)
     logger.set_sinks(["validation"]).info(
         "python_step_completed",
         data={
             "workflow_id": context.workflow_id,
             "step_name": step.name,
         },
-    )
-
-
-async def _execute_operation(
-    operation: Operation,
-    *,
-    step_name: str,
-    context: PythonStepsExecutionContext,
-) -> None:
-    if isinstance(operation, RunStepOp):
-        await _execute_step(operation.step_name, context)
-        return
-
-    if isinstance(operation, WriteOp):
-        _write_content(
-            operation.target,
-            operation.content,
-            context=context,
-            metadata={
-                "source": "python_step_write",
-                "origin_id": context.workflow_id,
-                "origin_name": step_name,
-                "origin_type": "python_step",
-                "size_chars": len(operation.content or ""),
-            },
-        )
-        return
-
-    if isinstance(operation, BranchOp):
-        resolved = _resolve_input_source(operation.on, context=context)
-        branch = "if_empty" if _is_empty_input(resolved) else "otherwise"
-        logger.set_sinks(["validation"]).info(
-            "python_branch_selected",
-            data={
-                "workflow_id": context.workflow_id,
-                "step_name": step_name,
-                "branch": branch,
-                "on": _input_source_label(operation.on),
-            },
-        )
-        chosen = operation.if_empty if branch == "if_empty" else operation.otherwise
-        await _execute_operation(chosen, step_name=step_name, context=context)
-        return
-
-    raise PythonStepsExecutionError(
-        f"Unsupported operation type '{type(operation).__name__}'",
-        step_name=step_name,
-        phase="operation_execution",
     )
 
 
@@ -276,7 +222,10 @@ async def _execute_prompt_step(
         model = ModelDirective().process_value(step.model, context.vault_path)
 
     agent = await create_agent(model=model)
-    agent.instructions(lambda _ctx: WORKFLOW_SYSTEM_INSTRUCTION)
+    instructions = WORKFLOW_SYSTEM_INSTRUCTION
+    if context.compiled.workflow.instructions:
+        instructions = f"{instructions}\n\n{context.compiled.workflow.instructions}"
+    agent.instructions(lambda _ctx: instructions)
 
     deps = SimpleNamespace(
         buffer_store=context.run_buffers,
@@ -308,9 +257,7 @@ def _build_step_prompt(
         resolved = _resolve_input_source(source, context=context)
         if not resolved:
             continue
-        input_chunks.extend(
-            f"--- INPUT: {item.label} ---\n{item.content}" for item in resolved
-        )
+        input_chunks.extend(f"--- INPUT: {item.label} ---\n{item.content}" for item in resolved)
 
     prompt_parts: list[str] = []
     if input_chunks:
@@ -329,9 +276,7 @@ def _resolve_input_source(
     if isinstance(source, VarInput):
         store = _buffer_store_for_var(source, context=context)
         entry = store.get(source.name)
-        if entry is None:
-            return []
-        if not entry.content:
+        if entry is None or not entry.content:
             return []
         return [ResolvedInputItem(label=f"variable:{source.name}", content=entry.content)]
 
@@ -356,7 +301,11 @@ def _resolve_file_input(
 
     resolved: list[ResolvedInputItem] = []
     for path in matches:
-        relative = path[len(context.vault_path) + 1 :] if path.startswith(f"{context.vault_path}/") else path
+        relative = (
+            path[len(context.vault_path) + 1 :]
+            if path.startswith(f"{context.vault_path}/")
+            else path
+        )
         with open(path, "r", encoding="utf-8") as handle:
             content = handle.read()
         resolved.append(ResolvedInputItem(label=relative, content=content))
@@ -427,20 +376,9 @@ def _resolve_runtime_path(path: str, *, context: PythonStepsExecutionContext) ->
     return path.format(today=context.today.strftime("%Y-%m-%d"))
 
 
-def _is_empty_input(items: Sequence[ResolvedInputItem]) -> bool:
-    return len(items) == 0
-
-
-def _input_source_label(source: InputSource) -> str:
-    if isinstance(source, VarInput):
-        return f"variable:{source.name}"
-    return f"file:{source.path}"
-
-
 def _output_label(target: PythonOutputTarget | None) -> str | None:
     if target is None:
         return None
     if isinstance(target, VarTarget):
         return f"variable:{target.name}"
     return f"file:{target.path}"
-
