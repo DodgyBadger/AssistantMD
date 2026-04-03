@@ -75,6 +75,15 @@ SUPPORTED_READ_FILE_TYPES = {
     ".tif": "image",
 }
 
+# Read-only internal API surface for authoring and metadata inspection tools.
+INTERNAL_API_ALLOWED_ENDPOINTS = {
+    "authoring_sdk": "/api/authoring/sdk",
+    "workflow_load_errors": "/api/workflows/load-errors",
+    "metadata": "/api/metadata",
+    "context_templates": "/api/context/templates",
+}
+INTERNAL_API_MAX_RESPONSE_CHARS = 50_000
+
 
 # ==============================================================================
 # LLM Prompts and Instructions

@@ -350,6 +350,27 @@ class AuthoringCompileResponse(BaseModel):
     )
 
 
+class AuthoringSdkResponse(BaseModel):
+    """Structured SDK inspection payload for authoring surfaces."""
+
+    overview: Optional[str] = Field(None, description="High-level description of python_steps authoring")
+    file_format: Optional[str] = Field(None, description="Markdown and frontmatter file structure rules")
+    rules: Optional[str] = Field(None, description="Compiler-facing authoring rules and constraints")
+    primitives: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Inspectable authoring primitive metadata",
+    )
+
+
+class WorkflowLoadErrorsResponse(BaseModel):
+    """Structured workflow load errors for authoring and repair loops."""
+
+    errors: List["ConfigurationError"] = Field(
+        default_factory=list,
+        description="Workflow configuration errors discovered during loading",
+    )
+
+
 #######################################################################
 ## Internal Data Models
 #######################################################################

@@ -1,0 +1,106 @@
+"""Read-only tool for allowlisted internal API metadata endpoints."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from httpx import ASGITransport, AsyncClient
+from pydantic_ai.tools import Tool
+
+from core.constants import INTERNAL_API_ALLOWED_ENDPOINTS, INTERNAL_API_MAX_RESPONSE_CHARS
+
+from .base import BaseTool
+
+
+class InternalApi(BaseTool):
+    """Read-only access to a small allowlist of internal metadata endpoints."""
+
+    allow_routing = False
+    _MAX_RESPONSE_CHARS = INTERNAL_API_MAX_RESPONSE_CHARS
+    _ALLOWED_ENDPOINTS = INTERNAL_API_ALLOWED_ENDPOINTS
+
+    @classmethod
+    def get_tool(cls, vault_path: str | None = None):
+        """Get the read-only internal API tool."""
+
+        async def internal_api(
+            *,
+            endpoint: str,
+            vault_name: str = "",
+            workflow_name: str = "",
+        ) -> str:
+            """Fetch structured metadata from a read-only allowlisted internal API endpoint.
+
+            :param endpoint: One of: authoring_sdk, workflow_load_errors, metadata, context_templates
+            :param vault_name: Optional vault name, used for context_templates or filtering workflow_load_errors
+            :param workflow_name: Optional workflow name filter for workflow_load_errors
+            """
+            endpoint_key = (endpoint or "").strip().lower()
+            if endpoint_key not in cls._ALLOWED_ENDPOINTS:
+                allowed = ", ".join(sorted(cls._ALLOWED_ENDPOINTS))
+                raise ValueError(f"Unsupported endpoint '{endpoint}'. Allowed endpoints: {allowed}")
+
+            path = cls._ALLOWED_ENDPOINTS[endpoint_key]
+            params: dict[str, str] = {}
+            if endpoint_key == "context_templates":
+                inferred_vault_name = cls._infer_vault_name(vault_path)
+                effective_vault_name = (vault_name or inferred_vault_name or "").strip()
+                if not effective_vault_name:
+                    raise ValueError(
+                        "vault_name is required for endpoint='context_templates' when vault context is unavailable"
+                    )
+                params["vault_name"] = effective_vault_name
+            elif endpoint_key == "workflow_load_errors":
+                inferred_vault_name = cls._infer_vault_name(vault_path)
+                effective_vault_name = (vault_name or inferred_vault_name or "").strip()
+                if effective_vault_name:
+                    params["vault_name"] = effective_vault_name
+                if workflow_name.strip():
+                    params["workflow_name"] = workflow_name.strip()
+
+            from main import app
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://internal-api") as client:
+                response = await client.get(path, params=params)
+            if response.status_code >= 400:
+                raise ValueError(
+                    f"Internal API request failed for {path}: HTTP {response.status_code} {response.text}"
+                )
+            payload = json.dumps(response.json(), indent=2, sort_keys=True)
+            if len(payload) > cls._MAX_RESPONSE_CHARS:
+                raise ValueError(
+                    f"Internal API response for {endpoint_key} exceeded {cls._MAX_RESPONSE_CHARS} characters. "
+                    "Use narrower filters."
+                )
+            return payload
+
+        return Tool(internal_api, name="internal_api")
+
+    @classmethod
+    def get_instructions(cls) -> str:
+        """Get usage instructions for read-only internal API access."""
+        return """
+## internal_api usage instructions
+
+Use for read-only inspection of allowlisted internal metadata endpoints.
+
+Allowed endpoints:
+- internal_api(endpoint="authoring_sdk")
+- internal_api(endpoint="workflow_load_errors", vault_name="PersonalVault", workflow_name="draft-name")
+- internal_api(endpoint="metadata")
+- internal_api(endpoint="context_templates", vault_name="PersonalVault")
+
+Rules:
+- Read-only GET access only.
+- Endpoint must be one of the allowlisted keys above.
+- Do not use for arbitrary URLs or mutation operations.
+- Responses larger than 50000 characters are rejected.
+"""
+
+    @staticmethod
+    def _infer_vault_name(vault_path: str | None) -> str | None:
+        if not vault_path:
+            return None
+        return Path(vault_path).name or None

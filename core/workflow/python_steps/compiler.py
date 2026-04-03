@@ -118,6 +118,19 @@ def _compile_assignment(statement: ast.stmt, *, context: _CompilationContext) ->
                 )
             context.workflow = _compile_workflow(target.id, value, context=context)
             return
+    if _is_sdk_constant_expr(value):
+        if target.id in context.constants:
+            raise PythonStepsValidationError(
+                f"Duplicate constant '{target.id}'",
+                section_name=target.id,
+                phase="semantic_validation",
+            )
+        context.constants[target.id] = _compile_sdk_constant(
+            value,
+            context=context,
+            section_name=target.id,
+        )
+        return
 
     if target.id in context.constants:
         raise PythonStepsValidationError(
@@ -276,6 +289,18 @@ def _compile_input(
     context: _CompilationContext,
     section_name: str,
 ) -> InputSource:
+    if isinstance(node, ast.Name):
+        constant = _resolve_literal(node, context=context)
+        if isinstance(constant, FileTarget):
+            return FileInput(path=constant.path, options=dict(constant.options))
+        if isinstance(constant, VarTarget):
+            return VarInput(name=constant.name, options=dict(constant.options))
+        raise PythonStepsValidationError(
+            "inputs= constants must resolve to File(...) or Var(...)",
+            section_name=section_name,
+            phase="compile",
+        )
+
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
         raise PythonStepsValidationError(
             "inputs= entries must be File(...) or Var(...) calls",
@@ -316,6 +341,15 @@ def _compile_output(
 ) -> OutputTarget | None:
     if node is None:
         return None
+    if isinstance(node, ast.Name):
+        constant = _resolve_literal(node, context=context)
+        if isinstance(constant, FileTarget | VarTarget):
+            return constant
+        raise PythonStepsValidationError(
+            "output= constants must resolve to File(...) or Var(...)",
+            section_name=section_name,
+            phase="compile",
+        )
     return _compile_target(node, context=context, section_name=section_name)
 
 
@@ -502,6 +536,44 @@ def _collect_extras(
             continue
         extras[key] = _resolve_literal(value, context=context)
     return extras
+
+
+def _is_sdk_constant_expr(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if isinstance(node.func, ast.Name):
+        return node.func.id in {"File", "Var"}
+    return isinstance(node.func, ast.Attribute)
+
+
+def _compile_sdk_constant(
+    node: ast.AST,
+    *,
+    context: _CompilationContext,
+    section_name: str,
+) -> object:
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id == "File":
+            path = _first_required_string_arg(
+                node,
+                "File",
+                context=context,
+                section_name=section_name,
+            )
+            return FileTarget(path=path, options=_keyword_literals(node, context=context))
+        if node.func.id == "Var":
+            name = _first_required_string_arg(
+                node,
+                "Var",
+                context=context,
+                section_name=section_name,
+            )
+            return VarTarget(name=name, options=_keyword_literals(node, context=context))
+
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        return _compile_target(node, context=context, section_name=section_name)
+
+    return _resolve_literal(node, context=context)
 
 
 def _resolve_literal(node: ast.AST, *, context: _CompilationContext) -> object:

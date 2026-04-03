@@ -18,20 +18,36 @@
   - compile-only authoring checks are exposed through:
     - `POST /api/authoring/compile`
     - `POST /api/workflows/test`
+    - `GET /api/authoring/sdk`
+    - `GET /api/workflows/load-errors`
+  - `GET /api/authoring/sdk` now returns the full authoring contract:
+    - doc-backed wrapper guidance (`overview`, `file_format`, `rules`)
+    - live SDK metadata (`primitives`)
+  - top-level SDK-bound constants now compile cleanly for reusable inputs/outputs, including `File(...)`, `Var(...)`, and target-method calls like `.replace()`
   - dashboard support now exists for:
     - `Test Workflow` on already loaded workflows
     - surfacing workflow load failures in the rescan result area
+  - a minimal read-only `internal_api` tool now exists for allowlisted internal metadata endpoints:
+    - `authoring_sdk`
+    - `workflow_load_errors`
+    - `metadata`
+    - `context_templates`
 - Current limitation:
-  - compile diagnostics for invalid new workflows are visible in rescan feedback and logs, but are not yet directly available to the authoring LLM through a dedicated tool or file-targeted draft test flow.
+  - invalid workflow diagnostics are now readable through a narrow internal tool, but the chat authoring loop still lacks a first-class draft-file test flow and richer repair-oriented endpoint design.
 - Immediate next work:
   1. Improve authoring diagnostics for invalid draft workflows that fail before load:
      - likely by testing workflow files by path/name instead of only loaded `global_id`
      - keep this compile-only
-  2. Extract shared semantic services below both directives and SDK adapters:
+     - make the result shape optimized for LLM repair loops
+  2. Decide how chat should gain access to the internal API tool safely:
+     - explicit enablement model
+     - endpoint allowlist ownership
+     - response-size/error-shaping guardrails
+  3. Extract shared semantic services below both directives and SDK adapters:
      - input selection
      - output target normalization
      - write mode handling
-  3. Continue Phase 4 parity only after the shared-semantic path is clearer:
+  4. Continue Phase 4 parity only after the shared-semantic path is clearer:
      - `File(...)` selector options
      - `Var(...)` routing/scope options
      - required-input behavior

@@ -1,6 +1,6 @@
 """Shared declarative authoring surface for workflows and related systems."""
 
-from core.authoring.introspection import describe_authoring_sdk
+from core.authoring.introspection import describe_authoring_contract, describe_authoring_sdk
 from core.authoring.primitives import (
     AUTHORING_PRIMITIVE_METADATA,
     AUTHORING_PRIMITIVE_NAMES,
@@ -29,5 +29,6 @@ __all__ = [
     "Var",
     "Workflow",
     "compile_candidate_workflow",
+    "describe_authoring_contract",
     "describe_authoring_sdk",
 ]

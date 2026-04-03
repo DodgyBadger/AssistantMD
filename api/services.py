@@ -45,7 +45,7 @@ from core.settings.secrets_store import (
     secret_has_value,
 )
 from core.runtime.paths import get_system_root
-from core.authoring import compile_candidate_workflow
+from core.authoring import compile_candidate_workflow, describe_authoring_contract
 from .models import (
     AuthoringCompileRequest,
     AuthoringCompileResponse,
@@ -118,6 +118,25 @@ def compile_authoring_candidate(
         for item in result.diagnostics
     ]
     return AuthoringCompileResponse(ok=result.ok, diagnostics=diagnostics, summary=summary)
+
+
+def get_authoring_sdk_metadata() -> dict[str, object]:
+    """Return the full authoring contract and SDK metadata."""
+    return describe_authoring_contract()
+
+
+def get_workflow_load_errors(
+    *,
+    vault_name: str | None = None,
+    workflow_name: str | None = None,
+) -> List[APIConfigurationError]:
+    """Return workflow configuration errors, optionally filtered by vault/workflow."""
+    errors = get_configuration_errors()
+    if vault_name:
+        errors = [error for error in errors if error.vault == vault_name]
+    if workflow_name:
+        errors = [error for error in errors if error.workflow_name == workflow_name]
+    return errors
 
 
 async def test_workflow_candidate(

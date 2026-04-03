@@ -302,3 +302,8 @@ tools:
     description: "List, run, enable, and disable workflows in the current vault"
     requires_secrets: []
     user_editable: false
+  internal_api:
+    module: core.tools.internal_api
+    description: "Read-only access to allowlisted internal metadata endpoints"
+    requires_secrets: []
+    user_editable: false

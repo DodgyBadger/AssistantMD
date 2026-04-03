@@ -23,6 +23,8 @@ from core.llm.chat_executor import (
 from .models import (
     AuthoringCompileRequest,
     AuthoringCompileResponse,
+    AuthoringSdkResponse,
+    WorkflowLoadErrorsResponse,
     TestWorkflowRequest,
     VaultRescanRequest,
     VaultRescanResponse,
@@ -72,6 +74,8 @@ from .services import (
     scan_import_folder,
     import_url_direct,
     compile_authoring_candidate,
+    get_authoring_sdk_metadata,
+    get_workflow_load_errors,
     test_workflow_candidate,
 )
 from api.import_models import (
@@ -608,6 +612,26 @@ async def compile_authoring(request: AuthoringCompileRequest):
     """Compile candidate workflow text without executing it."""
     try:
         return compile_authoring_candidate(request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/authoring/sdk", response_model=AuthoringSdkResponse, response_model_exclude_none=True)
+async def authoring_sdk():
+    """Return the full authoring contract and SDK metadata."""
+    try:
+        return AuthoringSdkResponse(**get_authoring_sdk_metadata())
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/workflows/load-errors", response_model=WorkflowLoadErrorsResponse)
+async def workflow_load_errors(vault_name: str | None = None, workflow_name: str | None = None):
+    """Return workflow load errors without exposing the full system status payload."""
+    try:
+        return WorkflowLoadErrorsResponse(
+            errors=get_workflow_load_errors(vault_name=vault_name, workflow_name=workflow_name)
+        )
     except Exception as e:
         return create_error_response(e)
 

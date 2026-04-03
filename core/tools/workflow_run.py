@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic_ai.tools import Tool
 
+from core.authoring import compile_candidate_workflow
 from core.logger import UnifiedLogger
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.scheduling.jobs import create_job_args
@@ -39,8 +40,8 @@ class WorkflowRun(BaseTool):
         ) -> str:
             """Run or list workflows in the current vault.
 
-            :param operation: Operation name (list, run, enable_workflow, disable_workflow)
-            :param workflow_name: Workflow name relative to AssistantMD/Workflows (required for run/enable/disable)
+            :param operation: Operation name (list, test, run, enable_workflow, disable_workflow)
+            :param workflow_name: Workflow name relative to AssistantMD/Workflows (required for test/run/enable/disable)
             :param step_name: Optional step name to execute (run only)
             """
             try:
@@ -77,6 +78,20 @@ class WorkflowRun(BaseTool):
                         )
                         return cls._format_run_error(global_id, single_step, exc)
 
+                if op == "test":
+                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
+                    if error:
+                        return error
+                    try:
+                        result = cls._test_workflow_file(vault_path=vault_path, vault_name=vault_name, workflow_name=name)
+                        return cls._format_test_result(result)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.exception(
+                            "workflow_run test failed",
+                            metadata={"operation": op, "workflow_name": name, "vault": vault_name},
+                        )
+                        return cls._format_test_error(vault_name=vault_name, workflow_name=name, exc=exc)
+
                 if op in {"enable_workflow", "disable_workflow"}:
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
@@ -88,7 +103,7 @@ class WorkflowRun(BaseTool):
                     )
                     return cls._format_lifecycle_result(result)
 
-                return "Unknown operation. Available: list, run, enable_workflow, disable_workflow"
+                return "Unknown operation. Available: list, test, run, enable_workflow, disable_workflow"
             except RuntimeStateError as exc:
                 return f"Runtime unavailable: {exc}"
             except Exception as exc:  # pylint: disable=broad-except
@@ -108,6 +123,9 @@ class WorkflowRun(BaseTool):
 
 Discovery:
 - workflow_run(operation="list")
+
+Validation:
+- workflow_run(operation="test", workflow_name="weekly-planner")
 
 Execution:
 - workflow_run(operation="run", workflow_name="weekly-planner")
@@ -231,6 +249,35 @@ Notes:
         )
 
     @staticmethod
+    def _format_test_result(result) -> str:
+        lines = [
+            f"ok: {result.ok}",
+        ]
+        if result.summary is not None:
+            lines.extend(
+                [
+                    f"workflow_id: {result.summary.workflow_id}",
+                    f"block_count: {result.summary.block_count}",
+                    f"workflow_name: {result.summary.workflow_name}",
+                    f"instructions_present: {result.summary.instructions_present}",
+                ]
+            )
+            if result.summary.step_names:
+                lines.append("step_names:")
+                lines.extend([f"- {name}" for name in result.summary.step_names])
+            if result.summary.output_targets:
+                lines.append("output_targets:")
+                for step_name, target in result.summary.output_targets.items():
+                    lines.append(f"- {step_name}: {target}")
+        if result.diagnostics:
+            lines.append("diagnostics:")
+            for diagnostic in result.diagnostics:
+                lines.append(
+                    f"- phase={diagnostic.phase} section={diagnostic.section_name or ''} message={diagnostic.message}"
+                )
+        return "\n".join(lines)
+
+    @staticmethod
     def _format_lifecycle_result(result: dict) -> str:
         lines = [
             f"success: {result.get('success', False)}",
@@ -264,6 +311,17 @@ Notes:
             lines.append("traceback_tail:")
             lines.extend([f"  {line}" for line in tail])
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_test_error(vault_name: str, workflow_name: str, exc: Exception) -> str:
+        return "\n".join(
+            [
+                "ok: False",
+                f"workflow_id: {vault_name}/{workflow_name}",
+                f"error_type: {type(exc).__name__}",
+                f"message: {exc}",
+            ]
+        )
 
     @staticmethod
     def _format_load_errors(loader, global_id: str) -> str:
@@ -335,6 +393,35 @@ Notes:
             "output_files": [],
             "message": f"Workflow '{target.global_id}' executed successfully in {elapsed:.2f} seconds",
         }
+
+    @classmethod
+    def _test_workflow_file(
+        cls,
+        *,
+        vault_path: str,
+        vault_name: str,
+        workflow_name: str,
+    ):
+        workflow_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=workflow_name)
+        if not workflow_path.exists():
+            raise ValueError(f"Workflow file not found: {workflow_path}")
+        if not workflow_path.is_file():
+            raise ValueError(f"Workflow path is not a file: {workflow_path}")
+
+        content = workflow_path.read_text(encoding="utf-8")
+        return compile_candidate_workflow(
+            workflow_id=f"{vault_name}/{workflow_name}",
+            content=content,
+        )
+
+    @staticmethod
+    def _resolve_workflow_file_path(*, vault_path: str, workflow_name: str) -> Path:
+        base_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / WORKFLOW_DEFINITIONS_DIR
+        normalized = workflow_name.strip().replace("\\", "/")
+        candidate = base_dir / normalized
+        if candidate.suffix.lower() != ".md":
+            candidate = candidate.with_suffix(".md")
+        return candidate
 
     @classmethod
     async def _set_workflow_enabled_state(
