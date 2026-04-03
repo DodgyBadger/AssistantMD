@@ -15,9 +15,7 @@
     - SDK introspection in [core/authoring/introspection.py](/app/core/authoring/introspection.py)
     - compile-only checks in [core/authoring/service.py](/app/core/authoring/service.py)
   - `python_steps` parser/compiler/executor are refactored around that shape under [core/workflow/python_steps/](/app/core/workflow/python_steps)
-  - compile-only authoring checks are exposed through:
-    - `POST /api/authoring/compile`
-    - `POST /api/workflows/test`
+  - authoring inspection is exposed through:
     - `GET /api/authoring/sdk`
     - `GET /api/workflows/load-errors`
   - `GET /api/authoring/sdk` now returns the full authoring contract:
@@ -25,29 +23,26 @@
     - live SDK metadata (`primitives`)
   - top-level SDK-bound constants now compile cleanly for reusable inputs/outputs, including `File(...)`, `Var(...)`, and target-method calls like `.replace()`
   - dashboard support now exists for:
-    - `Test Workflow` on already loaded workflows
     - surfacing workflow load failures in the rescan result area
   - a minimal read-only `internal_api` tool now exists for allowlisted internal metadata endpoints:
     - `authoring_sdk`
     - `workflow_load_errors`
     - `metadata`
     - `context_templates`
+  - compile-only file-backed draft testing is available to chat via:
+    - `workflow_run(operation="test", workflow_name="...")`
 - Current limitation:
-  - invalid workflow diagnostics are now readable through a narrow internal tool, but the chat authoring loop still lacks a first-class draft-file test flow and richer repair-oriented endpoint design.
+  - invalid workflow diagnostics are now readable to chat, but the system still lacks a dedicated UI surface for interactive workflow drafting beyond file editing plus rescan feedback.
 - Immediate next work:
-  1. Improve authoring diagnostics for invalid draft workflows that fail before load:
-     - likely by testing workflow files by path/name instead of only loaded `global_id`
-     - keep this compile-only
-     - make the result shape optimized for LLM repair loops
-  2. Decide how chat should gain access to the internal API tool safely:
+  1. Decide how chat should gain access to the internal API tool safely:
      - explicit enablement model
      - endpoint allowlist ownership
      - response-size/error-shaping guardrails
-  3. Extract shared semantic services below both directives and SDK adapters:
+  2. Extract shared semantic services below both directives and SDK adapters:
      - input selection
      - output target normalization
      - write mode handling
-  4. Continue Phase 4 parity only after the shared-semantic path is clearer:
+  3. Continue Phase 4 parity only after the shared-semantic path is clearer:
      - `File(...)` selector options
      - `Var(...)` routing/scope options
      - required-input behavior

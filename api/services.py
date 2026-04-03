@@ -45,13 +45,8 @@ from core.settings.secrets_store import (
     secret_has_value,
 )
 from core.runtime.paths import get_system_root
-from core.authoring import compile_candidate_workflow, describe_authoring_contract
+from core.authoring import describe_authoring_contract
 from .models import (
-    AuthoringCompileRequest,
-    AuthoringCompileResponse,
-    AuthoringCompileSummaryInfo,
-    AuthoringDiagnosticInfo,
-    TestWorkflowRequest,
     VaultInfo,
     SchedulerInfo,
     SystemInfo,
@@ -90,36 +85,6 @@ logger = UnifiedLogger(tag="api-services")
 _system_startup_time: Optional[datetime] = None
 
 
-def compile_authoring_candidate(
-    request: AuthoringCompileRequest,
-) -> AuthoringCompileResponse:
-    """Run compile-only validation for candidate workflow authoring text."""
-    result = compile_candidate_workflow(
-        workflow_id=request.workflow_id,
-        content=request.content,
-    )
-    summary = None
-    if result.summary is not None:
-        summary = AuthoringCompileSummaryInfo(
-            workflow_id=result.summary.workflow_id,
-            block_count=result.summary.block_count,
-            block_label=result.summary.block_label,
-            workflow_name=result.summary.workflow_name,
-            step_names=list(result.summary.step_names),
-            instructions_present=result.summary.instructions_present,
-            output_targets=dict(result.summary.output_targets),
-        )
-    diagnostics = [
-        AuthoringDiagnosticInfo(
-            phase=item.phase,
-            message=item.message,
-            section_name=item.section_name,
-        )
-        for item in result.diagnostics
-    ]
-    return AuthoringCompileResponse(ok=result.ok, diagnostics=diagnostics, summary=summary)
-
-
 def get_authoring_sdk_metadata() -> dict[str, object]:
     """Return the full authoring contract and SDK metadata."""
     return describe_authoring_contract()
@@ -137,30 +102,6 @@ def get_workflow_load_errors(
     if workflow_name:
         errors = [error for error in errors if error.workflow_name == workflow_name]
     return errors
-
-
-async def test_workflow_candidate(
-    request: TestWorkflowRequest,
-) -> AuthoringCompileResponse:
-    """Compile-check an existing stored workflow without executing it."""
-    global_id = request.global_id
-    if "/" not in global_id:
-        raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
-
-    loaded_workflows = await _get_workflow_loader().load_workflows(
-        force_reload=True,
-        target_global_id=global_id,
-    )
-    if not loaded_workflows:
-        raise ValueError(f"Workflow not found: {global_id}")
-
-    target_workflow = loaded_workflows[0]
-    with open(target_workflow.file_path, "r", encoding="utf-8") as handle:
-        content = handle.read()
-
-    return compile_authoring_candidate(
-        AuthoringCompileRequest(workflow_id=global_id, content=content)
-    )
 
 
 def _get_workflow_loader():

@@ -33,12 +33,6 @@ class ExecuteWorkflowRequest(BaseModel):
     )
 
 
-class TestWorkflowRequest(BaseModel):
-    """Request model for compile-only workflow testing."""
-
-    global_id: str = Field(..., description="Workflow global ID (vault/name format)")
-
-
 class ChatExecuteRequest(BaseModel):
     """Request model for chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")
@@ -52,15 +46,6 @@ class ChatExecuteRequest(BaseModel):
     model: str = Field(..., description="Model name to use")
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
-
-
-class AuthoringCompileRequest(BaseModel):
-    """Request payload for compile-only authoring checks."""
-
-    workflow_id: str = Field(..., description="Synthetic workflow identifier for diagnostics")
-    content: str = Field(..., min_length=1, description="Candidate workflow markdown content")
-
-
 
 
 #######################################################################
@@ -311,43 +296,6 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error type or category")
     message: str = Field(..., description="Human-readable error message")
     details: Optional[Dict] = Field(None, description="Additional error details")
-
-
-class AuthoringDiagnosticInfo(BaseModel):
-    """Structured compile diagnostic for authoring checks."""
-
-    phase: str = Field(..., description="Validation or compile phase")
-    message: str = Field(..., description="Human-readable diagnostic message")
-    section_name: Optional[str] = Field(None, description="Related markdown section or declaration name")
-
-
-class AuthoringCompileSummaryInfo(BaseModel):
-    """Compact summary of a successfully compiled candidate workflow."""
-
-    workflow_id: str = Field(..., description="Synthetic workflow identifier")
-    block_count: int = Field(..., description="Number of executable python blocks discovered")
-    block_label: Optional[str] = Field(None, description="Nearest markdown heading for the python block")
-    workflow_name: str = Field(..., description="Top-level workflow variable name")
-    step_names: List[str] = Field(default_factory=list, description="Compiled workflow step names in execution order")
-    instructions_present: bool = Field(..., description="Whether workflow-level instructions were provided")
-    output_targets: Dict[str, Optional[str]] = Field(
-        default_factory=dict,
-        description="Compiled output target labels keyed by step name",
-    )
-
-
-class AuthoringCompileResponse(BaseModel):
-    """Response payload for compile-only authoring checks."""
-
-    ok: bool = Field(..., description="Whether compilation succeeded")
-    diagnostics: List[AuthoringDiagnosticInfo] = Field(
-        default_factory=list,
-        description="Structured diagnostics for parse/compile failures",
-    )
-    summary: Optional[AuthoringCompileSummaryInfo] = Field(
-        None,
-        description="Compiled workflow summary when compilation succeeds",
-    )
 
 
 class AuthoringSdkResponse(BaseModel):
