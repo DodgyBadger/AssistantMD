@@ -18,10 +18,20 @@ Every `python_steps` workflow must include YAML frontmatter at the top of the fi
 ```yaml
 ---
 workflow_engine: python_steps
+schedule: "cron: 0 9 * * *"
 enabled: false
 description: Optional description
 ---
 ```
+
+Frontmatter notes:
+- `workflow_engine: python_steps` selects the Python workflow engine.
+- `schedule:` is optional. Omit it for manual-only workflows.
+- Supported schedule forms are:
+  - `schedule: "cron: 0 9 * * *"` for recurring runs
+  - `schedule: "once: 2026-01-15 14:30"` for one-time runs
+- `enabled: true` or `enabled: false` controls whether scheduled runs are active.
+- `description:` is optional but useful for workflow discovery.
 
 After the frontmatter, the file must contain exactly one executable fenced Python block:
 

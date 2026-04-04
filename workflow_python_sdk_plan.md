@@ -3,49 +3,35 @@
 ### Status Snapshot
 - Current branch: `feature/workflow_python_sdk`
 - Current state:
-  - `python_steps` now uses the intended MVP authoring shape:
+  - `python_steps` MVP authoring shape is working:
     - one executable Python block
     - declarative `Step(...)`
     - one `Workflow(...)`
     - terminal `workflow.run()`
-    - constrained top-level constants
+    - constrained top-level constants, including reusable SDK-bound targets like `File(...).replace()`
     - workflow-level `instructions=...`
-  - shared authoring surface now lives in [core/authoring/](/app/core/authoring):
+  - shared authoring surface lives in [core/authoring/](/app/core/authoring):
     - canonical primitives in [core/authoring/primitives.py](/app/core/authoring/primitives.py)
-    - SDK introspection in [core/authoring/introspection.py](/app/core/authoring/introspection.py)
-    - compile-only checks in [core/authoring/service.py](/app/core/authoring/service.py)
-  - `python_steps` parser/compiler/executor are refactored around that shape under [core/workflow/python_steps/](/app/core/workflow/python_steps)
-  - authoring inspection is exposed through:
-    - `GET /api/authoring/sdk`
-    - `GET /api/workflows/load-errors`
-  - `GET /api/authoring/sdk` now returns the full authoring contract:
-    - doc-backed wrapper guidance (`overview`, `file_format`, `rules`)
-    - live SDK metadata (`primitives`)
-  - top-level SDK-bound constants now compile cleanly for reusable inputs/outputs, including `File(...)`, `Var(...)`, and target-method calls like `.replace()`
-  - dashboard support now exists for:
-    - surfacing workflow load failures in the rescan result area
-  - a minimal read-only `internal_api` tool now exists for allowlisted internal metadata endpoints:
-    - `authoring_sdk`
-    - `workflow_load_errors`
-    - `metadata`
-    - `context_templates`
-  - compile-only file-backed draft testing is available to chat via:
-    - `workflow_run(operation="test", workflow_name="...")`
+    - contract/introspection in [core/authoring/introspection.py](/app/core/authoring/introspection.py)
+    - compile-only service in [core/authoring/service.py](/app/core/authoring/service.py)
+  - authoring support is live:
+    - `internal_api(endpoint="authoring_sdk")` exposes the full doc-backed contract
+    - `internal_api(endpoint="workflow_load_errors")` exposes load failures
+    - `workflow_run(operation="test", workflow_name="...")` gives file-backed compile-only testing
+    - rescan UI surfaces workflow load failures
+  - real file-first authoring has been proven with successful one-shot sample workflows and end-to-end runs using the chat agent.
+- Next phase:
+  - move into parity work against [workflow_python_sdk_parity_checklist.md](/app/workflow_python_sdk_parity_checklist.md)
+  - highest-value items are `pending` semantics, selector parity, and step-level tool access
+- Important implementation rule for the next phase:
+  - avoid duplicating directive/workflow semantics inside `python_steps`
+  - when parity work touches existing behavior like input selection, routing, write modes, variable scope, or lifecycle actions, prefer extracting shared helpers/services that both the string DSL and the SDK can use
+  - if reuse requires slowing down to refactor first, do that rather than adding a second drifting implementation
+- Validation requirement for the next phase:
+  - each parity slice should come with targeted validation or smoke coverage
+  - maintainers still own the full validation suite, but new shared semantics should be exercised in scenarios that prove both the old workflow DSL and the SDK path still behave correctly
 - Current limitation:
-  - invalid workflow diagnostics are now readable to chat, but the system still lacks a dedicated UI surface for interactive workflow drafting beyond file editing plus rescan feedback.
-- Immediate next work:
-  1. Decide how chat should gain access to the internal API tool safely:
-     - explicit enablement model
-     - endpoint allowlist ownership
-     - response-size/error-shaping guardrails
-  2. Extract shared semantic services below both directives and SDK adapters:
-     - input selection
-     - output target normalization
-     - write mode handling
-  3. Continue Phase 4 parity only after the shared-semantic path is clearer:
-     - `File(...)` selector options
-     - `Var(...)` routing/scope options
-     - required-input behavior
+  - the authoring loop is working, but semantic parity is still incomplete, especially around selectors/stateful file processing, tool access, and broader directive coverage.
 
 ### Goal
 - Add an experimental `python_steps` workflow engine that lives beside the existing `step` engine.
