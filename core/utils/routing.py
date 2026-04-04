@@ -1,9 +1,4 @@
-"""
-Shared routing helpers for directive/tool outputs.
-
-Provides parsing for output targets, write-mode normalization,
-and a single write path for buffers/files.
-"""
+"""Low-level routing helpers for writing outputs to buffers and files."""
 
 from __future__ import annotations
 
@@ -11,8 +6,6 @@ from dataclasses import dataclass
 import os
 from typing import Any, Optional
 
-from core.directives.output import OutputFileDirective
-from core.directives.write_mode import WriteModeDirective
 from core.runtime.buffers import get_buffer_store_for_scope
 
 
@@ -21,65 +14,6 @@ class OutputTarget:
     type: str  # inline | discard | buffer | file
     name: Optional[str] = None
     path: Optional[str] = None
-
-
-def normalize_write_mode(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    value = value.strip()
-    if not value:
-        return None
-    return WriteModeDirective().process_value(value, vault_path="")
-
-
-def parse_output_target(
-    value: Any,
-    vault_path: str,
-    *,
-    allow_context: bool = False,
-    reference_date=None,
-    week_start_day: int = 0,
-) -> OutputTarget:
-    if isinstance(value, dict):
-        if value.get("type") == "inline":
-            return OutputTarget(type="inline")
-        if value.get("type") == "discard":
-            return OutputTarget(type="discard")
-        if "buffer" in value:
-            return OutputTarget(type="buffer", name=value.get("buffer"))
-        if "file" in value:
-            return OutputTarget(type="file", path=value.get("file"))
-        if value.get("type") == "buffer":
-            return OutputTarget(type="buffer", name=value.get("name"))
-        if value.get("type") == "file":
-            return OutputTarget(type="file", path=value.get("path"))
-        raise ValueError(f"Unsupported output target dict: {value}")
-
-    if not value or not str(value).strip():
-        raise ValueError("Output target cannot be empty")
-    normalized = str(value).strip()
-    lowered = normalized.lower()
-    if lowered == "inline":
-        return OutputTarget(type="inline")
-    if lowered == "discard":
-        return OutputTarget(type="discard")
-    if allow_context and lowered == "context":
-        return OutputTarget(type="context")
-
-    directive = OutputFileDirective()
-    result = directive.process_value(
-        normalized,
-        vault_path,
-        reference_date=reference_date,
-        week_start_day=week_start_day,
-    )
-    if isinstance(result, dict) and result.get("type") == "buffer":
-        return OutputTarget(type="buffer", name=result.get("name"))
-    if isinstance(result, str):
-        return OutputTarget(type="file", path=result)
-    raise ValueError(f"Unsupported output target: {value}")
-
-
 def build_manifest(
     *,
     source: str,

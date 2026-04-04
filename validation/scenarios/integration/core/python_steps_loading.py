@@ -34,6 +34,11 @@ class PythonStepsLoadingScenario(BaseScenario):
             "AssistantMD/Workflows/python_steps_bad_ref.md",
             PYTHON_STEPS_BAD_REF_WORKFLOW,
         )
+        self.create_file(
+            vault,
+            "AssistantMD/Workflows/python_steps_brace_path.md",
+            PYTHON_STEPS_BRACE_PATH_WORKFLOW,
+        )
 
         checkpoint = self.event_checkpoint()
         await self.start_system()
@@ -90,6 +95,22 @@ class PythonStepsLoadingScenario(BaseScenario):
             expected={
                 "workflow_name": "python_steps_bad_ref",
                 "vault_identifier": "PythonStepsLoadingVault/python_steps_bad_ref",
+            },
+        )
+        self.assert_event_contains(
+            events,
+            name="python_steps_semantic_validation_failed",
+            expected={
+                "workflow_id": "PythonStepsLoadingVault/python_steps_brace_path",
+                "step_name": "write_note",
+            },
+        )
+        self.assert_event_contains(
+            events,
+            name="workflow_load_failed",
+            expected={
+                "workflow_name": "python_steps_brace_path",
+                "vault_identifier": "PythonStepsLoadingVault/python_steps_brace_path",
             },
         )
 
@@ -153,6 +174,29 @@ gather = Step(
 
 workflow = Workflow(
     steps=[gather, missing_step],
+)
+
+workflow.run()
+```
+"""
+
+
+PYTHON_STEPS_BRACE_PATH_WORKFLOW = """---
+workflow_engine: python_steps
+enabled: false
+description: Invalid python_steps workflow using deprecated brace path syntax
+---
+
+```python
+write_note = Step(
+    name="write_note",
+    model="test",
+    output=File("daily/{today}").replace(),
+    prompt="hello",
+)
+
+workflow = Workflow(
+    steps=[write_note],
 )
 
 workflow.run()

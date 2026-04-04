@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from core.authoring.primitives import (
+    AUTHORING_HELPER_METADATA,
+    AUTHORING_HELPER_OBJECTS,
     AUTHORING_PRIMITIVE_METADATA,
     AUTHORING_PRIMITIVE_TYPES,
 )
@@ -39,7 +41,30 @@ def describe_authoring_sdk() -> dict[str, object]:
             "constructor": metadata.get("constructor", {}),
             "methods": methods,
         }
-    return {"primitives": primitives}
+    helpers: dict[str, object] = {}
+    for helper_name, helper in AUTHORING_HELPER_OBJECTS.items():
+        metadata = AUTHORING_HELPER_METADATA.get(helper_name, {})
+        methods: dict[str, object] = {}
+        public_method_names = sorted(
+            name
+            for name, member in inspect.getmembers(helper, predicate=callable)
+            if not name.startswith("_")
+        )
+        for method_name in public_method_names:
+            method = getattr(helper, method_name, None)
+            if method is None:
+                continue
+            method_docs = metadata.get("methods", {})
+            methods[method_name] = {
+                "signature": str(inspect.signature(method)),
+                "doc": method_docs.get(method_name, inspect.getdoc(method) or ""),
+            }
+        helpers[helper_name] = {
+            "doc": metadata.get("doc", inspect.getdoc(helper) or ""),
+            "methods": methods,
+        }
+
+    return {"primitives": primitives, "helpers": helpers}
 
 
 AUTHORING_DOC_SECTIONS: dict[str, str] = {

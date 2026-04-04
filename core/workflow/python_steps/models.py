@@ -41,6 +41,7 @@ class VarTarget:
 
 
 OutputTarget = FileTarget | VarTarget
+OutputTargets = list[OutputTarget]
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class StepDefinition:
     prompt: str | None = None
     inputs: list[InputSource] = field(default_factory=list)
     output: OutputTarget | None = None
+    outputs: list[OutputTarget] = field(default_factory=list)
     extras: dict[str, object] = field(default_factory=dict)
 
 

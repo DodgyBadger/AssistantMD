@@ -9,11 +9,17 @@ from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
 from core.core_services import CoreServices
 from core.chunking import build_input_files_prompt
 from core.llm.agents import PromptInput
-from core.llm.model_utils import model_supports_capability
-from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
+from core.llm.model_selection import ModelExecutionSpec
 from core.runtime.buffers import BufferStore
-from core.utils.routing import OutputTarget, write_output
 from core.directives.tools import ToolsDirective
+from core.workflow.execution_prep import (
+    build_step_prompt,
+    compose_instruction_layers,
+    resolve_step_model_execution,
+    should_step_run_today,
+)
+from core.workflow.output_resolution import ResolvedOutputTarget, write_resolved_output
+from core.workflow.tool_binding import ToolBindingResult, merge_tool_bindings
 
 # Create workflow logger
 logger = UnifiedLogger(tag="step-workflow")
@@ -216,31 +222,6 @@ async def run_workflow(job_args: dict, **kwargs):
 ########################################################################
 ## Helper Functions
 ########################################################################
-
-def should_step_run_today(processed_step, step_name: str, context: Dict, single_step_name: str, global_id: str) -> bool:
-    """Check if step should run today based on @run-on directive."""
-    if single_step_name:
-        return True
-
-    run_on_days = processed_step.get_directive_value('run_on')
-    if not run_on_days:
-        # If @run-on is not specified, step runs every day (default behavior)
-        return True
-
-    # Check for 'never' option to disable step execution
-    if 'never' in run_on_days:
-        return False
-
-    # Check for 'daily' option to run every day
-    if 'daily' in run_on_days:
-        return True
-
-    today = context['today']
-    today_name = today.strftime('%A').lower()
-    today_abbrev = today.strftime('%a').lower()
-    return today_name in run_on_days or today_abbrev in run_on_days
-
-
 def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
     """Check if any directive issued a skip signal.
 
@@ -274,45 +255,28 @@ def has_workflow_skip_signal(processed_step) -> tuple[bool, str]:
 
 
 def _resolve_workflow_model_execution(processed_step) -> ModelExecutionSpec:
-    model_value = processed_step.get_directive_value("model")
-    if isinstance(model_value, ModelExecutionSpec):
-        return model_value
-    if isinstance(model_value, str) and model_value.strip():
-        return resolve_model_execution_spec(model_value.strip())
-    return resolve_model_execution_spec(None)
+    return resolve_step_model_execution(processed_step.get_directive_value("model"))
 
 
 def build_final_prompt(processed_step, *, vault_path: str) -> tuple[PromptInput, str, int, list[str]]:
     """Build final prompt with optional ordered media chunks from @input content."""
     base_prompt = processed_step.content
     input_file_data = processed_step.get_directive_value("input", [])
-    if not input_file_data:
-        return base_prompt, base_prompt, 0, []
-
     model_execution = _resolve_workflow_model_execution(processed_step)
-    supports_vision = (
-        False
-        if model_execution.mode == "skip"
-        else (
-            model_supports_capability(model_execution.raw_alias, "vision")
-            if model_execution.raw_alias
-            else None
-        )
-    )
-    built = build_input_files_prompt(
+    return build_step_prompt(
+        base_prompt=base_prompt,
         input_file_data=input_file_data,
         vault_path=vault_path,
-        base_prompt=base_prompt,
-        supports_vision=supports_vision,
+        model_execution=model_execution,
     )
-    return built.prompt, built.prompt_text, built.attached_image_count, built.warnings
 
 
 def _resolve_tools_result(tools_value) -> tuple[list, str, list]:
     if isinstance(tools_value, list):
-        return ToolsDirective.merge_results(
-            [value for value in tools_value if isinstance(value, tuple)]
-        )
+        binding = merge_tool_bindings(tools_value)
+        return binding.tool_functions, binding.tool_instructions, binding.tool_specs
+    if isinstance(tools_value, ToolBindingResult):
+        return tools_value.tool_functions, tools_value.tool_instructions, tools_value.tool_specs
     if isinstance(tools_value, tuple):
         if len(tools_value) >= 3:
             return tools_value[0], tools_value[1], tools_value[2]
@@ -340,13 +304,11 @@ async def create_step_agent(processed_step, workflow_instructions: str, services
     tool_functions, tool_instructions, _ = _resolve_tools_result(tools_result)
 
     # Compose instructions using Pydantic AI's list support for clean composition
-    base_instructions = workflow_instructions or "You are a helpful assistant."
-    workflow_instructions_with_system = f"{base_instructions}\n\n{WORKFLOW_SYSTEM_INSTRUCTION}".strip()
-
-    if tool_instructions:
-        instructions_stack = [workflow_instructions_with_system, tool_instructions]
-    else:
-        instructions_stack = [workflow_instructions_with_system]
+    instructions_stack = compose_instruction_layers(
+        workflow_instructions=workflow_instructions,
+        tool_instructions=tool_instructions,
+        base_instructions_fallback="You are a helpful assistant.",
+    )
 
     agent = await services.create_agent(model_instance, tool_functions)
     for inst in instructions_stack:
@@ -410,7 +372,11 @@ async def process_workflow_step(
         output_targets = []
 
     # Check @run-on directive for scheduled execution
-    if not should_step_run_today(processed_step, step_name, context, single_step_name, services.workflow_id):
+    if not should_step_run_today(
+        processed_step.get_directive_value("run_on"),
+        today=context["today"],
+        single_step_name=single_step_name,
+    ):
         logger.set_sinks(["validation"]).info(
             "workflow_step_skipped",
             data={
@@ -453,6 +419,13 @@ async def process_workflow_step(
                     getattr(tool, "__name__", "tool") for tool in tool_functions
                 ]
         context["tools_used"].update(tool_names)
+        logger.set_sinks(["validation"]).info(
+            "workflow_step_tools",
+            data={
+                "step_name": step_name,
+                "tool_names": tool_names,
+            },
+        )
 
     # Build final prompt with input file content
     final_prompt, final_prompt_text, attached_image_count, prompt_warnings = build_final_prompt(
@@ -465,12 +438,8 @@ async def process_workflow_step(
     if output_targets:
         labels = []
         for output_target in output_targets:
-            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-                labels.append(f"variable:{output_target.get('name')}")
-            elif isinstance(output_target, dict) and output_target.get("type") == "context":
-                labels.append("context")
-            elif output_target:
-                labels.append(f"file:{output_target}")
+            if isinstance(output_target, ResolvedOutputTarget):
+                labels.append(output_target.label())
         if labels:
             output_target_label = ", ".join(labels)
     logger.set_sinks(["validation"]).info(
@@ -524,7 +493,14 @@ async def process_workflow_step(
         write_mode = processed_step.get_directive_value('write_mode')
         header_value = processed_step.get_directive_value('header')
         for output_target in output_targets:
-            if isinstance(output_target, dict) and output_target.get("type") == "context":
+            if not isinstance(output_target, ResolvedOutputTarget):
+                raise _to_template_error(
+                    ValueError("Resolved output target expected"),
+                    template_pointer=f"## {step_name} (@output directive in this step)",
+                    step_name=step_name,
+                    phase="output_target",
+                )
+            if output_target.type == "context":
                 logger.info(
                     "Workflow output target ignored (context not supported)",
                     data={
@@ -533,19 +509,14 @@ async def process_workflow_step(
                     },
                 )
                 continue
-            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
-                target = OutputTarget(type="buffer", name=output_target.get("name"))
-            else:
-                target = OutputTarget(type="file", path=output_target)
             try:
-                write_result = write_output(
-                    target=target,
+                write_result = write_resolved_output(
+                    resolved_target=output_target,
                     content=step_content,
                     write_mode=write_mode,
                     buffer_store=context.get("buffer_store"),
                     vault_path=services.vault_path,
                     header=header_value,
-                    buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
                     default_scope="run",
                     metadata={
                         "source": "workflow_step",

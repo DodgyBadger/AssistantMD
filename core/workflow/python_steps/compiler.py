@@ -5,12 +5,14 @@ from __future__ import annotations
 import ast
 
 from core.authoring import AUTHORING_TARGET_METHODS
+from core.authoring.primitives import DateValue, PathValue
 from core.workflow.python_steps.models import (
     CompiledPythonStepsWorkflow,
     FileInput,
     FileTarget,
     InputSource,
     OutputTarget,
+    OutputTargets,
     StepDefinition,
     VarInput,
     VarTarget,
@@ -160,9 +162,16 @@ def _compile_step(
     prompt = _required_string(kwargs, "prompt", context=context, section_name=declaration_name)
     inputs = _compile_inputs(kwargs.get("inputs"), context=context, section_name=declaration_name)
     output = _compile_output(kwargs.get("output"), context=context, section_name=declaration_name)
+    outputs = _compile_outputs(kwargs.get("outputs"), context=context, section_name=declaration_name)
+    if output is not None and outputs:
+        raise PythonStepsValidationError(
+            "Step(...) cannot declare both output= and outputs=",
+            section_name=declaration_name,
+            phase="compile",
+        )
     extras = _collect_extras(
         kwargs,
-        handled={"name", "model", "prompt", "inputs", "output"},
+        handled={"name", "model", "prompt", "inputs", "output", "outputs"},
         context=context,
     )
     return StepDefinition(
@@ -172,6 +181,7 @@ def _compile_step(
         prompt=prompt,
         inputs=inputs,
         output=output,
+        outputs=outputs,
         extras=extras,
     )
 
@@ -310,7 +320,7 @@ def _compile_input(
 
     func_name = node.func.id
     if func_name == "File":
-        path = _first_required_string_arg(
+        path = _first_required_path_arg(
             node,
             func_name,
             context=context,
@@ -353,6 +363,32 @@ def _compile_output(
     return _compile_target(node, context=context, section_name=section_name)
 
 
+def _compile_outputs(
+    node: ast.AST | None,
+    *,
+    context: _CompilationContext,
+    section_name: str,
+) -> OutputTargets:
+    if node is None:
+        return []
+    if isinstance(node, ast.Name):
+        constant = _resolve_literal(node, context=context)
+        if isinstance(constant, list) and all(isinstance(item, FileTarget | VarTarget) for item in constant):
+            return list(constant)
+        raise PythonStepsValidationError(
+            "outputs= constants must resolve to a list of File(...) or Var(...) targets",
+            section_name=section_name,
+            phase="compile",
+        )
+    if not isinstance(node, ast.List):
+        raise PythonStepsValidationError(
+            "outputs= must be a list",
+            section_name=section_name,
+            phase="compile",
+        )
+    return [_compile_target(item, context=context, section_name=section_name) for item in node.elts]
+
+
 def _compile_target(
     node: ast.AST,
     *,
@@ -384,7 +420,7 @@ def _compile_target(
 
     func_name = node.func.id
     if func_name == "File":
-        path = _first_required_string_arg(
+        path = _first_required_path_arg(
             node,
             func_name,
             context=context,
@@ -419,6 +455,9 @@ def _apply_target_method(
     elif method_name == "replace":
         options = dict(target.options)
         options["mode"] = "replace"
+    elif method_name == "new":
+        options = dict(target.options)
+        options["mode"] = "new"
     else:
         raise PythonStepsValidationError(
             f"Unsupported target method '{method_name}'",
@@ -511,6 +550,40 @@ def _first_required_string_arg(
     return value
 
 
+def _first_required_path_arg(
+    call: ast.Call,
+    func_name: str,
+    *,
+    context: _CompilationContext,
+    section_name: str,
+) -> str:
+    if len(call.args) != 1:
+        raise PythonStepsValidationError(
+            f"{func_name}(...) requires exactly one positional path argument",
+            section_name=section_name,
+            phase="compile",
+        )
+    value = _resolve_literal(call.args[0], context=context)
+    if isinstance(value, PathValue):
+        return str(value)
+    if isinstance(value, str):
+        if _contains_brace_pattern(value):
+            raise PythonStepsValidationError(
+                (
+                    f"{func_name}(...) path arguments must use SDK date/path helpers instead of "
+                    "brace substitutions. Use path.join(..., date.today(...)) rather than raw brace patterns."
+                ),
+                section_name=section_name,
+                phase="compile",
+            )
+        return value
+    raise PythonStepsValidationError(
+        f"{func_name}(...) argument must resolve to a string or path.join(...) value",
+        section_name=section_name,
+        phase="compile",
+    )
+
+
 def _keyword_literals(
     call: ast.Call,
     *,
@@ -539,11 +612,18 @@ def _collect_extras(
 
 
 def _is_sdk_constant_expr(node: ast.AST) -> bool:
+    if isinstance(node, ast.List | ast.Tuple):
+        return all(_is_sdk_constant_expr(item) for item in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(
+            (key is None or _is_sdk_constant_expr(key)) and _is_sdk_constant_expr(value)
+            for key, value in zip(node.keys, node.values, strict=True)
+        )
     if not isinstance(node, ast.Call):
         return False
     if isinstance(node.func, ast.Name):
         return node.func.id in {"File", "Var"}
-    return isinstance(node.func, ast.Attribute)
+    return _is_sdk_helper_call(node) or isinstance(node.func, ast.Attribute)
 
 
 def _compile_sdk_constant(
@@ -570,8 +650,17 @@ def _compile_sdk_constant(
             )
             return VarTarget(name=name, options=_keyword_literals(node, context=context))
 
+    if _is_sdk_helper_call(node):
+        return _resolve_literal(node, context=context)
+
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
         return _compile_target(node, context=context, section_name=section_name)
+
+    if isinstance(node, ast.List):
+        return [_compile_sdk_constant(item, context=context, section_name=section_name) for item in node.elts]
+
+    if isinstance(node, ast.Tuple):
+        return tuple(_compile_sdk_constant(item, context=context, section_name=section_name) for item in node.elts)
 
     return _resolve_literal(node, context=context)
 
@@ -603,13 +692,128 @@ def _resolve_literal(node: ast.AST, *, context: _CompilationContext) -> object:
                 "Unary operators are only supported for numeric constants",
                 section_name=context.block_label,
                 phase="compile",
-            )
+        )
         return +operand if isinstance(node.op, ast.UAdd) else -operand
+    if isinstance(node, ast.Call) and _is_sdk_helper_call(node):
+        return _resolve_sdk_helper_call(node, context=context)
     raise PythonStepsValidationError(
         f"Unsupported literal expression '{type(node).__name__}'",
         section_name=context.block_label,
         phase="compile",
     )
+
+
+def _resolve_sdk_helper_call(node: ast.Call, *, context: _CompilationContext) -> object:
+    if not isinstance(node.func, ast.Attribute) or not isinstance(node.func.value, ast.Name):
+        raise PythonStepsValidationError(
+            "Invalid SDK helper call",
+            section_name=context.block_label,
+            phase="compile",
+        )
+    owner = node.func.value.id
+    method = node.func.attr
+    if owner == "date":
+        return _resolve_date_helper_call(node, method=method, context=context)
+    if owner == "path":
+        return _resolve_path_helper_call(node, method=method, context=context)
+    raise PythonStepsValidationError(
+        f"Unsupported SDK helper namespace '{owner}'",
+        section_name=context.block_label,
+        phase="compile",
+    )
+
+
+def _resolve_date_helper_call(
+    node: ast.Call,
+    *,
+    method: str,
+    context: _CompilationContext,
+) -> DateValue:
+    method_map = {
+        "today": "today",
+        "yesterday": "yesterday",
+        "tomorrow": "tomorrow",
+        "this_week": "this-week",
+        "last_week": "last-week",
+        "next_week": "next-week",
+        "this_month": "this-month",
+        "last_month": "last-month",
+        "day_name": "day-name",
+        "month_name": "month-name",
+    }
+    pattern = method_map.get(method)
+    if pattern is None:
+        raise PythonStepsValidationError(
+            f"Unsupported date helper '{method}'",
+            section_name=context.block_label,
+            phase="compile",
+        )
+    fmt: str | None = None
+    for keyword in node.keywords:
+        if keyword.arg == "fmt":
+            value = _resolve_literal(keyword.value, context=context)
+            if value is not None and not isinstance(value, str):
+                raise PythonStepsValidationError(
+                    "date helper fmt= must resolve to a string",
+                    section_name=context.block_label,
+                    phase="compile",
+                )
+            fmt = value
+    return DateValue(pattern=pattern, fmt=fmt)
+
+
+def _resolve_path_helper_call(
+    node: ast.Call,
+    *,
+    method: str,
+    context: _CompilationContext,
+) -> PathValue:
+    if method != "join":
+        raise PythonStepsValidationError(
+            f"Unsupported path helper '{method}'",
+            section_name=context.block_label,
+            phase="compile",
+        )
+    segments: list[str | DateValue] = []
+    for arg in node.args:
+        value = _resolve_literal(arg, context=context)
+        if isinstance(value, PathValue):
+            segments.extend(value.segments)
+            continue
+        if isinstance(value, DateValue):
+            segments.append(value)
+            continue
+        if isinstance(value, str):
+            if _contains_brace_pattern(value):
+                raise PythonStepsValidationError(
+                    (
+                        "path.join() string segments must be literal path parts, not raw brace substitutions. "
+                        "Use date.*() helpers for dynamic segments."
+                    ),
+                    section_name=context.block_label,
+                    phase="compile",
+                )
+            segments.append(value)
+            continue
+        raise PythonStepsValidationError(
+            "path.join() arguments must resolve to strings, date.*() values, or nested path.join(...) values",
+            section_name=context.block_label,
+            phase="compile",
+        )
+    return PathValue(tuple(segments))
+
+
+def _is_sdk_helper_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in {"date", "path"}
+    )
+
+
+def _contains_brace_pattern(value: str) -> bool:
+    return "{" in value or "}" in value
 
 
 def _workflow_name_from_run_call(call: ast.Call, *, section_name: str | None) -> str:

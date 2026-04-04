@@ -161,7 +161,11 @@ class BaseScenario(ABC):
     async def start_system(self):
         """Start the AssistantMD system."""
         self._log_timeline("Starting AssistantMD system")
-        await self._get_system_controller().start_system()
+        controller = self._get_system_controller()
+        time_controller = self._time_controller
+        if time_controller and time_controller.current_test_date is not None:
+            controller.set_test_date(time_controller.current_test_date)
+        await controller.start_system()
     
     async def stop_system(self):
         """Stop the system gracefully."""

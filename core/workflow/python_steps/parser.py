@@ -7,7 +7,11 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from core.authoring import AUTHORING_PRIMITIVE_NAMES, AUTHORING_TARGET_METHODS
+from core.authoring import (
+    AUTHORING_HELPER_NAMES,
+    AUTHORING_PRIMITIVE_NAMES,
+    AUTHORING_TARGET_METHODS,
+)
 from core.logger import UnifiedLogger
 from core.utils.frontmatter import parse_simple_frontmatter
 
@@ -222,6 +226,9 @@ def _validate_assignment_value(node: ast.AST, *, section_name: str | None) -> No
         if isinstance(node.func, ast.Name) and node.func.id in AUTHORING_PRIMITIVE_NAMES:
             _validate_call_arguments(node, section_name=section_name)
             return
+        if _is_sdk_helper_call(node):
+            _validate_helper_call(node, section_name=section_name)
+            return
         if _is_target_method_call(node):
             _validate_target_method_call(node, section_name=section_name)
             return
@@ -251,6 +258,9 @@ def _validate_argument_expr(node: ast.AST, *, section_name: str | None) -> None:
     if isinstance(node, ast.Call):
         if isinstance(node.func, ast.Name) and node.func.id in AUTHORING_PRIMITIVE_NAMES:
             _validate_call_arguments(node, section_name=section_name)
+            return
+        if _is_sdk_helper_call(node):
+            _validate_helper_call(node, section_name=section_name)
             return
         if _is_target_method_call(node):
             _validate_target_method_call(node, section_name=section_name)
@@ -290,6 +300,103 @@ def _validate_target_method_call(node: ast.Call, *, section_name: str | None) ->
             phase="ast_safety",
         )
     _validate_assignment_value(node.func.value, section_name=section_name)
+
+
+def _validate_helper_call(node: ast.Call, *, section_name: str | None) -> None:
+    if not isinstance(node.func, ast.Attribute) or not isinstance(node.func.value, ast.Name):
+        raise PythonStepsValidationError(
+            "Invalid SDK helper call",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+
+    owner = node.func.value.id
+    method = node.func.attr
+    if owner == "date":
+        _validate_date_helper_call(node, method=method, section_name=section_name)
+        return
+    if owner == "path":
+        _validate_path_helper_call(node, method=method, section_name=section_name)
+        return
+    raise PythonStepsValidationError(
+        f"Unsupported SDK helper namespace '{owner}'",
+        section_name=section_name,
+        phase="ast_safety",
+    )
+
+
+def _validate_date_helper_call(
+    node: ast.Call,
+    *,
+    method: str,
+    section_name: str | None,
+) -> None:
+    allowed_methods = {
+        "today",
+        "yesterday",
+        "tomorrow",
+        "this_week",
+        "last_week",
+        "next_week",
+        "this_month",
+        "last_month",
+        "day_name",
+        "month_name",
+    }
+    if method not in allowed_methods:
+        raise PythonStepsValidationError(
+            f"Unsupported date helper '{method}'",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    if node.args:
+        raise PythonStepsValidationError(
+            f"date.{method}() does not accept positional arguments",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    for keyword in node.keywords:
+        if keyword.arg is None:
+            raise PythonStepsValidationError(
+                "Star-arguments are not allowed in python_steps workflows",
+                section_name=section_name,
+                phase="ast_safety",
+            )
+        if keyword.arg != "fmt":
+            raise PythonStepsValidationError(
+                f"date.{method}() only accepts fmt=",
+                section_name=section_name,
+                phase="ast_safety",
+            )
+        _validate_literal_expr(keyword.value, section_name=section_name)
+
+
+def _validate_path_helper_call(
+    node: ast.Call,
+    *,
+    method: str,
+    section_name: str | None,
+) -> None:
+    if method != "join":
+        raise PythonStepsValidationError(
+            f"Unsupported path helper '{method}'",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    if not node.args:
+        raise PythonStepsValidationError(
+            "path.join() requires at least one argument",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    if node.keywords:
+        raise PythonStepsValidationError(
+            "path.join() does not accept keyword arguments",
+            section_name=section_name,
+            phase="ast_safety",
+        )
+    for arg in node.args:
+        _validate_argument_expr(arg, section_name=section_name)
 
 
 def _validate_literal_expr(node: ast.AST, *, section_name: str | None) -> None:
@@ -332,6 +439,15 @@ def _is_target_method_call(node: ast.AST) -> bool:
         and isinstance(node.func.value, ast.Call)
         and isinstance(node.func.value.func, ast.Name)
         and node.func.value.func.id in {"File", "Var"}
+    )
+
+
+def _is_sdk_helper_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in AUTHORING_HELPER_NAMES
     )
 
 

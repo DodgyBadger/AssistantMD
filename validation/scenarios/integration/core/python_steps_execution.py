@@ -60,7 +60,7 @@ class PythonStepsExecutionScenario(BaseScenario):
         )
         prompt_text = (prompt_event or {}).get("data", {}).get("prompt", "")
         self.soft_assert(
-            "--- INPUT: variable:gathered ---" in prompt_text,
+            "--- FILE: variable: gathered ---" in prompt_text,
             "echo step prompt should include gathered variable input",
         )
 

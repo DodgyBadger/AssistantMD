@@ -308,6 +308,10 @@ class AuthoringSdkResponse(BaseModel):
         None,
         description="Inspectable authoring primitive metadata",
     )
+    helpers: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Inspectable SDK helper metadata such as date/path helpers",
+    )
 
 
 class WorkflowLoadErrorsResponse(BaseModel):

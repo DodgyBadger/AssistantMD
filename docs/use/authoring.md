@@ -7,7 +7,7 @@ Use it together with the inspectable SDK surface exposed by the authoring API.
 
 `python_steps` is a markdown-native workflow format. The workflow file is still a markdown note stored under `AssistantMD/Workflows/`, but the executable workflow body is written as a constrained Python SDK inside one fenced code block.
 
-The Python block is not arbitrary Python. It supports a small declarative surface centered on `File`, `Var`, `Step`, and `Workflow`.
+The Python block is not arbitrary Python. It supports a small declarative surface centered on `File`, `Var`, `Step`, and `Workflow`, plus SDK-owned helper namespaces such as `date` and `path`.
 
 ## File Format
 
@@ -53,4 +53,16 @@ The executable workflow code belongs inside that block. Do not split execution a
 - Only one `Workflow(...)` declaration is allowed.
 - Inputs must use `File(...)` or `Var(...)`.
 - Outputs must use `File(...)`, `Var(...)`, or supported target methods such as `.replace()` and `.append()`.
+- Use `path.join(...)` with `date.*()` helpers for dynamic SDK paths.
+- Keep globs as plain strings, for example `File("notes/*")`.
+- Do not use raw brace substitutions like `File("daily/{today}")` in the Python SDK. That syntax belongs to the string DSL.
 - Avoid helper functions, imports, loops, and arbitrary control flow. The supported surface is declarative.
+
+Examples:
+
+```python
+today_note = File(path.join("daily", date.today()))
+weekly_note = File(path.join("weekly", date.this_week()))
+short_month = File(path.join("plans", date.month_name(fmt="MMM")))
+glob_input = File("notes/*")
+```
