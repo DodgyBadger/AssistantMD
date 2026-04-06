@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import Column, String, DateTime
 
-from core.database import Base, create_engine_from_system_db, create_session_factory
+from core.database import Base, create_engine_from_system_db, create_session_factory, create_tables
 from core.runtime.paths import get_data_root
 from core.logger import UnifiedLogger
 from core.utils.hash import hash_file_bytes
@@ -62,7 +62,7 @@ class WorkflowFileStateManager:
     
     def _init_database(self):
         """Initialize database schema if it doesn't exist."""
-        Base.metadata.create_all(self.engine)
+        create_tables(self.engine, ProcessedFile.__table__)
     
     def _normalize_path_for_state(self, filepath: str) -> str:
         """

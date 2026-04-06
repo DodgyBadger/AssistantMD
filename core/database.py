@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.schema import Table
 
 from core.logger import UnifiedLogger
 from core.runtime.paths import get_system_root
@@ -121,3 +122,10 @@ def create_session_factory(engine):
         SQLAlchemy sessionmaker class
     """
     return sessionmaker(bind=engine)
+
+
+def create_tables(engine, *tables: Table) -> None:
+    """Create only the explicitly declared tables for a system DB."""
+    if not tables:
+        raise ValueError("create_tables requires at least one table")
+    Base.metadata.create_all(engine, tables=list(tables))

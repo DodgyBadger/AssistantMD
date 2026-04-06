@@ -46,6 +46,34 @@ This plan covers issue [#36](https://github.com/DodgyBadger/AssistantMD/issues/3
   - APScheduler SQLAlchemy job store
   - owns `scheduler_jobs.db`
 
+### Actual DB File Contents
+
+Current observed contents under the active system root:
+
+- `cache.db`
+  - tables:
+    - `context_step_cache`
+    - `sessions`
+    - `context_summaries`
+  - appears aligned with intended ownership
+
+- `file_state.db`
+  - tables:
+    - `processed_files`
+  - previously contained a stray `ingestion_jobs` table from schema bleed
+  - the orphaned `ingestion_jobs` table has now been removed
+
+- `ingestion_jobs.db`
+  - tables:
+    - `ingestion_jobs`
+  - appears aligned with intended ownership
+
+- `scheduler_jobs.db`
+  - tables:
+    - `apscheduler_jobs`
+  - appears aligned with intended ownership
+  - should likely remain isolated unless there is an overwhelming operational reason to change it
+
 ## Current Problems
 
 - DB names are repeated as ad hoc strings in subsystem modules
@@ -56,6 +84,11 @@ This plan covers issue [#36](https://github.com/DodgyBadger/AssistantMD/issues/3
   - third-party APScheduler store creation
 - there is no centralized inventory or validation for which DB file a table belongs in
 - this makes future `state` work likely to add even more persistence drift
+
+Confirmed recurrence mechanism:
+
+- [file_state.py](/app/core/utils/file_state.py) had been calling unconstrained `Base.metadata.create_all(...)`
+- because `IngestionJob` shares the same SQLAlchemy `Base`, that allowed `ingestion_jobs` to be created in `file_state.db`
 
 ## Current Status
 
@@ -71,6 +104,10 @@ Completed in this first slice:
 - rewired current DB-backed modules to use the centralized declarations/helpers rather than only free-form DB strings:
   - [store.py](/app/core/context/store.py)
   - [database.py](/app/core/scheduling/database.py)
+  - [jobs.py](/app/core/ingestion/jobs.py)
+  - [file_state.py](/app/core/utils/file_state.py)
+- added explicit table-creation helper in [database.py](/app/core/database.py)
+- eliminated the active recurrence path for schema bleed by making table creation explicit in:
   - [jobs.py](/app/core/ingestion/jobs.py)
   - [file_state.py](/app/core/utils/file_state.py)
 
@@ -144,5 +181,10 @@ Once DB ownership is centralized:
 - inventory actual table contents in each DB file
 - compare intended vs actual ownership
 - decide what migration/cleanup is needed before `state` storage lands
+
+Immediate follow-up recommendation:
+
+- keep `file_state.db` limited to `processed_files`
+- do not touch `scheduler_jobs.db` unless a later inventory reveals a concrete operational problem
 
 That should happen before implementing the `state` backend adapter.

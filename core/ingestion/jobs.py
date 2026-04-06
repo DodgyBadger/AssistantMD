@@ -10,7 +10,7 @@ from typing import Optional
 from sqlalchemy import Column, DateTime, Integer, String, Text, JSON
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import Base, create_engine_from_system_db, create_session_factory
+from core.database import Base, create_engine_from_system_db, create_session_factory, create_tables
 from core.ingestion.models import JobStatus
 
 
@@ -42,7 +42,7 @@ def _get_session_factory():
 def init_db() -> None:
     """Create tables if they do not exist."""
     engine = _get_engine()
-    Base.metadata.create_all(engine, tables=[IngestionJob.__table__])
+    create_tables(engine, IngestionJob.__table__)
 
 
 def create_job(
