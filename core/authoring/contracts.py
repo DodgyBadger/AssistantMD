@@ -64,9 +64,9 @@ class AuthoringCapabilityScope:
         if not frontmatter:
             return cls(enabled=frozenset(default_enabled))
 
-        authoring_config = frontmatter.get("authoring", frontmatter)
+        authoring_config = _extract_authoring_mapping(frontmatter)
         if not isinstance(authoring_config, Mapping):
-            raise AuthoringCapabilityError("authoring frontmatter must be a mapping")
+            authoring_config = frontmatter
 
         raw_capabilities = authoring_config.get("capabilities")
         if raw_capabilities is None:
@@ -143,6 +143,16 @@ class GenerationResult:
     output: str
 
 
+@dataclass(frozen=True)
+class CallToolResult:
+    """Envelope for call_tool(...) results."""
+
+    name: str
+    status: str
+    output: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @runtime_checkable
 class AuthoringHost(Protocol):
     """Host-side adapter implemented by the caller of the Monty runtime."""
@@ -200,12 +210,28 @@ def _normalize_string_set(value: Any) -> frozenset[str]:
     return frozenset(_normalize_string_tuple(value))
 
 
+def _extract_authoring_mapping(frontmatter: Mapping[str, Any]) -> Mapping[str, Any]:
+    extracted: dict[str, Any] = {}
+    for raw_key, value in frontmatter.items():
+        if not isinstance(raw_key, str):
+            continue
+        if not raw_key.startswith("authoring."):
+            continue
+        nested_key = raw_key[len("authoring.") :].strip()
+        if nested_key:
+            extracted[nested_key] = value
+
+    if extracted:
+        return extracted
+    return {}
+
+
 def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
     """Normalize frontmatter string lists while rejecting invalid shapes."""
     if value is None:
         return ()
     if isinstance(value, str):
-        values = (value,)
+        values = _expand_string_list_literal(value)
     elif isinstance(value, Sequence):
         values = tuple(value)
     else:
@@ -219,3 +245,13 @@ def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
         if stripped:
             normalized.append(stripped)
     return tuple(normalized)
+
+
+def _expand_string_list_literal(value: str) -> tuple[str, ...]:
+    stripped = value.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        inner = stripped[1:-1].strip()
+        if not inner:
+            return ()
+        return tuple(part.strip() for part in inner.split(","))
+    return (value,)

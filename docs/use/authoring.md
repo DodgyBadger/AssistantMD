@@ -15,6 +15,7 @@ The current built-in workflow capabilities are:
 - `retrieve(...)` to read scoped external inputs into the workflow
 - `generate(...)` to perform one explicit model call
 - `output(...)` to write selected results out
+- `call_tool(...)` to invoke one declared host tool explicitly
 
 Capability results are returned as Python objects with attribute access, for example:
 
@@ -69,7 +70,16 @@ Frontmatter notes:
   - `schedule: "once: 2026-01-15 14:30"` for one-time runs
 - `enabled: true` or `enabled: false` controls whether scheduled runs are active.
 - `description:` is optional but useful for workflow discovery.
-- `authoring:` is optional. It is the capability manifest for the workflow and may declare capabilities, read/write paths, models, tools, import destinations, and related policy.
+- Top-level `authoring.*` properties are the canonical capability manifest shape for workflow files in Obsidian. File reads, file writes, and tool calls are fail-closed unless the relevant scope is declared there.
+
+Example capability manifest:
+
+```yaml
+authoring.capabilities: [retrieve, generate, output, call_tool]
+authoring.read_paths: [Tasks/**/*.md, Inbox/*.md]
+authoring.write_paths: [Tasks/weekly/*.md, Reports/*.md]
+authoring.tools: [file_ops_safe, internal_api]
+```
 
 After the frontmatter, the file must contain exactly one executable fenced Python block:
 
@@ -86,6 +96,10 @@ The executable workflow code belongs inside that block. Do not split execution a
 - Use one markdown artifact with frontmatter and one fenced `python` block.
 - Prefer explicit orchestration in Python over hidden framework behavior.
 - Use built-in capabilities such as `retrieve(...)`, `generate(...)`, and `output(...)` for host boundary crossings.
+- Treat frontmatter as a real security boundary, not documentation.
+- `retrieve(type="file", ...)` is denied unless `authoring.read_paths` explicitly allows the target ref.
+- `output(type="file", ...)` is denied unless `authoring.write_paths` explicitly allows the target ref.
+- `call_tool(...)` is denied unless `authoring.tools` explicitly allowlists the tool name.
 - Treat `type`, `ref`, and `options` as the stable contract shape for resource-oriented capabilities.
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
 - Prefer attribute access on returned objects, for example `source.items[0].content` and `draft.output`.

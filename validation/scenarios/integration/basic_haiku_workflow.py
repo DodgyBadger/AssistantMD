@@ -155,6 +155,9 @@ schedule: cron: 0 10 * * *
 workflow_engine: monty
 enabled: true
 description: Monty haiku writing workflow
+authoring.capabilities: [retrieve, generate, output]
+authoring.read_paths: [notes/haiku_seed.md]
+authoring.write_paths: [haiku-monty-*.md]
 ---
 
 ## Run

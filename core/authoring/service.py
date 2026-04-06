@@ -129,11 +129,7 @@ async def _run_loaded_template(
     source: AuthoringTemplateSource,
 ) -> AuthoringMontyExecutionResult:
     frontmatter = dict(source.frontmatter)
-    authoring = frontmatter.get("authoring")
-    if not isinstance(authoring, dict):
-        authoring = {}
-    if "capabilities" not in authoring:
-        authoring = {**authoring, "capabilities": ["retrieve", "output", "generate"]}
+    authoring = _extract_authoring_frontmatter(frontmatter)
     frontmatter["authoring"] = authoring
 
     return await run_authoring_monty(
@@ -142,6 +138,16 @@ async def _run_loaded_template(
         host=WorkflowAuthoringHost(workflow_id=workflow_id),
         frontmatter=frontmatter,
     )
+
+
+def _extract_authoring_frontmatter(frontmatter: dict[str, object]) -> dict[str, object]:
+    extracted: dict[str, object] = {}
+    for raw_key, value in frontmatter.items():
+        if isinstance(raw_key, str) and raw_key.startswith("authoring."):
+            nested_key = raw_key[len("authoring.") :].strip()
+            if nested_key:
+                extracted[nested_key] = value
+    return extracted
 
 def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
     """Split workflow_id into vault and workflow name for validation context."""

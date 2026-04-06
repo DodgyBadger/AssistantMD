@@ -44,10 +44,7 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
                 name="call_tool",
                 handler_name="handle_call_tool",
                 doc="Call one declared host tool and return its result or reference.",
-                contract=_placeholder_contract(
-                    "call_tool",
-                    "call_tool(*, name: str, arguments: dict | None = None, options: dict | None = None)",
-                ),
+                contract=_call_tool_contract(),
             ),
             _host_dispatch_capability(
                 name="import_content",
@@ -210,10 +207,6 @@ def _output_contract() -> dict[str, Any]:
                         "default": "append",
                         "description": "Write mode forwarded to the shared workflow output runtime.",
                     },
-                    "header": {
-                        "type": "string",
-                        "description": "Optional header text resolved through the shared header formatter.",
-                    },
                 },
             }
         },
@@ -300,6 +293,56 @@ def _generate_contract() -> dict[str, Any]:
                     'model="test", options={"thinking": False})'
                 ),
                 "description": "Use an explicit model alias with a supported generation option.",
+            },
+        ],
+    }
+
+
+def _call_tool_contract() -> dict[str, Any]:
+    return {
+        "signature": "call_tool(*, name: str, arguments: dict | None = None, options: dict | None = None)",
+        "summary": (
+            "Call one declared host tool by configured tool name. Arguments are passed "
+            "as keyword arguments to the tool. The current MVP returns inline output only."
+        ),
+        "arguments": {
+            "name": {
+                "type": "string",
+                "required": True,
+                "description": "Configured tool name from system settings and authoring frontmatter.",
+            },
+            "arguments": {
+                "type": "dict",
+                "required": False,
+                "description": "Keyword arguments forwarded directly to the resolved tool.",
+            },
+            "options": {
+                "type": "dict",
+                "required": False,
+                "description": "Reserved for future host-side behavior. The MVP requires this to be empty or omitted.",
+            },
+        },
+        "return_shape": {
+            "name": "Configured tool name that was invoked.",
+            "status": "High-level result status.",
+            "output": "Inline textual tool result.",
+            "metadata": "Host-owned metadata for result inspection and future expansion.",
+        },
+        "examples": [
+            {
+                "code": (
+                    'await call_tool(name="workflow_run", arguments={"operation": "list"})'
+                ),
+                "description": "List workflows in the current vault using the configured workflow tool.",
+            },
+            {
+                "code": (
+                    'await call_tool('
+                    'name="internal_api", '
+                    'arguments={"endpoint": "authoring_contract"}'
+                    ")"
+                ),
+                "description": "Read structured internal metadata through an allowlisted internal tool.",
             },
         ],
     }

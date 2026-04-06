@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import os
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatchcase
+from types import SimpleNamespace
 from typing import Any
+
+from pydantic_ai import RunContext
+from pydantic_ai.messages import ToolReturn
+from pydantic_ai.models.test import TestModel
+from pydantic_ai.usage import RunUsage
 
 from core.logger import UnifiedLogger
 from core.runtime.buffers import BufferStore
 from core.runtime.paths import get_data_root
 from core.utils.patterns import PatternUtilities
 from core.utils.file_state import WorkflowFileStateManager
+from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.authoring.shared.input_resolution import build_input_request, resolve_input_request
 from core.authoring.shared.output_resolution import (
     build_output_request,
     normalize_write_mode,
-    resolve_header_value,
     resolve_output_request,
     write_resolved_output,
 )
@@ -27,6 +34,7 @@ from core.authoring.contracts import (
     AuthoringCapabilityScope,
     AuthoringExecutionContext,
     AuthoringHost,
+    CallToolResult,
     CapabilityNotAllowedError,
     GenerationResult,
     OutputItem,
@@ -353,8 +361,68 @@ class WorkflowAuthoringHost(AuthoringHost):
         self,
         call: AuthoringCapabilityCall,
         context: AuthoringExecutionContext,
-    ) -> Any:
-        raise NotImplementedError("call_tool is not implemented for the Monty MVP host")
+    ) -> CallToolResult:
+        tool_name, arguments, options = _parse_call_tool_call(call)
+        _ensure_tool_allowed(tool_name=tool_name, scope=context.scope)
+
+        logger.info(
+            "authoring_call_tool_started",
+            data={
+                "workflow_id": context.workflow_id,
+                "tool": tool_name,
+                "argument_keys": sorted(arguments.keys()),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_call_tool_started",
+            data={
+                "workflow_id": context.workflow_id,
+                "tool": tool_name,
+                "argument_keys": sorted(arguments.keys()),
+            },
+        )
+
+        binding = resolve_tool_binding(
+            [tool_name],
+            vault_path=self.vault_path or "",
+            week_start_day=self.week_start_day,
+        )
+        tool_spec = next((spec for spec in binding.tool_specs if spec.name == tool_name), None)
+        if tool_spec is None:
+            raise ValueError(f"Resolved tool '{tool_name}' is unavailable in the current host context")
+
+        result = await _invoke_bound_tool(
+            tool_spec.tool_function,
+            tool_name=tool_name,
+            arguments=arguments,
+            run_buffers=self.run_buffers,
+            session_buffers=self.session_buffers,
+        )
+        output, metadata = _normalize_tool_result(result)
+
+        logger.info(
+            "authoring_call_tool_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "tool": tool_name,
+                "output_chars": len(output),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_call_tool_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "tool": tool_name,
+                "output_chars": len(output),
+            },
+        )
+
+        return CallToolResult(
+            name=tool_name,
+            status="completed",
+            output=output,
+            metadata=metadata,
+        )
 
     async def handle_import_content(
         self,
@@ -391,7 +459,9 @@ def _ensure_file_ref_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> No
         normalized_candidates.add(f"{ref}.md")
     allowed_patterns = tuple(path.strip() for path in scope.readable_paths if path.strip())
     if not allowed_patterns:
-        return
+        raise CapabilityNotAllowedError(
+            "retrieve(file) requires explicit authoring.read_paths frontmatter entries"
+        )
     if any(
         fnmatchcase(candidate, pattern)
         for candidate in normalized_candidates
@@ -409,7 +479,9 @@ def _ensure_file_output_allowed(*, ref: str, scope: AuthoringCapabilityScope) ->
         normalized_candidates.add(f"{ref}.md")
     allowed_patterns = tuple(path.strip() for path in scope.writable_paths if path.strip())
     if not allowed_patterns:
-        return
+        raise CapabilityNotAllowedError(
+            "output(file) requires explicit authoring.write_paths frontmatter entries"
+        )
     if any(
         fnmatchcase(candidate, pattern)
         for candidate in normalized_candidates
@@ -496,6 +568,78 @@ def _parse_generate_call(call: AuthoringCapabilityCall) -> tuple[str, str | None
     return prompt, instructions, model_value, options
 
 
+def _parse_call_tool_call(call: AuthoringCapabilityCall) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    if call.args:
+        raise ValueError("call_tool only supports keyword arguments")
+    tool_name = str(call.kwargs.get("name") or "").strip()
+    if not tool_name:
+        raise ValueError("call_tool requires a non-empty 'name'")
+    raw_arguments = call.kwargs.get("arguments")
+    if raw_arguments is None:
+        arguments: dict[str, Any] = {}
+    elif isinstance(raw_arguments, dict):
+        arguments = dict(raw_arguments)
+    else:
+        raise ValueError("call_tool arguments must be a dictionary when provided")
+    raw_options = call.kwargs.get("options")
+    if raw_options is None:
+        options: dict[str, Any] = {}
+    elif isinstance(raw_options, dict):
+        options = dict(raw_options)
+    else:
+        raise ValueError("call_tool options must be a dictionary when provided")
+    if options:
+        raise ValueError("call_tool options are reserved for future use and must currently be omitted")
+    return tool_name, arguments, options
+
+
+def _ensure_tool_allowed(*, tool_name: str, scope: AuthoringCapabilityScope) -> None:
+    allowed_tools = tuple(name.strip() for name in scope.allowed_tools if name.strip())
+    if not allowed_tools:
+        raise CapabilityNotAllowedError(
+            "call_tool requires explicit authoring.tools frontmatter entries for allowed tool names"
+        )
+    if tool_name not in allowed_tools:
+        raise CapabilityNotAllowedError(f"Tool '{tool_name}' is outside the configured tool scope")
+
+
+async def _invoke_bound_tool(
+    tool_function: Any,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    run_buffers: BufferStore,
+    session_buffers: BufferStore,
+) -> Any:
+    ctx = RunContext(
+        deps=SimpleNamespace(
+            buffer_store=run_buffers,
+            buffer_store_registry={
+                "run": run_buffers,
+                "session": session_buffers,
+            },
+        ),
+        model=TestModel(),
+        usage=RunUsage(),
+        tool_name=tool_name,
+    )
+    result = tool_function.function(ctx, **arguments)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+def _normalize_tool_result(result: Any) -> tuple[str, dict[str, Any]]:
+    if isinstance(result, ToolReturn):
+        metadata = {
+            "return_type": "tool_return",
+            "has_content": result.content is not None,
+            "metadata": result.metadata if isinstance(result.metadata, dict) else {},
+        }
+        return _coerce_output_data(result.return_value), metadata
+    return _coerce_output_data(result), {"return_type": "text"}
+
+
 def _apply_generate_options_to_model(model_value: str | None, options: dict[str, Any]) -> str | None:
     supported_keys = {"thinking"}
     unknown = sorted(set(options) - supported_keys)
@@ -517,7 +661,7 @@ def _build_file_output_options(
     reference_date: datetime,
     week_start_day: int,
 ) -> tuple[str, str | None]:
-    supported_keys = {"mode", "header"}
+    supported_keys = {"mode"}
     unknown = sorted(set(options) - supported_keys)
     if unknown:
         raise ValueError(f"Unsupported output(file) options: {', '.join(unknown)}")
@@ -525,17 +669,7 @@ def _build_file_output_options(
     write_mode = normalize_write_mode(raw_mode)
     if write_mode is None:
         write_mode = "append"
-    raw_header = options.get("header")
-    header: str | None = None
-    if raw_header is not None:
-        text = str(raw_header).strip()
-        if text:
-            header = resolve_header_value(
-                text,
-                reference_date=reference_date,
-                week_start_day=week_start_day,
-            )
-    return write_mode, header
+    return write_mode, None
 
 
 def _coerce_output_data(value: Any) -> str:

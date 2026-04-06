@@ -42,17 +42,28 @@ Implemented so far:
   - `retrieve(...)`
   - `output(...)`
   - `generate(...)`
-  - placeholders for `call_tool(...)` and `import_content(...)`
+  - `call_tool(...)`
+  - placeholder for `import_content(...)`
 - Monty execution is wired through a real runtime wrapper under `core/authoring/runtime`
 - markdown authoring templates load from frontmatter plus one fenced `python` block
 - `workflow_engine: monty` is wired into the normal workflow engine loading path
 - `retrieve(type="file", ref=..., options=...)` is implemented against the shared workflow input runtime
 - `output(type="file", ref=..., data=..., options=...)` is implemented against the shared workflow output runtime
 - `generate(prompt=..., instructions=..., model=..., options=...)` is implemented against the shared LLM runtime
+- `call_tool(name=..., arguments=..., options=...)` is implemented against the existing configured tool-binding/runtime path
+  - authoring scope is enforced through `authoring.tools`
+  - the current MVP returns inline textual results only
+- file/tool boundary hardening is implemented with canonical top-level `authoring.*` frontmatter keys:
+  - `authoring.capabilities`
+  - `authoring.read_paths`
+  - `authoring.write_paths`
+  - `authoring.tools`
+  - file reads, file writes, and tool calls are now fail-closed unless explicitly declared
 - capability return values already use Pythonic typed objects with attribute access:
   - `source.items[0].content`
   - `draft.output`
   - `written.item.resolved_ref`
+  - `tool_result.output`
 - a host-provided `date` object is injected into Monty templates to mirror the existing shared token vocabulary in a Pythonic form:
   - `date.today()`
   - `date.tomorrow()`
@@ -70,9 +81,8 @@ Implemented so far:
 
 Still intentionally incomplete:
 
-- `call_tool(...)` is not implemented yet
 - `import_content(...)` is not implemented yet
-- YAML/frontmatter scope enforcement is still relaxed for early exploration
+- model policy/frontmatter remains intentionally out of scope for now
 - chat/context-template integration is not implemented
 - stable scenario coverage is still intentionally narrow
 
@@ -118,7 +128,7 @@ Target direction from here:
 - define the new authoring model at a high level
 - identify the minimum built-in host capability set
 - define where capability registration and Monty integration should live
-- shape frontmatter as the capability boundary
+- shape canonical top-level `authoring.*` frontmatter keys as the capability boundary
 - preserve the existing `step` DSL unchanged while the new path hardens
 - consolidate Python authoring around `core/authoring`
 - remove or retire branch-local SDK-era authoring surfaces that are no longer part of the chosen direction
@@ -142,6 +152,7 @@ Explicitly out of scope for the immediate cleanup pass:
 - host functions, not syntax restrictions, are the primary safety boundary
 - large tool/import payloads should stay out of prompt context by default
 - frontmatter must remain the source of truth for capability scoping
+- authored workflow manifests should use canonical top-level `authoring.*` keys rather than nested `authoring:` objects or unprefixed fallback keys
 - migration should move shared automation/runtime logic toward `core/authoring` even if temporary compatibility shims remain elsewhere
 
 ## Proposed Architecture
@@ -236,7 +247,7 @@ Current extracted workflow runtime under `core/workflow/` should be moved under 
 
 ## Tricky Areas To Resolve
 
-- exact frontmatter schema for capability scoping
+- whether any additional scoped frontmatter beyond `authoring.capabilities`, `authoring.read_paths`, `authoring.write_paths`, and `authoring.tools` is truly needed
 - whether `state` is backed by existing variable/buffer storage, new storage, or a compatibility layer
 - minimum typed object surface returned by `retrieve(...)`
 - whether the host-provided `date` shim should remain as a durable authoring primitive or later give way to native Monty clock support once `date.today()` and `datetime.now()` are fully implemented upstream
