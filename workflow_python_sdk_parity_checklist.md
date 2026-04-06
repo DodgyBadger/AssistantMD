@@ -7,7 +7,7 @@ Purpose: track remaining work to bring file-first workflow authoring closer to p
 ## Current Read
 
 - The authoring loop is working:
-  - inspect via `internal_api(endpoint="authoring_sdk")`
+  - inspect via `internal_api(endpoint="authoring_contract")`
   - write real workflow files under `AssistantMD/Workflows/`
   - compile-check via `workflow_run(operation="test", workflow_name="...")`
   - execute via `workflow_run(operation="run", ...)`

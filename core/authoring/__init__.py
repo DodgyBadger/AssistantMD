@@ -1,6 +1,32 @@
 """Shared declarative authoring surface for workflows and related systems."""
 
-from core.authoring.introspection import describe_authoring_contract, describe_authoring_sdk
+from core.authoring.builtins import create_builtin_registry
+from core.authoring.contracts import (
+    BUILTIN_CAPABILITY_NAMES,
+    AuthoringCapabilityCall,
+    AuthoringCapabilityDefinition,
+    AuthoringCapabilityError,
+    AuthoringCapabilityScope,
+    AuthoringExecutionContext,
+    AuthoringHost,
+    CapabilityHandlerMissingError,
+    CapabilityNotAllowedError,
+    GenerationResult,
+    OutputItem,
+    OutputResult,
+    RetrieveResult,
+    RetrievedItem,
+    UnknownAuthoringCapabilityError,
+)
+from core.authoring.introspection import (
+    describe_authoring_contract,
+)
+from core.authoring.introspection import describe_authoring_capabilities
+from core.authoring.loader import (
+    AuthoringTemplateSource,
+    load_authoring_template_file,
+    parse_authoring_template_text,
+)
 from core.authoring.primitives import (
     AUTHORING_HELPER_METADATA,
     AUTHORING_HELPER_NAMES,
@@ -20,25 +46,60 @@ from core.authoring.service import (
     AuthoringCompileSummary,
     AuthoringDiagnostic,
     compile_candidate_workflow,
+    run_authoring_template,
+    run_authoring_template_text,
+)
+from core.authoring.registry import AuthoringCapabilityRegistry
+from core.authoring.runtime import (
+    AuthoringMontyExecutionError,
+    AuthoringMontyExecutionResult,
+    WorkflowAuthoringHost,
+    run_authoring_monty,
 )
 
 __all__ = [
+    "BUILTIN_CAPABILITY_NAMES",
     "AUTHORING_PRIMITIVE_METADATA",
     "AUTHORING_PRIMITIVE_NAMES",
     "AUTHORING_HELPER_METADATA",
     "AUTHORING_HELPER_NAMES",
     "AUTHORING_HELPER_OBJECTS",
     "AUTHORING_TARGET_METHODS",
+    "AuthoringCapabilityCall",
+    "AuthoringCapabilityDefinition",
+    "AuthoringCapabilityError",
+    "AuthoringCapabilityRegistry",
+    "AuthoringCapabilityScope",
     "AuthoringCompileResult",
     "AuthoringCompileSummary",
     "AuthoringDiagnostic",
+    "AuthoringExecutionContext",
+    "AuthoringHost",
+    "AuthoringMontyExecutionError",
+    "AuthoringMontyExecutionResult",
+    "AuthoringTemplateSource",
+    "CapabilityHandlerMissingError",
+    "CapabilityNotAllowedError",
     "File",
+    "GenerationResult",
+    "OutputItem",
+    "OutputResult",
+    "RetrieveResult",
+    "RetrievedItem",
     "Step",
+    "UnknownAuthoringCapabilityError",
     "Var",
     "Workflow",
+    "create_builtin_registry",
     "date",
     "path",
     "compile_candidate_workflow",
+    "load_authoring_template_file",
+    "parse_authoring_template_text",
+    "run_authoring_template",
+    "run_authoring_template_text",
+    "describe_authoring_capabilities",
     "describe_authoring_contract",
-    "describe_authoring_sdk",
+    "WorkflowAuthoringHost",
+    "run_authoring_monty",
 ]

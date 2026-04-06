@@ -27,7 +27,13 @@ class BasicHaikuWorkflowScenario(BaseScenario):
 
         # Create simple single-step workflow
         self.create_file(vault, "AssistantMD/Workflows/haiku_writer.md", HAIKU_WRITER_WORKFLOW)
+        self.create_file(
+            vault,
+            "AssistantMD/Workflows/haiku_writer_monty.md",
+            HAIKU_WRITER_MONTY_WORKFLOW,
+        )
         self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
+        self.create_file(vault, "notes/haiku_seed.md", HAIKU_SEED_NOTE)
 
         # === SYSTEM STARTUP VALIDATION ===
         # Test real system startup with vault discovery and job scheduling
@@ -41,6 +47,11 @@ class BasicHaikuWorkflowScenario(BaseScenario):
             name="workflow_loaded",
             expected={"workflow_id": "HaikuVault/haiku_writer"},
         )
+        self.assert_event_contains(
+            events,
+            name="workflow_loaded",
+            expected={"workflow_id": "HaikuVault/haiku_writer_monty"},
+        )
         job_event = self.assert_event_contains(
             events,
             name="job_synced",
@@ -48,6 +59,13 @@ class BasicHaikuWorkflowScenario(BaseScenario):
         )
         trigger = str(job_event.get("data", {}).get("trigger", "")).lower()
         assert "cron" in trigger, "Expected cron trigger"
+        monty_job_event = self.assert_event_contains(
+            events,
+            name="job_synced",
+            expected={"job_id": "HaikuVault__haiku_writer_monty", "action": "created"},
+        )
+        monty_trigger = str(monty_job_event.get("data", {}).get("trigger", "")).lower()
+        assert "cron" in monty_trigger, "Expected cron trigger for monty workflow"
 
         # === SCHEDULED WORKFLOW EXECUTION ===
         # Set a known date for predictable output file naming
@@ -76,6 +94,27 @@ class BasicHaikuWorkflowScenario(BaseScenario):
         output_path = vault / "2025-01-15.md"
         assert output_path.exists(), "Expected 2025-01-15.md to be created"
         assert output_path.stat().st_size > 0, "Output file is empty"
+
+        # === MONTY WORKFLOW EXECUTION ===
+        checkpoint = self.event_checkpoint()
+        assert await self.trigger_job(vault, "haiku_writer_monty"), (
+            "Monty job should execute when triggered"
+        )
+        events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            events,
+            name="job_executed",
+            expected={"job_id": "HaikuVault__haiku_writer_monty"},
+        )
+        self.assert_event_contains(
+            events,
+            name="authoring_output_written",
+            expected={"workflow_id": "HaikuVault/haiku_writer_monty"},
+        )
+
+        monty_output_path = vault / "haiku-monty-2025-01-15.md"
+        assert monty_output_path.exists(), "Expected haiku-monty-2025-01-15.md to be created"
+        assert monty_output_path.stat().st_size > 0, "Monty output file is empty"
 
         # Clean up
         await self.stop_system()
@@ -108,4 +147,41 @@ Write a beautiful haiku about the image. Format it nicely with proper line break
 @header Haiku critique
 
 Write a short critique about the above haiku and suggest ways to improve it. Keep it concise and constructive.
+"""
+
+
+HAIKU_WRITER_MONTY_WORKFLOW = """---
+schedule: cron: 0 10 * * *
+workflow_engine: monty
+enabled: true
+description: Monty haiku writing workflow
+---
+
+## Run
+
+```python
+source = await retrieve(type="file", ref="notes/haiku_seed.md")
+note_content = source.items[0].content
+
+draft = await generate(
+    prompt=(
+        "Write a three-line haiku inspired by this note. Preserve the imagery.\\n\\n"
+        + note_content
+    ),
+    instructions="Write only the haiku with proper line breaks.",
+    model="gpt-mini",
+)
+
+await output(
+    type="file",
+    ref=f"haiku-monty-{date.today()}",
+    data=draft.output,
+)
+```
+"""
+
+
+HAIKU_SEED_NOTE = """Morning frost settles over the fence.
+The garden is quiet except for a single bird call.
+Sunlight is just starting to reach the grass.
 """

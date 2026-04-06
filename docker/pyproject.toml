@@ -25,6 +25,7 @@ dependencies = [
     "markdownify>=1.2.2",
     "playwright>=1.57.0",
     "pymupdf>=1.24.10",
+    "pydantic-monty",
 ]
 
 [project.optional-dependencies]

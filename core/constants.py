@@ -77,8 +77,7 @@ SUPPORTED_READ_FILE_TYPES = {
 
 # Read-only internal API surface for authoring and metadata inspection tools.
 INTERNAL_API_ALLOWED_ENDPOINTS = {
-    "authoring_sdk": "/api/authoring/sdk",
-    "workflow_load_errors": "/api/workflows/load-errors",
+    "authoring_contract": "/api/authoring/contract",
     "metadata": "/api/metadata",
     "context_templates": "/api/context/templates",
 }

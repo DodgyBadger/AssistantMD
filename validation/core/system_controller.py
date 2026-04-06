@@ -25,6 +25,7 @@ from core.workflow.loader import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
 import workflow_engines.step.workflow as workflow_module
 import core.workflow.python_steps.executor as python_steps_executor_module
+import core.authoring.runtime.host as authoring_host_module
 
 
 class SchedulerJobInfo:
@@ -155,6 +156,7 @@ class SystemController:
         if self._current_test_date:
             workflow_module.datetime = dt_module.datetime
             python_steps_executor_module.datetime = dt_module.datetime
+            authoring_host_module.datetime = dt_module.datetime
             self._current_test_date = None
 
         # Stop runtime services
@@ -366,6 +368,7 @@ class SystemController:
         mock_datetime = self._create_mock_datetime(test_date)
         workflow_module.datetime = mock_datetime
         python_steps_executor_module.datetime = mock_datetime
+        authoring_host_module.datetime = mock_datetime
         
     def _create_mock_datetime(self, test_date):
         """Create mock datetime module that returns test_date for today() calls."""

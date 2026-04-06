@@ -29,6 +29,72 @@ The target shape is:
 
 This is an architecture search, not a commitment to immediate production rollout. The expected outcome of the next phase is an experimental but coherent authoring path with clear seams for later hardening.
 
+## Current Status
+
+The branch has now moved beyond architecture-only planning into an experimental working path.
+
+Recommendation now: commit the current branch state and collapse future Python authoring work onto the constrained-Python contract under `core/authoring` rather than continuing the earlier SDK track.
+
+Implemented so far:
+
+- `core/authoring` runtime scaffolding exists
+- built-in capability registry and inspectable contracts exist for:
+  - `retrieve(...)`
+  - `output(...)`
+  - `generate(...)`
+  - placeholders for `call_tool(...)` and `import_content(...)`
+- Monty execution is wired through a real runtime wrapper under `core/authoring/runtime`
+- markdown authoring templates load from frontmatter plus one fenced `python` block
+- `workflow_engine: monty` is wired into the normal workflow engine loading path
+- `retrieve(type="file", ref=..., options=...)` is implemented against the shared workflow input runtime
+- `output(type="file", ref=..., data=..., options=...)` is implemented against the shared workflow output runtime
+- `generate(prompt=..., instructions=..., model=..., options=...)` is implemented against the shared LLM runtime
+- capability return values already use Pythonic typed objects with attribute access:
+  - `source.items[0].content`
+  - `draft.output`
+  - `written.item.resolved_ref`
+- a host-provided `date` object is injected into Monty templates to mirror the existing shared token vocabulary in a Pythonic form:
+  - `date.today()`
+  - `date.tomorrow()`
+  - `date.yesterday()`
+  - `date.this_week()`
+  - `date.last_week()`
+  - `date.next_week()`
+  - `date.this_month()`
+  - `date.last_month()`
+  - `date.day_name()`
+  - `date.month_name()`
+  - each also supports an optional format string such as `date.today("YYYYMMDD")`
+- reduced-capability Monty templates now run through the real workflow path
+- smoke validation coverage exists through `integration/basic_haiku_workflow`
+
+Still intentionally incomplete:
+
+- `call_tool(...)` is not implemented yet
+- `import_content(...)` is not implemented yet
+- YAML/frontmatter scope enforcement is still relaxed for early exploration
+- chat/context-template integration is not implemented
+- stable scenario coverage is still intentionally narrow
+
+## Decision
+
+Based on the current end-to-end workflow results, the recommended direction is:
+
+- keep `step` workflows intact
+- keep `workflow_engine: monty` as the current constrained-Python workflow path
+- stop expanding the earlier SDK/primitives path as a first-class authoring surface
+- refactor remaining Python authoring code and docs toward a single source of truth under `core/authoring`
+- remove or quarantine branch-local SDK-era introspection and guidance that no longer reflects the chosen model
+
+This is no longer just an architecture experiment. The constrained-Python path has now proven:
+
+- better prompt composition ergonomics
+- more transparent orchestration in the authored file
+- better reuse of the shared workflow runtime
+- better LLM authorability from the inspectable contract
+
+The remaining issues found so far have been interface hardening problems, not model failures.
+
 ## Scope And Invariants
 
 ### In Scope
@@ -37,14 +103,21 @@ This is an architecture search, not a commitment to immediate production rollout
 - identify the minimum built-in host capability set
 - define where capability registration and Monty integration should live
 - shape frontmatter as the capability boundary
-- preserve the existing DSL unchanged while the new path remains experimental
+- preserve the existing `step` DSL unchanged while the new path hardens
+- consolidate Python authoring around `core/authoring`
+- remove or retire branch-local SDK-era authoring surfaces that are no longer part of the chosen direction
 
 ### Out Of Scope For Initial Pass
 
-- full migration from `python_steps`
 - full Monty integration details
 - bespoke tool authoring design beyond reserving space for it
 - broad validation parity with every existing workflow feature
+
+Explicitly out of scope for the immediate cleanup pass:
+
+- removing the `step` workflow engine
+- broad migration of existing user workflows
+- solving every remaining capability before consolidation
 
 ### Working Invariants
 
@@ -79,6 +152,15 @@ The host boundary should be pluggable and registry-driven.
 - optional capability packs can extend the registry without creating alternate execution paths
 - frontmatter resolves to a scoped subset of capabilities for a given authoring artifact or chat session
 - each capability owns its own schema, policy checks, and runtime adapter
+- capability schemas must be inspectable by authoring agents, not only enforced at runtime
+- each capability contract should expose structured metadata for:
+  - signature
+  - supported `type` values
+  - `ref` semantics per `type`
+  - allowed `options` per `type`, including defaults and valid values
+  - return-envelope shape
+  - example calls
+- `options` dictionaries are allowed in the runtime API only when their schema is explicitly published through this inspectable contract
 
 ### State Model
 
@@ -107,7 +189,7 @@ Probable structure:
 - `core/authoring/addons/`
   - optional or experimental capability packs
 - `core/authoring/contracts.py`
-  - capability interfaces and typed boundary models
+  - capability interfaces, typed boundary models, and inspectable capability schemas
 - `core/authoring/registry.py`
   - registration and lookup of built-ins/add-ons
 
@@ -116,7 +198,7 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
 ## Affected Areas
 
 - `core/authoring/`
-  - likely expansion from the current SDK/introspection/service modules into runtime and capability registry layers
+  - promoted to the canonical home for constrained-Python authoring contracts, runtime, and introspection
 - `core/workflow/`
   - shared input/output/tool/execution services may become host adapters behind built-ins
 - chat/context-template execution path
@@ -125,18 +207,22 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
   - large payload tools should be able to return state refs instead of raw context-heavy payloads
 - frontmatter loading/validation
   - new capability-manifest fields for files, state, tools, models, imports, and context
+- branch-local SDK-era docs, prompts, and helper exports
+  - should be removed, hidden, or clearly downgraded if they no longer reflect the chosen authoring path
 
 ## Tricky Areas To Resolve
 
 - exact frontmatter schema for capability scoping
 - whether `state` is backed by existing variable/buffer storage, new storage, or a compatibility layer
 - minimum typed object surface returned by `retrieve(...)`
+- whether the host-provided `date` shim should remain as a durable authoring primitive or later give way to native Monty clock support once `date.today()` and `datetime.now()` are fully implemented upstream
 - how much per-call control `generate(...)` exposes for models/thinking/options
 - how Monty enters chat execution without destabilizing existing agent flows
+- how capability schema introspection should be surfaced in prompts, internal APIs, and authoring tooling
 - migration strategy for current `python_steps` work:
-  - freeze as experimental
-  - bridge into the new capability runtime
-  - or retire later after a Monty path proves out
+  - retire branch-local SDK-era work now
+  - keep only compatibility pieces that are still referenced by stable runtime paths
+  - avoid partial dual-track authoring guidance
 
 ## Implementation Outline
 
@@ -144,14 +230,23 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
 
 - create `core/authoring` runtime and registry skeletons
 - define capability contracts for built-ins and add-ons
+- make capability contracts inspectable and structured enough for LLM self-discovery
 - define draft frontmatter schema for scoped access
 - define the v1 built-in function signatures without overfilling them
+
+Status:
+
+- completed for the current reduced-capability slice
 
 ### Phase 2: Experimental Monty Runner
 
 - add a minimal Monty-backed execution path in `core/authoring/runtime`
 - register a stub built-in capability set
 - prove host-call dispatch and policy enforcement on a small sample artifact
+
+Status:
+
+- completed, then expanded beyond stubs into a working markdown-template execution path
 
 ### Phase 3: Built-In Capabilities
 
@@ -166,20 +261,75 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
 - implement `generate(...)`, `call_tool(...)`, and `import_content(...)`
 - reuse existing shared runtime under `core/workflow/` wherever it already owns the correct semantics
 
+Status:
+
+- completed for the file-backed MVP:
+  - `retrieve(file)`
+  - `output(file)`
+  - `generate(...)`
+- deferred:
+  - `retrieve(state)`
+  - `retrieve(runs)`
+  - `output(state)`
+  - `output(context)`
+  - `call_tool(...)`
+  - `import_content(...)`
+
 ### Phase 4: Chat/Template Integration
 
 - introduce an experimental path for chat-side Monty execution
 - allow large tool/import payloads to materialize into state and return refs
 - prove that Monty-based exploration can replace key `buffer_ops` usage patterns
 
+Status:
+
+- partially completed for workflow authoring:
+  - chat now inspects `authoring_contract`
+  - compile/review loop is usable
+- still needed:
+  - tighter compile/run authoring loop
+  - workflow drafting flow that can self-repair with the current contract
+
 ### Phase 5: Authoring UX And Examples
 
 - expose an inspectable capability contract for the new authoring mode
+- ensure inspectable capability metadata includes `type`/`ref` semantics, option schemas, return shapes, and examples rather than relying on prose alone
 - add a few representative examples:
   - file-based workflow
   - import/research workflow
   - chat/context exploration flow
 - tune prompts/templates around the new inspect/write/test/run loop
+
+Status:
+
+- partially completed:
+  - inspectable capability contracts exist
+  - capability return values already use Pythonic typed objects
+  - file-based example workflows exist
+- still needed:
+  - broader examples beyond file workflows
+  - clearer authoring guidance around the transitional host-provided `date` object
+  - later UX cleanup once tool/import capabilities land
+
+### Phase 6: Consolidation And Teardown
+
+- commit the current working constrained-Python path as the new baseline
+- remove or quarantine SDK-era contract prose and introspection surfaces that no longer serve the chosen path
+- refactor `core/authoring` module layout toward the intended long-term structure:
+  - contracts
+  - introspection
+  - loader
+  - service
+  - runtime/
+  - builtins/
+- keep reuse with `core/workflow/` explicit and narrow
+- avoid leaving two competing Python authoring stories in prompts or API payloads
+
+Validation target for consolidation:
+
+- extend the current smoke path with one more authored workflow scenario
+- keep `integration/basic_haiku_workflow` green
+- keep the manually-authored weekly planning workflow load/compile/run path working
 
 ## Validation Targets
 
@@ -193,12 +343,29 @@ Initial validation should stay narrow and artifact-oriented.
   - selected result is emitted to context
 - model allowlist enforcement test for `generate(...)`
 
+Current implemented validation:
+
+- compile/run smoke checks for Monty-authored artifacts
+- end-to-end workflow smoke coverage through `integration/basic_haiku_workflow`
+- targeted local checks with `ruff` and `compileall`
+
+Deferred until the system-facing surface hardens:
+
+- full frontmatter scope enforcement scenarios
+- state-ref flow scenarios
+- tool/import scenarios
+- broader matrix coverage against existing DSL semantics
+
 Maintainers should continue to own full validation runs; agent-side work should stay focused on targeted local checks and scenario additions.
 
 ## Next Phase
 
 Next phase: Feature Development.
 
-Immediate goal for that phase:
+Immediate goal for the next phase:
 
-- sketch the concrete capability contracts and frontmatter schema for the experimental Monty path without yet committing to full implementation detail.
+- move from architecture search into consolidation and hardening:
+  - commit the current authoring path
+  - tear down branch-local SDK-era guidance/surfaces that conflict with it
+  - refactor module layout under `core/authoring`
+  - then continue with scope enforcement and the next capability slice

@@ -32,9 +32,9 @@ class InternalApi(BaseTool):
         ) -> str:
             """Fetch structured metadata from a read-only allowlisted internal API endpoint.
 
-            :param endpoint: One of: authoring_sdk, workflow_load_errors, metadata, context_templates
-            :param vault_name: Optional vault name, used for context_templates or filtering workflow_load_errors
-            :param workflow_name: Optional workflow name filter for workflow_load_errors
+            :param endpoint: One of: authoring_contract, metadata, context_templates
+            :param vault_name: Optional vault name, used for context_templates
+            :param workflow_name: Reserved for future allowlisted endpoints that support workflow-name filtering
             """
             endpoint_key = (endpoint or "").strip().lower()
             if endpoint_key not in cls._ALLOWED_ENDPOINTS:
@@ -51,13 +51,6 @@ class InternalApi(BaseTool):
                         "vault_name is required for endpoint='context_templates' when vault context is unavailable"
                     )
                 params["vault_name"] = effective_vault_name
-            elif endpoint_key == "workflow_load_errors":
-                inferred_vault_name = cls._infer_vault_name(vault_path)
-                effective_vault_name = (vault_name or inferred_vault_name or "").strip()
-                if effective_vault_name:
-                    params["vault_name"] = effective_vault_name
-                if workflow_name.strip():
-                    params["workflow_name"] = workflow_name.strip()
 
             from main import app
 
@@ -87,8 +80,7 @@ class InternalApi(BaseTool):
 Use for read-only inspection of allowlisted internal metadata endpoints.
 
 Allowed endpoints:
-- internal_api(endpoint="authoring_sdk")
-- internal_api(endpoint="workflow_load_errors", vault_name="PersonalVault", workflow_name="draft-name")
+- internal_api(endpoint="authoring_contract")
 - internal_api(endpoint="metadata")
 - internal_api(endpoint="context_templates", vault_name="PersonalVault")
 

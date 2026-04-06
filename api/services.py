@@ -85,8 +85,8 @@ logger = UnifiedLogger(tag="api-services")
 _system_startup_time: Optional[datetime] = None
 
 
-def get_authoring_sdk_metadata() -> dict[str, object]:
-    """Return the full authoring contract and SDK metadata."""
+def get_authoring_contract_metadata() -> dict[str, object]:
+    """Return the full authoring contract metadata."""
     return describe_authoring_contract()
 
 

@@ -298,19 +298,15 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict] = Field(None, description="Additional error details")
 
 
-class AuthoringSdkResponse(BaseModel):
-    """Structured SDK inspection payload for authoring surfaces."""
+class AuthoringContractResponse(BaseModel):
+    """Structured authoring contract inspection payload."""
 
-    overview: Optional[str] = Field(None, description="High-level description of python_steps authoring")
+    overview: Optional[str] = Field(None, description="High-level description of the current authoring surface")
     file_format: Optional[str] = Field(None, description="Markdown and frontmatter file structure rules")
     rules: Optional[str] = Field(None, description="Compiler-facing authoring rules and constraints")
-    primitives: Optional[Dict[str, Any]] = Field(
+    capabilities: Optional[Dict[str, Any]] = Field(
         None,
-        description="Inspectable authoring primitive metadata",
-    )
-    helpers: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Inspectable SDK helper metadata such as date/path helpers",
+        description="Inspectable capability metadata for Monty-backed authoring",
     )
 
 

@@ -21,7 +21,7 @@ from core.llm.chat_executor import (
 )
 
 from .models import (
-    AuthoringSdkResponse,
+    AuthoringContractResponse,
     WorkflowLoadErrorsResponse,
     VaultRescanRequest,
     VaultRescanResponse,
@@ -70,7 +70,7 @@ from .services import (
     delete_secret_entry,
     scan_import_folder,
     import_url_direct,
-    get_authoring_sdk_metadata,
+    get_authoring_contract_metadata,
     get_workflow_load_errors,
 )
 from api.import_models import (
@@ -115,6 +115,12 @@ def _parse_form_tools(raw_tools: list[object]) -> list[str]:
         if isinstance(parsed, list):
             return [str(item).strip() for item in parsed if str(item).strip()]
     return values
+
+
+def _looks_like_workflow_path(value: str) -> bool:
+    """Return True when a workflow identifier looks like a file path instead of a workflow name."""
+    normalized = value.strip().replace("\\", "/")
+    return "/" in normalized or normalized.endswith((".md", ".markdown"))
 
 
 async def _parse_chat_execute_payload(
@@ -593,11 +599,11 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         return create_error_response(e)
 
 
-@router.get("/authoring/sdk", response_model=AuthoringSdkResponse, response_model_exclude_none=True)
-async def authoring_sdk():
-    """Return the full authoring contract and SDK metadata."""
+@router.get("/authoring/contract", response_model=AuthoringContractResponse, response_model_exclude_none=True)
+async def authoring_contract():
+    """Return the full authoring contract metadata."""
     try:
-        return AuthoringSdkResponse(**get_authoring_sdk_metadata())
+        return AuthoringContractResponse(**get_authoring_contract_metadata())
     except Exception as e:
         return create_error_response(e)
 
@@ -606,6 +612,16 @@ async def authoring_sdk():
 async def workflow_load_errors(vault_name: str | None = None, workflow_name: str | None = None):
     """Return workflow load errors without exposing the full system status payload."""
     try:
+        if workflow_name and _looks_like_workflow_path(workflow_name):
+            raise APIException(
+                status_code=400,
+                error_type="InvalidWorkflowNameFilter",
+                message=(
+                    "workflow_load_errors expects a workflow name, not a file path. "
+                    "Use compile-only workflow testing for draft files under AssistantMD/Workflows/."
+                ),
+                details={"workflow_name": workflow_name},
+            )
         return WorkflowLoadErrorsResponse(
             errors=get_workflow_load_errors(vault_name=vault_name, workflow_name=workflow_name)
         )
