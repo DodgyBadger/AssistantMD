@@ -1,4 +1,4 @@
-"""Introspection helpers for the current declarative authoring surface."""
+"""Introspection helpers for the current constrained-Python runtime surface."""
 
 from __future__ import annotations
 
@@ -23,11 +23,11 @@ def describe_authoring_capabilities() -> dict[str, object]:
 
 AUTHORING_DOC_SECTIONS: dict[str, str] = {
     "overview": "Overview",
-    "file_format": "File Format",
+    "runtime_environment": "Runtime Environment",
     "rules": "Rules",
 }
 def describe_authoring_contract() -> dict[str, object]:
-    """Return the full current authoring contract."""
+    """Return the current constrained-Python runtime contract."""
     payload: dict[str, object] = {}
     doc_sections = _load_authoring_doc_sections()
     for section in AUTHORING_DOC_SECTIONS:
@@ -38,7 +38,7 @@ def describe_authoring_contract() -> dict[str, object]:
 
 @lru_cache(maxsize=1)
 def _load_authoring_doc_sections() -> dict[str, str]:
-    """Load authoring guide prose sections from docs/use/authoring.md."""
+    """Load runtime-contract prose sections from docs/use/authoring.md."""
     doc_path = Path(__file__).resolve().parents[2] / "docs" / "use" / "authoring.md"
     content = doc_path.read_text(encoding="utf-8")
 

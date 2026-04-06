@@ -37,6 +37,7 @@ class ToolConfig(BaseModel):
     description: str | None = None
     requires_secrets: list[str] = Field(default_factory=list)
     user_editable: bool = False
+    chat_visible: bool = True
 
     def required_secret_keys(self) -> list[str]:
         return list(self.requires_secrets)

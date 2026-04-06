@@ -67,6 +67,16 @@ codebase toward clearer database-layer ownership.
 - workflow/chat do not yet share one fully converged artifact exploration model
 - Monty can now persist and revisit cache artifacts, but chat still needs a cleaner author-facing path for iterative cache inspection
 
+### Current Transitional Stance
+
+- chat metadata now hides `buffer_ops`
+- `buffer_ops` remains compatibility-only for older buffer-era flows
+- `code_execution_local` is the preferred chat-facing tool for cache exploration and small deterministic local transforms
+- deterministic metadata coverage now exists in
+  [chat_tool_metadata_visibility.py](/app/validation/scenarios/integration/core/chat_tool_metadata_visibility.py)
+- recent manual chat testing showed the current bridge works, but the model is still too eager to use `generate(...)` inside `code_execution_local` for summarization when deterministic extraction would be higher-fidelity and cheaper
+- follow-up manual testing showed direct extraction/verification against cached text produced better fidelity than summary-first handoff, but the agent needed too many local-code tool calls to get there
+
 ## Desired Contract
 
 ### Author-Facing Shape
@@ -146,6 +156,8 @@ Validation coverage:
 
 - deterministic chat overflow contract coverage now exists in
   [chat_tool_overflow_cache.py](/app/validation/scenarios/integration/core/chat_tool_overflow_cache.py)
+- deterministic chat metadata coverage now exists in
+  [chat_tool_metadata_visibility.py](/app/validation/scenarios/integration/core/chat_tool_metadata_visibility.py)
 
 ### Workflow / Monty Policy
 
@@ -156,6 +168,21 @@ Target behavior:
 - `call_tool(...)` returns inline result + metadata
 - scripts explicitly decide whether to store a result into `output(type="cache", ...)`
 - no hidden rerouting in authored Python
+
+### Chat Exploration Guidance Direction
+
+The current runtime behavior is acceptable, but chat guidance needs tuning.
+
+Observed direction from manual testing:
+
+- when the user asks to find, show, quote, verify, or list material from a cached artifact, chat should prefer deterministic extraction over `generate(...)`
+- when the user asks to summarize, compare, synthesize, or rewrite, `generate(...)` remains appropriate
+- `code_execution_local` should usually try to complete deterministic investigation in one script rather than many tiny exploratory calls
+
+Likely next steps:
+
+- tune the default chat template with an explicit extraction-first decision rule
+- experiment with a small set of deterministic text-exploration helpers for common patterns such as heading lookup or section extraction, while keeping pure Python as the main substrate
 
 ### Lifecycle / TTL Policy
 
@@ -366,6 +393,10 @@ Status:
   - capabilities: `retrieve(cache)`, `output(cache)`, and `generate(...)` inside one Monty snippet
 - deterministic contract coverage now exists in:
   - [code_execution_local.py](/app/validation/scenarios/integration/core/code_execution_local.py)
+- chat metadata now hides `buffer_ops`
+  - `buffer_ops` remains as compatibility infrastructure
+  - deterministic visibility coverage exists in
+    [chat_tool_metadata_visibility.py](/app/validation/scenarios/integration/core/chat_tool_metadata_visibility.py)
 
 Non-goal for this phase:
 

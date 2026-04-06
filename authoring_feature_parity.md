@@ -210,13 +210,17 @@ Still missing from the intended surface:
   - the current MVP returns inline textual results only
   - older output-routing behavior is no longer the preferred path
   - oversized chat tool results now use cache refs via chat-specific hook handling rather than shared hidden buffering
+  - `buffer_ops` is now compatibility-only and hidden from chat metadata
+  - `code_execution_local` is the preferred chat-facing path for exploring cache refs and running small local deterministic code
+  - current chat behavior still needs prompt tuning so deterministic extraction is preferred over `generate(...)` when the user is asking for exact text, verification, or section-local facts
 
 ### `@cache`
 
 - old surface: context-template caching
 - target status: `planned`
 - notes:
-  - should be reconsidered only in the converged context/workflow architecture
+  - cache is now a real authoring surface for `retrieve(type="cache", ...)` and `output(type="cache", ...)`
+  - context-template-specific cache directives still need redesign as the broader automation surfaces converge
 
 ### `@recent_runs`
 

@@ -267,9 +267,10 @@ tools:
     user_editable: false
   buffer_ops:
     module: core.tools.buffer_ops
-    description: "Read-only buffer inspection (list, info, peek, read, search)"
+    description: "Read-only buffer inspection (compatibility tool for buffer-era flows)"
     requires_secrets: []
     user_editable: false
+    chat_visible: false
   file_ops_unsafe:
     module: core.tools.file_ops_unsafe
     description: "Edit, delete, move/overwrite (use with caution)"
@@ -312,3 +313,4 @@ tools:
     description: "Run constrained local Python against the current chat cache namespace"
     requires_secrets: []
     user_editable: false
+    chat_visible: true

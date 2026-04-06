@@ -1309,10 +1309,15 @@ async def get_metadata() -> MetadataResponse:
             else:
                 requires_secrets = list(getattr(config, "requires_secrets", []) or getattr(config, "requires_env", []) or [])
             user_editable = getattr(config, "user_editable", False)
+            chat_visible = getattr(config, "chat_visible", True)
         else:
             description = config.get('description', '')
             requires_secrets = list(config.get('requires_secrets') or config.get('requires_env') or [])
             user_editable = config.get('user_editable', False)
+            chat_visible = config.get('chat_visible', True)
+
+        if not chat_visible:
+            continue
 
         tools.append(
             ToolInfo(
@@ -1321,6 +1326,7 @@ async def get_metadata() -> MetadataResponse:
                 requires_secrets=requires_secrets,
                 available=config_status.tool_availability.get(name, True),
                 user_editable=user_editable,
+                chat_visible=chat_visible,
             )
         )
 

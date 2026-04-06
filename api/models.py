@@ -168,6 +168,7 @@ class ToolInfo(BaseModel):
     requires_secrets: List[str] = Field(default_factory=list, description="Secret names required for activation")
     available: bool = Field(True, description="Whether required credentials are configured")
     user_editable: bool = Field(False, description="If the tool entry is user-editable via UI")
+    chat_visible: bool = Field(True, description="Whether the tool should be exposed in chat metadata/UI")
 
 
 class ProviderInfo(BaseModel):
@@ -301,12 +302,12 @@ class ErrorResponse(BaseModel):
 class AuthoringContractResponse(BaseModel):
     """Structured authoring contract inspection payload."""
 
-    overview: Optional[str] = Field(None, description="High-level description of the current authoring surface")
-    file_format: Optional[str] = Field(None, description="Markdown and frontmatter file structure rules")
-    rules: Optional[str] = Field(None, description="Compiler-facing authoring rules and constraints")
+    overview: Optional[str] = Field(None, description="High-level description of the constrained-Python runtime surface")
+    runtime_environment: Optional[str] = Field(None, description="Runtime capabilities, object model, and host-boundary behavior")
+    rules: Optional[str] = Field(None, description="Compiler-facing runtime rules and constraints")
     capabilities: Optional[Dict[str, Any]] = Field(
         None,
-        description="Inspectable capability metadata for Monty-backed authoring",
+        description="Inspectable capability metadata for the constrained-Python runtime",
     )
 
 

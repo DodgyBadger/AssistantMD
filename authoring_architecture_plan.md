@@ -90,6 +90,7 @@ Implemented so far:
   - authoring host contracts in `integration/core/authoring_contract`
   - chat oversized-tool cache behavior in `integration/core/chat_tool_overflow_cache`
   - chat cache-scoped constrained local execution in `integration/core/code_execution_local`
+  - chat metadata visibility for compatibility-vs-preferred tools in `integration/core/chat_tool_metadata_visibility`
 
 Still intentionally incomplete:
 
@@ -98,6 +99,8 @@ Still intentionally incomplete:
 - chat/context-template integration is not implemented
 - stable scenario coverage is still intentionally narrow
 - chat now has an initial constrained-Python cache exploration path through the `code_execution_local` tool, but this is still a bridge rather than the final converged chat runtime
+- `buffer_ops` still exists for compatibility, but it is now hidden from chat metadata and is no longer the intended exploration path
+- recent manual chat testing suggests the runtime bridge is viable, but default chat behavior still needs tuning so the agent prefers deterministic extraction over `generate(...)` when fidelity matters
 
 ## Decision
 
@@ -214,6 +217,9 @@ The host boundary should be pluggable and registry-driven.
 - host-managed `cache` handles off-context artifacts and persisted transient/session data
 - tools and imports may auto-materialize large payloads into `cache` and return lightweight refs
 - Monty code can inspect and transform cache-backed artifacts before sending selected results to `context`
+- chat guidance should distinguish clearly between:
+  - deterministic extraction/verification tasks, which should stay in local code where possible
+  - synthesis tasks, which may justify `generate(...)` inside local code
 
 ## Likely Landing Zones
 
