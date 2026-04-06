@@ -2,7 +2,7 @@
 
 from .base import DirectiveProcessor
 from .parser import DirectiveValueParser
-from core.workflow.output_resolution import (
+from core.authoring.shared.output_resolution import (
     OUTPUT_ALLOWED_PARAMETERS,
     parse_output_value,
     resolve_output_request,

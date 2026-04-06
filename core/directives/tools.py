@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from .base import DirectiveProcessor
-from core.workflow.tool_binding import (
+from core.authoring.shared.tool_binding import (
     ToolBindingResult,
     ToolSpec,
     merge_tool_bindings,

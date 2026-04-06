@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import DirectiveProcessor
 from .parser import DirectiveValueParser
-from core.workflow.input_resolution import (
+from core.authoring.shared.input_resolution import (
     INPUT_ALLOWED_PARAMETERS,
     build_input_request,
     resolve_input_request,

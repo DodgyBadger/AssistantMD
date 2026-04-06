@@ -13,8 +13,8 @@ from core.runtime.buffers import BufferStore
 from core.runtime.paths import get_data_root
 from core.utils.patterns import PatternUtilities
 from core.utils.file_state import WorkflowFileStateManager
-from core.workflow.input_resolution import build_input_request, resolve_input_request
-from core.workflow.output_resolution import (
+from core.authoring.shared.input_resolution import build_input_request, resolve_input_request
+from core.authoring.shared.output_resolution import (
     build_output_request,
     normalize_write_mode,
     resolve_header_value,

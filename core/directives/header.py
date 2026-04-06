@@ -1,7 +1,7 @@
 """Thin @header directive adapter over shared workflow output resolution."""
 
 from .base import DirectiveProcessor
-from core.workflow.output_resolution import resolve_header_value
+from core.authoring.shared.output_resolution import resolve_header_value
 
 
 class HeaderDirective(DirectiveProcessor):

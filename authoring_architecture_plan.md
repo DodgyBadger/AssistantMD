@@ -81,10 +81,12 @@ Still intentionally incomplete:
 Based on the current end-to-end workflow results, the recommended direction is:
 
 - keep `step` workflows intact
-- keep `workflow_engine: monty` as the current constrained-Python workflow path
+- keep `workflow_engine: monty` as the current constrained-Python workflow path during transition
 - stop expanding the earlier SDK/primitives path as a first-class authoring surface
 - refactor remaining Python authoring code and docs toward a single source of truth under `core/authoring`
 - remove or quarantine branch-local SDK-era introspection and guidance that no longer reflects the chosen model
+- treat `core/authoring` as the long-term automation architecture for workflows, context templates, and related authored automations
+- deprecate the architectural idea of multiple workflow engines over time, while keeping `workflow_engines/` in place temporarily as a compatibility seam and rollback point
 
 This is no longer just an architecture experiment. The constrained-Python path has now proven:
 
@@ -101,6 +103,13 @@ Branch-local consolidation status:
 - `core/authoring` no longer serves both the old primitive model and the new constrained-Python contract
 - validation scenarios that existed only to prove `python_steps` parity have been removed
 - the active Python workflow authoring path is now the constrained-Python contract exposed through `workflow_engine: monty`
+
+Target direction from here:
+
+- converge workflows, context templates, and future chat-side automation on one authoring/automation architecture
+- make authored markdown artifacts plus frontmatter the primary unit
+- move shared automation/runtime logic under `core/authoring`
+- keep `workflow_engines/` only as thin compatibility wrappers until the new shape is proven comfortable
 
 ## Scope And Invariants
 
@@ -133,6 +142,7 @@ Explicitly out of scope for the immediate cleanup pass:
 - host functions, not syntax restrictions, are the primary safety boundary
 - large tool/import payloads should stay out of prompt context by default
 - frontmatter must remain the source of truth for capability scoping
+- migration should move shared automation/runtime logic toward `core/authoring` even if temporary compatibility shims remain elsewhere
 
 ## Proposed Architecture
 
@@ -190,6 +200,11 @@ Probable structure:
   - Monty runner/session setup
   - capability scoping from frontmatter
   - host-call dispatch and policy enforcement
+- `core/authoring/shared/` or equivalent
+  - shared source resolution
+  - shared sink/output resolution
+  - shared tool binding
+  - shared execution-prep helpers
 - `core/authoring/builtins/`
   - built-in `retrieve`, `output`, `generate`, `call_tool`, `import_content`
   - built-in resource/sink handlers for files, state, runs, and context
@@ -200,14 +215,14 @@ Probable structure:
 - `core/authoring/registry.py`
   - registration and lookup of built-ins/add-ons
 
-Current extracted workflow runtime under `core/workflow/` should be reused where possible behind these built-ins rather than duplicated.
+Current extracted workflow runtime under `core/workflow/` should be moved under `core/authoring/` over time rather than remaining a second conceptual center.
 
 ## Affected Areas
 
 - `core/authoring/`
   - promoted to the canonical home for constrained-Python authoring contracts, runtime, and introspection
 - `core/workflow/`
-  - shared input/output/tool/execution services may become host adapters behind built-ins
+  - expected to shrink as shared authored-automation runtime moves into `core/authoring`
 - chat/context-template execution path
   - likely needs a Monty-enabled path for state-backed exploration in chat
 - tool and import integration
@@ -216,6 +231,8 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
   - new capability-manifest fields for files, state, tools, models, imports, and context
 - branch-local SDK-era docs, prompts, and helper exports
   - should be removed, hidden, or clearly downgraded if they no longer reflect the chosen authoring path
+- `workflow_engines/`
+  - retained temporarily as a compatibility seam, but no longer the desired long-term abstraction boundary
 
 ## Tricky Areas To Resolve
 
@@ -229,6 +246,10 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
 - migration strategy for current `python_steps` work:
   - completed for this branch-local experiment
   - avoid reintroducing partial dual-track authoring guidance
+- migration strategy for workflow engines generally:
+  - keep compatibility shims for now
+  - move real logic into `core/authoring`
+  - remove engine-centric architecture only after the new authoring runtime owns the shared execution path cleanly
 
 ## Implementation Outline
 
@@ -337,6 +358,20 @@ Validation target for consolidation:
 - keep `integration/basic_haiku_workflow` green
 - keep the manually-authored weekly planning workflow load/compile/run path working
 
+### Phase 7: Move Shared Runtime Under `core/authoring`
+
+- move shared input resolution from `core/workflow/` into `core/authoring/`
+- move shared output resolution from `core/workflow/` into `core/authoring/`
+- move shared tool binding and execution-prep helpers into `core/authoring/`
+- update `step` and constrained-Python entrypoints to import the shared runtime from `core/authoring`
+- keep `workflow_engines/` as thin wrappers only during this phase
+
+Validation target for this phase:
+
+- `integration/basic_haiku_workflow` still passes
+- one manually-authored real workflow still compiles, loads, and runs
+- no behavior drift in shared file input/output semantics
+
 ## Validation Targets
 
 Initial validation should stay narrow and artifact-oriented.
@@ -373,5 +408,6 @@ Immediate goal for the next phase:
 - move from architecture search into consolidation and hardening:
   - commit the current authoring path
   - tear down branch-local SDK-era guidance/surfaces that conflict with it
-  - refactor module layout under `core/authoring`
+  - move shared runtime inward under `core/authoring`
+  - reduce `workflow_engines/` to compatibility shells rather than homes for real logic
   - then continue with scope enforcement and the next capability slice

@@ -12,14 +12,14 @@ from core.llm.agents import PromptInput
 from core.llm.model_selection import ModelExecutionSpec
 from core.runtime.buffers import BufferStore
 from core.directives.tools import ToolsDirective
-from core.workflow.execution_prep import (
+from core.authoring.shared.execution_prep import (
     build_step_prompt,
     compose_instruction_layers,
     resolve_step_model_execution,
     should_step_run_today,
 )
-from core.workflow.output_resolution import ResolvedOutputTarget, write_resolved_output
-from core.workflow.tool_binding import ToolBindingResult, merge_tool_bindings
+from core.authoring.shared.output_resolution import ResolvedOutputTarget, write_resolved_output
+from core.authoring.shared.tool_binding import ToolBindingResult, merge_tool_bindings
 
 # Create workflow logger
 logger = UnifiedLogger(tag="step-workflow")
