@@ -31,6 +31,7 @@ class IngestionJob(Base):
 
 
 def _get_engine():
+    # Uses the centralized declared system DB registry.
     return create_engine_from_system_db("ingestion_jobs")
 
 

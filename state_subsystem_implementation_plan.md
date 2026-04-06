@@ -78,6 +78,31 @@ This keeps the surface symmetrical:
 
 Do not introduce a separate `store_state(...)` capability unless this turns out to be necessary later.
 
+### What Belongs In State
+
+`state` should store host-generated off-context artifacts, not duplicate existing vault content.
+
+Examples that should usually go to `state`:
+
+- large web search result sets
+- `tavily_extract` output
+- browser/crawl extraction output
+- broad file-search result blobs
+- large derived or aggregated intermediate artifacts created during exploration
+
+Examples that should usually **not** go to `state`:
+
+- ordinary vault file content already addressable through `retrieve(type="file", ...)`
+- large `file_ops` reads where the real artifact is still the vault file ref
+
+For existing vault-backed content, the correct oversize behavior should usually be:
+
+- return refs, metadata, and preview
+- signal that the content is large
+- switch to scripted exploration against the underlying files
+
+Do not copy vault content into `state` just to make it inspectable.
+
 ### Chat Overflow Policy
 
 Chat should keep automatic context protection, but the destination should become `state`, not buffers.
@@ -99,6 +124,41 @@ Target behavior:
 - `call_tool(...)` returns inline result + metadata
 - scripts explicitly decide whether to store a result into `output(type="state", ...)`
 - no hidden rerouting in authored Python
+
+### Lifecycle / TTL Policy
+
+`state` must not become a shadow content store.
+
+Therefore:
+
+- `state` entries should default to expiring
+- durable user-owned knowledge should still be written explicitly to vault files
+- lifecycle should be part of the core contract, not bolt-on cleanup
+
+Initial design direction:
+
+- read-time expiration enforcement:
+  - expired entries behave as unavailable immediately
+- periodic physical purge:
+  - expired entries are deleted from storage rather than merely ignored
+- metadata should include at least:
+  - `created_at`
+  - `expires_at`
+  - `origin`
+  - `scope`
+  - optionally `last_accessed_at`
+
+Suggested lifetime categories:
+
+- `run`
+  - very short-lived
+  - intended for one authored execution / one workflow run
+- `session`
+  - survives across iterative chat exploration in one session
+- `temporary`
+  - longer-lived but still auto-expiring
+
+Do not introduce effectively permanent state in the MVP unless there is a concrete use case that cannot be met by explicit vault output.
 
 ## Scope Model Direction
 
@@ -131,6 +191,9 @@ Working assumptions:
 - `state` should be DB-backed
 - `file_state.db` and `cache.db` should be evaluated as candidate backends or merge targets
 - the authoring/runtime API must not expose backend fragmentation
+- payload storage may be hybrid:
+  - DB for refs and metadata
+  - file/blob backing for large payload bodies if needed
 
 Backend principles:
 
@@ -205,6 +268,7 @@ Recommended minimal semantics:
 - content is text-first for MVP
 - metadata is stored and returned
 - explicit overwrite/append behavior is defined for state writes
+- entries have explicit lifetime semantics
 
 ### Phase 2: State Backend Adapter
 
@@ -216,6 +280,7 @@ Deliverables:
 - clear mapping to existing DB infrastructure
 - workflow/chat origin metadata on writes
 - timestamps and basic metadata storage
+- lifecycle fields and TTL enforcement
 - documented DB/table ownership for the new state path
 
 Decision point:
@@ -301,6 +366,7 @@ Once state-backed overflow works:
 - whether `file_state.db` and `cache.db` should merge now or later
 - whether large payloads should live fully in DB rows or in a DB+blob hybrid
 - whether `state` should initially land in an existing DB as a clearly owned table family or wait for the broader centralized database-layer refactor from issue `#36`
+- what payload-size threshold should switch from inline DB storage to blob/file-backed storage, if any
 
 ### Database Consolidation Questions
 
@@ -312,6 +378,10 @@ Once state-backed overflow works:
 
 - how to expose size metadata from tool calls consistently without reintroducing hidden rerouting
 - where exactly the chat overflow interception should sit in `chat_executor`
+- what the default TTL should be for:
+  - chat overflow artifacts
+  - workflow-written state artifacts
+  - session-scoped exploration artifacts
 
 ### Scope Questions
 
@@ -332,6 +402,7 @@ The smallest useful slice is:
 2. inventory existing DB/store boundaries enough to choose a safe initial `state` home
 3. implement `output(type="state", ...)`
 4. implement `retrieve(type="state", ...)`
-5. verify with ephemeral smoke tests before touching chat overflow behavior
+5. implement read-time expiration behavior and a minimal purge path
+6. verify with ephemeral smoke tests before touching chat overflow behavior
 
 Do not redesign the shared tool wrapper and chat routing in the same first slice.

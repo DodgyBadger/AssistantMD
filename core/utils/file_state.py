@@ -54,7 +54,7 @@ class WorkflowFileStateManager:
         self.workflow_id = workflow_id
         self.vault_path = os.path.join(str(get_data_root()), vault_name)
 
-        # Create SQLAlchemy engine and session factory for file_state database
+        # Uses the centralized declared system DB registry.
         self.engine = create_engine_from_system_db("file_state")
         self.SessionFactory = create_session_factory(self.engine)
 

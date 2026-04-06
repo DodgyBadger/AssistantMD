@@ -6,7 +6,7 @@ Simple utilities for setting up the SQLAlchemy job store.
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 
-from core.database import get_system_database_path
+from core.database import get_system_database_definition, get_system_database_path
 
 
 def create_job_store(system_root: str = None) -> SQLAlchemyJobStore:
@@ -17,6 +17,7 @@ def create_job_store(system_root: str = None) -> SQLAlchemyJobStore:
     Returns:
         Configured SQLAlchemyJobStore instance
     """
+    get_system_database_definition("scheduler_jobs")
     database_path = get_system_database_path("scheduler_jobs", system_root)
     database_url = f"sqlite:///{database_path}"
 

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from core.context.templates import TemplateRecord
-from core.database import get_system_database_path
+from core.database import connect_sqlite_from_system_db, get_system_database_path
 from core.logger import UnifiedLogger
 
 logger = UnifiedLogger(tag="context-store")
@@ -22,7 +21,7 @@ def _get_db_path(system_root: Optional[Path] = None) -> str:
 def _ensure_db(system_root: Optional[Path] = None) -> str:
     """Create database file and tables if missing."""
     db_path = _get_db_path(system_root)
-    conn = sqlite3.connect(db_path)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         conn.execute(
             """
@@ -114,8 +113,8 @@ def upsert_cached_step_output(
     system_root: Optional[Path] = None,
 ) -> None:
     """Insert or update a cached step output."""
-    db_path = _ensure_db(system_root)
-    conn = sqlite3.connect(db_path)
+    _ensure_db(system_root)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         if cache_mode == "session":
             conn.execute(
@@ -179,8 +178,8 @@ def get_cached_step_output(
     system_root: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
     """Fetch the most recent cached step output for a key."""
-    db_path = _ensure_db(system_root)
-    conn = sqlite3.connect(db_path)
+    _ensure_db(system_root)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         if cache_mode == "session":
             rows = conn.execute(
@@ -257,9 +256,9 @@ def upsert_session(
     system_root: Optional[Path] = None,
 ) -> None:
     """Insert session row if missing; ignore duplicates."""
-    db_path = _ensure_db(system_root)
+    _ensure_db(system_root)
     meta_json = json.dumps(metadata or {}, ensure_ascii=False)
-    conn = sqlite3.connect(db_path)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         conn.execute(
             """
@@ -290,11 +289,11 @@ def add_context_summary(
     system_root: Optional[Path] = None,
 ) -> int:
     """Persist a compiled context summary and return its row id."""
-    db_path = _ensure_db(system_root)
+    _ensure_db(system_root)
     sections_str = json.dumps(sections_included, ensure_ascii=False) if sections_included is not None else None
     payload_str = json.dumps(input_payload, ensure_ascii=False) if input_payload is not None else None
 
-    conn = sqlite3.connect(db_path)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         conn.execute(
             """
@@ -349,8 +348,8 @@ def get_recent_summaries(
     Returns a compact list of snapshots so tools can compare the current turn
     with prior objectives/constraints without pulling full transcripts.
     """
-    db_path = _ensure_db(system_root)
-    conn = sqlite3.connect(db_path)
+    _ensure_db(system_root)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         if limit is None:
             rows = conn.execute(
