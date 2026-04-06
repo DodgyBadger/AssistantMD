@@ -30,7 +30,7 @@ settings:
     restart_required: false
   auto_buffer_max_tokens:
     value: 10000
-    description: "Automatically route tool output to a buffer variable when it exceeds this token count. 0 = disabled. Caution: very low values will increase tool churn and token usage. This setting is used to protect context window from massive tool outputs. buffer_ops tool is automatically enabled if this setting > 0."
+    description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
     restart_required: false
   file_search_timeout_seconds:
     value: 10

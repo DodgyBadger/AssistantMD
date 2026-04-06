@@ -11,7 +11,7 @@ dependencies = [
     "uvicorn[standard]>=0.22.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
-    "pydantic-ai>=1.60.0",
+    "pydantic-ai @ git+https://github.com/pydantic/pydantic-ai.git",
     "fastapi>=0.100.0",
     "python-multipart",
     "logfire[fastapi,sqlalchemy]",
@@ -42,6 +42,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.ruff]
 target-version = "py313"

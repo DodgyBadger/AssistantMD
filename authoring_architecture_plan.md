@@ -55,6 +55,10 @@ Implemented so far:
 - `call_tool(name=..., arguments=..., options=...)` is implemented against the existing configured tool-binding/runtime path
   - authoring scope is enforced through `authoring.tools`
   - the current MVP returns inline textual results only
+- shared tool binding no longer auto-buffers large results
+- chat-side oversized textual tool results are now intercepted via PydanticAI tool-execution hooks
+  - large non-file textual results are stored in `cache.db` and replaced with a compact cache-ref/preview notice
+  - large vault-backed `file_ops_safe(read)` results are left as file-ref guidance rather than copied into cache
 - file/tool boundary hardening is implemented with canonical top-level `authoring.*` frontmatter keys:
   - `authoring.capabilities`
   - `authoring.retrieve.file`
@@ -82,6 +86,9 @@ Implemented so far:
   - each also supports an optional format string such as `date.today("YYYYMMDD")`
 - reduced-capability Monty templates now run through the real workflow path
 - smoke validation coverage exists through `integration/basic_haiku_workflow`
+- deterministic core contract coverage now exists for:
+  - authoring host contracts in `integration/core/authoring_contract`
+  - chat oversized-tool cache behavior in `integration/core/chat_tool_overflow_cache`
 
 Still intentionally incomplete:
 

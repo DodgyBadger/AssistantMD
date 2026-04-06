@@ -18,6 +18,7 @@ async def create_agent(
     retries: Optional[int] = None,
     output_type: Optional[Any] = None,
     history_processors: Optional[List] = None,
+    capabilities: Optional[List[Any]] = None,
 ) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
@@ -29,6 +30,7 @@ async def create_agent(
         retries: Number of retries for tool validation errors (defaults to DEFAULT_TOOL_RETRIES)
         output_type: Optional structured output specification for the agent
         history_processors: Optional list of history processors to apply
+        capabilities: Optional PydanticAI capabilities to attach to the agent
 
     Returns:
         Configured Pydantic AI Agent ready for use
@@ -66,6 +68,8 @@ async def create_agent(
         agent_kwargs['tools'] = tools
     if output_type is not None:
         agent_kwargs['output_type'] = output_type
+    if capabilities:
+        agent_kwargs['capabilities'] = capabilities
 
     agent = Agent(**agent_kwargs)
 

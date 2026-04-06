@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage, TextPart
+from pydantic_ai.messages import ModelMessage, TextPart, ToolReturn
 from pydantic_ai import (
     BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
@@ -39,6 +39,7 @@ from core.llm.model_utils import (
 from core.context.manager import build_context_manager_history_processor
 from core.context.templates import load_template
 from core.settings import (
+    get_auto_buffer_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
 )
@@ -46,6 +47,8 @@ from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
+from core.context.store import purge_expired_cache_artifacts, upsert_cache_artifact
+from core.tools.utils import estimate_token_count
 
 
 logger = UnifiedLogger(tag="chat-executor")
@@ -219,6 +222,71 @@ def _normalize_tool_result(result: Any) -> Optional[str]:
         return _truncate_preview(str(result), limit=240)
 
 
+def _tool_result_has_multimodal_payload(result: Any) -> bool:
+    if not isinstance(result, ToolReturn):
+        return False
+    content = result.content
+    if content is None or isinstance(content, str):
+        return False
+    return True
+
+
+def _tool_result_as_text(result: Any) -> str:
+    if isinstance(result, ToolReturn):
+        return str(result.return_value or "")
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(result, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(result)
+
+
+def _chat_cache_owner_id(*, vault_name: str, session_id: str) -> str:
+    return f"{vault_name}/chat/{session_id}"
+
+
+def _chat_cache_ref(*, tool_name: str, tool_call_id: str) -> str:
+    safe_tool_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_name).strip("-") or "tool"
+    safe_call_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_call_id).strip("-") or "call"
+    return f"tool/{safe_tool_name}/{safe_call_id}"
+
+
+def _should_preserve_vault_backed_tool_result(tool_name: str, args: dict[str, Any]) -> bool:
+    if tool_name != "file_ops_safe":
+        return False
+    operation = str(args.get("operation") or "").strip().lower()
+    return operation == "read"
+
+
+def _build_large_vault_read_notice(*, tool_name: str, args: dict[str, Any], token_count: int, token_limit: int) -> str:
+    target = str(args.get("target") or "").strip() or "<unknown>"
+    return (
+        f"Tool '{tool_name}' produced a large vault-backed file read for '{target}' "
+        f"({token_count} estimated tokens > {token_limit}). The content was not inlined or cached. "
+        "Explore the underlying file incrementally with targeted reads or switch to constrained-Python "
+        "exploration against the file path."
+    )
+
+
+def _build_cached_tool_overflow_notice(
+    *,
+    tool_name: str,
+    cache_ref: str,
+    token_count: int,
+    token_limit: int,
+    preview: str,
+) -> str:
+    return (
+        f"Tool '{tool_name}' produced a large result ({token_count} estimated tokens > {token_limit}) "
+        f"and it was stored in cache ref '{cache_ref}'. Preview:\n\n{preview}\n\n"
+        "Do not request the full content inline. Switch to constrained-Python exploration and retrieve "
+        "the cached artifact by ref when you need to inspect it."
+    )
+
+
 def _build_model_capability_details(
     model_alias: str,
     requested_capability: str,
@@ -290,6 +358,101 @@ def _resolve_context_template_name(vault_path: str, context_template: Optional[s
         return fallback
 
 
+def _build_chat_tool_overflow_capability(
+    *,
+    vault_name: str,
+    session_id: str,
+    now: datetime | None,
+) -> Any | None:
+    token_limit = get_auto_buffer_max_tokens()
+    if token_limit <= 0:
+        return None
+
+    from pydantic_ai.capabilities import Hooks
+
+    hooks = Hooks()
+
+    @hooks.on.after_tool_execute
+    async def cache_oversized_tool_output(ctx, *, call, tool_def, args, result):
+        del ctx, tool_def
+        if _tool_result_has_multimodal_payload(result):
+            return result
+
+        text = _tool_result_as_text(result)
+        if not text:
+            return result
+
+        token_count = estimate_token_count(text)
+        if token_count <= token_limit:
+            return result
+
+        if _should_preserve_vault_backed_tool_result(call.tool_name, args):
+            logger.info(
+                "Chat oversized vault-backed tool result left inline as file ref guidance",
+                data={
+                    "vault_name": vault_name,
+                    "session_id": session_id,
+                    "tool_name": call.tool_name,
+                    "tool_call_id": call.tool_call_id,
+                    "token_count": token_count,
+                    "token_limit": token_limit,
+                },
+            )
+            return _build_large_vault_read_notice(
+                tool_name=call.tool_name,
+                args=args,
+                token_count=token_count,
+                token_limit=token_limit,
+            )
+
+        reference_time = now or datetime.now()
+        cache_ref = _chat_cache_ref(tool_name=call.tool_name, tool_call_id=call.tool_call_id)
+        purge_expired_cache_artifacts(now=reference_time)
+        upsert_cache_artifact(
+            owner_id=_chat_cache_owner_id(vault_name=vault_name, session_id=session_id),
+            session_key=session_id,
+            artifact_ref=cache_ref,
+            cache_mode="session",
+            ttl_seconds=None,
+            raw_content=text,
+            metadata={
+                "origin": "chat_tool_overflow",
+                "tool_name": call.tool_name,
+                "tool_call_id": call.tool_call_id,
+                "token_count": token_count,
+            },
+            origin="chat_tool_overflow",
+            now=reference_time,
+            week_start_day=0,
+        )
+        preview_limit = 1200
+        preview = text[:preview_limit]
+        if len(text) > preview_limit:
+            preview += "\n… [truncated]"
+
+        logger.info(
+            "Chat oversized tool result stored in cache",
+            data={
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "tool_name": call.tool_name,
+                "tool_call_id": call.tool_call_id,
+                "cache_ref": cache_ref,
+                "token_count": token_count,
+                "token_limit": token_limit,
+            },
+        )
+        return _build_cached_tool_overflow_notice(
+            tool_name=call.tool_name,
+            cache_ref=cache_ref,
+            token_count=token_count,
+            token_limit=token_limit,
+            preview=preview,
+        )
+
+    return hooks
+
+
 @dataclass
 class ChatExecutionResult:
     """Result of chat prompt execution."""
@@ -307,6 +470,8 @@ class ChatRunDeps:
     context_manager_now: Optional[datetime] = None
     buffer_store: BufferStore = field(default_factory=BufferStore)
     buffer_store_registry: dict[str, BufferStore] = field(default_factory=dict)
+    session_id: str = ""
+    vault_name: str = ""
 
 
 def _resolve_context_manager_now() -> Optional[datetime]:
@@ -505,11 +670,17 @@ async def _prepare_chat_execution(
             template_name=resolved_template,
         )
     ]
+    overflow_capability = _build_chat_tool_overflow_capability(
+        vault_name=vault_name,
+        session_id=session_id,
+        now=_resolve_context_manager_now(),
+    )
 
     agent = await create_agent(
         model=model_instance,
         tools=tool_functions if tool_functions else None,
         history_processors=history_processors,
+        capabilities=[overflow_capability] if overflow_capability is not None else None,
     )
     for inst in [base_instructions, tool_instructions]:
         if inst:
@@ -641,6 +812,8 @@ async def execute_chat_prompt(
             context_manager_now=_resolve_context_manager_now(),
             buffer_store=session_buffer_store,
             buffer_store_registry={"session": session_buffer_store},
+            session_id=session_id,
+            vault_name=vault_name,
         )
         result = await prepared.agent.run(
             prepared.user_prompt,
@@ -711,6 +884,8 @@ async def _stream_prepared_chat_prompt(
         context_manager_now=_resolve_context_manager_now(),
         buffer_store=session_buffer_store,
         buffer_store_registry={"session": session_buffer_store},
+        session_id=session_id,
+        vault_name=vault_name,
     )
     _log_chat_lifecycle(
         "Streaming chat execution started",

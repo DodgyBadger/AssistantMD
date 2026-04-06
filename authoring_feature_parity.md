@@ -208,7 +208,8 @@ Still missing from the intended surface:
   - explicit orchestration is the preferred model
   - implemented now for declared tool names from `authoring.tools`
   - the current MVP returns inline textual results only
-  - older output-routing behavior should be reconsidered carefully instead of carried over wholesale
+  - older output-routing behavior is no longer the preferred path
+  - oversized chat tool results now use cache refs via chat-specific hook handling rather than shared hidden buffering
 
 ### `@cache`
 
@@ -261,6 +262,8 @@ Still missing from the intended surface:
   - “buffer” should not remain the main author-facing concept
   - future design should center on `cache`
   - local Python variables already handle most intra-run flow more naturally
+  - chat overflow has now moved off hidden buffer routing and onto cache refs
+  - remaining buffer infrastructure should be treated as compatibility-only until removed
 
 ### Routing
 
@@ -295,8 +298,8 @@ These are the highest-value parity / capability targets for the next phase.
 1. strict frontmatter capability enforcement
    - completed for file reads, file writes, and tool calls
 
-2. `cache` design
-   - replace legacy buffer-thinking with a durable off-context artifact model
+2. chat/cache exploration convergence
+   - build the constrained-Python exploration loop on top of the new cache-ref overflow path
 
 3. `import_content(...)`
    - complete the core host-boundary surface

@@ -19,12 +19,12 @@ from pydantic_ai.messages import (
 )
 
 from core.logger import UnifiedLogger
-from core.settings import get_auto_buffer_max_tokens, get_routing_allowed_tools
+from core.settings import get_routing_allowed_tools
 from core.settings.secrets_store import secret_has_value
 from core.settings.store import ToolConfig, get_tools_config
 from core.tools.base import BaseTool
-from core.tools.utils import estimate_token_count, get_tool_instructions
-from core.utils.routing import OutputTarget, build_manifest, write_output
+from core.tools.utils import get_tool_instructions
+from core.utils.routing import build_manifest, write_output
 from core.authoring.shared.output_resolution import (
     normalize_write_mode,
     parse_output_value,
@@ -104,10 +104,6 @@ def resolve_tool_binding(
                 tool_names.append(name)
             if params:
                 tool_params_by_name[name] = params
-
-    auto_buffer_limit = get_auto_buffer_max_tokens()
-    if auto_buffer_limit and auto_buffer_limit > 0 and "buffer_ops" not in tool_names:
-        tool_names.append("buffer_ops")
 
     configs = get_tools_config()
     tool_classes: list[Type] = []
@@ -466,59 +462,6 @@ def _route_tool_output(
             )
         return result
     if output_target is None:
-        auto_limit = get_auto_buffer_max_tokens()
-        if auto_limit and auto_limit > 0:
-            content = "" if result is None else (result if isinstance(result, str) else str(result))
-            if content:
-                token_count = estimate_token_count(content)
-                if token_count > auto_limit:
-                    default_scope = "run"
-                    if buffer_store_registry and "session" in buffer_store_registry and "run" not in buffer_store_registry:
-                        default_scope = "session"
-                    auto_name = f"{tool_name}_output"
-                    write_result = write_output(
-                        target=OutputTarget(type="buffer", name=auto_name),
-                        content=content,
-                        write_mode="new",
-                        buffer_store=buffer_store,
-                        buffer_store_registry=buffer_store_registry,
-                        vault_path=vault_path,
-                        buffer_scope=scope_value,
-                        default_scope=default_scope,
-                        metadata={"auto_buffered": True, "token_count": token_count},
-                    )
-                    destination = f"variable: {write_result.get('name')}"
-                    preview_limit = 1200
-                    preview = content[:preview_limit]
-                    if len(content) > preview_limit:
-                        preview += "\n… [truncated]"
-                    manifest = build_manifest(
-                        source=tool_name,
-                        destination=destination,
-                        item_count=1,
-                        total_chars=len(content),
-                        note=(
-                            f"Auto-buffered output ({token_count} tokens > {auto_limit}). "
-                            f"Preview (first {preview_limit} chars):\n{preview}\n\n"
-                            f"Read full content with buffer_ops, e.g. buffer_ops(operation=\"peek\", "
-                            f"target=\"{write_result.get('name')}\", max_chars=1000)."
-                        ),
-                    )
-                    logger.set_sinks(["validation"]).info(
-                        "tool_output_routed",
-                        data={
-                            "event": "tool_output_routed",
-                            "tool": tool_name,
-                            "destination": destination,
-                            "write_mode": write_result.get("write_mode", "append"),
-                            "output_chars": len(content),
-                            "forced": True,
-                            "auto_buffered": True,
-                            "token_count": token_count,
-                            "token_limit": auto_limit,
-                        },
-                    )
-                    return manifest
         return result
 
     if hard_output is not None and hard_output.strip().lower() == "inline":

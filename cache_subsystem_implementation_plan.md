@@ -62,10 +62,10 @@ codebase toward clearer database-layer ownership.
 
 ### What Still Breaks Down
 
-- large tool outputs in chat are still auto-routed into buffers
-- `buffer_ops` is still the exploration mechanism for that routed data
-- workflow/chat do not yet share a coherent artifact persistence model
-- Monty can inspect a large result once, but has no first-class persisted off-context place to revisit it later
+- chat-side overflow now lands in cache refs, but chat exploration has not yet converged on constrained-Python retrieval of those refs
+- `buffer_ops` still exists as compatibility infrastructure even though it is no longer the intended overflow path
+- workflow/chat do not yet share one fully converged artifact exploration model
+- Monty can now persist and revisit cache artifacts, but chat still needs a cleaner author-facing path for iterative cache inspection
 
 ## Desired Contract
 
@@ -127,6 +127,25 @@ Target behavior:
 - chat receives a lightweight preview/reference
 - exploration then happens by generating/running constrained-Python code against
   `retrieve(type="cache", ...)`
+
+Implementation note:
+
+- the shared tool wrapper should not own this policy
+- the preferred chat implementation point is PydanticAI tool-execution hooks
+  (`after_tool_execute` or `tool_execute`) attached to the chat agent
+- this keeps Monty/workflow tool calls transparent while letting chat preserve
+  context-window safety
+- the current branch upgraded `pydantic-ai` specifically to unlock this hooks API
+- this is now implemented for chat:
+  - shared tool binding no longer auto-buffers
+  - chat intercepts oversized textual tool results after tool execution
+  - large vault-backed `file_ops_safe(read)` results are left as file-ref guidance rather than copied into cache
+  - other oversized textual tool results are stored in cache and replaced with a compact notice containing a cache ref and preview
+
+Validation coverage:
+
+- deterministic chat overflow contract coverage now exists in
+  [chat_tool_overflow_cache.py](/app/validation/scenarios/integration/core/chat_tool_overflow_cache.py)
 
 ### Workflow / Monty Policy
 
@@ -262,13 +281,15 @@ Do not create a new storage subsystem unless `cache.db` proves inadequate.
   - [tool_output_routing.py](/app/validation/scenarios/integration/live/tool_output_routing.py)
 - current Monty smoke:
   - [basic_haiku_workflow.py](/app/validation/scenarios/integration/basic_haiku_workflow.py)
-- likely new integration scenario for cache-backed exploration
+- deterministic core chat overflow scenario:
+  - [chat_tool_overflow_cache.py](/app/validation/scenarios/integration/core/chat_tool_overflow_cache.py)
+- likely later integration scenario for cache-backed exploration
 
 ## Proposed Phases
 
 ### Phase 1: Cache Contract
 
-Define the minimum authoring contract without changing chat overflow yet.
+Define the minimum authoring contract and land the first chat-overflow migration slice.
 
 Deliverables:
 
@@ -295,6 +316,8 @@ Status:
   - `ttl=session|daily|weekly|<duration>`
   - read-time expiry enforcement
   - physical purge of time-bounded expired cache artifacts
+  - chat overflow interception via PydanticAI hooks
+  - cache-ref/preview responses for oversized non-file textual chat tool results
 
 ### Phase 2: Cache Backend Adapter
 
@@ -324,15 +347,15 @@ Non-goal for this phase:
 - do not let `cache` become another ad hoc persistence island with its own
   uncodified DB ownership rules
 
-### Phase 3: Chat Overflow Migration
+### Phase 3: Chat Exploration Convergence
 
-Move automatic oversized tool-output interception out of the generic tool wrapper and into chat execution.
+Build the next layer above the migrated overflow path so chat can inspect cache refs cleanly.
 
 Deliverables:
 
-- oversized chat tool outputs stored in `cache`
-- preview/reference returned to chat instead of buffer manifest
-- no new buffer writes for chat overflow
+- examples/docs showing constrained-Python exploration of cache refs in chat
+- no active chat guidance that treats `buffer_ops` as the primary exploration path
+- a decision on whether any residual buffer infrastructure is still needed after chat exploration converges
 
 Non-goal for this phase:
 
@@ -370,9 +393,9 @@ Once cache-backed overflow works:
    - [authoring_contract.py](/app/validation/scenarios/integration/core/authoring_contract.py)
    - covers `output(cache)` / `retrieve(cache)` and daily cache expiry semantics
 
-2. Update live routing scenario:
-   - oversized chat tool output is routed to `cache` rather than buffer
-   - returned artifact includes preview/reference
+2. Added deterministic core chat overflow coverage in:
+   - [chat_tool_overflow_cache.py](/app/validation/scenarios/integration/core/chat_tool_overflow_cache.py)
+   - covers cache-ref response behavior and persisted cache artifact existence
 
 3. Add a chat-side exploration scenario later:
    - a stored cache artifact is inspected in multiple passes without re-running the original tool
@@ -423,15 +446,11 @@ Once cache-backed overflow works:
 
 ## Recommendation
 
-Next implementation phase should be **Feature Development** focused on **Phase 1: Cache Contract**.
+Next implementation phase should be **Feature Development** focused on **Phase 3: Chat Exploration Convergence**.
 
-The smallest useful slice is:
+The smallest useful next slice is:
 
-1. define `cache` result and write/read contract
-2. expand `cache.db` ownership to cover cache artifacts explicitly
-3. implement `output(type="cache", ...)`
-4. implement `retrieve(type="cache", ...)`
-5. implement read-time expiration behavior and a minimal purge path
-6. verify with ephemeral smoke tests before touching chat overflow behavior
-
-Do not redesign the shared tool wrapper and chat routing in the same first slice.
+1. define the user-facing chat pattern for exploring cache refs through constrained-Python
+2. reduce or remove active `buffer_ops` guidance from chat surfaces
+3. add one scenario that revisits the same cached artifact in more than one pass
+4. only then decide how much residual buffer/runtime infrastructure can be removed
