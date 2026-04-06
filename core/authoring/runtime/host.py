@@ -18,6 +18,12 @@ from pydantic_ai.usage import RunUsage
 from core.logger import UnifiedLogger
 from core.runtime.buffers import BufferStore
 from core.runtime.paths import get_data_root
+from core.context.cache_semantics import parse_cache_mode_value
+from core.context.store import (
+    get_cache_artifact,
+    purge_expired_cache_artifacts,
+    upsert_cache_artifact,
+)
 from core.utils.patterns import PatternUtilities
 from core.utils.file_state import WorkflowFileStateManager
 from core.authoring.shared.tool_binding import resolve_tool_binding
@@ -109,6 +115,7 @@ class WorkflowAuthoringHost(AuthoringHost):
     run_buffers: BufferStore = field(default_factory=BufferStore)
     session_buffers: BufferStore = field(default_factory=BufferStore)
     state_manager: WorkflowFileStateManager | None = None
+    session_key: str | None = None
 
     def __post_init__(self) -> None:
         if self.vault_path is None:
@@ -121,6 +128,8 @@ class WorkflowAuthoringHost(AuthoringHost):
         if self.state_manager is None and "/" in self.workflow_id:
             vault_name, _workflow_name = self.workflow_id.split("/", 1)
             self.state_manager = WorkflowFileStateManager(vault_name, self.workflow_id)
+        if self.session_key is None:
+            self.session_key = self.workflow_id
 
     def get_monty_inputs(self) -> dict[str, Any]:
         """Return reserved Monty globals injected by the host."""
@@ -141,9 +150,11 @@ class WorkflowAuthoringHost(AuthoringHost):
         context: AuthoringExecutionContext,
     ) -> RetrieveResult:
         request_type, ref, options = _parse_retrieve_call(call)
+        if request_type == "cache":
+            return self._handle_cache_retrieve(ref=ref, options=options, context=context)
         if request_type != "file":
             raise ValueError(
-                f"Unsupported retrieve type '{request_type}'. Only 'file' is implemented in the MVP."
+                f"Unsupported retrieve type '{request_type}'. Supported types are: file, cache."
             )
 
         _ensure_file_ref_allowed(ref=ref, scope=context.scope)
@@ -211,9 +222,11 @@ class WorkflowAuthoringHost(AuthoringHost):
         context: AuthoringExecutionContext,
     ) -> OutputResult:
         request_type, ref, data, options = _parse_output_call(call)
+        if request_type == "cache":
+            return self._handle_cache_output(ref=ref, data=data, options=options, context=context)
         if request_type != "file":
             raise ValueError(
-                f"Unsupported output type '{request_type}'. Only 'file' is implemented in the MVP."
+                f"Unsupported output type '{request_type}'. Supported types are: file, cache."
             )
 
         _ensure_file_output_allowed(ref=ref, scope=context.scope)
@@ -431,6 +444,113 @@ class WorkflowAuthoringHost(AuthoringHost):
     ) -> Any:
         raise NotImplementedError("import_content is not implemented for the Monty MVP host")
 
+    def _handle_cache_retrieve(
+        self,
+        *,
+        ref: str,
+        options: dict[str, Any],
+        context: AuthoringExecutionContext,
+    ) -> RetrieveResult:
+        _ensure_cache_ref_allowed(ref=ref, scope=context.scope)
+        _ensure_cache_retrieve_options_supported(options)
+        purge_expired_cache_artifacts(now=self.reference_date)
+        artifact = get_cache_artifact(
+            owner_id=context.workflow_id,
+            session_key=self.session_key,
+            artifact_ref=ref,
+            now=self.reference_date,
+            week_start_day=self.week_start_day,
+        )
+        item = _normalize_cache_record(ref=ref, record=artifact)
+        logger.info(
+            "authoring_retrieve_cache_resolved",
+            data={
+                "workflow_id": context.workflow_id,
+                "type": "cache",
+                "ref": ref,
+                "exists": item.exists,
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_retrieve_cache_resolved",
+            data={
+                "workflow_id": context.workflow_id,
+                "type": "cache",
+                "ref": ref,
+                "exists": item.exists,
+            },
+        )
+        return RetrieveResult(type="cache", ref=ref, items=(item,))
+
+    def _handle_cache_output(
+        self,
+        *,
+        ref: str,
+        data: Any,
+        options: dict[str, Any],
+        context: AuthoringExecutionContext,
+    ) -> OutputResult:
+        _ensure_cache_output_allowed(ref=ref, scope=context.scope)
+        write_mode, cache_mode, ttl_seconds = _build_cache_output_options(options)
+        purge_expired_cache_artifacts(now=self.reference_date)
+
+        content = _coerce_output_data(data)
+        if write_mode == "append":
+            existing = get_cache_artifact(
+                owner_id=context.workflow_id,
+                session_key=self.session_key,
+                artifact_ref=ref,
+                now=self.reference_date,
+                week_start_day=self.week_start_day,
+            )
+            if existing is not None:
+                content = f"{existing['raw_content']}{content}"
+
+        upsert_cache_artifact(
+            owner_id=context.workflow_id,
+            session_key=self.session_key,
+            artifact_ref=ref,
+            cache_mode=cache_mode,
+            ttl_seconds=ttl_seconds,
+            raw_content=content,
+            metadata={
+                "type": "cache",
+                "write_mode": write_mode,
+                "workflow_id": context.workflow_id,
+            },
+            origin="authoring_monty",
+            now=self.reference_date,
+            week_start_day=self.week_start_day,
+        )
+        logger.info(
+            "authoring_output_cache_written",
+            data={
+                "workflow_id": context.workflow_id,
+                "type": "cache",
+                "ref": ref,
+                "write_mode": write_mode,
+                "cache_mode": cache_mode,
+                "ttl_seconds": ttl_seconds,
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_output_cache_written",
+            data={
+                "workflow_id": context.workflow_id,
+                "type": "cache",
+                "ref": ref,
+                "write_mode": write_mode,
+                "cache_mode": cache_mode,
+                "ttl_seconds": ttl_seconds,
+            },
+        )
+        return OutputResult(
+            type="cache",
+            ref=ref,
+            status="written",
+            item=OutputItem(ref=ref, resolved_ref=ref, mode=write_mode),
+        )
+
 
 def _parse_retrieve_call(call: AuthoringCapabilityCall) -> tuple[str, str, dict[str, Any]]:
     if call.args:
@@ -489,6 +609,34 @@ def _ensure_file_output_allowed(*, ref: str, scope: AuthoringCapabilityScope) ->
     ):
         return
     raise CapabilityNotAllowedError(f"File ref '{ref}' is outside the configured write scope")
+
+
+def _ensure_cache_ref_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> None:
+    allowed_patterns = tuple(pattern.strip() for pattern in scope.readable_cache_refs if pattern.strip())
+    if not allowed_patterns:
+        raise CapabilityNotAllowedError(
+            "retrieve(cache) requires explicit authoring.retrieve.cache frontmatter entries"
+        )
+    if any(fnmatchcase(ref, pattern) for pattern in allowed_patterns):
+        return
+    raise CapabilityNotAllowedError(f"Cache ref '{ref}' is outside the configured read scope")
+
+
+def _ensure_cache_output_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> None:
+    allowed_patterns = tuple(pattern.strip() for pattern in scope.writable_cache_refs if pattern.strip())
+    if not allowed_patterns:
+        raise CapabilityNotAllowedError(
+            "output(cache) requires explicit authoring.output.cache frontmatter entries"
+        )
+    if any(fnmatchcase(ref, pattern) for pattern in allowed_patterns):
+        return
+    raise CapabilityNotAllowedError(f"Cache ref '{ref}' is outside the configured write scope")
+
+
+def _ensure_cache_retrieve_options_supported(options: dict[str, Any]) -> None:
+    if options:
+        unknown = ", ".join(sorted(options))
+        raise ValueError(f"Unsupported retrieve(cache) options: {unknown}")
 
 
 def _build_file_parameters(options: dict[str, Any]) -> dict[str, Any]:
@@ -672,6 +820,21 @@ def _build_file_output_options(
     return write_mode, None
 
 
+def _build_cache_output_options(options: dict[str, Any]) -> tuple[str, str, int | None]:
+    supported_keys = {"mode", "ttl"}
+    unknown = sorted(set(options) - supported_keys)
+    if unknown:
+        raise ValueError(f"Unsupported output(cache) options: {', '.join(unknown)}")
+
+    raw_mode = str(options.get("mode") or "append").strip().lower()
+    if raw_mode not in {"append", "replace"}:
+        raise ValueError("output(cache) option 'mode' must be one of: append, replace")
+
+    raw_ttl = str(options.get("ttl") or "session").strip()
+    parsed_ttl = parse_cache_mode_value(raw_ttl)
+    return raw_mode, str(parsed_ttl["mode"]), parsed_ttl.get("ttl_seconds")
+
+
 def _coerce_output_data(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -717,5 +880,32 @@ def _normalize_file_record(record: dict[str, Any]) -> RetrievedItem:
         ref=source_ref,
         content=record.get("content", ""),
         exists=exists,
+        metadata=metadata,
+    )
+
+
+def _normalize_cache_record(*, ref: str, record: dict[str, Any] | None) -> RetrievedItem:
+    if record is None:
+        return RetrievedItem(
+            ref=ref,
+            content="",
+            exists=False,
+            metadata={},
+        )
+    metadata = dict(record.get("metadata") or {})
+    metadata.update(
+        {
+            "cache_mode": record.get("cache_mode"),
+            "ttl_seconds": record.get("ttl_seconds"),
+            "origin": record.get("origin"),
+            "created_at": record.get("created_at"),
+            "last_accessed_at": record.get("last_accessed_at"),
+            "expires_at": record.get("expires_at"),
+        }
+    )
+    return RetrievedItem(
+        ref=ref,
+        content=str(record.get("raw_content") or ""),
+        exists=True,
         metadata=metadata,
     )

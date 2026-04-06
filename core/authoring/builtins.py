@@ -24,14 +24,14 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
                 name="retrieve",
                 handler_name="handle_retrieve",
                 doc=(
-                    "Retrieve scoped external inputs such as files, state, or recent runs."
+                    "Retrieve scoped external inputs such as files, cache, or recent runs."
                 ),
                 contract=_retrieve_contract(),
             ),
             _host_dispatch_capability(
                 name="output",
                 handler_name="handle_output",
-                doc="Emit selected results to files, state, or context sinks.",
+                doc="Emit selected results to files, cache, or context sinks.",
                 contract=_output_contract(),
             ),
             _host_dispatch_capability(
@@ -160,6 +160,10 @@ def _retrieve_contract() -> dict[str, Any]:
                         "description": "Required with order='filename_dt' to parse dates from filenames.",
                     },
                 },
+            },
+            "cache": {
+                "ref": "Logical cache reference scoped by the host execution owner.",
+                "options": {},
             }
         },
         "return_shape": {
@@ -186,6 +190,10 @@ def _retrieve_contract() -> dict[str, Any]:
                 ),
                 "description": "Resolve pending files using the shared workflow selector semantics.",
             },
+            {
+                "code": 'await retrieve(type="cache", ref="research/browser-page")',
+                "description": "Load one previously stored cache artifact by logical reference.",
+            },
         ],
     }
 
@@ -206,6 +214,22 @@ def _output_contract() -> dict[str, Any]:
                         "values": ["append", "replace", "new"],
                         "default": "append",
                         "description": "Write mode forwarded to the shared workflow output runtime.",
+                    },
+                },
+            },
+            "cache": {
+                "ref": "Logical cache reference scoped by the host execution owner.",
+                "options": {
+                    "mode": {
+                        "type": "enum",
+                        "values": ["append", "replace"],
+                        "default": "append",
+                        "description": "Append to or replace the current cache artifact value.",
+                    },
+                    "ttl": {
+                        "type": "string",
+                        "default": "session",
+                        "description": "Cache lifetime using the shared cache semantics: session, daily, weekly, or a duration like 30m.",
                     },
                 },
             }
@@ -231,6 +255,13 @@ def _output_contract() -> dict[str, Any]:
                     'options={"mode": "replace"})'
                 ),
                 "description": "Replace an existing file using the shared output runtime.",
+            },
+            {
+                "code": (
+                    'await output(type="cache", ref="research/browser-page", data=page_text, '
+                    'options={"mode": "replace", "ttl": "24h"})'
+                ),
+                "description": "Store a temporary cache artifact for later scripted exploration.",
             },
         ],
     }

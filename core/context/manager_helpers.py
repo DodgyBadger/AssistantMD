@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic_ai import RunContext
@@ -24,6 +24,7 @@ from core.context.store import (
     get_recent_summaries,
     upsert_cached_step_output,
 )
+from core.context.cache_semantics import cache_entry_is_valid
 from core.directives.context_manager import _parse_passthrough_runs
 from core.directives.tools import ToolsDirective
 from core.logger import UnifiedLogger
@@ -295,57 +296,6 @@ def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
         metadata={"value": raw_value},
     )
     return 0
-
-
-def parse_db_timestamp(raw_value: Optional[str]) -> Optional[datetime]:
-    if not raw_value:
-        return None
-    try:
-        return datetime.fromisoformat(raw_value)
-    except ValueError:
-        try:
-            return datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return None
-    return None
-
-
-def start_of_week(value: datetime, week_start_day: int) -> datetime:
-    delta_days = (value.weekday() - week_start_day) % 7
-    return (value - timedelta(days=delta_days)).replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-
-
-def cache_entry_is_valid(
-    *,
-    created_at: Optional[str],
-    cache_mode: str,
-    ttl_seconds: Optional[int],
-    now: datetime,
-    week_start_day: int,
-) -> bool:
-    created_dt = parse_db_timestamp(created_at)
-    if created_dt is None:
-        return False
-    if created_dt.tzinfo is None and now.tzinfo is not None:
-        created_dt = created_dt.replace(tzinfo=timezone.utc)
-    elif created_dt.tzinfo is not None and now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    if cache_mode == "duration":
-        if ttl_seconds is None:
-            return False
-        return now - created_dt < timedelta(seconds=ttl_seconds)
-    if cache_mode == "daily":
-        return created_dt.date() == now.date()
-    if cache_mode == "weekly":
-        return start_of_week(created_dt, week_start_day) == start_of_week(now, week_start_day)
-    if cache_mode == "session":
-        return True
-    return False
 
 
 def resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: int) -> int:

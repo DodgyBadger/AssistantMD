@@ -55,11 +55,13 @@ Still missing from the intended surface:
 - new shape:
   - `authoring.capabilities`
   - `authoring.retrieve.file`
+  - `authoring.retrieve.cache`
   - `authoring.output.file`
+  - `authoring.output.cache`
   - `authoring.tools`
 - notes:
   - this is now the canonical authored shape
-  - file reads, file writes, and tool calls fail closed unless explicitly declared
+  - file reads, cache reads, file writes, cache writes, and tool calls fail closed unless explicitly declared
   - nested `authoring:` objects and unprefixed fallback keys are no longer the supported authored contract
 
 ### `workflow_engine`
@@ -118,6 +120,7 @@ Still missing from the intended surface:
   - `await retrieve(type="file", ref=..., options=...)`
 - direct parity already present:
   - file reads
+  - cache reads
   - glob/selector behavior via shared runtime
   - `required`
   - `refs_only`
@@ -129,7 +132,7 @@ Still missing from the intended surface:
   - `dt_pattern`
   - `dt_format`
 - missing / changed:
-  - variable/buffer reads are not part of the new contract and should likely be re-expressed through `state` rather than legacy buffer terminology
+  - cache reads are now the intended replacement for legacy variable/buffer reads
   - direct input-side routing (`output=...`, `write_mode=...`, `scope=...`) should be treated as `rethink`
   - `images`, `head`, `tail`, and `properties` need explicit evaluation for the new contract rather than assumed carry-over
 - notes:
@@ -142,11 +145,13 @@ Still missing from the intended surface:
 - target status: `partial`
 - new shape:
   - `await output(type="file", ref=..., data=..., options=...)`
+  - `await output(type="cache", ref=..., data=..., options=...)`
 - direct parity already present:
   - file output
+  - cache output
   - `mode=append|replace|new`
 - missing / changed:
-  - variable/buffer output should be treated as `planned` through a future `state` model, not recreated as legacy buffer routing
+  - cache output is now the intended replacement for variable/buffer output
   - context output is `planned`
 - notes:
   - file write policy itself is now `done` through `authoring.output.file`
@@ -217,14 +222,14 @@ Still missing from the intended surface:
 - old surface: context-template chat-history access
 - target status: `planned`
 - notes:
-  - likely a future `retrieve(type="run", ...)` or related history/state surface
+  - likely a future `retrieve(type="run", ...)` or related history/cache surface
 
 ### `@recent_summaries`
 
 - old surface: context-template summary access
 - target status: `planned`
 - notes:
-  - likely part of future run-history/state retrieval rather than a special directive
+  - likely part of future run-history/cache retrieval rather than a special directive
 
 ## Pattern Parity
 
@@ -254,7 +259,7 @@ Still missing from the intended surface:
 - target status: `rethink`
 - notes:
   - “buffer” should not remain the main author-facing concept
-  - future design should center on `state`
+  - future design should center on `cache`
   - local Python variables already handle most intra-run flow more naturally
 
 ### Routing
@@ -290,7 +295,7 @@ These are the highest-value parity / capability targets for the next phase.
 1. strict frontmatter capability enforcement
    - completed for file reads, file writes, and tool calls
 
-2. `state` design
+2. `cache` design
    - replace legacy buffer-thinking with a durable off-context artifact model
 
 3. `import_content(...)`

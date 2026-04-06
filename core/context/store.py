@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any
 
-from core.context.templates import TemplateRecord
+from core.context.cache_semantics import cache_entry_is_valid, compute_cache_expiration
 from core.database import connect_sqlite_from_system_db, get_system_database_path
 from core.logger import UnifiedLogger
+
+if TYPE_CHECKING:
+    from core.context.templates import TemplateRecord
 
 logger = UnifiedLogger(tag="context-store")
 
@@ -93,10 +97,212 @@ def _ensure_db(system_root: Optional[Path] = None) -> str:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_context_summaries_session ON context_summaries(session_id, vault_name)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cache_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id TEXT NOT NULL,
+                session_key TEXT,
+                artifact_ref TEXT NOT NULL,
+                cache_mode TEXT NOT NULL,
+                ttl_seconds INTEGER,
+                raw_content TEXT NOT NULL,
+                metadata TEXT,
+                origin TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_artifacts_owner_ref
+            ON cache_artifacts(owner_id, artifact_ref)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cache_artifacts_expires
+            ON cache_artifacts(expires_at)
+            """
+        )
         conn.commit()
     finally:
         conn.close()
     return db_path
+
+
+def purge_expired_cache_artifacts(
+    *,
+    now: datetime,
+    system_root: Optional[Path] = None,
+) -> int:
+    """Delete cache artifacts whose expiration timestamp has passed."""
+    _ensure_db(system_root)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    try:
+        cursor = conn.execute(
+            """
+            DELETE FROM cache_artifacts
+            WHERE expires_at IS NOT NULL
+              AND expires_at <= ?
+            """,
+            (now.isoformat(sep=" "),),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        conn.close()
+
+
+def upsert_cache_artifact(
+    *,
+    owner_id: str,
+    session_key: str | None,
+    artifact_ref: str,
+    cache_mode: str,
+    ttl_seconds: int | None,
+    raw_content: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    origin: str | None = None,
+    now: datetime,
+    week_start_day: int,
+    system_root: Optional[Path] = None,
+) -> None:
+    """Insert or replace one named cache artifact for an owner/ref pair."""
+    _ensure_db(system_root)
+    expires_at = compute_cache_expiration(
+        created_at=now,
+        cache_mode=cache_mode,
+        ttl_seconds=ttl_seconds,
+        week_start_day=week_start_day,
+    )
+    metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    try:
+        conn.execute(
+            """
+            DELETE FROM cache_artifacts
+            WHERE owner_id = ? AND artifact_ref = ?
+            """,
+            (owner_id, artifact_ref),
+        )
+        conn.execute(
+            """
+            INSERT INTO cache_artifacts (
+                owner_id,
+                session_key,
+                artifact_ref,
+                cache_mode,
+                ttl_seconds,
+                raw_content,
+                metadata,
+                origin,
+                created_at,
+                last_accessed_at,
+                expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                owner_id,
+                session_key,
+                artifact_ref,
+                cache_mode,
+                ttl_seconds,
+                raw_content,
+                metadata_json,
+                origin,
+                now.isoformat(sep=" "),
+                now.isoformat(sep=" "),
+                None if expires_at is None else expires_at.isoformat(sep=" "),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_cache_artifact(
+    *,
+    owner_id: str,
+    session_key: str | None,
+    artifact_ref: str,
+    now: datetime,
+    week_start_day: int,
+    system_root: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Fetch one cache artifact if it exists and is still valid."""
+    _ensure_db(system_root)
+    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                owner_id,
+                session_key,
+                artifact_ref,
+                cache_mode,
+                ttl_seconds,
+                raw_content,
+                metadata,
+                origin,
+                created_at,
+                last_accessed_at,
+                expires_at
+            FROM cache_artifacts
+            WHERE owner_id = ? AND artifact_ref = ?
+            LIMIT 1
+            """,
+            (owner_id, artifact_ref),
+        ).fetchone()
+        if row is None:
+            return None
+
+        cache_mode = row[4]
+        ttl_seconds = row[5]
+        created_at = row[9]
+        if cache_mode == "session" and row[2] != session_key:
+            return None
+        if not cache_entry_is_valid(
+            created_at=created_at,
+            cache_mode=cache_mode,
+            ttl_seconds=ttl_seconds,
+            now=now,
+            week_start_day=week_start_day,
+        ):
+            conn.execute("DELETE FROM cache_artifacts WHERE id = ?", (row[0],))
+            conn.commit()
+            return None
+
+        conn.execute(
+            "UPDATE cache_artifacts SET last_accessed_at = ? WHERE id = ?",
+            (now.isoformat(sep=" "), row[0]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    metadata: Dict[str, Any]
+    try:
+        metadata = json.loads(row[7]) if row[7] else {}
+    except json.JSONDecodeError:
+        metadata = {}
+
+    return {
+        "owner_id": row[1],
+        "session_key": row[2],
+        "artifact_ref": row[3],
+        "cache_mode": cache_mode,
+        "ttl_seconds": ttl_seconds,
+        "raw_content": row[6],
+        "metadata": metadata,
+        "origin": row[8],
+        "created_at": created_at,
+        "last_accessed_at": row[10],
+        "expires_at": row[11],
+    }
 
 
 def upsert_cached_step_output(

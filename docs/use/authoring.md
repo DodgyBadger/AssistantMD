@@ -77,7 +77,9 @@ Example capability manifest:
 ```yaml
 authoring.capabilities: [retrieve, generate, output, call_tool]
 authoring.retrieve.file: [Tasks/**/*.md, Inbox/*.md]
+authoring.retrieve.cache: [research/*, scratch/*]
 authoring.output.file: [Tasks/weekly/*.md, Reports/*.md]
+authoring.output.cache: [research/*, scratch/*]
 authoring.tools: [file_ops_safe, internal_api]
 ```
 
@@ -98,7 +100,9 @@ The executable workflow code belongs inside that block. Do not split execution a
 - Use built-in capabilities such as `retrieve(...)`, `generate(...)`, and `output(...)` for host boundary crossings.
 - Treat frontmatter as a real security boundary, not documentation.
 - `retrieve(type="file", ...)` is denied unless `authoring.retrieve.file` explicitly allows the target ref.
+- `retrieve(type="cache", ...)` is denied unless `authoring.retrieve.cache` explicitly allows the target ref.
 - `output(type="file", ...)` is denied unless `authoring.output.file` explicitly allows the target ref.
+- `output(type="cache", ...)` is denied unless `authoring.output.cache` explicitly allows the target ref.
 - `call_tool(...)` is denied unless `authoring.tools` explicitly allowlists the tool name.
 - Treat `type`, `ref`, and `options` as the stable contract shape for resource-oriented capabilities.
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
@@ -112,11 +116,19 @@ Example:
 
 ```python
 source = await retrieve(type="file", ref="notes/*.md", options={"limit": 3})
+await output(
+    type="cache",
+    ref="research/latest-note-summary",
+    data="\n\n".join(item.content for item in source.items),
+    options={"mode": "replace", "ttl": "24h"},
+)
+
+cached = await retrieve(type="cache", ref="research/latest-note-summary")
 
 draft = await generate(
     prompt=(
         "Write a short summary of these notes.\n\n"
-        + "\n\n".join(item.content for item in source.items)
+        + cached.items[0].content
     ),
     instructions="Be concise and factual.",
     model="gpt-mini",

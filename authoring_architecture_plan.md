@@ -20,9 +20,9 @@ The target shape is:
   - import destinations
   - model allowlists/defaults
   - tool allowlists
-  - state/context access
-- host-managed off-context state replacing buffer-specific concepts:
-  - tools and imports may persist large results into state automatically
+  - cache/context access
+- host-managed off-context cache replacing buffer-specific concepts:
+  - tools and imports may persist large results into cache automatically
   - sandbox code retrieves those artifacts by reference and explores them in Python
   - only selected derived output is routed into context
 - `core/authoring` becomes the long-term home for this surface, including built-ins, capability registration, and optional add-ons
@@ -48,7 +48,9 @@ Implemented so far:
 - markdown authoring templates load from frontmatter plus one fenced `python` block
 - `workflow_engine: monty` is wired into the normal workflow engine loading path
 - `retrieve(type="file", ref=..., options=...)` is implemented against the shared workflow input runtime
+- `retrieve(type="cache", ref=...)` is implemented against the shared cache runtime in `cache.db`
 - `output(type="file", ref=..., data=..., options=...)` is implemented against the shared workflow output runtime
+- `output(type="cache", ref=..., data=..., options=...)` is implemented against the shared cache runtime in `cache.db`
 - `generate(prompt=..., instructions=..., model=..., options=...)` is implemented against the shared LLM runtime
 - `call_tool(name=..., arguments=..., options=...)` is implemented against the existing configured tool-binding/runtime path
   - authoring scope is enforced through `authoring.tools`
@@ -56,9 +58,11 @@ Implemented so far:
 - file/tool boundary hardening is implemented with canonical top-level `authoring.*` frontmatter keys:
   - `authoring.capabilities`
   - `authoring.retrieve.file`
+  - `authoring.retrieve.cache`
   - `authoring.output.file`
+  - `authoring.output.cache`
   - `authoring.tools`
-  - file reads, file writes, and tool calls are now fail-closed unless explicitly declared
+  - file reads, cache reads, file writes, cache writes, and tool calls are now fail-closed unless explicitly declared
 - capability return values already use Pythonic typed objects with attribute access:
   - `source.items[0].content`
   - `draft.output`
@@ -169,8 +173,8 @@ A single markdown artifact remains the primary unit:
 
 The authoring contract should stay small and composable:
 
-- `retrieve(...)` for scoped external inputs such as files, state, and recent run history
-- `output(...)` for files, state, and context sinks
+- `retrieve(...)` for scoped external inputs such as files, cache, and recent run history
+- `output(...)` for files, cache, and context sinks
 - `generate(...)` for explicit model calls, with per-call model override inside frontmatter policy
 - `call_tool(...)` for declared tool access
 - `import_content(...)` for first-class ingestion through the import pipeline
@@ -193,14 +197,14 @@ The host boundary should be pluggable and registry-driven.
   - example calls
 - `options` dictionaries are allowed in the runtime API only when their schema is explicitly published through this inspectable contract
 
-### State Model
+### Cache Model
 
 “Buffer” should not remain the author-facing concept.
 
 - local Python variables handle intra-execution flow
-- host-managed `state` handles off-context artifacts and persisted transient/session data
-- tools and imports may auto-materialize large payloads into `state` and return lightweight refs
-- Monty code can inspect and transform state-backed artifacts before sending selected results to `context`
+- host-managed `cache` handles off-context artifacts and persisted transient/session data
+- tools and imports may auto-materialize large payloads into `cache` and return lightweight refs
+- Monty code can inspect and transform cache-backed artifacts before sending selected results to `context`
 
 ## Likely Landing Zones
 
@@ -221,7 +225,7 @@ Probable structure:
   - shared execution-prep helpers
 - `core/authoring/builtins/`
   - built-in `retrieve`, `output`, `generate`, `call_tool`, `import_content`
-  - built-in resource/sink handlers for files, state, runs, and context
+  - built-in resource/sink handlers for files, cache, runs, and context
 - `core/authoring/addons/`
   - optional or experimental capability packs
 - `core/authoring/contracts.py`
@@ -238,11 +242,11 @@ Current extracted workflow runtime under `core/workflow/` should be moved under 
 - `core/workflow/`
   - expected to shrink as shared authored-automation runtime moves into `core/authoring`
 - chat/context-template execution path
-  - likely needs a Monty-enabled path for state-backed exploration in chat
+  - likely needs a Monty-enabled path for cache-backed exploration in chat
 - tool and import integration
-  - large payload tools should be able to return state refs instead of raw context-heavy payloads
+  - large payload tools should be able to return cache refs instead of raw context-heavy payloads
 - frontmatter loading/validation
-  - new capability-manifest fields for files, state, tools, models, imports, and context
+  - new capability-manifest fields for files, cache, tools, models, imports, and context
 - branch-local SDK-era docs, prompts, and helper exports
   - should be removed, hidden, or clearly downgraded if they no longer reflect the chosen authoring path
 - `workflow_engines/`
@@ -251,7 +255,7 @@ Current extracted workflow runtime under `core/workflow/` should be moved under 
 ## Tricky Areas To Resolve
 
 - whether any additional scoped frontmatter beyond `authoring.capabilities`, `authoring.retrieve.file`, `authoring.output.file`, and `authoring.tools` is truly needed
-- whether `state` is backed by existing variable/buffer storage, new storage, or a compatibility layer
+- how far to evolve `cache.db` into the shared off-context artifact store without reintroducing persistence sprawl
 - minimum typed object surface returned by `retrieve(...)`
 - whether the host-provided `date` shim should remain as a durable authoring primitive or later give way to native Monty clock support once `date.today()` and `datetime.now()` are fully implemented upstream
 - how much per-call control `generate(...)` exposes for models/thinking/options
@@ -293,11 +297,11 @@ Status:
 
 - implement `retrieve(...)` over the highest-value sources first:
   - files
-  - state
+  - cache
   - recent runs if needed
 - implement `output(...)` for:
   - files
-  - state
+  - cache
   - context
 - implement `generate(...)`, `call_tool(...)`, and `import_content(...)`
 - reuse existing shared runtime under `core/workflow/` wherever it already owns the correct semantics
@@ -309,17 +313,14 @@ Status:
   - `output(file)`
   - `generate(...)`
 - deferred:
-  - `retrieve(state)`
   - `retrieve(runs)`
-  - `output(state)`
   - `output(context)`
-  - `call_tool(...)`
   - `import_content(...)`
 
 ### Phase 4: Chat/Template Integration
 
 - introduce an experimental path for chat-side Monty execution
-- allow large tool/import payloads to materialize into state and return refs
+- allow large tool/import payloads to materialize into cache and return refs
 - prove that Monty-based exploration can replace key `buffer_ops` usage patterns
 
 Status:
@@ -392,8 +393,8 @@ Initial validation should stay narrow and artifact-oriented.
 
 - compile/run smoke test for a minimal Monty-authored artifact
 - frontmatter scope enforcement test for file retrieve/output restrictions
-- state-ref flow test:
-  - tool/import stores large content in state
+- cache-ref flow test:
+  - tool/import stores large content in cache
   - Monty retrieves by ref
   - selected result is emitted to context
 - model allowlist enforcement test for `generate(...)`
@@ -402,12 +403,13 @@ Current implemented validation:
 
 - compile/run smoke checks for Monty-authored artifacts
 - end-to-end workflow smoke coverage through `integration/basic_haiku_workflow`
+- deterministic host-contract coverage through `integration/core/authoring_contract`
 - targeted local checks with `ruff` and `compileall`
 
 Deferred until the system-facing surface hardens:
 
 - full frontmatter scope enforcement scenarios
-- state-ref flow scenarios
+- cache-ref flow scenarios
 - tool/import scenarios
 - broader matrix coverage against existing DSL semantics
 

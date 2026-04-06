@@ -43,11 +43,12 @@ class AuthoringCapabilityScope:
 
     enabled: frozenset[str]
     readable_paths: tuple[str, ...] = ()
+    readable_cache_refs: tuple[str, ...] = ()
     writable_paths: tuple[str, ...] = ()
+    writable_cache_refs: tuple[str, ...] = ()
     import_paths: tuple[str, ...] = ()
     allowed_models: tuple[str, ...] = ()
     allowed_tools: tuple[str, ...] = ()
-    state_names: tuple[str, ...] = ()
 
     def allows(self, capability_name: str) -> bool:
         """Return True when the capability is enabled for this execution."""
@@ -79,11 +80,12 @@ class AuthoringCapabilityScope:
         return cls(
             enabled=enabled,
             readable_paths=_normalize_string_tuple(authoring_config.get("retrieve.file", ())),
+            readable_cache_refs=_normalize_string_tuple(authoring_config.get("retrieve.cache", ())),
             writable_paths=_normalize_string_tuple(authoring_config.get("output.file", ())),
+            writable_cache_refs=_normalize_string_tuple(authoring_config.get("output.cache", ())),
             import_paths=_normalize_string_tuple(authoring_config.get("import_paths", ())),
             allowed_models=_normalize_string_tuple(authoring_config.get("models", ())),
             allowed_tools=_normalize_string_tuple(authoring_config.get("tools", ())),
-            state_names=_normalize_string_tuple(authoring_config.get("state", ())),
         )
 
 
