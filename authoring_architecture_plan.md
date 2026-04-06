@@ -95,6 +95,13 @@ This is no longer just an architecture experiment. The constrained-Python path h
 
 The remaining issues found so far have been interface hardening problems, not model failures.
 
+Branch-local consolidation status:
+
+- the retired `python_steps` SDK experiment has now been removed from active runtime paths in this branch
+- `core/authoring` no longer serves both the old primitive model and the new constrained-Python contract
+- validation scenarios that existed only to prove `python_steps` parity have been removed
+- the active Python workflow authoring path is now the constrained-Python contract exposed through `workflow_engine: monty`
+
 ## Scope And Invariants
 
 ### In Scope
@@ -220,9 +227,8 @@ Current extracted workflow runtime under `core/workflow/` should be reused where
 - how Monty enters chat execution without destabilizing existing agent flows
 - how capability schema introspection should be surfaced in prompts, internal APIs, and authoring tooling
 - migration strategy for current `python_steps` work:
-  - retire branch-local SDK-era work now
-  - keep only compatibility pieces that are still referenced by stable runtime paths
-  - avoid partial dual-track authoring guidance
+  - completed for this branch-local experiment
+  - avoid reintroducing partial dual-track authoring guidance
 
 ## Implementation Outline
 

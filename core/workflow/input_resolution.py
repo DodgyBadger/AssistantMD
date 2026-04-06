@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger

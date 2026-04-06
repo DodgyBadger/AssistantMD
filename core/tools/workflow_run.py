@@ -262,13 +262,6 @@ Notes:
                     f"instructions_present: {result.summary.instructions_present}",
                 ]
             )
-            if result.summary.step_names:
-                lines.append("step_names:")
-                lines.extend([f"- {name}" for name in result.summary.step_names])
-            if result.summary.output_targets:
-                lines.append("output_targets:")
-                for step_name, target in result.summary.output_targets.items():
-                    lines.append(f"- {step_name}: {target}")
         if result.diagnostics:
             lines.append("diagnostics:")
             for diagnostic in result.diagnostics:

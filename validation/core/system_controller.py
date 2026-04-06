@@ -24,7 +24,6 @@ from core.runtime.paths import set_bootstrap_roots
 from core.workflow.loader import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
 import workflow_engines.step.workflow as workflow_module
-import core.workflow.python_steps.executor as python_steps_executor_module
 import core.authoring.runtime.host as authoring_host_module
 
 
@@ -155,7 +154,6 @@ class SystemController:
         # Restore original datetime module
         if self._current_test_date:
             workflow_module.datetime = dt_module.datetime
-            python_steps_executor_module.datetime = dt_module.datetime
             authoring_host_module.datetime = dt_module.datetime
             self._current_test_date = None
 
@@ -367,7 +365,6 @@ class SystemController:
         # Apply datetime monkey patch for scheduled jobs
         mock_datetime = self._create_mock_datetime(test_date)
         workflow_module.datetime = mock_datetime
-        python_steps_executor_module.datetime = mock_datetime
         authoring_host_module.datetime = mock_datetime
         
     def _create_mock_datetime(self, test_date):
