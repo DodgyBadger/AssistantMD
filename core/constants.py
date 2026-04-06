@@ -117,7 +117,7 @@ Vault context:
 
 Tool calls (all tools):
 - Always use named parameters (keyword arguments). Positional arguments and args arrays are not supported.
-- If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload. When that happens, switch to constrained-Python exploration rather than requesting the full content inline.
+- If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload. When that happens, switch to constrained-Python exploration rather than requesting the full content inline. Use `code_execution_local` when that tool is available.
 
 Grounding:
 - When the answer depends on current information, external sources, or the user's files, use available tools to verify it instead of relying on memory alone.

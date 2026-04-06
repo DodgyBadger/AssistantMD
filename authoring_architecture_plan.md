@@ -89,6 +89,7 @@ Implemented so far:
 - deterministic core contract coverage now exists for:
   - authoring host contracts in `integration/core/authoring_contract`
   - chat oversized-tool cache behavior in `integration/core/chat_tool_overflow_cache`
+  - chat cache-scoped constrained local execution in `integration/core/code_execution_local`
 
 Still intentionally incomplete:
 
@@ -96,6 +97,7 @@ Still intentionally incomplete:
 - model policy/frontmatter remains intentionally out of scope for now
 - chat/context-template integration is not implemented
 - stable scenario coverage is still intentionally narrow
+- chat now has an initial constrained-Python cache exploration path through the `code_execution_local` tool, but this is still a bridge rather than the final converged chat runtime
 
 ## Decision
 

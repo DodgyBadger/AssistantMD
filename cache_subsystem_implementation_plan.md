@@ -353,9 +353,19 @@ Build the next layer above the migrated overflow path so chat can inspect cache 
 
 Deliverables:
 
+- a chat-scoped constrained-Python exploration tool for cache refs
 - examples/docs showing constrained-Python exploration of cache refs in chat
 - no active chat guidance that treats `buffer_ops` as the primary exploration path
 - a decision on whether any residual buffer infrastructure is still needed after chat exploration converges
+
+Status:
+
+- initial exploration path now exists through `code_execution_local`
+  - tool module: [code_execution_local.py](/app/core/tools/code_execution_local.py)
+  - scope: current chat session cache namespace
+  - capabilities: `retrieve(cache)`, `output(cache)`, and `generate(...)` inside one Monty snippet
+- deterministic contract coverage now exists in:
+  - [code_execution_local.py](/app/validation/scenarios/integration/core/code_execution_local.py)
 
 Non-goal for this phase:
 

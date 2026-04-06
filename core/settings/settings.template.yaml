@@ -307,3 +307,8 @@ tools:
     description: "Read-only access to allowlisted internal metadata endpoints"
     requires_secrets: []
     user_editable: false
+  code_execution_local:
+    module: core.tools.code_execution_local
+    description: "Run constrained local Python against the current chat cache namespace"
+    requires_secrets: []
+    user_editable: false

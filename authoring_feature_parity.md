@@ -300,6 +300,8 @@ These are the highest-value parity / capability targets for the next phase.
 
 2. chat/cache exploration convergence
    - build the constrained-Python exploration loop on top of the new cache-ref overflow path
+   - initial bridge now exists through the `code_execution_local` tool
+   - deterministic core coverage now exists for allowed/denied cache access and explicit cache writes
 
 3. `import_content(...)`
    - complete the core host-boundary surface
