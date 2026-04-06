@@ -52,8 +52,8 @@ Only add events at decision boundaries; avoid noisy instrumentation.
 - Relevant technical docs are updated (architecture, usage, or examples).
 
 ## Execution Rules
-- Agents should not run `validation/run_validation.py` directly.
-- Maintainers run full validation and share results.
+- Agents should run individual scenarios directly to validate functionality being built.
+- Only the maintainers should run the full validation suite.
 - In this dev container, avoid long validation jobs unless explicitly requested.
 
 ## Agent Smoke Tests (Local, Fast)
