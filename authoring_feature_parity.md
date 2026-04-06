@@ -54,8 +54,8 @@ Still missing from the intended surface:
 - target status: `done`
 - new shape:
   - `authoring.capabilities`
-  - `authoring.read_paths`
-  - `authoring.write_paths`
+  - `authoring.retrieve.file`
+  - `authoring.output.file`
   - `authoring.tools`
 - notes:
   - this is now the canonical authored shape
@@ -134,7 +134,7 @@ Still missing from the intended surface:
   - `images`, `head`, `tail`, and `properties` need explicit evaluation for the new contract rather than assumed carry-over
 - notes:
   - the new model is better at prompt placement because retrieved content is inserted explicitly in Python
-  - file access policy itself is now `done` through `authoring.read_paths`; the remaining `partial` status is about non-file surfaces and old routing-era options
+  - file access policy itself is now `done` through `authoring.retrieve.file`; the remaining `partial` status is about non-file surfaces and old routing-era options
 
 ### `@output`
 
@@ -149,7 +149,7 @@ Still missing from the intended surface:
   - variable/buffer output should be treated as `planned` through a future `state` model, not recreated as legacy buffer routing
   - context output is `planned`
 - notes:
-  - file write policy itself is now `done` through `authoring.write_paths`
+  - file write policy itself is now `done` through `authoring.output.file`
 
 ### `@header`
 

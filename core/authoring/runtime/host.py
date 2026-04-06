@@ -460,7 +460,7 @@ def _ensure_file_ref_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> No
     allowed_patterns = tuple(path.strip() for path in scope.readable_paths if path.strip())
     if not allowed_patterns:
         raise CapabilityNotAllowedError(
-            "retrieve(file) requires explicit authoring.read_paths frontmatter entries"
+            "retrieve(file) requires explicit authoring.retrieve.file frontmatter entries"
         )
     if any(
         fnmatchcase(candidate, pattern)
@@ -480,7 +480,7 @@ def _ensure_file_output_allowed(*, ref: str, scope: AuthoringCapabilityScope) ->
     allowed_patterns = tuple(path.strip() for path in scope.writable_paths if path.strip())
     if not allowed_patterns:
         raise CapabilityNotAllowedError(
-            "output(file) requires explicit authoring.write_paths frontmatter entries"
+            "output(file) requires explicit authoring.output.file frontmatter entries"
         )
     if any(
         fnmatchcase(candidate, pattern)

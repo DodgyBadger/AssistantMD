@@ -55,8 +55,8 @@ Implemented so far:
   - the current MVP returns inline textual results only
 - file/tool boundary hardening is implemented with canonical top-level `authoring.*` frontmatter keys:
   - `authoring.capabilities`
-  - `authoring.read_paths`
-  - `authoring.write_paths`
+  - `authoring.retrieve.file`
+  - `authoring.output.file`
   - `authoring.tools`
   - file reads, file writes, and tool calls are now fail-closed unless explicitly declared
 - capability return values already use Pythonic typed objects with attribute access:
@@ -153,6 +153,9 @@ Explicitly out of scope for the immediate cleanup pass:
 - large tool/import payloads should stay out of prompt context by default
 - frontmatter must remain the source of truth for capability scoping
 - authored workflow manifests should use canonical top-level `authoring.*` keys rather than nested `authoring:` objects or unprefixed fallback keys
+- file scope should be expressed through typed keys that mirror capability usage:
+  - `authoring.retrieve.file`
+  - `authoring.output.file`
 - migration should move shared automation/runtime logic toward `core/authoring` even if temporary compatibility shims remain elsewhere
 
 ## Proposed Architecture
@@ -247,7 +250,7 @@ Current extracted workflow runtime under `core/workflow/` should be moved under 
 
 ## Tricky Areas To Resolve
 
-- whether any additional scoped frontmatter beyond `authoring.capabilities`, `authoring.read_paths`, `authoring.write_paths`, and `authoring.tools` is truly needed
+- whether any additional scoped frontmatter beyond `authoring.capabilities`, `authoring.retrieve.file`, `authoring.output.file`, and `authoring.tools` is truly needed
 - whether `state` is backed by existing variable/buffer storage, new storage, or a compatibility layer
 - minimum typed object surface returned by `retrieve(...)`
 - whether the host-provided `date` shim should remain as a durable authoring primitive or later give way to native Monty clock support once `date.today()` and `datetime.now()` are fully implemented upstream

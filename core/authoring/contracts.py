@@ -78,8 +78,8 @@ class AuthoringCapabilityScope:
 
         return cls(
             enabled=enabled,
-            readable_paths=_normalize_string_tuple(authoring_config.get("read_paths", ())),
-            writable_paths=_normalize_string_tuple(authoring_config.get("write_paths", ())),
+            readable_paths=_normalize_string_tuple(authoring_config.get("retrieve.file", ())),
+            writable_paths=_normalize_string_tuple(authoring_config.get("output.file", ())),
             import_paths=_normalize_string_tuple(authoring_config.get("import_paths", ())),
             allowed_models=_normalize_string_tuple(authoring_config.get("models", ())),
             allowed_tools=_normalize_string_tuple(authoring_config.get("tools", ())),

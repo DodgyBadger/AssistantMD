@@ -76,8 +76,8 @@ Example capability manifest:
 
 ```yaml
 authoring.capabilities: [retrieve, generate, output, call_tool]
-authoring.read_paths: [Tasks/**/*.md, Inbox/*.md]
-authoring.write_paths: [Tasks/weekly/*.md, Reports/*.md]
+authoring.retrieve.file: [Tasks/**/*.md, Inbox/*.md]
+authoring.output.file: [Tasks/weekly/*.md, Reports/*.md]
 authoring.tools: [file_ops_safe, internal_api]
 ```
 
@@ -97,8 +97,8 @@ The executable workflow code belongs inside that block. Do not split execution a
 - Prefer explicit orchestration in Python over hidden framework behavior.
 - Use built-in capabilities such as `retrieve(...)`, `generate(...)`, and `output(...)` for host boundary crossings.
 - Treat frontmatter as a real security boundary, not documentation.
-- `retrieve(type="file", ...)` is denied unless `authoring.read_paths` explicitly allows the target ref.
-- `output(type="file", ...)` is denied unless `authoring.write_paths` explicitly allows the target ref.
+- `retrieve(type="file", ...)` is denied unless `authoring.retrieve.file` explicitly allows the target ref.
+- `output(type="file", ...)` is denied unless `authoring.output.file` explicitly allows the target ref.
 - `call_tool(...)` is denied unless `authoring.tools` explicitly allowlists the tool name.
 - Treat `type`, `ref`, and `options` as the stable contract shape for resource-oriented capabilities.
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
