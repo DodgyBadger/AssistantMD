@@ -473,6 +473,7 @@ class ChatRunDeps:
     session_id: str = ""
     vault_name: str = ""
     message_history: List[ModelMessage] = field(default_factory=list)
+    tools: List[str] = field(default_factory=list)
 
 
 def _resolve_context_manager_now() -> Optional[datetime]:
@@ -816,6 +817,7 @@ async def execute_chat_prompt(
             session_id=session_id,
             vault_name=vault_name,
             message_history=list(prepared.message_history or []),
+            tools=list(prepared.tools or []),
         )
         result = await prepared.agent.run(
             prepared.user_prompt,
@@ -889,6 +891,7 @@ async def _stream_prepared_chat_prompt(
         session_id=session_id,
         vault_name=vault_name,
         message_history=list(prepared.message_history or []),
+        tools=list(prepared.tools or []),
     )
     _log_chat_lifecycle(
         "Streaming chat execution started",

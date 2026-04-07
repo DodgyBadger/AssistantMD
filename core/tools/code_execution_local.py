@@ -40,12 +40,16 @@ class CodeExecutionLocal(BaseTool):
             code: str,
             readable_cache_refs: list[str] | None = None,
             writable_cache_refs: list[str] | None = None,
+            readable_file_paths: list[str] | None = None,
+            writable_file_paths: list[str] | None = None,
         ) -> str:
             """Run constrained local Python in the current chat session.
 
             :param code: Constrained-Python snippet to execute
             :param readable_cache_refs: Cache refs or glob patterns the snippet may retrieve
             :param writable_cache_refs: Cache refs or glob patterns the snippet may write
+            :param readable_file_paths: Optional explicit file read scope when file_ops_safe is enabled
+            :param writable_file_paths: Optional explicit file write scope when file_ops_safe is enabled
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -56,6 +60,11 @@ class CodeExecutionLocal(BaseTool):
                 deps = getattr(ctx, "deps", None)
                 session_id = str(getattr(deps, "session_id", "") or "").strip()
                 vault_name = str(getattr(deps, "vault_name", "") or "").strip()
+                enabled_tools = {
+                    str(name).strip()
+                    for name in (getattr(deps, "tools", []) or [])
+                    if str(name).strip()
+                }
                 reference_date = getattr(deps, "context_manager_now", None) or datetime.today()
                 if not session_id or not vault_name:
                     return (
@@ -66,10 +75,19 @@ class CodeExecutionLocal(BaseTool):
                     return "code_execution_local requires a non-empty code snippet."
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
+                allow_file_scope = "file_ops_safe" in enabled_tools
+                readable_file_scope = (
+                    list(readable_file_paths or ["*"]) if allow_file_scope else []
+                )
+                writable_file_scope = (
+                    list(writable_file_paths or ["*"]) if allow_file_scope else []
+                )
                 frontmatter = {
                     "authoring.capabilities": ["retrieve", "output", "generate", "assemble_context"],
                     "authoring.retrieve.cache": list(readable_cache_refs or []),
                     "authoring.output.cache": list(writable_cache_refs or []),
+                    "authoring.retrieve.file": readable_file_scope,
+                    "authoring.output.file": writable_file_scope,
                 }
                 host = WorkflowAuthoringHost(
                     workflow_id=workflow_id,
@@ -103,15 +121,24 @@ class CodeExecutionLocal(BaseTool):
 Use this for:
 - small calculations and transformations
 - iterative inspection of cached artifacts by ref
+- direct vault file exploration when chat also has `file_ops_safe`
 - tightly scoped local summarization or extraction loops
 
 This tool runs constrained local Python with a small host API and narrow
 current-chat execution context.
 
+If you need the exact current runtime contract, call:
+- `internal_api(endpoint="authoring_contract")`
+
+That endpoint describes the available Monty/runtime capabilities and result
+shapes for constrained local code.
+
 What it supports well right now:
 - `retrieve(type="cache", ref=...)`
+- `retrieve(type="file", ref=...)` when `file_ops_safe` is enabled for the chat run
 - `retrieve(type="run", ref="session", options=...)`
 - `output(type="cache", ref=..., data=...)`
+- `output(type="file", ref=..., data=...)` when `file_ops_safe` is enabled for the chat run
 - `generate(...)`
 - `assemble_context(...)`
 - ordinary Python logic around those calls
@@ -120,10 +147,11 @@ For broader language support or a remote sandbox, use the Piston-backed
 `code_execution` tool.
 
 Required arguments:
-- code_execution_local(code="...", readable_cache_refs=["tool/..."])
+- code_execution_local(code="...")
 
 Optional arguments:
 - writable_cache_refs=["scratch/*"] to persist derived cache artifacts
+- readable_file_paths=[...] or writable_file_paths=[...] to narrow file scope explicitly
 
 Patterns:
 - Simple calculation:
@@ -169,9 +197,19 @@ assembled = await assemble_context(
 \"\"\",
   )
 
+- Explore a vault file directly when `file_ops_safe` is enabled:
+  code_execution_local(
+    code=\"\"\"
+doc = await retrieve(type="file", ref="notes/project.md")
+doc.items[0].content[:2000]
+\"\"\",
+  )
+
 Notes:
-- This tool can read the current chat session history and any explicitly granted cache refs.
-- Grant the narrowest `readable_cache_refs` patterns that fit the task.
+- This tool can always read the current chat session history.
+- It can read/write explicitly granted cache refs.
+- If chat has `file_ops_safe`, this tool also gets vault file read/write access by default. Use `readable_file_paths` or `writable_file_paths` to narrow that scope when helpful.
+- Use `internal_api(endpoint="authoring_contract")` when you need exact details about available built-ins or return shapes instead of guessing.
 - Prefer returning a compact final value rather than printing large text.
 """
 
