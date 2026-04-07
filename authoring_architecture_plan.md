@@ -270,6 +270,21 @@ This gives us:
 
 This is still a design sketch, not an implemented contract.
 
+Relevant invariants from the current context-manager implementation:
+
+- final chat history is assembled by a dedicated history processor, not by flattening everything into one text blob
+- chat instructions are injected as a distinct `SystemPromptPart` message ahead of passthrough history
+- passthrough history remains as original `ModelMessage` objects rather than being re-rendered into text for the final chat agent
+- the latest user message is kept separate and appended last so the primary chat agent still responds directly to the current turn
+- context-manager section outputs that target chat context are also injected as structured `SystemPromptPart` messages, in order
+- the context-manager LLM itself receives a rendered text view of recent conversation for reasoning, but the downstream chat agent receives structured message objects
+- template failure prepends a dedicated error handoff instruction rather than silently degrading
+
+These are strong signals that the converged design should keep two distinct layers:
+
+- authored retrieval/transformation logic in constrained Python
+- host-side structured context assembly for the final downstream chat call
+
 ## Likely Landing Zones
 
 Primary home:
