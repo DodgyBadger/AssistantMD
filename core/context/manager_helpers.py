@@ -24,6 +24,7 @@ from core.context.store import (
     get_recent_summaries,
     upsert_cached_step_output,
 )
+from core.authoring.shared.output_resolution import ResolvedOutputTarget
 from core.context.cache_semantics import cache_entry_is_valid
 from core.directives.context_manager import _parse_passthrough_runs
 from core.directives.tools import ToolsDirective
@@ -595,7 +596,36 @@ def resolve_section_outputs(
             if output_result.success:
                 output_target = output_result.processed_value
                 output_targets.append(output_target)
-                if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+                if isinstance(output_target, ResolvedOutputTarget) and output_target.type == "buffer":
+                    logger.info(
+                        "Context output target resolved (buffer)",
+                        data={
+                            "session_id": session_id,
+                            "vault_name": vault_name,
+                            "section_name": section_name,
+                            "variable": output_target.name,
+                        },
+                    )
+                elif isinstance(output_target, ResolvedOutputTarget) and output_target.type == "context":
+                    logger.info(
+                        "Context output target resolved (context)",
+                        data={
+                            "session_id": session_id,
+                            "vault_name": vault_name,
+                            "section_name": section_name,
+                        },
+                    )
+                elif isinstance(output_target, ResolvedOutputTarget) and output_target.type == "file":
+                    logger.info(
+                        "Context output target resolved (file)",
+                        data={
+                            "session_id": session_id,
+                            "vault_name": vault_name,
+                            "section_name": section_name,
+                            "output_file": output_target.path,
+                        },
+                    )
+                elif isinstance(output_target, dict) and output_target.get("type") == "buffer":
                     logger.info(
                         "Context output target resolved (buffer)",
                         data={
@@ -964,9 +994,15 @@ def route_section_outputs(
     written_files: List[str] = []
     if output_targets and not skip_llm:
         for output_target in output_targets:
+            if isinstance(output_target, ResolvedOutputTarget) and output_target.type == "context":
+                continue
             if isinstance(output_target, dict) and output_target.get("type") == "context":
                 continue
-            if isinstance(output_target, dict) and output_target.get("type") == "buffer":
+            if isinstance(output_target, ResolvedOutputTarget) and output_target.type == "buffer":
+                target = OutputTarget(type="buffer", name=output_target.name)
+            elif isinstance(output_target, ResolvedOutputTarget) and output_target.type == "file":
+                target = OutputTarget(type="file", path=output_target.path)
+            elif isinstance(output_target, dict) and output_target.get("type") == "buffer":
                 target = OutputTarget(type="buffer", name=output_target.get("name"))
             elif isinstance(output_target, str):
                 target = OutputTarget(type="file", path=output_target)
@@ -985,7 +1021,11 @@ def route_section_outputs(
                     buffer_store_registry=exec_ctx.buffer_store_registry,
                     vault_path=exec_ctx.vault_path,
                     header=header_value,
-                    buffer_scope=output_target.get("scope") if isinstance(output_target, dict) else None,
+                    buffer_scope=(
+                        output_target.buffer_scope if isinstance(output_target, ResolvedOutputTarget)
+                        else output_target.get("scope") if isinstance(output_target, dict)
+                        else None
+                    ),
                     default_scope="run",
                     metadata={
                         "source": "context_manager",
@@ -1065,6 +1105,9 @@ async def run_context_section(
         section_name=section.name,
     )
     emit_context = any(
+        isinstance(target, ResolvedOutputTarget) and target.type == "context"
+        for target in output_targets
+    ) or any(
         isinstance(target, dict) and target.get("type") == "context"
         for target in output_targets
     )

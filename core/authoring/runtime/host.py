@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import inspect
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatchcase
@@ -11,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from pydantic_ai import RunContext
-from pydantic_ai.messages import ToolReturn
+from pydantic_ai.messages import ModelMessage, ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -19,6 +21,7 @@ from core.logger import UnifiedLogger
 from core.runtime.buffers import BufferStore
 from core.runtime.paths import get_data_root
 from core.context.cache_semantics import parse_cache_mode_value
+from core.context.manager_helpers import extract_role_and_text, run_slice
 from core.context.store import (
     get_cache_artifact,
     purge_expired_cache_artifacts,
@@ -40,8 +43,10 @@ from core.authoring.contracts import (
     AuthoringCapabilityScope,
     AuthoringExecutionContext,
     AuthoringHost,
+    AssembleContextResult,
     CallToolResult,
     CapabilityNotAllowedError,
+    ContextMessage,
     GenerationResult,
     OutputItem,
     OutputResult,
@@ -116,6 +121,8 @@ class WorkflowAuthoringHost(AuthoringHost):
     session_buffers: BufferStore = field(default_factory=BufferStore)
     state_manager: WorkflowFileStateManager | None = None
     session_key: str | None = None
+    chat_session_id: str | None = None
+    message_history: list[ModelMessage] | None = None
 
     def __post_init__(self) -> None:
         if self.vault_path is None:
@@ -130,6 +137,8 @@ class WorkflowAuthoringHost(AuthoringHost):
             self.state_manager = WorkflowFileStateManager(vault_name, self.workflow_id)
         if self.session_key is None:
             self.session_key = self.workflow_id
+        if self.chat_session_id is None:
+            self.chat_session_id = self.session_key
 
     def get_monty_inputs(self) -> dict[str, Any]:
         """Return reserved Monty globals injected by the host."""
@@ -152,9 +161,11 @@ class WorkflowAuthoringHost(AuthoringHost):
         request_type, ref, options = _parse_retrieve_call(call)
         if request_type == "cache":
             return self._handle_cache_retrieve(ref=ref, options=options, context=context)
+        if request_type == "run":
+            return self._handle_run_retrieve(ref=ref, options=options, context=context)
         if request_type != "file":
             raise ValueError(
-                f"Unsupported retrieve type '{request_type}'. Supported types are: file, cache."
+                f"Unsupported retrieve type '{request_type}'. Supported types are: file, cache, run."
             )
 
         _ensure_file_ref_allowed(ref=ref, scope=context.scope)
@@ -318,8 +329,54 @@ class WorkflowAuthoringHost(AuthoringHost):
         from core.llm.agents import create_agent, generate_response
         from core.llm.model_selection import ModelExecutionSpec
 
-        prompt, instructions, model_value, options = _parse_generate_call(call)
+        prompt, instructions, model_value, cache_policy, options = _parse_generate_call(call)
         resolved_model_value = _apply_generate_options_to_model(model_value, options)
+        cache_mode: str | None = None
+        cache_ttl_seconds: int | None = None
+        cache_ref: str | None = None
+        if cache_policy is not None:
+            cache_mode, cache_ttl_seconds = _parse_generate_cache_policy(cache_policy)
+            cache_ref = _build_generate_cache_ref(
+                prompt=prompt,
+                instructions=instructions,
+                model_value=resolved_model_value or "default",
+                cache_mode=cache_mode,
+                ttl_seconds=cache_ttl_seconds,
+            )
+            purge_expired_cache_artifacts(now=self.reference_date)
+            cached = get_cache_artifact(
+                owner_id=context.workflow_id,
+                session_key=self.session_key,
+                artifact_ref=cache_ref,
+                now=self.reference_date,
+                week_start_day=self.week_start_day,
+            )
+            if cached is not None:
+                logger.info(
+                    "authoring_generate_cache_hit",
+                    data={
+                        "workflow_id": context.workflow_id,
+                        "model": resolved_model_value or "default",
+                        "cache_mode": cache_mode,
+                        "cache_ref": cache_ref,
+                        "output_chars": len(cached["raw_content"]),
+                    },
+                )
+                logger.set_sinks(["validation"]).info(
+                    "authoring_generate_cache_hit",
+                    data={
+                        "workflow_id": context.workflow_id,
+                        "model": resolved_model_value or "default",
+                        "cache_mode": cache_mode,
+                        "cache_ref": cache_ref,
+                        "output_chars": len(cached["raw_content"]),
+                    },
+                )
+                return GenerationResult(
+                    status="cached",
+                    model=resolved_model_value or "default",
+                    output=cached["raw_content"],
+                )
 
         model = None
         if resolved_model_value:
@@ -333,6 +390,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
                 "instructions_present": bool(instructions),
+                "cache_mode": cache_mode,
             },
         )
         logger.set_sinks(["validation"]).info(
@@ -341,6 +399,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
                 "instructions_present": bool(instructions),
+                "cache_mode": cache_mode,
             },
         )
         agent = await create_agent(model=model)
@@ -348,6 +407,44 @@ class WorkflowAuthoringHost(AuthoringHost):
             agent.instructions(lambda _ctx, text=instructions: text)
         output = await generate_response(agent, prompt)
         text = _coerce_output_data(output)
+        if cache_mode is not None and cache_ref is not None:
+            upsert_cache_artifact(
+                owner_id=context.workflow_id,
+                session_key=self.session_key,
+                artifact_ref=cache_ref,
+                cache_mode=cache_mode,
+                ttl_seconds=cache_ttl_seconds,
+                raw_content=text,
+                metadata={
+                    "kind": "generate",
+                    "model": resolved_model_value or "default",
+                    "prompt_chars": len(prompt),
+                    "instructions_present": bool(instructions),
+                },
+                origin="authoring_generate",
+                now=self.reference_date,
+                week_start_day=self.week_start_day,
+            )
+            logger.info(
+                "authoring_generate_cache_stored",
+                data={
+                    "workflow_id": context.workflow_id,
+                    "model": resolved_model_value or "default",
+                    "cache_mode": cache_mode,
+                    "cache_ref": cache_ref,
+                    "output_chars": len(text),
+                },
+            )
+            logger.set_sinks(["validation"]).info(
+                "authoring_generate_cache_stored",
+                data={
+                    "workflow_id": context.workflow_id,
+                    "model": resolved_model_value or "default",
+                    "cache_mode": cache_mode,
+                    "cache_ref": cache_ref,
+                    "output_chars": len(text),
+                },
+            )
         logger.info(
             "authoring_generate_completed",
             data={
@@ -437,6 +534,45 @@ class WorkflowAuthoringHost(AuthoringHost):
             metadata=metadata,
         )
 
+    async def handle_assemble_context(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> AssembleContextResult:
+        history, context_messages, instructions, latest_user_message = _parse_assemble_context_call(call)
+        assembled_messages: list[ContextMessage] = []
+
+        for instruction in instructions:
+            assembled_messages.append(ContextMessage(role="system", content=instruction))
+        for item in context_messages:
+            assembled_messages.append(_normalize_context_message(item, default_role="system"))
+        for item in history:
+            assembled_messages.append(_normalize_context_message(item))
+        if latest_user_message is not None:
+            assembled_messages.append(_normalize_context_message(latest_user_message, default_role="user"))
+
+        logger.info(
+            "authoring_assemble_context_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "message_count": len(assembled_messages),
+                "instruction_count": len(instructions),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_assemble_context_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "message_count": len(assembled_messages),
+                "instruction_count": len(instructions),
+            },
+        )
+
+        return AssembleContextResult(
+            messages=tuple(assembled_messages),
+            instructions=tuple(instructions),
+        )
+
     async def handle_import_content(
         self,
         call: AuthoringCapabilityCall,
@@ -481,6 +617,45 @@ class WorkflowAuthoringHost(AuthoringHost):
             },
         )
         return RetrieveResult(type="cache", ref=ref, items=(item,))
+
+    def _handle_run_retrieve(
+        self,
+        *,
+        ref: str,
+        options: dict[str, Any],
+        context: AuthoringExecutionContext,
+    ) -> RetrieveResult:
+        if ref != "session":
+            raise ValueError("retrieve(run) currently supports only ref='session'")
+        if self.message_history is None:
+            raise ValueError("retrieve(run) requires chat session history in the host context")
+
+        limit = _parse_history_limit(options, default="all")
+        if limit == "all":
+            selected_messages = list(self.message_history)
+        else:
+            selected_messages = run_slice(list(self.message_history), limit)
+
+        items = tuple(_normalize_run_message(message) for message in selected_messages)
+        logger.info(
+            "authoring_retrieve_resolved",
+            data={
+                "workflow_id": context.workflow_id,
+                "type": "run",
+                "ref": ref,
+                "item_count": len(items),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_retrieve_resolved",
+            data={
+                "workflow_id": context.workflow_id,
+                "type": "run",
+                "ref": ref,
+                "item_count": len(items),
+            },
+        )
+        return RetrieveResult(type="run", ref=ref, items=items)
 
     def _handle_cache_output(
         self,
@@ -696,7 +871,9 @@ def _parse_output_call(call: AuthoringCapabilityCall) -> tuple[str, str, Any, di
     return request_type, ref, call.kwargs["data"], options
 
 
-def _parse_generate_call(call: AuthoringCapabilityCall) -> tuple[str, str | None, str | None, dict[str, Any]]:
+def _parse_generate_call(
+    call: AuthoringCapabilityCall,
+) -> tuple[str, str | None, str | None, str | dict[str, Any] | None, dict[str, Any]]:
     if call.args:
         raise ValueError("generate only supports keyword arguments")
     prompt = str(call.kwargs.get("prompt") or "")
@@ -706,6 +883,16 @@ def _parse_generate_call(call: AuthoringCapabilityCall) -> tuple[str, str | None
     instructions = None if raw_instructions is None else str(raw_instructions).strip() or None
     raw_model = call.kwargs.get("model")
     model_value = None if raw_model is None else str(raw_model).strip() or None
+    raw_cache = call.kwargs.get("cache")
+    cache_value: str | dict[str, Any] | None
+    if raw_cache is None:
+        cache_value = None
+    elif isinstance(raw_cache, str):
+        cache_value = raw_cache.strip()
+    elif isinstance(raw_cache, dict):
+        cache_value = dict(raw_cache)
+    else:
+        raise ValueError("generate cache must be a string or dictionary when provided")
     raw_options = call.kwargs.get("options")
     if raw_options is None:
         options: dict[str, Any] = {}
@@ -713,7 +900,47 @@ def _parse_generate_call(call: AuthoringCapabilityCall) -> tuple[str, str | None
         options = dict(raw_options)
     else:
         raise ValueError("generate options must be a dictionary when provided")
-    return prompt, instructions, model_value, options
+    return prompt, instructions, model_value, cache_value, options
+
+
+def _parse_generate_cache_policy(cache_value: str | dict[str, Any]) -> tuple[str, int | None]:
+    if isinstance(cache_value, str):
+        normalized = cache_value.strip()
+        if not normalized:
+            raise ValueError("generate cache cannot be empty when provided")
+        parsed = parse_cache_mode_value(normalized)
+        return str(parsed["mode"]), parsed.get("ttl_seconds")
+
+    unknown = sorted(set(cache_value) - {"mode"})
+    if unknown:
+        raise ValueError(f"Unsupported generate cache options: {', '.join(unknown)}")
+    raw_mode = str(cache_value.get("mode") or "").strip()
+    if not raw_mode:
+        raise ValueError("generate cache object requires a non-empty 'mode'")
+    parsed = parse_cache_mode_value(raw_mode)
+    return str(parsed["mode"]), parsed.get("ttl_seconds")
+
+
+def _build_generate_cache_ref(
+    *,
+    prompt: str,
+    instructions: str | None,
+    model_value: str,
+    cache_mode: str,
+    ttl_seconds: int | None,
+) -> str:
+    cache_key_payload = {
+        "kind": "generate",
+        "model": model_value,
+        "prompt": prompt,
+        "instructions": instructions or "",
+        "cache_mode": cache_mode,
+        "ttl_seconds": ttl_seconds,
+    }
+    digest = hashlib.sha256(
+        json.dumps(cache_key_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return f"generate/{digest}"
 
 
 def _parse_call_tool_call(call: AuthoringCapabilityCall) -> tuple[str, dict[str, Any], dict[str, Any]]:
@@ -741,6 +968,19 @@ def _parse_call_tool_call(call: AuthoringCapabilityCall) -> tuple[str, dict[str,
     return tool_name, arguments, options
 
 
+def _parse_assemble_context_call(
+    call: AuthoringCapabilityCall,
+) -> tuple[tuple[Any, ...], tuple[Any, ...], tuple[str, ...], Any | None]:
+    if call.args:
+        raise ValueError("assemble_context only supports keyword arguments")
+
+    history = _normalize_object_sequence(call.kwargs.get("history"))
+    context_messages = _normalize_object_sequence(call.kwargs.get("context_messages"))
+    instructions = _normalize_string_sequence(call.kwargs.get("instructions"))
+    latest_user_message = call.kwargs.get("latest_user_message")
+    return history, context_messages, instructions, latest_user_message
+
+
 def _ensure_tool_allowed(*, tool_name: str, scope: AuthoringCapabilityScope) -> None:
     allowed_tools = tuple(name.strip() for name in scope.allowed_tools if name.strip())
     if not allowed_tools:
@@ -749,6 +989,90 @@ def _ensure_tool_allowed(*, tool_name: str, scope: AuthoringCapabilityScope) -> 
         )
     if tool_name not in allowed_tools:
         raise CapabilityNotAllowedError(f"Tool '{tool_name}' is outside the configured tool scope")
+
+
+def _parse_history_limit(options: dict[str, Any], *, default: int | str) -> int | str:
+    unknown = sorted(set(options) - {"limit"})
+    if unknown:
+        raise ValueError(f"Unsupported options: {', '.join(unknown)}")
+    raw_limit = options.get("limit", default)
+    if isinstance(raw_limit, str):
+        normalized = raw_limit.strip().lower()
+        if normalized == "all":
+            return "all"
+        if normalized.isdigit():
+            parsed = int(normalized)
+            if parsed <= 0:
+                raise ValueError("limit must be a positive integer or 'all'")
+            return parsed
+        raise ValueError("limit must be a positive integer or 'all'")
+    if isinstance(raw_limit, int):
+        if raw_limit <= 0:
+            raise ValueError("limit must be a positive integer or 'all'")
+        return raw_limit
+    raise ValueError("limit must be a positive integer or 'all'")
+
+
+def _normalize_run_message(message: ModelMessage) -> RetrievedItem:
+    role, content = extract_role_and_text(message)
+    run_id = getattr(message, "run_id", None)
+    return RetrievedItem(
+        ref=run_id or role,
+        content=content,
+        exists=True,
+        metadata={
+            "role": role,
+            "run_id": run_id,
+            "message_type": type(message).__name__,
+        },
+    )
+
+
+def _normalize_object_sequence(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
+    raise ValueError("assemble_context sequences must be lists or tuples when provided")
+
+
+def _normalize_string_sequence(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("assemble_context instructions must be a list or tuple when provided")
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("assemble_context instructions must only contain strings")
+        stripped = item.strip()
+        if stripped:
+            normalized.append(stripped)
+    return tuple(normalized)
+
+
+def _normalize_context_message(value: Any, *, default_role: str | None = None) -> ContextMessage:
+    if isinstance(value, ContextMessage):
+        return value
+    if isinstance(value, RetrievedItem):
+        role = str(value.metadata.get("role") or default_role or "system").strip().lower()
+        return ContextMessage(role=role, content=value.content, metadata=dict(value.metadata))
+    if isinstance(value, dict):
+        role = str(value.get("role") or default_role or "system").strip().lower()
+        content = str(value.get("content") or "")
+        metadata = value.get("metadata")
+        if metadata is None:
+            metadata_dict: dict[str, Any] = {}
+        elif isinstance(metadata, dict):
+            metadata_dict = dict(metadata)
+        else:
+            raise ValueError("assemble_context message metadata must be a dictionary when provided")
+        return ContextMessage(role=role, content=content, metadata=metadata_dict)
+    if isinstance(value, str):
+        return ContextMessage(role=(default_role or "system"), content=value)
+    raise ValueError(
+        "assemble_context messages must be RetrievedItem, ContextMessage, dict, or string values"
+    )
 
 
 async def _invoke_bound_tool(

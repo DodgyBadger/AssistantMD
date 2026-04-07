@@ -67,7 +67,7 @@ class CodeExecutionLocal(BaseTool):
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
                 frontmatter = {
-                    "authoring.capabilities": ["retrieve", "output", "generate"],
+                    "authoring.capabilities": ["retrieve", "output", "generate", "assemble_context"],
                     "authoring.retrieve.cache": list(readable_cache_refs or []),
                     "authoring.output.cache": list(writable_cache_refs or []),
                 }
@@ -76,6 +76,8 @@ class CodeExecutionLocal(BaseTool):
                     vault_path=vault_path,
                     reference_date=reference_date,
                     session_key=session_id,
+                    chat_session_id=session_id,
+                    message_history=list(getattr(deps, "message_history", []) or []),
                 )
                 result = await run_authoring_monty(
                     workflow_id=workflow_id,
@@ -103,23 +105,19 @@ Use this for:
 - iterative inspection of cached artifacts by ref
 - tightly scoped local summarization or extraction loops
 
-This is NOT generic local Python. It runs in a constrained sandbox with a small
-host API and current chat-session cache access only.
+This tool runs constrained local Python with a small host API and narrow
+current-chat execution context.
 
 What it supports well right now:
 - `retrieve(type="cache", ref=...)`
+- `retrieve(type="run", ref="session", options=...)`
 - `output(type="cache", ref=..., data=...)`
 - `generate(...)`
+- `assemble_context(...)`
 - ordinary Python logic around those calls
 
-What it does NOT currently provide by default:
-- arbitrary file access
-- arbitrary tool access
-- unrestricted stdlib / OS access
-- multi-language execution
-
-If you need broader language support or a more general remote sandbox, use the
-Piston-backed `code_execution` tool instead.
+For broader language support or a remote sandbox, use the Piston-backed
+`code_execution` tool.
 
 Required arguments:
 - code_execution_local(code="...", readable_cache_refs=["tool/..."])
@@ -152,14 +150,27 @@ artifact = await retrieve(type="cache", ref="tool/example/ref")
 summary = await generate(
     prompt=artifact.items[0].content[:4000],
     instructions="Summarize the main points briefly.",
+    cache="daily",
 )
 summary.output
 \"\"\",
     readable_cache_refs=["tool/example/ref"],
   )
 
+- Retrieve recent chat history and assemble a validated downstream context:
+  code_execution_local(
+    code=\"\"\"
+history = await retrieve(type="run", ref="session", options={"limit": 3})
+assembled = await assemble_context(
+    history=history.items,
+    instructions=["Keep the response concise."],
+)
+[(message.role, message.content) for message in assembled.messages]
+\"\"\",
+  )
+
 Notes:
-- This tool runs in the current chat session cache namespace only.
+- This tool can read the current chat session history and any explicitly granted cache refs.
 - Grant the narrowest `readable_cache_refs` patterns that fit the task.
 - Prefer returning a compact final value rather than printing large text.
 """

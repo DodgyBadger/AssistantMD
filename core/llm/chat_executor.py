@@ -472,6 +472,7 @@ class ChatRunDeps:
     buffer_store_registry: dict[str, BufferStore] = field(default_factory=dict)
     session_id: str = ""
     vault_name: str = ""
+    message_history: List[ModelMessage] = field(default_factory=list)
 
 
 def _resolve_context_manager_now() -> Optional[datetime]:
@@ -814,6 +815,7 @@ async def execute_chat_prompt(
             buffer_store_registry={"session": session_buffer_store},
             session_id=session_id,
             vault_name=vault_name,
+            message_history=list(prepared.message_history or []),
         )
         result = await prepared.agent.run(
             prepared.user_prompt,
@@ -886,6 +888,7 @@ async def _stream_prepared_chat_prompt(
         buffer_store_registry={"session": session_buffer_store},
         session_id=session_id,
         vault_name=vault_name,
+        message_history=list(prepared.message_history or []),
     )
     _log_chat_lifecycle(
         "Streaming chat execution started",

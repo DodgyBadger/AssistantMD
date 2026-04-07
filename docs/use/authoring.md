@@ -7,7 +7,7 @@ Use it together with the inspectable authoring contract exposed by the authoring
 
 AssistantMD exposes a constrained Python sandbox for authored automation and chat-side local code execution.
 
-This is not full CPython. Prefer normal Python orchestration where it works, but assume that some standard-library and OS-backed runtime behavior may still be unavailable inside the sandbox.
+AssistantMD exposes a focused runtime for explicit orchestration with a small host API, typed results, and host-enforced capability boundaries.
 
 The current built-in runtime capabilities are:
 
@@ -15,6 +15,7 @@ The current built-in runtime capabilities are:
 - `generate(...)` to perform one explicit model call
 - `output(...)` to write selected results out
 - `call_tool(...)` to invoke one declared host tool explicitly
+- `assemble_context(...)` to build validated downstream chat context from structured history and instructions
 
 Capability results are returned as Python objects with attribute access, for example:
 
@@ -37,9 +38,10 @@ The runtime is intentionally small and explicit.
 Current built-ins and conventions:
 
 - `retrieve(type=..., ref=..., options=...)`
-- `generate(prompt=..., instructions=..., model=..., options=...)`
+- `generate(prompt=..., instructions=..., model=..., cache=..., options=...)`
 - `output(type=..., ref=..., data=..., options=...)`
 - `call_tool(name=..., arguments=..., options=...)`
+- `assemble_context(history=..., context_messages=..., instructions=..., latest_user_message=...)`
 
 Capability return values use attribute access:
 
@@ -52,6 +54,19 @@ Supported resource types currently include:
 
 - `file`
 - `cache`
+- `run`
+
+Current retrieval and output surfaces are intentionally typed:
+
+- `retrieve(type="file", ...)`
+- `retrieve(type="cache", ...)`
+- `retrieve(type="run", ref="session", ...)`
+- `output(type="file", ...)`
+- `output(type="cache", ...)`
+
+`generate(..., cache=...)` provides host-managed memoization for the model call
+itself. Use `output(type="cache", ...)` when you want a named retrievable cache
+artifact.
 
 A host-provided `date` object is available for runtime-oriented date helpers such as:
 
@@ -68,10 +83,11 @@ A host-provided `date` object is available for runtime-oriented date helpers suc
 
 Each date method also supports an optional format string such as `date.today("YYYYMMDD")`.
 
-The security boundary is enforced by the host, not by trusting the prompt:
+The security boundary is enforced by the host:
 
 - `retrieve(type="file", ...)` is denied unless file scope allows the target ref
 - `retrieve(type="cache", ...)` is denied unless cache scope allows the target ref
+- `retrieve(type="run", ...)` requires host-provided chat session history
 - `output(type="file", ...)` is denied unless file scope allows the target ref
 - `output(type="cache", ...)` is denied unless cache scope allows the target ref
 - `call_tool(...)` is denied unless tool scope allows the named tool
@@ -80,12 +96,14 @@ The security boundary is enforced by the host, not by trusting the prompt:
 
 - Prefer explicit orchestration in Python over hidden framework behavior.
 - Use built-in capabilities such as `retrieve(...)`, `generate(...)`, and `output(...)` for host boundary crossings.
-- Treat the host scope as a real security boundary, not documentation.
+- Use `assemble_context(...)` to build validated downstream chat context from structured history and instructions.
+- Treat the host scope as a real security boundary.
 - Treat `type`, `ref`, and `options` as the stable contract shape for resource-oriented capabilities.
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
 - Prefer attribute access on returned objects, for example `source.items[0].content` and `draft.output`.
+- Use `generate(..., cache=...)` for repeated generation memoization.
+- Use `output(type="cache", ...)` for named retrievable artifacts.
 - Use the host-provided `date` object for date helpers such as `date.today()` and `date.today("YYYYMMDD")`.
-- Do not assume unrestricted imports, full stdlib support, or direct OS access inside the sandbox.
 - Inspect the authoring contract before guessing capability arguments or return shapes.
 
 Example:
@@ -108,6 +126,7 @@ draft = await generate(
     ),
     instructions="Be concise and factual.",
     model="gpt-mini",
+    cache="daily",
 )
 
 await output(

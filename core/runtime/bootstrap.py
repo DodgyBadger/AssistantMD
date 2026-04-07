@@ -5,7 +5,7 @@ Provides single entry point for initializing all runtime services
 with proper configuration, error handling, and lifecycle management.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -124,7 +124,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,

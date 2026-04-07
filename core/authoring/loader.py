@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,6 @@ from core.utils.frontmatter import parse_simple_frontmatter
 
 
 _PYTHON_BLOCK_PATTERN = re.compile(r"```python\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
-_HEADING_PATTERN = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class AuthoringTemplateSource:
     frontmatter: dict[str, Any]
     code: str
     block_count: int
-    block_label: str | None
+    docstring_summary: str | None
     body: str
 
 
@@ -45,21 +45,24 @@ def parse_authoring_template_text(content: str) -> AuthoringTemplateSource:
     if not code:
         raise ValueError("Authoring template python block must not be empty")
 
-    block_label = _nearest_heading(body, match.start())
     return AuthoringTemplateSource(
         frontmatter=frontmatter,
         code=code,
         block_count=1,
-        block_label=block_label,
+        docstring_summary=_extract_docstring_summary(code),
         body=body,
     )
 
 
-def _nearest_heading(body: str, block_start: int) -> str | None:
-    """Return the closest preceding markdown heading label for the python block."""
-    label: str | None = None
-    for match in _HEADING_PATTERN.finditer(body):
-        if match.start() >= block_start:
-            break
-        label = match.group(1).strip()
-    return label
+def _extract_docstring_summary(code: str) -> str | None:
+    """Extract the first line of a module docstring, when present."""
+    try:
+        module = ast.parse(code)
+    except SyntaxError:
+        return None
+
+    docstring = ast.get_docstring(module)
+    if not docstring:
+        return None
+    first_line = docstring.strip().splitlines()[0].strip()
+    return first_line or None

@@ -35,8 +35,10 @@ Current authored constrained-Python workflows support:
 - canonical top-level `authoring.*` manifest keys
 - `retrieve(...)`
 - `generate(...)`
+- `generate(..., cache=...)`
 - `output(...)`
 - `call_tool(...)`
+- `assemble_context(...)` (first draft)
 - typed attribute-access results
 - host-provided `date.*()` helpers
 - compile-only contract inspection and draft validation
@@ -98,10 +100,11 @@ Still missing from the intended surface:
 ### `passthrough_runs`
 
 - old surface: context-template-specific
-- target status: `planned`
+- target status: `drop`
 - notes:
-  - likely belongs in the converged automation/context architecture
-  - not yet part of the constrained-Python workflow path
+  - resolved by replacement rather than preserved as hidden passthrough behavior
+  - authored code should retrieve the history it wants explicitly and hand it to `assemble_context(...)`
+  - first implementation slice now exists through `retrieve(type="run", ref="session", ...)` and `assemble_context(...)`
 
 ### `token_threshold`
 
@@ -152,7 +155,7 @@ Still missing from the intended surface:
   - `mode=append|replace|new`
 - missing / changed:
   - cache output is now the intended replacement for variable/buffer output
-  - context output is `planned`
+  - plain context output is no longer the preferred direction; a dedicated `assemble_context(...)` host function is a better fit
 - notes:
   - file write policy itself is now `done` through `authoring.output.file`
 
@@ -217,24 +220,29 @@ Still missing from the intended surface:
 ### `@cache`
 
 - old surface: context-template caching
-- target status: `planned`
+- target status: `partial`
 - notes:
   - cache is now a real authoring surface for `retrieve(type="cache", ...)` and `output(type="cache", ...)`
-  - context-template-specific cache directives still need redesign as the broader automation surfaces converge
+  - generation-level caching now exists through `generate(..., cache=...)` using the existing cache TTL semantics
+  - context-template-specific whole-history or whole-automation caching still needs redesign as the broader automation surfaces converge
 
 ### `@recent_runs`
 
 - old surface: context-template chat-history access
-- target status: `planned`
+- target status: `done`
 - notes:
-  - likely a future `retrieve(type="run", ...)` or related history/cache surface
+  - resolved by replacement rather than preserved as a standalone directive
+  - new shape is `retrieve(type="run", ...)` with options controlling recency/count
+  - first draft retrieval surface now exists for the active chat session
 
 ### `@recent_summaries`
 
 - old surface: context-template summary access
-- target status: `planned`
+- target status: `drop`
 - notes:
-  - likely part of future run-history/cache retrieval rather than a special directive
+  - resolved by intentional removal from the first-class authoring surface
+  - if the use case proves valuable later, it can be reintroduced from the persisted summary store
+  - for now, prefer explicit history retrieval plus authored summarization when needed
 
 ## Pattern Parity
 

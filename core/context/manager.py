@@ -4,6 +4,19 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from pydantic_ai import RunContext
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    UserContent,
+    UserPromptPart,
+)
+
+from core.authoring.contracts import AssembleContextResult, ContextMessage
+from core.authoring.loader import parse_authoring_template_text
+from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, run_authoring_monty
 from core.directives.model import ModelDirective
 from core.llm.agents import create_agent
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
@@ -15,7 +28,6 @@ from core.constants import (
 )
 from core.directives.bootstrap import ensure_builtin_directives_registered
 from core.directives.registry import get_global_registry
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, UserContent
 from core.tools.utils import estimate_token_count
 from core.context.store import add_context_summary, upsert_session
 from core.runtime.buffers import BufferStore
@@ -23,6 +35,7 @@ from core.context.manager_helpers import (
     extract_role_and_text,
     find_last_user_idx,
     prepare_template_runtime,
+    resolve_cache_now,
     run_context_section,
     run_slice,
 )
@@ -36,6 +49,286 @@ from core.context.manager_types import (
 
 logger = UnifiedLogger(tag="context-manager")
 PromptInput = str | Sequence[UserContent]
+
+
+def _is_authoring_context_template(template) -> bool:
+    engine_name = str(template.frontmatter.get("workflow_engine") or "").strip().lower()
+    return engine_name == "monty"
+
+
+def _build_template_error_processor(template_error: ContextTemplateError):
+    async def processor(_run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
+        warning = (
+            CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
+            +
+            f"phase={template_error.phase}; "
+            f"template_pointer={template_error.template_pointer}; "
+            f"message={template_error}"
+        )
+        return [ModelRequest(parts=[SystemPromptPart(content=warning)])] + list(messages)
+
+    return processor
+
+
+def _context_message_to_model_message(message: ContextMessage) -> ModelMessage:
+    role = (message.role or "system").strip().lower()
+    content = message.content or ""
+    if role == "assistant":
+        return ModelResponse(parts=[TextPart(content=content)])
+    if role == "user":
+        return ModelRequest(parts=[UserPromptPart(content=content)])
+    return ModelRequest(parts=[SystemPromptPart(content=content)])
+
+
+def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
+    if isinstance(value, AssembleContextResult):
+        return value
+    if isinstance(value, dict):
+        messages = value.get("messages", ())
+        instructions = value.get("instructions", ())
+        normalized_messages: list[ContextMessage] = []
+        if not isinstance(messages, (list, tuple)):
+            raise ValueError("assemble_context result must expose 'messages' as a list or tuple")
+        for item in messages:
+            if isinstance(item, ContextMessage):
+                normalized_messages.append(item)
+                continue
+            if isinstance(item, dict):
+                normalized_messages.append(
+                    ContextMessage(
+                        role=str(item.get("role") or "system"),
+                        content=str(item.get("content") or ""),
+                        metadata=dict(item.get("metadata") or {}),
+                    )
+                )
+                continue
+            raise ValueError("assemble_context result messages must contain ContextMessage or dict values")
+        normalized_instructions: list[str] = []
+        if isinstance(instructions, (list, tuple)):
+            for item in instructions:
+                text = str(item).strip()
+                if text:
+                    normalized_instructions.append(text)
+        return AssembleContextResult(
+            messages=tuple(normalized_messages),
+            instructions=tuple(normalized_instructions),
+        )
+    raise ValueError("Authoring context template must return AssembleContextResult or an equivalent dictionary")
+
+
+def _combined_context_text(messages: Sequence[ContextMessage]) -> str:
+    return "\n\n".join(
+        f"{(message.role or 'system').strip().lower()}: {message.content}"
+        for message in messages
+        if (message.content or "").strip()
+    ).strip()
+
+
+def _compiled_history_includes_latest_user(
+    messages: Sequence[ContextMessage],
+    latest_user_message: ModelMessage | None,
+) -> bool:
+    if latest_user_message is None:
+        return False
+    latest_role, latest_text = extract_role_and_text(latest_user_message)
+    if latest_role != "user" or not latest_text:
+        return False
+    for message in reversed(messages):
+        if message.role == "user" and message.content == latest_text:
+            return True
+    return False
+
+
+async def _build_authoring_context_history(
+    *,
+    run_context: RunContext[Any],
+    messages: List[ModelMessage],
+    session_id: str,
+    vault_name: str,
+    vault_path: str,
+    template,
+    chat_instruction_message: ModelMessage | None,
+    template_token_threshold: int,
+    source,
+) -> List[ModelMessage]:
+    if not messages:
+        return []
+
+    last_user_idx = find_last_user_idx(messages)
+    latest_user_message = messages[last_user_idx] if last_user_idx is not None else None
+    history_before_latest = messages[:last_user_idx] if last_user_idx is not None else messages
+
+    if template_token_threshold > 0:
+        estimate_parts: List[str] = []
+        for message in messages:
+            role, text = extract_role_and_text(message)
+            if text:
+                estimate_parts.append(f"{role}: {text}")
+        estimate_basis = "\n".join(estimate_parts)
+        token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
+        logger.debug(
+            "Context manager template threshold check",
+            metadata={
+                "run_id": run_context.run_id,
+                "token_estimate": token_estimate,
+                "threshold": template_token_threshold,
+            },
+        )
+        if token_estimate < template_token_threshold:
+            logger.set_sinks(["validation"]).info(
+                "Context template skipped (token threshold)",
+                data={
+                    "event": "context_template_skipped",
+                    "template_name": template.name,
+                    "token_estimate": token_estimate,
+                    "threshold": template_token_threshold,
+                },
+            )
+            curated_history: List[ModelMessage] = []
+            if chat_instruction_message:
+                curated_history.append(chat_instruction_message)
+            curated_history.extend(history_before_latest)
+            if latest_user_message is not None:
+                curated_history.append(latest_user_message)
+            return curated_history
+
+    latest_role, latest_text = ("user", "")
+    if latest_user_message is not None:
+        latest_role, latest_text = extract_role_and_text(latest_user_message)
+    latest_user_payload = None
+    if latest_user_message is not None and latest_text:
+        latest_user_payload = {
+            "role": latest_role,
+            "content": latest_text,
+        }
+
+    workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
+    reference_date = resolve_cache_now(run_context)
+    host = WorkflowAuthoringHost(
+        workflow_id=workflow_id,
+        vault_path=vault_path,
+        reference_date=reference_date,
+        session_key=session_id,
+        chat_session_id=session_id,
+        message_history=list(history_before_latest),
+    )
+
+    try:
+        result = await run_authoring_monty(
+            workflow_id=workflow_id,
+            code=source.code,
+            host=host,
+            frontmatter=template.frontmatter,
+            inputs={
+                "latest_user_message": latest_user_payload,
+                "latest_user_text": latest_text,
+            },
+            script_name=template.name,
+        )
+    except AuthoringMontyExecutionError as exc:
+        logger.warning(
+            "Context authoring execution failed in history processor",
+            metadata={
+                "error": str(exc),
+                "phase": "authoring_run",
+                "template_pointer": source.docstring_summary or "```python``` block",
+            },
+        )
+        warning = (
+            CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
+            +
+            f"phase=authoring_run; "
+            f"template_pointer={source.docstring_summary or '```python``` block'}; "
+            f"message={exc}"
+        )
+        curated_history: List[ModelMessage] = []
+        if chat_instruction_message:
+            curated_history.append(chat_instruction_message)
+        curated_history.append(ModelRequest(parts=[SystemPromptPart(content=warning)]))
+        if latest_user_message is not None:
+            curated_history.append(latest_user_message)
+        return curated_history
+
+    assembled = _normalize_authoring_context_result(result.value)
+    section_name = source.docstring_summary or "Context"
+    summary_text = _combined_context_text(assembled.messages)
+
+    logger.set_sinks(["validation"]).info(
+        "Context section completed",
+        data={
+            "event": "context_section_completed",
+            "section_name": section_name,
+            "section_key": f"authoring:{section_name}",
+            "model_alias": "authoring_monty",
+            "output_length": len(summary_text),
+            "output_hash": None,
+            "from_cache": False,
+            "cache_scope": None,
+            "cache_mode": None,
+        },
+    )
+
+    if summary_text:
+        try:
+            upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
+            combined_output = f"## {section_name}\n{summary_text}"
+            add_context_summary(
+                session_id=session_id,
+                vault_name=vault_name,
+                turn_index=None,
+                template=template,
+                model_alias="authoring_monty",
+                raw_output=combined_output,
+                budget_used=None,
+                sections_included=None,
+                compiled_prompt=None,
+                input_payload={"sections": [section_name]},
+            )
+            logger.info(
+                "Context summary persisted",
+                data={
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "template_name": template.name,
+                    "sections": [section_name],
+                },
+            )
+            logger.set_sinks(["validation"]).info(
+                "Context summary persisted",
+                data={
+                    "event": "context_summary_persisted",
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "template_name": template.name,
+                    "sections": [section_name],
+                    "summary_length": len(combined_output),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist authoring context summary", metadata={"error": str(exc)})
+
+    curated_history: List[ModelMessage] = []
+    if chat_instruction_message:
+        curated_history.append(chat_instruction_message)
+    curated_history.extend(_context_message_to_model_message(message) for message in assembled.messages)
+    logger.set_sinks(["validation"]).info(
+        "Context history compiled",
+        data={
+            "event": "context_history_compiled",
+            "session_id": session_id,
+            "vault_name": vault_name,
+            "template_name": template.name,
+            "total_messages": len(curated_history),
+            "summary_section_count": 1 if summary_text else 0,
+            "summary_sections": [section_name] if summary_text else [],
+            "passthrough_count": 0,
+            "latest_user_included": _compiled_history_includes_latest_user(
+                assembled.messages,
+                latest_user_message,
+            ),
+        },
+    )
+    return curated_history
 
 
 async def manage_context(
@@ -184,6 +477,7 @@ def build_context_manager_history_processor(
     try:
         template = load_template(template_name, Path(vault_path))
         runtime = prepare_template_runtime(template, passthrough_runs, token_threshold_default=0)
+        authoring_source = parse_authoring_template_text(template.content) if _is_authoring_context_template(template) else None
     except Exception as exc:
         template_error = ContextTemplateError(
             f"Failed to load/parse context template '{template_name}': {exc}",
@@ -199,18 +493,7 @@ def build_context_manager_history_processor(
                 "template_pointer": template_error.template_pointer,
             },
         )
-
-        async def processor(_run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
-            warning = (
-                CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
-                + 
-                f"phase={template_error.phase}; "
-                f"template_pointer={template_error.template_pointer}; "
-                f"message={template_error}"
-            )
-            return [ModelRequest(parts=[SystemPromptPart(content=warning)])] + list(messages)
-
-        return processor
+        return _build_template_error_processor(template_error)
     recent_summaries = 0
     default_sections = runtime.sections
     week_start_day = runtime.week_start_day
@@ -237,6 +520,22 @@ def build_context_manager_history_processor(
             "passthrough_runs": passthrough_runs,
         },
     )
+
+    if authoring_source is not None:
+        async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
+            return await _build_authoring_context_history(
+                run_context=run_context,
+                messages=messages,
+                session_id=session_id,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                template=template,
+                chat_instruction_message=chat_instruction_message,
+                template_token_threshold=template_token_threshold,
+                source=authoring_source,
+            )
+
+        return processor
 
     async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
         if not messages:

@@ -33,7 +33,7 @@ class AuthoringCompileSummary:
 
     workflow_id: str
     block_count: int
-    block_label: str | None
+    docstring_summary: str | None
     workflow_name: str
     instructions_present: bool
 
@@ -116,7 +116,7 @@ def _compile_monty_candidate_workflow(
         summary=AuthoringCompileSummary(
             workflow_id=workflow_id,
             block_count=parsed.block_count,
-            block_label=parsed.block_label,
+            docstring_summary=parsed.docstring_summary,
             workflow_name="monty_template",
             instructions_present=bool(parsed.body.strip()),
         ),

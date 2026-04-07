@@ -159,10 +159,9 @@ authoring.capabilities: [retrieve, generate, output]
 authoring.retrieve.file: [notes/haiku_seed.md]
 authoring.output.file: [haiku-monty-*.md]
 ---
-
-## Run
-
 ```python
+\"\"\"Write one haiku from the seed note and save it to today's Monty output file.\"\"\"
+
 source = await retrieve(type="file", ref="notes/haiku_seed.md")
 note_content = source.items[0].content
 

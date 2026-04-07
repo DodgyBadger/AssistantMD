@@ -8,7 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
-    {"retrieve", "output", "generate", "call_tool", "import_content"}
+    {"retrieve", "output", "generate", "call_tool", "assemble_context", "import_content"}
 )
 
 
@@ -118,6 +118,15 @@ class RetrieveResult:
 
 
 @dataclass(frozen=True)
+class ContextMessage:
+    """One normalized chat-history message for downstream context assembly."""
+
+    role: str
+    content: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class OutputItem:
     """One resolved output target written by output(...)."""
 
@@ -155,6 +164,14 @@ class CallToolResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class AssembleContextResult:
+    """Validated structured context ready for a downstream chat call."""
+
+    messages: tuple[ContextMessage, ...] = ()
+    instructions: tuple[str, ...] = ()
+
+
 @runtime_checkable
 class AuthoringHost(Protocol):
     """Host-side adapter implemented by the caller of the Monty runtime."""
@@ -182,6 +199,12 @@ class AuthoringHost(Protocol):
     ) -> Any: ...
 
     async def handle_call_tool(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> Any: ...
+
+    async def handle_assemble_context(
         self,
         call: AuthoringCapabilityCall,
         context: AuthoringExecutionContext,

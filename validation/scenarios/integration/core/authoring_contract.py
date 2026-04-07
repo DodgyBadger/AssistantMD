@@ -34,6 +34,11 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.create_file(
             vault,
+            "AssistantMD/Workflows/authoring_generate_cache_daily.md",
+            AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW,
+        )
+        self.create_file(
+            vault,
             "AssistantMD/Workflows/authoring_missing_file_scope.md",
             AUTHORING_MISSING_FILE_SCOPE_WORKFLOW,
         )
@@ -209,6 +214,81 @@ class AuthoringContractScenario(BaseScenario):
             },
         )
 
+        # Generate-level cache semantics should skip repeated LLM work within the TTL window.
+        self.set_date("2026-04-06")
+        checkpoint = self.event_checkpoint()
+        first_generate_cache = await self.run_workflow(vault, "authoring_generate_cache_daily")
+        self.soft_assert_equal(
+            first_generate_cache.status,
+            "completed",
+            "First generate cache workflow run should succeed",
+        )
+        generate_cache_status = vault / "outputs" / "generate-cache-status.md"
+        self.soft_assert(
+            generate_cache_status.read_text(encoding="utf-8").strip() == "status=generated",
+            "First generate cache run should produce a fresh generation",
+        )
+        generate_cache_events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            generate_cache_events,
+            name="authoring_generate_started",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
+                "cache_mode": "daily",
+            },
+        )
+        self.assert_event_contains(
+            generate_cache_events,
+            name="authoring_generate_cache_stored",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
+                "cache_mode": "daily",
+            },
+        )
+
+        checkpoint = self.event_checkpoint()
+        second_generate_cache = await self.run_workflow(vault, "authoring_generate_cache_daily")
+        self.soft_assert_equal(
+            second_generate_cache.status,
+            "completed",
+            "Second same-day generate cache workflow run should succeed",
+        )
+        self.soft_assert(
+            generate_cache_status.read_text(encoding="utf-8").strip() == "status=cached",
+            "Second same-day generate cache run should hit cache",
+        )
+        generate_cache_events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            generate_cache_events,
+            name="authoring_generate_cache_hit",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
+                "cache_mode": "daily",
+            },
+        )
+
+        self.set_date("2026-04-07")
+        checkpoint = self.event_checkpoint()
+        third_generate_cache = await self.run_workflow(vault, "authoring_generate_cache_daily")
+        self.soft_assert_equal(
+            third_generate_cache.status,
+            "completed",
+            "Next-day generate cache workflow run should succeed",
+        )
+        self.soft_assert(
+            generate_cache_status.read_text(encoding="utf-8").strip() == "status=generated",
+            "Next-day generate cache run should treat daily generation cache as expired",
+        )
+        generate_cache_events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            generate_cache_events,
+            name="authoring_generate_started",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
+                "cache_mode": "daily",
+            },
+        )
+
         await self._assert_workflow_fails_with(
             vault,
             "authoring_missing_file_scope",
@@ -356,6 +436,34 @@ await output(
     type="file",
     ref="outputs/daily-status.md",
     data=f"before={before}; after={after}",
+    options={"mode": "replace"},
+)
+```
+"""
+
+
+AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW = """---
+workflow_engine: monty
+enabled: false
+description: Deterministic generate cache semantics workflow
+authoring.capabilities: [generate, output]
+authoring.output.file: [outputs/*.md]
+---
+
+## Run
+
+```python
+draft = await generate(
+    prompt="Deterministic prompt",
+    instructions="Return a short stable line.",
+    model="test",
+    cache="daily",
+)
+
+await output(
+    type="file",
+    ref="outputs/generate-cache-status.md",
+    data=f"status={draft.status}",
     options={"mode": "replace"},
 )
 ```

@@ -56,6 +56,7 @@ Implemented now:
 - workflow authoring can already pass intermediate values through normal Python variables
 - `retrieve(type="file", ...)` and `output(type="file", ...)` are real
 - `retrieve(type="cache", ...)` and `output(type="cache", ...)` now exist for the Monty workflow path
+- `generate(..., cache=...)` now exists using the shared cache TTL semantics
 - `call_tool(...)` is real and explicit
 - file/tool scope is fail-closed through canonical `authoring.*` manifest keys
 - cache read/write scope is fail-closed through:
@@ -107,6 +108,21 @@ This keeps the surface symmetrical:
 
 Do not introduce a separate cache-write function. The existing resource-oriented
 surface is sufficient.
+
+Separate from author-managed cache artifacts, generation caching now exists as a
+host-managed optimization on `generate(...)`:
+
+```python
+draft = await generate(
+    prompt="Summarize this note",
+    instructions="Be concise.",
+    cache="daily",
+)
+```
+
+This is the current preferred replacement for the most important part of DSL
+`@cache`: skipping repeated expensive LLM work without needing a new directive
+surface.
 
 ### What Belongs In Cache
 

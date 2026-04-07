@@ -31,7 +31,7 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
             _host_dispatch_capability(
                 name="output",
                 handler_name="handle_output",
-                doc="Emit selected results to files, cache, or context sinks.",
+                doc="Emit selected results to files or cache sinks.",
                 contract=_output_contract(),
             ),
             _host_dispatch_capability(
@@ -43,8 +43,17 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
             _host_dispatch_capability(
                 name="call_tool",
                 handler_name="handle_call_tool",
-                doc="Call one declared host tool and return its result or reference.",
+                doc="Call one declared host tool and return its inline result plus metadata.",
                 contract=_call_tool_contract(),
+            ),
+            _host_dispatch_capability(
+                name="assemble_context",
+                handler_name="handle_assemble_context",
+                doc=(
+                    "Assemble validated structured chat context from retrieved history, "
+                    "instructions, and explicit latest-user input."
+                ),
+                contract=_assemble_context_contract(),
             ),
             _host_dispatch_capability(
                 name="import_content",
@@ -164,7 +173,17 @@ def _retrieve_contract() -> dict[str, Any]:
             "cache": {
                 "ref": "Logical cache reference scoped by the host execution owner.",
                 "options": {},
-            }
+            },
+            "run": {
+                "ref": "Currently only 'session' is supported. Retrieves chat history for the active chat session.",
+                "options": {
+                    "limit": {
+                        "type": "int|string",
+                        "default": "all",
+                        "description": "Number of recent runs to retrieve, or 'all' for the full session history.",
+                    },
+                },
+            },
         },
         "return_shape": {
             "type": "Requested type value.",
@@ -193,6 +212,10 @@ def _retrieve_contract() -> dict[str, Any]:
             {
                 "code": 'await retrieve(type="cache", ref="research/browser-page")',
                 "description": "Load one previously stored cache artifact by logical reference.",
+            },
+            {
+                "code": 'await retrieve(type="run", ref="session", options={"limit": 3})',
+                "description": "Load recent chat history for the active session as structured items.",
             },
         ],
     }
@@ -271,11 +294,13 @@ def _generate_contract() -> dict[str, Any]:
     return {
         "signature": (
             "generate(*, prompt: str, instructions: str | None = None, "
-            "model: str | None = None, options: dict | None = None)"
+            "model: str | None = None, cache: str | dict | None = None, "
+            "options: dict | None = None)"
         ),
         "summary": (
             "Run one explicit model generation using the shared agent runtime. "
-            "Instructions are first-class, while less common model controls live in options."
+            "Instructions are first-class, while generation caching and less common "
+            "model controls stay explicit."
         ),
         "arguments": {
             "prompt": {
@@ -293,6 +318,26 @@ def _generate_contract() -> dict[str, Any]:
                 "required": False,
                 "description": "Optional model alias resolved through the existing model directive.",
             },
+            "cache": {
+                "type": "string | object",
+                "required": False,
+                "description": (
+                    "Optional host-managed generation cache policy. Use the same TTL "
+                    "semantics as cache artifacts: session, daily, weekly, or a "
+                    "duration like 10m/24h. Use this for generation memoization. "
+                    "Use output(type=\"cache\", ...) when you want a named retrievable "
+                    "cache artifact."
+                ),
+                "schema": {
+                    "string_form": "session | daily | weekly | <duration>",
+                    "object_form": {
+                        "mode": {
+                            "type": "string",
+                            "description": "Cache mode using the same values as the string form.",
+                        }
+                    },
+                },
+            },
             "options": {
                 "type": "object",
                 "required": False,
@@ -306,10 +351,20 @@ def _generate_contract() -> dict[str, Any]:
             },
         },
         "return_shape": {
-            "status": "High-level generation status.",
+            "status": "High-level generation status such as generated or cached.",
             "model": "Resolved model alias or default indicator.",
             "output": "Generated output text.",
         },
+        "notes": [
+            (
+                "generate(..., cache=...) provides host-managed memoization for repeated "
+                "generation calls with the same inputs."
+            ),
+            (
+                "Use output(type=\"cache\", ...) when you want a named retrievable "
+                "artifact for later scripted access."
+            ),
+        ],
         "examples": [
             {
                 "code": (
@@ -325,6 +380,13 @@ def _generate_contract() -> dict[str, Any]:
                 ),
                 "description": "Use an explicit model alias with a supported generation option.",
             },
+            {
+                "code": (
+                    'await generate(prompt="Summarize these notes", '
+                    'instructions="Be concise.", model="test", cache="daily")'
+                ),
+                "description": "Cache a deterministic generation result using existing cache TTL semantics.",
+            },
         ],
     }
 
@@ -334,7 +396,7 @@ def _call_tool_contract() -> dict[str, Any]:
         "signature": "call_tool(*, name: str, arguments: dict | None = None, options: dict | None = None)",
         "summary": (
             "Call one declared host tool by configured tool name. Arguments are passed "
-            "as keyword arguments to the tool. The current MVP returns inline output only."
+            "as keyword arguments to the tool. The current MVP returns inline output plus metadata only."
         ),
         "arguments": {
             "name": {
@@ -374,6 +436,72 @@ def _call_tool_contract() -> dict[str, Any]:
                     ")"
                 ),
                 "description": "Read structured internal metadata through an allowlisted internal tool.",
+            },
+        ],
+    }
+
+
+def _assemble_context_contract() -> dict[str, Any]:
+    return {
+        "signature": (
+            "assemble_context(*, history: list | tuple | None = None, "
+            "context_messages: list | tuple | None = None, "
+            "instructions: list[str] | tuple[str, ...] | None = None, "
+            "latest_user_message: object | None = None)"
+        ),
+        "summary": (
+            "Build validated structured downstream chat context from retrieved history "
+            "and explicit instruction/context layers."
+        ),
+        "arguments": {
+            "history": {
+                "type": "list|tuple",
+                "required": False,
+                "description": "Structured message-like items to preserve in order.",
+            },
+            "context_messages": {
+                "type": "list|tuple",
+                "required": False,
+                "description": "Additional system-context messages injected ahead of preserved history.",
+            },
+            "instructions": {
+                "type": "list|tuple",
+                "required": False,
+                "description": "Extra downstream chat instructions injected as separate system messages.",
+            },
+            "latest_user_message": {
+                "type": "object",
+                "required": False,
+                "description": "Optional explicit latest user message appended last.",
+            },
+        },
+        "return_shape": {
+            "messages": [
+                {
+                    "role": "Normalized role such as system, user, or assistant.",
+                    "content": "Text content for the downstream chat message.",
+                    "metadata": "Host-owned metadata retained from normalization.",
+                }
+            ],
+            "instructions": "Normalized downstream instruction strings included in assembly.",
+        },
+        "examples": [
+            {
+                "code": (
+                    'history = await retrieve(type="run", ref="session", options={"limit": 3})\n'
+                    'final = await assemble_context(history=history.items)'
+                ),
+                "description": "Preserve recent chat history as structured downstream context.",
+            },
+            {
+                "code": (
+                    'history = await retrieve(type="run", ref="session", options={"limit": 3})\n'
+                    'final = await assemble_context(\n'
+                    '    history=history.items,\n'
+                    '    instructions=["Prefer exact quoted text when possible."],\n'
+                    ')\n'
+                ),
+                "description": "Add downstream instructions without flattening them into the transcript.",
             },
         ],
     }

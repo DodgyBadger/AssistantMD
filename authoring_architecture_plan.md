@@ -43,15 +43,18 @@ Implemented so far:
   - `output(...)`
   - `generate(...)`
   - `call_tool(...)`
+  - `assemble_context(...)`
   - placeholder for `import_content(...)`
 - Monty execution is wired through a real runtime wrapper under `core/authoring/runtime`
 - markdown authoring templates load from frontmatter plus one fenced `python` block
 - `workflow_engine: monty` is wired into the normal workflow engine loading path
 - `retrieve(type="file", ref=..., options=...)` is implemented against the shared workflow input runtime
 - `retrieve(type="cache", ref=...)` is implemented against the shared cache runtime in `cache.db`
+- `retrieve(type="run", ref=\"session\", options=...)` is implemented for chat-scoped local execution against the current session history
 - `output(type="file", ref=..., data=..., options=...)` is implemented against the shared workflow output runtime
 - `output(type="cache", ref=..., data=..., options=...)` is implemented against the shared cache runtime in `cache.db`
 - `generate(prompt=..., instructions=..., model=..., options=...)` is implemented against the shared LLM runtime
+  - generation-level caching now exists through `generate(..., cache=...)` using the shared cache TTL semantics
 - `call_tool(name=..., arguments=..., options=...)` is implemented against the existing configured tool-binding/runtime path
   - authoring scope is enforced through `authoring.tools`
   - the current MVP returns inline textual results only
@@ -72,6 +75,9 @@ Implemented so far:
   - `draft.output`
   - `written.item.resolved_ref`
   - `tool_result.output`
+- a first `assemble_context(...)` slice is implemented
+  - it accepts retrieved history/context material plus explicit downstream instructions
+  - it returns a validated structured message list rather than writing to a generic context sink
 - a host-provided `date` object is injected into Monty templates to mirror the existing shared token vocabulary in a Pythonic form:
   - `date.today()`
   - `date.tomorrow()`
@@ -88,6 +94,7 @@ Implemented so far:
 - smoke validation coverage exists through `integration/basic_haiku_workflow`
 - deterministic core contract coverage now exists for:
   - authoring host contracts in `integration/core/authoring_contract`
+  - run retrieval plus structured context assembly in `integration/core/authoring_context_assembly`
   - chat oversized-tool cache behavior in `integration/core/chat_tool_overflow_cache`
   - chat cache-scoped constrained local execution in `integration/core/code_execution_local`
   - chat metadata visibility for compatibility-vs-preferred tools in `integration/core/chat_tool_metadata_visibility`
@@ -188,7 +195,7 @@ A single markdown artifact remains the primary unit:
 The authoring contract should stay small and composable:
 
 - `retrieve(...)` for scoped external inputs such as files, cache, and recent run history
-- `output(...)` for files, cache, and context sinks
+- `output(...)` for files and cache
 - `generate(...)` for explicit model calls, with per-call model override inside frontmatter policy
 - `call_tool(...)` for declared tool access
 - `import_content(...)` for first-class ingestion through the import pipeline
@@ -252,9 +259,45 @@ Important design note:
 - it needs provider-aware validation, ordering guarantees, and handling of message-part
   constraints such as tool-call/tool-result pairing
 
+### Caching Direction
+
+The old DSL's `@cache` behavior should not be recreated literally as a generic
+step primitive in the unified authoring surface.
+
+Current preferred direction:
+
+- add first-class cache support to `generate(...)`
+- reuse the existing cache TTL semantics:
+  - `session`
+  - `daily`
+  - `weekly`
+  - duration strings like `10m`, `24h`
+- treat this as host-managed generation caching rather than as an author-visible
+  cache sink
+
+That gives us the useful part of DSL caching first:
+
+- skip repeated expensive LLM work
+- work the same way in workflows and future context automations
+- avoid the ambiguity of host-level whole-script skipping while the unified
+  context pipeline is still taking shape
+
+Example target shape:
+
+```python
+draft = await generate(
+    prompt=prompt,
+    instructions="Be concise and factual.",
+    cache="daily",
+)
+```
+
+Whole-context pre-execution cache can still be considered later as a context-only
+optimization, but it should not block generate-level caching.
+
 Likely direction:
 
-- `retrieve(...)` returns structured run/history/summary material
+- `retrieve(...)` returns structured run/history material
 - Python code selects, filters, and transforms it
 - a dedicated host function assembles the final chat history and carries any extra
   instructions intended for the downstream chat agent
@@ -284,6 +327,66 @@ These are strong signals that the converged design should keep two distinct laye
 
 - authored retrieval/transformation logic in constrained Python
 - host-side structured context assembly for the final downstream chat call
+
+Concrete direction for the next design slice:
+
+- add history-like retrieval sources rather than reintroducing context-template-only
+  directives
+  - likely candidates:
+    - `retrieve(type="run", ...)`
+- keep final chat assembly in a dedicated host function rather than modeling it as
+  `output(type="context", ...)`
+- treat downstream chat instructions as a separate input to that host function rather
+  than flattening them into retrieved history
+
+The likely long-term shape is:
+
+1. authored Python retrieves structured history/files/cache artifacts
+2. authored Python filters or transforms them as needed
+3. a host-side context assembly function validates and emits the final ordered
+   message history for the downstream chat call
+
+This suggests that the old context-template surface should eventually collapse toward:
+
+- explicit retrieval sources instead of `@recent_runs` / `@recent_summaries`
+- explicit assembly instead of `passthrough_runs`
+- no implicit context passthrough by default
+
+Candidate host-side context assembly contract:
+
+```python
+history = await retrieve(type="run", options={"limit": "all"})
+
+final_context = await assemble_context(
+    messages=history.items,
+    instructions=[
+        "Prefer exact extracted facts over inferred claims.",
+        "Keep the response concise.",
+    ],
+)
+```
+
+Working intent:
+
+- `retrieve(...)` yields structured message/history items rather than flattened text
+- authored Python can filter, reorder, slice, or transform those items before final assembly
+- `assemble_context(...)` becomes the only supported way to construct the downstream
+  chat history for provider execution
+
+Likely responsibilities of `assemble_context(...)`:
+
+- accept structured message-like inputs, not raw concatenated transcript text
+- accept separate instruction payloads for downstream chat guidance
+- validate ordering and message-part invariants
+- preserve tool-call/tool-result pairing rules
+- normalize provider-specific chat-history constraints in one place
+- return a validated structured history object ready for the downstream model call
+
+Likely non-goals:
+
+- it should not write files or cache
+- it should not be a generic sink like `output(...)`
+- it should not hide retrieval logic; authored Python still decides what material is included
 
 ## Likely Landing Zones
 
