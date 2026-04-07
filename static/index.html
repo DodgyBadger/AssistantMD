@@ -1217,6 +1217,36 @@
                         </div>
                     </div>
                 </details>
+
+                <details id="config-misc-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Misc</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-txt-secondary">
+                            Manual maintenance actions that do not fit elsewhere.
+                        </p>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Purge Expired Cache</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Deletes expired cache artifacts from <code>cache.db</code>. Unexpired cache entries are preserved.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <button id="purge-expired-cache" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                    Purge Expired Cache
+                                </button>
+                                <div id="misc-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
+                        </div>
+                    </div>
+                </details>
             </div>
         </div>
     </div>

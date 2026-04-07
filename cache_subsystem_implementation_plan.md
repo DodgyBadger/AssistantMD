@@ -47,35 +47,45 @@ That issue raises a broader persistence-boundary problem:
 So this plan must not just "pick a DB" for `cache`; it needs to help move the
 codebase toward clearer database-layer ownership.
 
-## Current Situation
+## Current Status
 
-### What Already Works
+This effort has reached a usable checkpoint.
+
+Implemented now:
 
 - workflow authoring can already pass intermediate values through normal Python variables
 - `retrieve(type="file", ...)` and `output(type="file", ...)` are real
 - `retrieve(type="cache", ...)` and `output(type="cache", ...)` now exist for the Monty workflow path
 - `call_tool(...)` is real and explicit
 - file/tool scope is fail-closed through canonical `authoring.*` manifest keys
-- cache read/write scope is now fail-closed through:
+- cache read/write scope is fail-closed through:
   - `authoring.retrieve.cache`
   - `authoring.output.cache`
-
-### What Still Breaks Down
-
-- chat-side overflow now lands in cache refs, but chat exploration has not yet converged on constrained-Python retrieval of those refs
-- `buffer_ops` still exists as compatibility infrastructure even though it is no longer the intended overflow path
-- workflow/chat do not yet share one fully converged artifact exploration model
-- Monty can now persist and revisit cache artifacts, but chat still needs a cleaner author-facing path for iterative cache inspection
-
-### Current Transitional Stance
-
+- chat overflow now lands in cache refs through chat-side PydanticAI hooks
+- `code_execution_local` now provides a least-privilege chat-facing path for cache exploration and small deterministic local transforms
 - chat metadata now hides `buffer_ops`
 - `buffer_ops` remains compatibility-only for older buffer-era flows
-- `code_execution_local` is the preferred chat-facing tool for cache exploration and small deterministic local transforms
-- deterministic metadata coverage now exists in
-  [chat_tool_metadata_visibility.py](/app/validation/scenarios/integration/core/chat_tool_metadata_visibility.py)
-- recent manual chat testing showed the current bridge works, but the model is still too eager to use `generate(...)` inside `code_execution_local` for summarization when deterministic extraction would be higher-fidelity and cheaper
-- follow-up manual testing showed direct extraction/verification against cached text produced better fidelity than summary-first handoff, but the agent needed too many local-code tool calls to get there
+- deterministic coverage now exists in:
+  - [authoring_contract.py](/app/validation/scenarios/integration/core/authoring_contract.py)
+  - [chat_tool_overflow_cache.py](/app/validation/scenarios/integration/core/chat_tool_overflow_cache.py)
+  - [code_execution_local.py](/app/validation/scenarios/integration/core/code_execution_local.py)
+  - [chat_cache_multi_pass.py](/app/validation/scenarios/integration/core/chat_cache_multi_pass.py)
+  - [chat_tool_metadata_visibility.py](/app/validation/scenarios/integration/core/chat_tool_metadata_visibility.py)
+  - [cache_manual_purge.py](/app/validation/scenarios/integration/core/cache_manual_purge.py)
+
+Current transitional stance:
+
+- cache is now the intended off-context artifact layer
+- buffers remain only as compatibility infrastructure for older DSL/runtime paths
+- chat-side cache exploration works, but chat behavior still needs instruction tuning
+- large-text exploration helpers are deferred until prompt/SOP tuning proves insufficient
+
+Recent manual testing showed:
+
+- the cache bridge works in real chat flows
+- the model is still too eager to use `generate(...)` inside `code_execution_local`
+- direct extraction/verification against cached text gives better fidelity than summary-first handoff
+- the next improvement area is behavior/SOP tuning, not more cache substrate work
 
 ## Desired Contract
 
@@ -171,7 +181,7 @@ Target behavior:
 
 ### Chat Exploration Guidance Direction
 
-The current runtime behavior is acceptable, but chat guidance needs tuning.
+The runtime path is working. The remaining work here is mostly behavioral.
 
 Observed direction from manual testing:
 
@@ -179,10 +189,37 @@ Observed direction from manual testing:
 - when the user asks to summarize, compare, synthesize, or rewrite, `generate(...)` remains appropriate
 - `code_execution_local` should usually try to complete deterministic investigation in one script rather than many tiny exploratory calls
 
-Likely next steps:
+Current next steps:
 
 - tune the default chat template with an explicit extraction-first decision rule
-- experiment with a small set of deterministic text-exploration helpers for common patterns such as heading lookup or section extraction, while keeping pure Python as the main substrate
+- define an explicit SOP for large-text cache exploration before adding new helper primitives
+- defer implementation of deterministic text-exploration helpers for now
+- revisit helpers later only when they provide clear value-add beyond ordinary Python string/list operations and when the algorithm quality is something we want to own centrally
+
+### Current SOP Direction For Large Cached Text
+
+When chat or local constrained code explores a large cached text artifact, the working SOP should be:
+
+1. identify what kind of content it appears to be
+   - markdown
+   - wiki-style markup
+   - HTML
+   - plain text
+   - mixed/unknown
+2. orient deterministically before summarizing
+   - inspect the start of the text
+   - look for headings or other obvious structural markers
+   - prefer extracting exact sections or excerpts over immediately calling `generate(...)`
+3. use deterministic code for structural navigation where possible
+   - find headings
+   - isolate likely sections
+   - verify whether specific terms or works are actually present
+4. use `generate(...)` only when synthesis is actually needed
+   - summarization
+   - comparison
+   - synthesis across multiple extracted sections
+5. keep the number of local-code calls low
+   - prefer one focused script that orients, extracts, and verifies over many tiny exploratory calls
 
 ### Lifecycle / TTL Policy
 
@@ -216,6 +253,14 @@ Initial design direction:
 
 Do not introduce effectively permanent cache entries in the MVP unless there is a
 concrete use case that cannot be met by explicit vault output.
+
+Current implementation status:
+
+- read-time expiration is implemented
+- opportunistic purge on cache read/write is implemented
+- manual physical purge is now available through the API via `/api/system/cache/purge-expired`
+- deterministic coverage exists in
+  [cache_manual_purge.py](/app/validation/scenarios/integration/core/cache_manual_purge.py)
 
 ## Scope Model Direction
 
@@ -333,7 +378,7 @@ Recommended minimal semantics:
 - explicit overwrite/append behavior is defined for cache writes
 - entries have explicit lifetime semantics
 
-Status:
+Status: complete for this phase.
 
 - implemented for constrained-Python workflow authoring
 - current MVP supports:
@@ -374,6 +419,14 @@ Non-goal for this phase:
 - do not let `cache` become another ad hoc persistence island with its own
   uncodified DB ownership rules
 
+Status: complete for the current MVP.
+
+Notes:
+
+- `cache.db` is now the active backend home
+- database ownership was tightened separately under the issue-36 consolidation work
+- large-payload blob/file backing is still deferred
+
 ### Phase 3: Chat Exploration Convergence
 
 Build the next layer above the migrated overflow path so chat can inspect cache refs cleanly.
@@ -385,7 +438,7 @@ Deliverables:
 - no active chat guidance that treats `buffer_ops` as the primary exploration path
 - a decision on whether any residual buffer infrastructure is still needed after chat exploration converges
 
-Status:
+Status: initial slice complete.
 
 - initial exploration path now exists through `code_execution_local`
   - tool module: [code_execution_local.py](/app/core/tools/code_execution_local.py)
@@ -411,6 +464,14 @@ Deliverables:
 - examples/docs showing tool result -> cache -> retrieve(cache) -> generate loop
 - a path for chat/codemode to inspect stored artifacts through authored Python
 
+Status: initial bridge complete, broader convergence deferred.
+
+Notes:
+
+- chat can now revisit cache refs across multiple passes
+- `code_execution_local` is the current bridge into local constrained-Python exploration
+- full chat/runtime convergence is still later work
+
 ### Phase 5: Deprecation Cleanup
 
 Once cache-backed overflow works:
@@ -418,6 +479,14 @@ Once cache-backed overflow works:
 - deprecate `buffer_ops` as the primary exploration model
 - reduce or remove automatic buffer routing
 - document buffers as compatibility-only if still needed temporarily
+
+Status: partially complete.
+
+Notes:
+
+- `buffer_ops` is already hidden from chat metadata
+- shared tool binding no longer auto-buffers
+- full buffer cleanup is deferred because legacy DSL/runtime paths still depend on it
 
 ## Validation Targets
 
@@ -438,8 +507,29 @@ Once cache-backed overflow works:
    - [chat_tool_overflow_cache.py](/app/validation/scenarios/integration/core/chat_tool_overflow_cache.py)
    - covers cache-ref response behavior and persisted cache artifact existence
 
-3. Add a chat-side exploration scenario later:
-   - a stored cache artifact is inspected in multiple passes without re-running the original tool
+3. Added deterministic multi-pass chat cache reuse coverage in:
+   - [chat_cache_multi_pass.py](/app/validation/scenarios/integration/core/chat_cache_multi_pass.py)
+   - proves a stored cache artifact can be revisited without re-running the original oversized tool
+
+## Current Stop Point
+
+For now, this effort is in a good stopping state.
+
+Implemented and usable:
+
+- cache-backed authoring read/write
+- chat overflow to cache
+- scoped local cache exploration in chat
+- multi-pass cache reuse
+- manual expired-cache purge
+
+Deferred to later phases:
+
+- periodic/background purge
+- large-payload blob/file backing if needed
+- helper primitives for text exploration
+- buffer/runtime convergence once older DSL paths are retired
+- deeper chat instruction tuning based on more real usage
 
 ## Risks / Open Questions
 

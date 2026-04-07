@@ -240,6 +240,14 @@ class OperationResult(BaseModel):
     )
 
 
+class CachePurgeResponse(BaseModel):
+    """Response model for manual cache maintenance operations."""
+
+    success: bool = Field(True, description="Whether the purge completed successfully")
+    message: str = Field(..., description="Human-readable purge summary")
+    purged_count: int = Field(..., description="Number of expired cache artifacts removed")
+
+
 class SecretInfo(BaseModel):
     """Information about a stored secret without revealing its value."""
 

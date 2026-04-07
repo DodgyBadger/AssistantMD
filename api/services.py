@@ -46,6 +46,7 @@ from core.settings.secrets_store import (
 )
 from core.runtime.paths import get_system_root
 from core.authoring import describe_authoring_contract
+from core.context.store import purge_expired_cache_artifacts
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -61,6 +62,7 @@ from .models import (
     ProviderInfo,
     ModelConfigRequest,
     ProviderConfigRequest,
+    CachePurgeResponse,
     OperationResult,
     SecretInfo,
     SecretUpdateRequest,
@@ -88,6 +90,24 @@ _system_startup_time: Optional[datetime] = None
 def get_authoring_contract_metadata() -> dict[str, object]:
     """Return the full authoring contract metadata."""
     return describe_authoring_contract()
+
+
+def purge_expired_cache() -> CachePurgeResponse:
+    """Delete expired cache artifacts on demand."""
+    now = datetime.now()
+    purged_count = purge_expired_cache_artifacts(now=now)
+    logger.info(
+        "Manual cache purge completed",
+        data={
+            "purged_count": purged_count,
+            "now": now.isoformat(),
+        },
+    )
+    return CachePurgeResponse(
+        success=True,
+        message=f"Purged {purged_count} expired cache artifact(s).",
+        purged_count=purged_count,
+    )
 
 
 def get_workflow_load_errors(

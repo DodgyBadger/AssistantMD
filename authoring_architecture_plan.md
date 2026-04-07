@@ -91,6 +91,7 @@ Implemented so far:
   - chat oversized-tool cache behavior in `integration/core/chat_tool_overflow_cache`
   - chat cache-scoped constrained local execution in `integration/core/code_execution_local`
   - chat metadata visibility for compatibility-vs-preferred tools in `integration/core/chat_tool_metadata_visibility`
+  - manual expired-cache purge in `integration/core/cache_manual_purge`
 
 Still intentionally incomplete:
 
@@ -101,6 +102,7 @@ Still intentionally incomplete:
 - chat now has an initial constrained-Python cache exploration path through the `code_execution_local` tool, but this is still a bridge rather than the final converged chat runtime
 - `buffer_ops` still exists for compatibility, but it is now hidden from chat metadata and is no longer the intended exploration path
 - recent manual chat testing suggests the runtime bridge is viable, but default chat behavior still needs tuning so the agent prefers deterministic extraction over `generate(...)` when fidelity matters
+- cache lifecycle now includes a simple manual purge path via the API, while periodic/background cleanup remains a later hardening step
 
 ## Decision
 

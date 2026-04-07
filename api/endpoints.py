@@ -23,6 +23,7 @@ from core.llm.chat_executor import (
 from .models import (
     AuthoringContractResponse,
     WorkflowLoadErrorsResponse,
+    CachePurgeResponse,
     VaultRescanRequest,
     VaultRescanResponse,
     ExecuteWorkflowRequest,
@@ -72,6 +73,7 @@ from .services import (
     import_url_direct,
     get_authoring_contract_metadata,
     get_workflow_load_errors,
+    purge_expired_cache,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -531,6 +533,15 @@ async def delete_secret_endpoint(secret_name: str):
     """Delete a stored secret entry entirely."""
     try:
         return delete_secret_entry(secret_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/cache/purge-expired", response_model=CachePurgeResponse)
+async def purge_expired_cache_endpoint():
+    """Manually delete expired cache artifacts."""
+    try:
+        return purge_expired_cache()
     except Exception as e:
         return create_error_response(e)
 

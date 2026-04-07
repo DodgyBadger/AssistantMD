@@ -18,6 +18,7 @@
         isSavingProvider: false,
         isLoadingSecrets: false,
         isSavingSecret: false,
+        isPurgingCache: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
         isImportingUrl: false,
@@ -84,6 +85,9 @@
         secretSubmitBtn: null,
         secretResetBtn: null,
 
+        miscFeedback: null,
+        purgeExpiredCacheBtn: null,
+
         importVaultSelect: null,
         importPdfModeSelect: null,
         importQueueCheckbox: null,
@@ -132,6 +136,9 @@
         elements.secretSubmitBtn = document.getElementById('secret-submit');
         elements.secretResetBtn = document.getElementById('secret-reset');
 
+        elements.miscFeedback = document.getElementById('misc-feedback');
+        elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
+
         elements.importVaultSelect = document.getElementById('import-vault-select');
         elements.importPdfModeSelect = document.getElementById('import-pdf-mode');
         elements.importQueueCheckbox = document.getElementById('import-queue');
@@ -163,6 +170,7 @@
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
+        elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
@@ -1389,6 +1397,41 @@ async function saveModelRow(rowKey) {
         await loadProviders();
         await notifyConfigChanged();
         return result;
+    }
+
+    async function handlePurgeExpiredCache() {
+        if (!elements.purgeExpiredCacheBtn || state.isPurgingCache) return;
+
+        state.isPurgingCache = true;
+        const button = elements.purgeExpiredCacheBtn;
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Purging…';
+        setStatus(elements.miscFeedback, 'Purging expired cache artifacts…', 'info');
+
+        try {
+            const response = await fetch('api/system/cache/purge-expired', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            setStatus(
+                elements.miscFeedback,
+                result?.message || `Purged ${result?.purged_count ?? 0} expired cache artifact(s).`,
+                'success'
+            );
+        } catch (error) {
+            setStatus(elements.miscFeedback, `Failed to purge cache: ${error.message}`, 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
+            state.isPurgingCache = false;
+        }
     }
 
     async function notifyConfigChanged() {
