@@ -223,6 +223,53 @@ The host boundary should be pluggable and registry-driven.
   - deterministic extraction/verification tasks, which should stay in local code where possible
   - synthesis tasks, which may justify `generate(...)` inside local code
 
+### Context Convergence Sketch
+
+If context templates converge onto the constrained-Python runtime, they should do so
+as another invocation mode of the same authoring surface rather than as a special
+directive system.
+
+Working direction:
+
+- no implicit history passthrough by default
+- context-building scripts retrieve the history they want explicitly
+- old concepts like `passthrough_runs` should be treated as transitional compatibility,
+  not as long-term primitives
+
+That means the simplest “pass everything through” shape becomes explicit authored code,
+for example:
+
+```python
+runs = await retrieve(type="run", options={"limit": "all"})
+```
+
+with the retrieved history then handed to a dedicated host-side context assembly step.
+
+Important design note:
+
+- `context` should probably not be modeled as an `output(...)` sink
+- unlike files or cache, final chat context is not just a destination for raw text
+- it needs provider-aware validation, ordering guarantees, and handling of message-part
+  constraints such as tool-call/tool-result pairing
+
+Likely direction:
+
+- `retrieve(...)` returns structured run/history/summary material
+- Python code selects, filters, and transforms it
+- a dedicated host function assembles the final chat history and carries any extra
+  instructions intended for the downstream chat agent
+
+This gives us:
+
+- no hidden passthrough behavior
+- one explicit model for “what history was included and why”
+- one validated place to enforce provider ordering and message-part invariants
+- a cleaner separation between:
+  - persisted sinks like `file` and `cache`
+  - transient assembled chat context
+
+This is still a design sketch, not an implemented contract.
+
 ## Likely Landing Zones
 
 Primary home:
