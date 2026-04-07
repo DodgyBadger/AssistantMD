@@ -41,7 +41,7 @@ LARGE_PAGE_URL = (
 
 
 class BrowserPolicyScenario(BaseScenario):
-    """Validate browser policy blocks, selector guidance, and oversized output routing."""
+    """Validate browser policy blocks and current large-output behavior."""
 
     async def test_scenario(self):
         vault = self.create_vault("BrowserPolicyVault")
@@ -79,10 +79,11 @@ class BrowserPolicyScenario(BaseScenario):
             name="browser_navigation_failed",
             expected={"tool": "browser", "result_type": "selector_not_found"},
         )
-        self.assert_event_contains(
-            events,
-            name="tool_output_routed",
-            expected={"tool": "browser"},
+        routed_events = self.find_events(events, name="tool_output_routed", tool="browser")
+        self.soft_assert_equal(
+            len(routed_events),
+            0,
+            "Browser workflow output should remain inline; hidden tool routing is chat-only now",
         )
 
         blocked_output = (vault / "tool-outputs" / "blocked.md").read_text(encoding="utf-8")
@@ -93,6 +94,11 @@ class BrowserPolicyScenario(BaseScenario):
 
         routed_output = (vault / "tool-outputs" / "routed.md").read_text(encoding="utf-8")
         assert routed_output.strip(), "Routing step should still produce a response file"
+        self.soft_assert(
+            "tool response's \"Content\" section" in routed_output
+            or "Extracted selector: main" in routed_output,
+            "Large browser workflow output should describe inline tool content, not hidden routing",
+        )
 
         await self.stop_system()
         self.teardown_scenario()

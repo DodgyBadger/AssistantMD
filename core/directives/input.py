@@ -75,18 +75,15 @@ class InputFileDirective(DirectiveProcessor):
         try:
             base_value, parameters = self._parse_input_target_and_parameters(value.strip())
             if base_value.startswith("file:"):
-                target_type = "file"
                 target = base_value[len("file:"):].strip()
                 if not target or target.startswith("/") or ".." in target:
                     return False
             elif base_value.startswith("variable:"):
-                target_type = "variable"
                 target = base_value[len("variable:"):].strip()
                 if not target:
                     return False
             else:
                 return False
-            build_input_request(target_type=target_type, target=target, parameters=parameters)
         except ValueError:
             return False
 
