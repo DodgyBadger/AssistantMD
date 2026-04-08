@@ -131,8 +131,10 @@ class ExecuteWorkflowResponse(BaseModel):
     """Response model for manual workflow execution."""
     success: bool = Field(..., description="Whether execution succeeded")
     global_id: str = Field(..., description="Workflow global ID that was executed")
+    status: str = Field(..., description="Terminal workflow status such as completed or skipped")
     execution_time_seconds: float = Field(..., description="Workflow execution time")
     output_files: List[str] = Field(default_factory=list, description="Created output file paths")
+    reason: Optional[str] = Field(None, description="Optional structured reason for non-default termination")
     message: str = Field(..., description="Human-readable execution summary")
 
 

@@ -64,6 +64,12 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
                     "import_content(*, source: str, options: dict | None = None)",
                 ),
             ),
+            _host_dispatch_capability(
+                name="finish",
+                handler_name="handle_finish",
+                doc="End execution intentionally with a structured terminal status.",
+                contract=_finish_contract(),
+            ),
         ]
     )
     return registry
@@ -122,51 +128,16 @@ def _retrieve_contract() -> dict[str, Any]:
             "file": {
                 "ref": "Vault-relative file path or selector pattern.",
                 "options": {
-                    "required": {
-                        "type": "bool",
-                        "default": False,
-                        "description": "Skip/fail semantics for missing file inputs.",
-                    },
                     "refs_only": {
                         "type": "bool",
                         "default": False,
-                        "description": "Return file references without loading content into prompt-oriented fields.",
+                        "description": "Return file references and metadata without loading textual file bodies.",
                     },
                     "pending": {
                         "type": "enum",
                         "values": ["include", "only"],
                         "default": "include",
                         "description": "When set to 'only', resolve only unprocessed files for the pattern.",
-                    },
-                    "latest": {
-                        "type": "bool",
-                        "default": False,
-                        "description": "Resolve only the latest matching files using shared selector semantics.",
-                    },
-                    "limit": {
-                        "type": "int",
-                        "minimum": 1,
-                        "description": "Maximum number of items returned after selector resolution.",
-                    },
-                    "order": {
-                        "type": "enum",
-                        "values": ["mtime", "ctime", "alphanum", "filename_dt"],
-                        "default": "alphanum",
-                        "description": "Ordering strategy forwarded to the shared workflow selector runtime.",
-                    },
-                    "dir": {
-                        "type": "enum",
-                        "values": ["asc", "desc"],
-                        "default": "asc",
-                        "description": "Ordering direction forwarded to the shared workflow selector runtime.",
-                    },
-                    "dt_pattern": {
-                        "type": "string",
-                        "description": "Required with order='filename_dt' to parse dates from filenames.",
-                    },
-                    "dt_format": {
-                        "type": "string",
-                        "description": "Required with order='filename_dt' to parse dates from filenames.",
                     },
                 },
             },
@@ -193,7 +164,21 @@ def _retrieve_contract() -> dict[str, Any]:
                     "ref": "Resolved item reference, usually a vault-relative path without extension normalization surprises.",
                     "content": "Loaded content when available.",
                     "exists": "Whether the referenced item was found.",
-                    "metadata": "Host-owned metadata for deterministic exploration.",
+                    "metadata": {
+                        "filename": "Base filename without extension when available.",
+                        "filepath": "Vault-relative path normalized without the implicit .md suffix.",
+                        "source_path": "Vault-relative source path including extension when available.",
+                        "extension": "Resolved file extension such as .md or .png.",
+                        "size_bytes": "Filesystem size for found files.",
+                        "char_count": "Exact text character count for textual files.",
+                        "token_estimate": "Approximate token count for textual files.",
+                        "mtime_epoch": "Modification time as a Unix timestamp.",
+                        "ctime_epoch": "Creation/change time as a Unix timestamp.",
+                        "mtime": "Modification time as an ISO-8601 UTC string.",
+                        "ctime": "Creation/change time as an ISO-8601 UTC string.",
+                        "filename_dt": "Parsed filename date as an ISO-8601 UTC string when common patterns are detected.",
+                        "error": "Host-provided error string when resolution fails.",
+                    },
                 }
             ],
         },
@@ -204,10 +189,18 @@ def _retrieve_contract() -> dict[str, Any]:
             },
             {
                 "code": (
-                    'await retrieve(type="file", ref="notes/*.md", '
-                    'options={"pending": "only", "order": "ctime", "limit": 5})'
+                    'notes = await retrieve(type="file", ref="notes/*.md")\n'
+                    'latest_three = sorted(\n'
+                    '    [item for item in notes.items if item.exists],\n'
+                    '    key=lambda item: item.metadata.get("mtime_epoch") or 0,\n'
+                    '    reverse=True,\n'
+                    ')[:3]'
                 ),
-                "description": "Resolve pending files using the shared workflow selector semantics.",
+                "description": "Retrieve files, then sort and slice explicitly in Python using metadata.",
+            },
+            {
+                "code": 'await retrieve(type="file", ref="notes/*.md", options={"pending": "only", "refs_only": True})',
+                "description": "Enumerate pending file refs without loading file bodies into content fields.",
             },
             {
                 "code": 'await retrieve(type="cache", ref="research/browser-page")',
@@ -502,6 +495,37 @@ def _assemble_context_contract() -> dict[str, Any]:
                     ')\n'
                 ),
                 "description": "Add downstream instructions without flattening them into the transcript.",
+            },
+        ],
+    }
+
+
+def _finish_contract() -> dict[str, Any]:
+    return {
+        "signature": 'finish(*, status: str = "completed", reason: str | None = None)',
+        "summary": (
+            "End execution intentionally with a terminal status instead of raising an error."
+        ),
+        "arguments": {
+            "status": {
+                "type": "string",
+                "required": False,
+                "description": "Terminal status. Supported values are completed and skipped.",
+            },
+            "reason": {
+                "type": "string",
+                "required": False,
+                "description": "Optional human-readable reason recorded in execution logs and results.",
+            },
+        },
+        "return_shape": {
+            "status": "Resolved terminal status.",
+            "reason": "Structured reason string when provided.",
+        },
+        "examples": [
+            {
+                "code": 'await finish(status="skipped", reason="No inputs matched today.")',
+                "description": "Exit early without treating the workflow as a failure.",
             },
         ],
     }

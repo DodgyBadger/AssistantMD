@@ -10,6 +10,7 @@ from pydantic_monty import Monty, run_monty_async
 
 from core.authoring.builtins import create_builtin_registry
 from core.authoring.contracts import (
+    AuthoringFinishSignal,
     AuthoringCapabilityScope,
     AuthoringExecutionContext,
     AuthoringHost,
@@ -30,6 +31,8 @@ class AuthoringMontyExecutionResult:
     """Structured result from one Monty-backed authoring execution."""
 
     value: Any
+    status: str = "completed"
+    reason: str = ""
     prints: tuple[str, ...] = ()
     enabled_capabilities: tuple[str, ...] = ()
 
@@ -88,6 +91,9 @@ async def run_authoring_monty(
         },
     )
 
+    terminal_status = "completed"
+    terminal_reason = ""
+    value: Any = None
     try:
         runner = Monty(
             code,
@@ -100,12 +106,19 @@ async def run_authoring_monty(
         if type_check:
             runner.type_check()
 
-        value = await run_monty_async(
-            runner,
-            inputs=effective_inputs or None,
-            external_functions=external_functions,
-            print_callback=capture.callback,
-        )
+        try:
+            value = await run_monty_async(
+                runner,
+                inputs=effective_inputs or None,
+                external_functions=external_functions,
+                print_callback=capture.callback,
+            )
+        except Exception as exc:
+            parsed_finish = _extract_finish_signal(exc)
+            if parsed_finish is not None:
+                terminal_status, terminal_reason = parsed_finish
+            else:
+                raise
     except Exception as exc:
         logger.error(
             "authoring_monty_execution_failed",
@@ -137,6 +150,8 @@ async def run_authoring_monty(
             "workflow_id": workflow_id,
             "script_name": script_name,
             "enabled_capabilities": sorted(capability_scope.enabled),
+            "status": terminal_status,
+            "reason": terminal_reason,
             "printed_line_count": len(capture.lines),
         },
     )
@@ -146,11 +161,27 @@ async def run_authoring_monty(
             "workflow_id": workflow_id,
             "script_name": script_name,
             "enabled_capabilities": sorted(capability_scope.enabled),
+            "status": terminal_status,
+            "reason": terminal_reason,
             "printed_line_count": len(capture.lines),
         },
     )
     return AuthoringMontyExecutionResult(
         value=value,
+        status=terminal_status,
+        reason=terminal_reason,
         prints=tuple(capture.lines),
         enabled_capabilities=tuple(sorted(capability_scope.enabled)),
     )
+
+
+def _extract_finish_signal(exc: Exception) -> tuple[str, str] | None:
+    direct = AuthoringFinishSignal.try_parse(str(exc))
+    if direct is not None:
+        return direct
+    inner_exception = getattr(exc, "exception", None)
+    if callable(inner_exception):
+        inner = inner_exception()
+        if inner is not None:
+            return AuthoringFinishSignal.try_parse(str(inner))
+    return None

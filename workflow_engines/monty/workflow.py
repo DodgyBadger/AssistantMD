@@ -40,4 +40,4 @@ async def run_workflow(job_args: dict, **kwargs):
         WORKFLOW_DEFINITIONS_DIR,
         f"{workflow_name}.md",
     )
-    await run_authoring_template(workflow_id=global_id, file_path=file_path)
+    return await run_authoring_template(workflow_id=global_id, file_path=file_path)

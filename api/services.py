@@ -1235,7 +1235,7 @@ async def execute_workflow_manually(
                 kwargs['step_name'] = step_name
             if expect_failure:
                 kwargs['expected_failure'] = True
-            await workflow_function(job_args, **kwargs)
+            execution_result = await workflow_function(job_args, **kwargs)
             execution_time = (datetime.now() - start_time).total_seconds()
             
         except Exception as workflow_error:
@@ -1243,18 +1243,28 @@ async def execute_workflow_manually(
             # Re-raise as SystemConfigurationError for API layer
             raise SystemConfigurationError(f"Workflow execution failed for '{global_id}': {str(workflow_error)}")
         
+        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
+        terminal_reason = str(getattr(execution_result, "reason", "") or "")
+
         # Prepare results
         results = {
             'success': True,
             'global_id': global_id,
+            'status': terminal_status,
             'execution_time_seconds': execution_time,
             'output_files': [],  # TODO: Enhanced in Phase 4
-            'message': f"Workflow '{global_id}' executed successfully in {execution_time:.2f} seconds"
+            'reason': terminal_reason or None,
+            'message': (
+                f"Workflow '{global_id}' {terminal_status} in {execution_time:.2f} seconds"
+                + (f": {terminal_reason}" if terminal_reason else "")
+            ),
         }
         logger.info(
             "Workflow execution finished",
             data={
                 "global_id": global_id,
+                "status": terminal_status,
+                "reason": terminal_reason,
                 "execution_time_seconds": execution_time,
             },
         )

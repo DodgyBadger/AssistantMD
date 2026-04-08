@@ -109,11 +109,16 @@ The security boundary is enforced by the host:
 Example:
 
 ```python
-source = await retrieve(type="file", ref="notes/*.md", options={"limit": 3})
+source = await retrieve(type="file", ref="notes/*.md")
+latest_three = sorted(
+    [item for item in source.items if item.exists],
+    key=lambda item: item.metadata.get("mtime_epoch") or 0,
+    reverse=True,
+)[:3]
 await output(
     type="cache",
     ref="research/latest-note-summary",
-    data="\n\n".join(item.content for item in source.items),
+    data="\n\n".join(item.content for item in latest_three),
     options={"mode": "replace", "ttl": "24h"},
 )
 

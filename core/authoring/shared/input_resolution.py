@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger
 from core.runtime.buffers import get_buffer_store_for_scope
+from core.tools.utils import estimate_token_count
 from core.tools.utils import get_virtual_mount_key, resolve_virtual_path
 from core.utils.frontmatter import parse_simple_frontmatter
 from core.utils.hash import hash_file_bytes, hash_file_content
@@ -77,7 +78,7 @@ class InputResolutionRequest:
     selector: InputSelectorOptions | None = None
 
 
-def load_file_with_metadata(file_path: str, vault_root: str) -> dict[str, Any]:
+def load_file_with_metadata(file_path: str, vault_root: str, *, include_content: bool = True) -> dict[str, Any]:
     """Load content from a single file with metadata."""
     normalized_path = file_path
     if "." not in os.path.basename(normalized_path):
@@ -117,6 +118,14 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> dict[str, Any]:
             vault_abs = os.path.realpath(vault_root)
             if not resolved_path.startswith(vault_abs + os.sep) and resolved_path != vault_abs:
                 raise ValueError("Path escapes vault boundaries")
+        stat_result = os.stat(resolved_path)
+        common_metadata = _build_file_runtime_metadata(
+            resolved_path=resolved_path,
+            extension=extension,
+            size_bytes=stat_result.st_size,
+            mtime_epoch=stat_result.st_mtime,
+            ctime_epoch=stat_result.st_ctime,
+        )
 
         if kind == "image":
             if not os.path.isfile(resolved_path):
@@ -128,11 +137,30 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> dict[str, Any]:
                 "content": "",
                 "found": True,
                 "error": None,
+                **common_metadata,
+            }
+
+        if not include_content:
+            return {
+                "filepath": filepath_without_ext,
+                "source_path": normalized_path,
+                "filename": filename,
+                "content": "",
+                "found": True,
+                "error": None,
+                "refs_only": True,
+                **common_metadata,
             }
 
         with open(resolved_path, "r", encoding="utf-8") as file:
             content = file.read()
 
+        common_metadata.update(
+            {
+                "char_count": len(content),
+                "token_estimate": estimate_token_count(content) if content else 0,
+            }
+        )
         return {
             "filepath": filepath_without_ext,
             "source_path": normalized_path,
@@ -140,6 +168,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> dict[str, Any]:
             "content": content,
             "found": True,
             "error": None,
+            **common_metadata,
         }
     except FileNotFoundError:
         return {
@@ -149,6 +178,7 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> dict[str, Any]:
             "content": "",
             "found": False,
             "error": f"File not found: {filename}",
+            "extension": extension,
         }
     except Exception as exc:
         logger.exception(
@@ -171,7 +201,38 @@ def load_file_with_metadata(file_path: str, vault_root: str) -> dict[str, Any]:
             "content": "",
             "found": False,
             "error": f"Error reading file: {str(exc)}",
+            "extension": extension,
         }
+
+
+def _build_file_runtime_metadata(
+    *,
+    resolved_path: str,
+    extension: str,
+    size_bytes: int,
+    mtime_epoch: float,
+    ctime_epoch: float,
+) -> dict[str, Any]:
+    filename_dt = PatternUtilities.extract_date_from_filename(resolved_path)
+    return {
+        "extension": extension,
+        "size_bytes": size_bytes,
+        "mtime_epoch": mtime_epoch,
+        "ctime_epoch": ctime_epoch,
+        "mtime": _format_timestamp(mtime_epoch),
+        "ctime": _format_timestamp(ctime_epoch),
+        "filename_dt": _format_datetime(filename_dt),
+    }
+
+
+def _format_timestamp(value: float) -> str:
+    return _format_datetime(datetime.fromtimestamp(value, tz=timezone.utc))
+
+
+def _format_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def build_input_request(*, target_type: str, target: str, parameters: dict[str, Any]) -> InputResolutionRequest:
@@ -264,11 +325,20 @@ class WorkflowInputResolver:
             file_path = file_path[2:-2]
 
         if "{" in file_path:
-            result_files = self._resolve_brace_pattern(file_path, vault_path, **context)
+            result_files = self._resolve_brace_pattern(
+                file_path,
+                vault_path,
+                include_content=not request.refs_only,
+                **context,
+            )
         elif "*" in file_path:
-            result_files = self._resolve_glob_pattern(file_path, vault_path)
+            result_files = self._resolve_glob_pattern(
+                file_path,
+                vault_path,
+                include_content=not request.refs_only,
+            )
         else:
-            result_files = [load_file_with_metadata(file_path, vault_path)]
+            result_files = [load_file_with_metadata(file_path, vault_path, include_content=not request.refs_only)]
 
         result_files = self._apply_selector_mode(
             result_files=result_files,
@@ -276,6 +346,7 @@ class WorkflowInputResolver:
             vault_path=vault_path,
             selector_options=request.selector,
             state_manager=context.get("state_manager"),
+            include_content=not request.refs_only,
         )
 
         if request.required:
@@ -441,6 +512,7 @@ class WorkflowInputResolver:
         vault_path: str,
         selector_options: InputSelectorOptions | None,
         state_manager,
+        include_content: bool = True,
     ) -> list[dict[str, Any]]:
         candidate_paths: list[str] = []
         for file_data in result_files:
@@ -510,7 +582,9 @@ class WorkflowInputResolver:
             relative_path = os.path.relpath(file_path, vault_path).replace("\\", "/")
             if relative_path.endswith(".md"):
                 relative_path = relative_path[:-3]
-            selected_results.append(load_file_with_metadata(relative_path, vault_path))
+            selected_results.append(
+                load_file_with_metadata(relative_path, vault_path, include_content=include_content)
+            )
 
         if selector.mode == "pending" and selected_results:
             file_records = []
@@ -701,7 +775,13 @@ class WorkflowInputResolver:
         routed_results.append({"manifest": manifest, "found": True})
         return routed_results
 
-    def _resolve_glob_pattern(self, glob_pattern: str, vault_path: str) -> list[dict[str, Any]]:
+    def _resolve_glob_pattern(
+        self,
+        glob_pattern: str,
+        vault_path: str,
+        *,
+        include_content: bool = True,
+    ) -> list[dict[str, Any]]:
         if "**" in glob_pattern or ".." in glob_pattern:
             raise ValueError(f"Recursive or parent directory glob patterns not allowed: {glob_pattern}")
         matched_files = self.pattern_utils.resolve_safe_glob(glob_pattern, vault_path)
@@ -710,10 +790,19 @@ class WorkflowInputResolver:
             relative_path = os.path.relpath(file_path, vault_path)
             if relative_path.endswith(".md"):
                 relative_path = relative_path[:-3]
-            result_files.append(load_file_with_metadata(relative_path, vault_path))
+            result_files.append(
+                load_file_with_metadata(relative_path, vault_path, include_content=include_content)
+            )
         return result_files
 
-    def _resolve_brace_pattern(self, value: str, vault_path: str, **context) -> list[dict[str, Any]]:
+    def _resolve_brace_pattern(
+        self,
+        value: str,
+        vault_path: str,
+        *,
+        include_content: bool = True,
+        **context,
+    ) -> list[dict[str, Any]]:
         brace_patterns = re.findall(r"\{([^}]+)\}", value)
         if len(brace_patterns) != 1:
             raise ValueError(f"Multiple time patterns not supported: {value}")
@@ -741,8 +830,9 @@ class WorkflowInputResolver:
                 vault_path,
                 context.get("reference_date"),
                 context.get("week_start_day", 0),
+                include_content=include_content,
             )
-        return self._resolve_single_time_pattern(value, vault_path, **context)
+        return self._resolve_single_time_pattern(value, vault_path, include_content=include_content, **context)
 
     def _resolve_time_based_multi_pattern(
         self,
@@ -752,6 +842,8 @@ class WorkflowInputResolver:
         vault_path: str,
         reference_date: datetime | None,
         week_start_day: int,
+        *,
+        include_content: bool = True,
     ) -> list[dict[str, Any]]:
         if count < 1:
             return []
@@ -775,7 +867,9 @@ class WorkflowInputResolver:
             relative_path = os.path.relpath(file_path, vault_path)
             if relative_path.endswith(".md"):
                 relative_path = relative_path[:-3]
-            result_files.append(load_file_with_metadata(relative_path, vault_path))
+            result_files.append(
+                load_file_with_metadata(relative_path, vault_path, include_content=include_content)
+            )
         return result_files
 
     def _select_files_in_date_range(self, all_files: list[str], start_date, end_date, limit: int | None) -> list[str]:
@@ -791,18 +885,29 @@ class WorkflowInputResolver:
         matched_files = [filepath for _, filepath in dated_matches]
         return matched_files[:limit] if limit is not None else matched_files
 
-    def _resolve_single_time_pattern(self, value: str, vault_path: str, **context) -> list[dict[str, Any]]:
+    def _resolve_single_time_pattern(
+        self,
+        value: str,
+        vault_path: str,
+        *,
+        include_content: bool = True,
+        **context,
+    ) -> list[dict[str, Any]]:
         reference_date = context.get("reference_date")
         week_start_day = context.get("week_start_day", 0)
         brace_patterns = re.findall(r"\{([^}]+)\}", value)
         if not brace_patterns:
-            return [load_file_with_metadata(value, vault_path)]
+            return [load_file_with_metadata(value, vault_path, include_content=include_content)]
         pattern = brace_patterns[0]
         resolved_date = self.pattern_utils.resolve_date_pattern(pattern, reference_date, week_start_day)
         resolved_path = value.replace(f"{{{pattern}}}", resolved_date)
         if "*" in resolved_path:
-            return self._resolve_glob_pattern(resolved_path, vault_path)
-        return [load_file_with_metadata(resolved_path, vault_path)]
+            return self._resolve_glob_pattern(
+                resolved_path,
+                vault_path,
+                include_content=include_content,
+            )
+        return [load_file_with_metadata(resolved_path, vault_path, include_content=include_content)]
 
 
 def _clean_optional_string(value: Any) -> str | None:

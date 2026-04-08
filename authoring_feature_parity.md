@@ -125,16 +125,11 @@ Still missing from the intended surface:
   - file reads
   - cache reads
   - glob/selector behavior via shared runtime
-  - `required`
   - `refs_only`
   - `pending`
-  - `latest`
-  - `limit`
-  - `order`
-  - `dir`
-  - `dt_pattern`
-  - `dt_format`
 - missing / changed:
+  - `required` is intentionally not part of `retrieve(...)` in the constrained-Python surface; missing inputs should be handled with explicit Python checks
+  - `latest`, `limit`, `order`, `dir`, `dt_pattern`, and `dt_format` are intentionally not part of `retrieve(...)`; authored Python should sort and slice explicitly using retrieved metadata such as `mtime_epoch`, `ctime_epoch`, `filename_dt`, and `token_estimate`
   - cache reads are now the intended replacement for legacy variable/buffer reads
   - direct input-side routing (`output=...`, `write_mode=...`, `scope=...`) should be treated as `rethink`
   - `images`, `head`, `tail`, and `properties` need explicit evaluation for the new contract rather than assumed carry-over

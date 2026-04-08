@@ -376,15 +376,22 @@ Notes:
 
         started = datetime.now()
         job_args = create_job_args(target.global_id)
-        await target.workflow_function(job_args, **kwargs)
+        execution_result = await target.workflow_function(job_args, **kwargs)
         elapsed = (datetime.now() - started).total_seconds()
+        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
+        terminal_reason = str(getattr(execution_result, "reason", "") or "")
 
         return {
             "success": True,
             "global_id": target.global_id,
+            "status": terminal_status,
             "execution_time_seconds": elapsed,
             "output_files": [],
-            "message": f"Workflow '{target.global_id}' executed successfully in {elapsed:.2f} seconds",
+            "reason": terminal_reason or None,
+            "message": (
+                f"Workflow '{target.global_id}' {terminal_status} in {elapsed:.2f} seconds"
+                + (f": {terminal_reason}" if terminal_reason else "")
+            ),
         }
 
     @classmethod

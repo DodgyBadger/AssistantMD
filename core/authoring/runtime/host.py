@@ -39,14 +39,16 @@ from core.authoring.shared.output_resolution import (
 )
 
 from core.authoring.contracts import (
+    AssembleContextResult,
     AuthoringCapabilityCall,
     AuthoringCapabilityScope,
     AuthoringExecutionContext,
     AuthoringHost,
-    AssembleContextResult,
+    AuthoringFinishSignal,
     CallToolResult,
     CapabilityNotAllowedError,
     ContextMessage,
+    FinishResult,
     GenerationResult,
     OutputItem,
     OutputResult,
@@ -580,6 +582,30 @@ class WorkflowAuthoringHost(AuthoringHost):
     ) -> Any:
         raise NotImplementedError("import_content is not implemented for the Monty MVP host")
 
+    async def handle_finish(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> FinishResult:
+        status, reason = _parse_finish_call(call)
+        logger.info(
+            "authoring_finish_requested",
+            data={
+                "workflow_id": context.workflow_id,
+                "status": status,
+                "reason": reason,
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_finish_requested",
+            data={
+                "workflow_id": context.workflow_id,
+                "status": status,
+                "reason": reason,
+            },
+        )
+        raise AuthoringFinishSignal(status=status, reason=reason)
+
     def _handle_cache_retrieve(
         self,
         *,
@@ -816,22 +842,15 @@ def _ensure_cache_retrieve_options_supported(options: dict[str, Any]) -> None:
 
 def _build_file_parameters(options: dict[str, Any]) -> dict[str, Any]:
     supported_keys = {
-        "required",
         "refs_only",
         "pending",
-        "latest",
-        "limit",
-        "order",
-        "dir",
-        "dt_pattern",
-        "dt_format",
     }
     unknown = sorted(set(options) - supported_keys)
     if unknown:
         raise ValueError(f"Unsupported retrieve(file) options: {', '.join(unknown)}")
 
     parameters: dict[str, Any] = {}
-    for key in ("required", "refs_only", "latest", "limit", "order", "dir", "dt_pattern", "dt_format"):
+    for key in ("refs_only",):
         if key in options:
             parameters[key] = options[key]
 
@@ -966,6 +985,19 @@ def _parse_call_tool_call(call: AuthoringCapabilityCall) -> tuple[str, dict[str,
     if options:
         raise ValueError("call_tool options are reserved for future use and must currently be omitted")
     return tool_name, arguments, options
+
+
+def _parse_finish_call(call: AuthoringCapabilityCall) -> tuple[str, str]:
+    if call.args:
+        raise ValueError("finish only supports keyword arguments")
+    unknown = sorted(set(call.kwargs) - {"status", "reason"})
+    if unknown:
+        raise ValueError(f"Unsupported finish arguments: {', '.join(unknown)}")
+    status = str(call.kwargs.get("status") or "completed").strip().lower()
+    if status not in {"completed", "skipped"}:
+        raise ValueError("finish status must be one of: completed, skipped")
+    reason = str(call.kwargs.get("reason") or "").strip()
+    return status, reason
 
 
 def _parse_assemble_context_call(
@@ -1195,6 +1227,15 @@ def _normalize_file_record(record: dict[str, Any]) -> RetrievedItem:
     metadata = {
         "filename": record.get("filename"),
         "error": record.get("error"),
+        "extension": record.get("extension"),
+        "size_bytes": record.get("size_bytes"),
+        "char_count": record.get("char_count"),
+        "token_estimate": record.get("token_estimate"),
+        "mtime_epoch": record.get("mtime_epoch"),
+        "ctime_epoch": record.get("ctime_epoch"),
+        "mtime": record.get("mtime"),
+        "ctime": record.get("ctime"),
+        "filename_dt": record.get("filename_dt"),
     }
     if record.get("filepath") is not None:
         metadata["filepath"] = record.get("filepath")

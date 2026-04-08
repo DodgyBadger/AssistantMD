@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
-    {"retrieve", "output", "generate", "call_tool", "assemble_context", "import_content"}
+    {"retrieve", "output", "generate", "call_tool", "assemble_context", "import_content", "finish"}
 )
 
 
@@ -26,6 +27,29 @@ class CapabilityNotAllowedError(AuthoringCapabilityError):
 
 class CapabilityHandlerMissingError(AuthoringCapabilityError):
     """Raised when a capability is registered but the host adapter is missing."""
+
+
+class AuthoringFinishSignal(RuntimeError):
+    """Raised internally when authored code ends execution intentionally."""
+
+    PREFIX = "__authoring_finish__:"
+
+    def __init__(self, *, status: str, reason: str = "") -> None:
+        payload = {"status": status, "reason": reason}
+        super().__init__(f"{self.PREFIX}{json.dumps(payload, sort_keys=True)}")
+        self.status = status
+        self.reason = reason
+
+    @classmethod
+    def try_parse(cls, value: str) -> tuple[str, str] | None:
+        if not isinstance(value, str) or not value.startswith(cls.PREFIX):
+            return None
+        payload = json.loads(value[len(cls.PREFIX) :])
+        status = str(payload.get("status") or "").strip().lower()
+        reason = str(payload.get("reason") or "")
+        if not status:
+            return None
+        return status, reason
 
 
 @dataclass(frozen=True)
@@ -172,6 +196,14 @@ class AssembleContextResult:
     instructions: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class FinishResult:
+    """Envelope for an intentional authored termination."""
+
+    status: str
+    reason: str = ""
+
+
 @runtime_checkable
 class AuthoringHost(Protocol):
     """Host-side adapter implemented by the caller of the Monty runtime."""
@@ -211,6 +243,12 @@ class AuthoringHost(Protocol):
     ) -> Any: ...
 
     async def handle_import_content(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> Any: ...
+
+    async def handle_finish(
         self,
         call: AuthoringCapabilityCall,
         context: AuthoringExecutionContext,
