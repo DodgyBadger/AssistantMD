@@ -576,7 +576,7 @@ class WorkflowAuthoringHost(AuthoringHost):
             data={
                 "workflow_id": context.workflow_id,
                 "message_count": len(assembled_messages),
-                "instruction_count": len(instructions),
+                "instruction_count": 1 if instructions else 0,
             },
         )
         logger.set_sinks(["validation"]).info(
@@ -584,7 +584,7 @@ class WorkflowAuthoringHost(AuthoringHost):
             data={
                 "workflow_id": context.workflow_id,
                 "message_count": len(assembled_messages),
-                "instruction_count": len(instructions),
+                "instruction_count": 1 if instructions else 0,
             },
         )
 

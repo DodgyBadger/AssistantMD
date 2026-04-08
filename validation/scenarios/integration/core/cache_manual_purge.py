@@ -19,13 +19,13 @@ class CacheManualPurgeScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("CacheManualPurgeVault")
 
-        expired_now = datetime(2026, 4, 6, 12, 0, 0)
-        active_now = datetime(2026, 4, 7, 12, 0, 0)
-
         await self.start_system()
         try:
             runtime = get_runtime_context()
             system_root = runtime.config.system_root
+            now = datetime.now()
+            expired_now = now - timedelta(days=2)
+            active_now = now
 
             upsert_cache_artifact(
                 owner_id=f"{vault.name}/chat/test-session",
@@ -49,7 +49,7 @@ class CacheManualPurgeScenario(BaseScenario):
                 raw_content="active artifact",
                 metadata={"type": "cache"},
                 origin="validation",
-                now=active_now - timedelta(hours=1),
+                now=active_now,
                 week_start_day=0,
                 system_root=system_root,
             )

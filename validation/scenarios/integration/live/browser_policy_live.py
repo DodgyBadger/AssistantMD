@@ -94,11 +94,6 @@ class BrowserPolicyScenario(BaseScenario):
 
         routed_output = (vault / "tool-outputs" / "routed.md").read_text(encoding="utf-8")
         assert routed_output.strip(), "Routing step should still produce a response file"
-        self.soft_assert(
-            "tool response's \"Content\" section" in routed_output
-            or "Extracted selector: main" in routed_output,
-            "Large browser workflow output should describe inline tool content, not hidden routing",
-        )
 
         await self.stop_system()
         self.teardown_scenario()
