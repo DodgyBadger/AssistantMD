@@ -112,7 +112,7 @@ AUTHORING_CONTEXT_ASSEMBLY_CODE = """
 history = await retrieve(type="run", ref="session", options={"limit": 2})
 assembled = await assemble_context(
     history=history.items,
-    instructions=["Use exact text."],
+    instructions="Use exact text.",
     latest_user_message={"role": "user", "content": "What should happen next?"},
 )
 

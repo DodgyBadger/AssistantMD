@@ -439,7 +439,7 @@ def _assemble_context_contract() -> dict[str, Any]:
         "signature": (
             "assemble_context(*, history: list | tuple | None = None, "
             "context_messages: list | tuple | None = None, "
-            "instructions: list[str] | tuple[str, ...] | None = None, "
+            "instructions: str | None = None, "
             "latest_user_message: object | None = None)"
         ),
         "summary": (
@@ -458,9 +458,9 @@ def _assemble_context_contract() -> dict[str, Any]:
                 "description": "Additional system-context messages injected ahead of preserved history.",
             },
             "instructions": {
-                "type": "list|tuple",
+                "type": "string",
                 "required": False,
-                "description": "Extra downstream chat instructions injected as separate system messages.",
+                "description": "Extra downstream chat instructions injected as one additional system message.",
             },
             "latest_user_message": {
                 "type": "object",
@@ -491,7 +491,7 @@ def _assemble_context_contract() -> dict[str, Any]:
                     'history = await retrieve(type="run", ref="session", options={"limit": 3})\n'
                     'final = await assemble_context(\n'
                     '    history=history.items,\n'
-                    '    instructions=["Prefer exact quoted text when possible."],\n'
+                    '    instructions="Prefer exact quoted text when possible.",\n'
                     ')\n'
                 ),
                 "description": "Add downstream instructions without flattening them into the transcript.",

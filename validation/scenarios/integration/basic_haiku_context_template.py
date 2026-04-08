@@ -261,9 +261,7 @@ await output(
 )
 
 assembled = await assemble_context(
-    instructions=[
-        "You are a concise poet. When asked for a haiku, write exactly three lines and do not add commentary."
-    ],
+    instructions="You are a concise poet. When asked for a haiku, write exactly three lines and do not add commentary.",
     context_messages=[{"role": "system", "content": seed_words.output}],
     latest_user_message=latest_user_message,
 )

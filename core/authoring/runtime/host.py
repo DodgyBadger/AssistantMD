@@ -544,8 +544,8 @@ class WorkflowAuthoringHost(AuthoringHost):
         history, context_messages, instructions, latest_user_message = _parse_assemble_context_call(call)
         assembled_messages: list[ContextMessage] = []
 
-        for instruction in instructions:
-            assembled_messages.append(ContextMessage(role="system", content=instruction))
+        if instructions:
+            assembled_messages.append(ContextMessage(role="system", content=instructions))
         for item in context_messages:
             assembled_messages.append(_normalize_context_message(item, default_role="system"))
         for item in history:
@@ -572,7 +572,7 @@ class WorkflowAuthoringHost(AuthoringHost):
 
         return AssembleContextResult(
             messages=tuple(assembled_messages),
-            instructions=tuple(instructions),
+            instructions=(instructions,) if instructions else (),
         )
 
     async def handle_import_content(
@@ -1002,13 +1002,13 @@ def _parse_finish_call(call: AuthoringCapabilityCall) -> tuple[str, str]:
 
 def _parse_assemble_context_call(
     call: AuthoringCapabilityCall,
-) -> tuple[tuple[Any, ...], tuple[Any, ...], tuple[str, ...], Any | None]:
+) -> tuple[tuple[Any, ...], tuple[Any, ...], str | None, Any | None]:
     if call.args:
         raise ValueError("assemble_context only supports keyword arguments")
 
     history = _normalize_object_sequence(call.kwargs.get("history"))
     context_messages = _normalize_object_sequence(call.kwargs.get("context_messages"))
-    instructions = _normalize_string_sequence(call.kwargs.get("instructions"))
+    instructions = _normalize_optional_string(call.kwargs.get("instructions"))
     latest_user_message = call.kwargs.get("latest_user_message")
     return history, context_messages, instructions, latest_user_message
 
@@ -1068,19 +1068,13 @@ def _normalize_object_sequence(value: Any) -> tuple[Any, ...]:
     raise ValueError("assemble_context sequences must be lists or tuples when provided")
 
 
-def _normalize_string_sequence(value: Any) -> tuple[str, ...]:
+def _normalize_optional_string(value: Any) -> str | None:
     if value is None:
-        return ()
-    if not isinstance(value, (list, tuple)):
-        raise ValueError("assemble_context instructions must be a list or tuple when provided")
-    normalized: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            raise ValueError("assemble_context instructions must only contain strings")
-        stripped = item.strip()
-        if stripped:
-            normalized.append(stripped)
-    return tuple(normalized)
+        return None
+    if not isinstance(value, str):
+        raise ValueError("assemble_context instructions must be a string when provided")
+    normalized = value.strip()
+    return normalized or None
 
 
 def _normalize_context_message(value: Any, *, default_role: str | None = None) -> ContextMessage:
