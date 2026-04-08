@@ -12,7 +12,7 @@ AssistantMD exposes a focused runtime for explicit orchestration with a small ho
 The current built-in runtime capabilities are:
 
 - `retrieve(...)` to read scoped external inputs into the runtime
-- `generate(...)` to perform one explicit model call
+- `generate(...)` to perform one explicit model call, optionally with an explicit tool subset
 - `output(...)` to write selected results out
 - `call_tool(...)` to invoke one declared host tool explicitly
 - `assemble_context(...)` to build validated downstream chat context from structured history and instructions
@@ -38,7 +38,7 @@ The runtime is intentionally small and explicit.
 Current built-ins and conventions:
 
 - `retrieve(type=..., ref=..., options=...)`
-- `generate(prompt=..., instructions=..., model=..., cache=..., options=...)`
+- `generate(prompt=..., instructions=..., model=..., tools=..., cache=..., options=...)`
 - `output(type=..., ref=..., data=..., options=...)`
 - `call_tool(name=..., arguments=..., options=...)`
 - `assemble_context(history=..., context_messages=..., instructions=..., latest_user_message=...)`
@@ -91,6 +91,7 @@ The security boundary is enforced by the host:
 - `output(type="file", ...)` is denied unless file scope allows the target ref
 - `output(type="cache", ...)` is denied unless cache scope allows the target ref
 - `call_tool(...)` is denied unless tool scope allows the named tool
+- `generate(..., tools=[...])` may only use tools allowed by `authoring.tools`
 
 ## Rules
 
@@ -102,6 +103,7 @@ The security boundary is enforced by the host:
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
 - Prefer attribute access on returned objects, for example `source.items[0].content` and `draft.output`.
 - Use `generate(..., cache=...)` for repeated generation memoization.
+- Use `generate(..., tools=[...])` only when you want explicit bounded tool use inside one generation call.
 - Use `output(type="cache", ...)` for named retrievable artifacts.
 - Use the host-provided `date` object for date helpers such as `date.today()` and `date.today("YYYYMMDD")`.
 - Inspect the authoring contract before guessing capability arguments or return shapes.
@@ -130,6 +132,7 @@ draft = await generate(
         + cached.items[0].content
     ),
     instructions="Be concise and factual.",
+    tools=["web_search_tavily"],
     model="gpt-mini",
     cache="daily",
 )

@@ -287,13 +287,14 @@ def _generate_contract() -> dict[str, Any]:
     return {
         "signature": (
             "generate(*, prompt: str, instructions: str | None = None, "
-            "model: str | None = None, cache: str | dict | None = None, "
+            "model: str | None = None, tools: list[str] | tuple[str, ...] | None = None, "
+            "cache: str | dict | None = None, "
             "options: dict | None = None)"
         ),
         "summary": (
             "Run one explicit model generation using the shared agent runtime. "
-            "Instructions are first-class, while generation caching and less common "
-            "model controls stay explicit."
+            "Instructions are first-class, while optional tool use, generation caching, "
+            "and less common model controls stay explicit."
         ),
         "arguments": {
             "prompt": {
@@ -310,6 +311,14 @@ def _generate_contract() -> dict[str, Any]:
                 "type": "string",
                 "required": False,
                 "description": "Optional model alias resolved through the existing model directive.",
+            },
+            "tools": {
+                "type": "list|tuple",
+                "required": False,
+                "description": (
+                    "Optional explicit subset of authoring.tools enabled for this generation. "
+                    "When omitted, generate runs without tool use."
+                ),
             },
             "cache": {
                 "type": "string | object",
@@ -357,6 +366,10 @@ def _generate_contract() -> dict[str, Any]:
                 "Use output(type=\"cache\", ...) when you want a named retrievable "
                 "artifact for later scripted access."
             ),
+            (
+                "Tool use is opt-in. Pass tools=[...] to enable an explicit subset "
+                "of authoring.tools for one generation call."
+            ),
         ],
         "examples": [
             {
@@ -372,6 +385,14 @@ def _generate_contract() -> dict[str, Any]:
                     'model="test", options={"thinking": False})'
                 ),
                 "description": "Use an explicit model alias with a supported generation option.",
+            },
+            {
+                "code": (
+                    'await generate(prompt="Summarize and verify these leads.", '
+                    'instructions="Use search sparingly and cite concrete event details.", '
+                    'tools=["web_search_tavily"])'
+                ),
+                "description": "Enable tool use explicitly for one bounded generation call.",
             },
             {
                 "code": (

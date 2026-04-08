@@ -331,8 +331,10 @@ class WorkflowAuthoringHost(AuthoringHost):
         from core.llm.agents import create_agent, generate_response
         from core.llm.model_selection import ModelExecutionSpec
 
-        prompt, instructions, model_value, cache_policy, options = _parse_generate_call(call)
+        prompt, instructions, model_value, tool_names, cache_policy, options = _parse_generate_call(call)
         resolved_model_value = _apply_generate_options_to_model(model_value, options)
+        if tool_names:
+            _ensure_generate_tools_allowed(tool_names=tool_names, scope=context.scope)
         cache_mode: str | None = None
         cache_ttl_seconds: int | None = None
         cache_ref: str | None = None
@@ -342,6 +344,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 prompt=prompt,
                 instructions=instructions,
                 model_value=resolved_model_value or "default",
+                tool_names=tool_names,
                 cache_mode=cache_mode,
                 ttl_seconds=cache_ttl_seconds,
             )
@@ -392,6 +395,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
                 "instructions_present": bool(instructions),
+                "tool_names": list(tool_names),
                 "cache_mode": cache_mode,
             },
         )
@@ -401,10 +405,19 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
                 "instructions_present": bool(instructions),
+                "tool_names": list(tool_names),
                 "cache_mode": cache_mode,
             },
         )
-        agent = await create_agent(model=model)
+        bound_tools = None
+        if tool_names:
+            binding = resolve_tool_binding(
+                list(tool_names),
+                vault_path=self.vault_path or "",
+                week_start_day=self.week_start_day,
+            )
+            bound_tools = binding.tool_functions
+        agent = await create_agent(model=model, tools=bound_tools)
         if instructions:
             agent.instructions(lambda _ctx, text=instructions: text)
         output = await generate_response(agent, prompt)
@@ -422,6 +435,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                     "model": resolved_model_value or "default",
                     "prompt_chars": len(prompt),
                     "instructions_present": bool(instructions),
+                    "tool_names": list(tool_names),
                 },
                 origin="authoring_generate",
                 now=self.reference_date,
@@ -432,6 +446,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 data={
                     "workflow_id": context.workflow_id,
                     "model": resolved_model_value or "default",
+                    "tool_names": list(tool_names),
                     "cache_mode": cache_mode,
                     "cache_ref": cache_ref,
                     "output_chars": len(text),
@@ -442,6 +457,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 data={
                     "workflow_id": context.workflow_id,
                     "model": resolved_model_value or "default",
+                    "tool_names": list(tool_names),
                     "cache_mode": cache_mode,
                     "cache_ref": cache_ref,
                     "output_chars": len(text),
@@ -452,6 +468,7 @@ class WorkflowAuthoringHost(AuthoringHost):
             data={
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
+                "tool_names": list(tool_names),
                 "output_chars": len(text),
             },
         )
@@ -460,6 +477,7 @@ class WorkflowAuthoringHost(AuthoringHost):
             data={
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
+                "tool_names": list(tool_names),
                 "output_chars": len(text),
             },
         )
@@ -892,7 +910,7 @@ def _parse_output_call(call: AuthoringCapabilityCall) -> tuple[str, str, Any, di
 
 def _parse_generate_call(
     call: AuthoringCapabilityCall,
-) -> tuple[str, str | None, str | None, str | dict[str, Any] | None, dict[str, Any]]:
+) -> tuple[str, str | None, str | None, tuple[str, ...], str | dict[str, Any] | None, dict[str, Any]]:
     if call.args:
         raise ValueError("generate only supports keyword arguments")
     prompt = str(call.kwargs.get("prompt") or "")
@@ -902,6 +920,20 @@ def _parse_generate_call(
     instructions = None if raw_instructions is None else str(raw_instructions).strip() or None
     raw_model = call.kwargs.get("model")
     model_value = None if raw_model is None else str(raw_model).strip() or None
+    raw_tools = call.kwargs.get("tools")
+    if raw_tools is None:
+        tool_names: tuple[str, ...] = ()
+    elif isinstance(raw_tools, (list, tuple)):
+        normalized_tools: list[str] = []
+        for item in raw_tools:
+            if not isinstance(item, str):
+                raise ValueError("generate tools entries must be strings")
+            normalized = item.strip()
+            if normalized:
+                normalized_tools.append(normalized)
+        tool_names = tuple(normalized_tools)
+    else:
+        raise ValueError("generate tools must be a list or tuple of strings when provided")
     raw_cache = call.kwargs.get("cache")
     cache_value: str | dict[str, Any] | None
     if raw_cache is None:
@@ -919,7 +951,7 @@ def _parse_generate_call(
         options = dict(raw_options)
     else:
         raise ValueError("generate options must be a dictionary when provided")
-    return prompt, instructions, model_value, cache_value, options
+    return prompt, instructions, model_value, tool_names, cache_value, options
 
 
 def _parse_generate_cache_policy(cache_value: str | dict[str, Any]) -> tuple[str, int | None]:
@@ -945,6 +977,7 @@ def _build_generate_cache_ref(
     prompt: str,
     instructions: str | None,
     model_value: str,
+    tool_names: tuple[str, ...],
     cache_mode: str,
     ttl_seconds: int | None,
 ) -> str:
@@ -953,6 +986,7 @@ def _build_generate_cache_ref(
         "model": model_value,
         "prompt": prompt,
         "instructions": instructions or "",
+        "tools": list(tool_names),
         "cache_mode": cache_mode,
         "ttl_seconds": ttl_seconds,
     }
@@ -1021,6 +1055,19 @@ def _ensure_tool_allowed(*, tool_name: str, scope: AuthoringCapabilityScope) -> 
         )
     if tool_name not in allowed_tools:
         raise CapabilityNotAllowedError(f"Tool '{tool_name}' is outside the configured tool scope")
+
+
+def _ensure_generate_tools_allowed(*, tool_names: tuple[str, ...], scope: AuthoringCapabilityScope) -> None:
+    allowed_tools = tuple(name.strip() for name in scope.allowed_tools if name.strip())
+    if not allowed_tools:
+        raise CapabilityNotAllowedError(
+            "generate(..., tools=[...]) requires explicit authoring.tools frontmatter entries"
+        )
+    for tool_name in tool_names:
+        if tool_name not in allowed_tools:
+            raise CapabilityNotAllowedError(
+                f"Tool '{tool_name}' is outside the configured tool scope"
+            )
 
 
 def _parse_history_limit(options: dict[str, Any], *, default: int | str) -> int | str:
