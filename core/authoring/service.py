@@ -14,6 +14,7 @@ from core.authoring.runtime import (
     WorkflowAuthoringHost,
     run_authoring_monty,
 )
+from core.constants import VALID_WEEK_DAYS
 from core.workflow.parser import validate_config
 from core.utils.frontmatter import parse_simple_frontmatter
 
@@ -131,11 +132,12 @@ async def _run_loaded_template(
     frontmatter = dict(source.frontmatter)
     authoring = _extract_authoring_frontmatter(frontmatter)
     frontmatter["authoring"] = authoring
+    week_start_day = _resolve_week_start_day(frontmatter)
 
     return await run_authoring_monty(
         workflow_id=workflow_id,
         code=source.code,
-        host=WorkflowAuthoringHost(workflow_id=workflow_id),
+        host=WorkflowAuthoringHost(workflow_id=workflow_id, week_start_day=week_start_day),
         frontmatter=frontmatter,
     )
 
@@ -156,3 +158,15 @@ def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
             f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}"
         )
     return workflow_id.split("/", 1)
+
+
+def _resolve_week_start_day(frontmatter: dict[str, object]) -> int:
+    """Resolve workflow week_start_day frontmatter to 0=Monday .. 6=Sunday."""
+    raw_value = frontmatter.get("week_start_day", frontmatter.get("week-start-day", "monday"))
+    if isinstance(raw_value, int) and 0 <= raw_value <= 6:
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in VALID_WEEK_DAYS:
+            return VALID_WEEK_DAYS.index(normalized)
+    return 0

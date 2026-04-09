@@ -83,6 +83,10 @@ A host-provided `date` object is available for runtime-oriented date helpers suc
 
 Each date method also supports an optional format string such as `date.today("YYYYMMDD")`.
 
+You can use the frontmatter option `week_start_day: ...` with week-based helpers such as
+`date.this_week()`, `date.last_week()`, and `date.next_week()`. When omitted, the default
+is `monday`.
+
 The security boundary is enforced by the host:
 
 - `retrieve(type="file", ...)` is denied unless file scope allows the target ref
