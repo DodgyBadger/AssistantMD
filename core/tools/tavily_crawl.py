@@ -103,16 +103,15 @@ class TavilyCrawl(BaseTool):
         return Tool(
             tavily_crawl,
             name='tavily_crawl',
-            description='Intelligently crawl websites to extract comprehensive content from multiple pages.'
+            description='Explore a website across multiple related pages when you need broader coverage than a single-page extract.',
         )
     
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Crawl."""
         return """
-## tavily_crawl usage instructions
+Explore a website across multiple related pages when you need broader coverage than a single-page extract.
 
-Use when you need to comprehensively explore a website and extract content from multiple related pages.
 - Crawling documentation sites for complete guides
 - Exploring knowledge bases and help centers
 - Conducting thorough research on company websites

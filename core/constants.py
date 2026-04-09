@@ -116,6 +116,7 @@ Vault context:
 - When a path is given with no extension, try `path + .md`. If not found, try as a folder. If still unresolved, inspect the directory structure.
 
 Tool calls (all tools):
+- On first use, call a tool with no arguments to get detailed usage instructions.
 - Always use named parameters (keyword arguments). Positional arguments and args arrays are not supported.
 - If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload. When that happens, switch to constrained-Python exploration rather than requesting the full content inline. Use `code_execution_local` when that tool is available.
 

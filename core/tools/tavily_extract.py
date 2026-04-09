@@ -86,16 +86,15 @@ class TavilyExtract(BaseTool):
         return Tool(
             tavily_extract,
             name='tavily_extract',
-            description='Extract content from specific URLs using Tavily for documentation, articles, or web pages.'
+            description='Extract full content from specific web pages, articles, and documentation URLs.',
         )
     
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Extract."""
         return """
-## tavily_extract usage instructions
+Extract full content from specific web pages, articles, and documentation URLs.
 
-Use when you need to extract full content from specific web pages, documentation, articles, or blog posts.
 - Extracting documentation from specific pages
 - Getting full article content for analysis
 - Pulling content from multiple related URLs

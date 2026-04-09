@@ -69,13 +69,17 @@ class WebSearchTavily(BaseTool):
             except Exception as e:
                 return f"Tavily search error: {str(e)}"
 
-        return Tool(web_search, name="web_search_tavily")
+        return Tool(
+            web_search,
+            name="web_search_tavily",
+            description="Search the web with Tavily when you want higher-quality research-oriented results.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily web search."""
         return """
-## web_search_tavily usage instructions
+Search the web with Tavily when you want higher-quality research-oriented results.
 
 Example: web_search_tavily(query="latest fastapi release").
 """ + WEB_TOOL_SECURITY_NOTICE

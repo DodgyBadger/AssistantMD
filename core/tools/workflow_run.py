@@ -113,13 +113,17 @@ class WorkflowRun(BaseTool):
                 )
                 return f"Error performing '{operation}' operation: {exc}"
 
-        return Tool(workflow_run, name="workflow_run")
+        return Tool(
+            workflow_run,
+            name="workflow_run",
+            description="List workflows in the current vault and run, test, enable, or disable them.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for workflow execution."""
         return """
-## workflow_run usage instructions
+List workflows in the current vault and run, test, enable, or disable them.
 
 Discovery:
 - workflow_run(operation="list")

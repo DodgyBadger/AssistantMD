@@ -62,6 +62,8 @@ class CodeExecutionLocalScenario(BaseScenario):
                         "readable_cache_refs": ["tool/demo/allowed"],
                         "writable_cache_refs": [],
                     }
+                if case_name == "discovery":
+                    return {}
                 if case_name == "deny_read":
                     return {
                         "code": (
@@ -116,6 +118,25 @@ class CodeExecutionLocalScenario(BaseScenario):
             self.soft_assert(
                 "ALPHA BETA GAMMA" in allow_text,
                 "Allowed cache read should return the cached artifact content",
+            )
+
+            current_case["name"] = "discovery"
+            discovery = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Inspect code_execution_local with no arguments first.",
+                    "session_id": "code_execution_local_discovery",
+                    "tools": ["code_execution_local"],
+                    "model": "test",
+                },
+            )
+            assert discovery.status_code == 200, "No-arg code_execution_local discovery should succeed"
+            discovery_text = discovery.json()["response"]
+            self.soft_assert(
+                bool(discovery_text.strip()),
+                "No-arg code_execution_local should return a non-empty discovery response",
             )
 
             current_case["name"] = "deny_read"

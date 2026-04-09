@@ -81,14 +81,18 @@ class BufferOps(BaseTool):
             except Exception as exc:
                 return f"Error performing '{operation}' operation: {str(exc)}"
 
-        return Tool(buffer_operations, name="buffer_ops")
+        return Tool(
+            buffer_operations,
+            name="buffer_ops",
+            description="Inspect chat/session buffers by listing them, previewing content, reading ranges, and searching within them.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for buffer operations."""
         return """
-## buffer_ops usage instructions
-        
+Inspect chat/session buffers by listing them, previewing content, reading ranges, and searching within them.
+
 DISCOVERY:
 - buffer_ops(operation="list")
 - buffer_ops(operation="info", target="buffer_name")

@@ -12,6 +12,7 @@ from typing import Any
 from pydantic_ai import RunContext
 from pydantic_ai.tools import Tool
 
+from core.authoring import describe_authoring_contract
 from core.authoring.runtime import (
     AuthoringMontyExecutionError,
     WorkflowAuthoringHost,
@@ -37,7 +38,7 @@ class CodeExecutionLocal(BaseTool):
         async def code_execution_local(
             ctx: RunContext,
             *,
-            code: str,
+            code: str = "",
             readable_cache_refs: list[str] | None = None,
             writable_cache_refs: list[str] | None = None,
             readable_file_paths: list[str] | None = None,
@@ -45,7 +46,7 @@ class CodeExecutionLocal(BaseTool):
         ) -> str:
             """Run constrained local Python in the current chat session.
 
-            :param code: Constrained-Python snippet to execute
+            :param code: Optional constrained-Python snippet to execute
             :param readable_cache_refs: Cache refs or glob patterns the snippet may retrieve
             :param writable_cache_refs: Cache refs or glob patterns the snippet may write
             :param readable_file_paths: Optional explicit file read scope when file_ops_safe is enabled
@@ -72,7 +73,15 @@ class CodeExecutionLocal(BaseTool):
                         "vault_name and session_id available."
                     )
                 if not code.strip():
-                    return "code_execution_local requires a non-empty code snippet."
+                    return json.dumps(
+                        {
+                            "usage": cls.get_instructions().strip(),
+                            "authoring_contract": describe_authoring_contract(),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    )
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
                 allow_file_scope = "file_ops_safe" in enabled_tools
@@ -110,13 +119,17 @@ class CodeExecutionLocal(BaseTool):
             except Exception as exc:  # noqa: BLE001
                 return f"code_execution_local failed: {exc}"
 
-        return Tool(code_execution_local, name="code_execution_local")
+        return Tool(
+            code_execution_local,
+            name="code_execution_local",
+            description="Run constrained local Python against the current chat session, cache scope, and optional vault file scope.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for constrained local code execution."""
         return """
-## code_execution_local usage instructions
+Run constrained local Python against the current chat session, cache scope, and optional vault file scope.
 
 Use this for:
 - small calculations and transformations
@@ -127,11 +140,8 @@ Use this for:
 This tool runs constrained local Python with a small host API and narrow
 current-chat execution context.
 
-If you need the exact current runtime contract, call:
-- `internal_api(endpoint="authoring_contract")`
-
-That endpoint describes the available Monty/runtime capabilities and result
-shapes for constrained local code.
+If you call `code_execution_local()` with no arguments, it returns these usage
+instructions plus the current structured authoring contract metadata.
 
 What it supports well right now:
 - `retrieve(type="cache", ref=...)`
@@ -146,8 +156,11 @@ What it supports well right now:
 For broader language support or a remote sandbox, use the Piston-backed
 `code_execution` tool.
 
-Required arguments:
-- code_execution_local(code="...")
+Discovery:
+- `code_execution_local()`
+
+Execution:
+- `code_execution_local(code="...")`
 
 Optional arguments:
 - writable_cache_refs=["scratch/*"] to persist derived cache artifacts
@@ -209,7 +222,6 @@ Notes:
 - This tool can always read the current chat session history.
 - It can read/write explicitly granted cache refs.
 - If chat has `file_ops_safe`, this tool also gets vault file read/write access by default. Use `readable_file_paths` or `writable_file_paths` to narrow that scope when helpful.
-- Use `internal_api(endpoint="authoring_contract")` when you need exact details about available built-ins or return shapes instead of guessing.
 - Prefer returning a compact final value rather than printing large text.
 """
 

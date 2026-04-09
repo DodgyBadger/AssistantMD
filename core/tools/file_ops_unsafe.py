@@ -80,14 +80,18 @@ class FileOpsUnsafe(BaseTool):
             except Exception as e:
                 return f"Error performing '{operation}' operation: {str(e)}"
 
-        return Tool(file_ops_unsafe, name="file_ops_unsafe")
+        return Tool(
+            file_ops_unsafe,
+            name="file_ops_unsafe",
+            description="Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for unsafe file operations."""
         return """
-## file_ops_unsafe usage instructions
-        
+Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed.
+
 ⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
 
 CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).

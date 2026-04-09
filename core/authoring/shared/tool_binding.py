@@ -152,7 +152,7 @@ def resolve_tool_binding(
         except Exception as exc:
             raise ValueError(f"Failed to load tool '{tool_name}': {exc}") from exc
 
-    tool_instructions = get_tool_instructions(tool_classes) if tool_classes else ""
+    tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
     if skipped_tools:
         skipped_messages = [
             f"{name} (missing {', '.join(missing)})" for name, missing in skipped_tools
@@ -193,7 +193,7 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
     tool_specs = list(specs_by_name.values())
     tool_classes = [spec.tool_class for spec in tool_specs]
     tool_functions = [spec.tool_function for spec in tool_specs] if tool_specs else fallback_functions
-    tool_instructions = get_tool_instructions(tool_classes) if tool_classes else ""
+    tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
 
     if notes:
         unique_notes: list[str] = []
@@ -351,6 +351,8 @@ def _wrap_tool_function(
     async def _call_async(ctx: RunContext, **kwargs):
         output_value = kwargs.pop("output", None) if allow_output_params else None
         write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
+        if not _has_meaningful_tool_args(kwargs):
+            return tool_instructions or f"No usage instructions available for tool '{tool_name}'."
         try:
             if original_takes_ctx:
                 result = await original_func(ctx, **kwargs)
@@ -373,6 +375,8 @@ def _wrap_tool_function(
     def _call_sync(ctx: RunContext, **kwargs):
         output_value = kwargs.pop("output", None) if allow_output_params else None
         write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
+        if not _has_meaningful_tool_args(kwargs):
+            return tool_instructions or f"No usage instructions available for tool '{tool_name}'."
         try:
             if original_takes_ctx:
                 result = original_func(ctx, **kwargs)
@@ -435,6 +439,21 @@ def _wrap_tool_function(
         name=getattr(tool, "name", None) or tool_name,
         description=getattr(tool, "description", None),
     )
+
+
+def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
+    """Return True when the tool call includes at least one non-empty user argument."""
+    if not kwargs:
+        return False
+    for value in kwargs.values():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, tuple, dict, set)) and not value:
+            continue
+        return True
+    return False
 
 
 def _route_tool_output(

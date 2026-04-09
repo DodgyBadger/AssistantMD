@@ -118,10 +118,7 @@ Policy notes:
     def get_instructions(cls) -> str:
         """Get usage instructions for the browser tool."""
         return """
-## browser usage instructions
-
-Use when you need a real browser to load and extract content from a known URL,
-especially after simple extraction fails or when the site depends on JavaScript.
+Open a web page in a headless browser and extract content from it, especially when simpler web tools are not enough.
 
 Prefer this order:
 - Search tools when you do not know the URL yet

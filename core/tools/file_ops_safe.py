@@ -125,14 +125,18 @@ class FileOpsSafe(BaseTool):
             except Exception as e:
                 return f"Error performing '{operation}' operation: {str(e)}"
         
-        return Tool(file_operations, name="file_ops_safe")
+        return Tool(
+            file_operations,
+            name="file_ops_safe",
+            description="Read, write, append, list, search, and move files safely within the current vault or virtual mounts.",
+        )
     
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for file operations."""
         return """
-## file_ops_safe usage instructions
-        
+Read, write, append, list, search, and move files safely within the current vault or virtual mounts.
+
 DISCOVERY - Start narrow, expand as needed:
 - file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)
 - file_ops_safe(operation="list", target="FolderName"): List .md files inside a folder (non-recursive)

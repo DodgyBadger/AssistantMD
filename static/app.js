@@ -524,6 +524,8 @@ function populateSelectors() {
             if (previousTools.size > 0) {
                 checkbox.checked = previousTools.has(tool.name);
             } else if (
+                tool.name === 'browser' ||
+                tool.name === 'code_execution_local' ||
                 tool.name === 'file_ops_safe' ||
                 tool.name === 'buffer_ops' ||
                 (preferredWebTool && tool.name === preferredWebTool)
@@ -564,6 +566,7 @@ function populateSelectors() {
         'documentation_access',
         'tavily_extract',
         'tavily_crawl',
+        'code_execution_local',
         'code_execution'
     ];
 

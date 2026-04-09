@@ -69,15 +69,17 @@ class InternalApi(BaseTool):
                 )
             return payload
 
-        return Tool(internal_api, name="internal_api")
+        return Tool(
+            internal_api,
+            name="internal_api",
+            description="Fetch structured metadata from a small allowlist of internal read-only API endpoints.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for read-only internal API access."""
         return """
-## internal_api usage instructions
-
-Use for read-only inspection of allowlisted internal metadata endpoints.
+Fetch structured metadata from a small allowlist of internal read-only API endpoints.
 
 Allowed endpoints:
 - internal_api(endpoint="authoring_contract")
