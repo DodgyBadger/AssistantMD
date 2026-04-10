@@ -32,7 +32,7 @@ class InternalApi(BaseTool):
         ) -> str:
             """Fetch structured metadata from a read-only allowlisted internal API endpoint.
 
-            :param endpoint: One of: authoring_contract, metadata, context_templates
+            :param endpoint: One of: metadata, context_templates
             :param vault_name: Optional vault name, used for context_templates
             :param workflow_name: Reserved for future allowlisted endpoints that support workflow-name filtering
             """
@@ -81,16 +81,11 @@ class InternalApi(BaseTool):
         return """
 Fetch structured metadata from a small allowlist of internal read-only API endpoints.
 
-Allowed endpoints:
-- internal_api(endpoint="authoring_contract")
-- internal_api(endpoint="metadata")
-- internal_api(endpoint="context_templates", vault_name="PersonalVault")
+This tool is not part of the normal default tool surface.
 
-Rules:
-- Read-only GET access only.
-- Endpoint must be one of the allowlisted keys above.
-- Do not use for arbitrary URLs or mutation operations.
-- Responses larger than 50000 characters are rejected.
+Important notes:
+- read-only allowlisted endpoints only
+- do not use for arbitrary URLs or mutation operations
 """
 
     @staticmethod

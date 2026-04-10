@@ -2,9 +2,9 @@
 
 This document describes the workflow-specific file shape used when authoring constrained-Python workflows in AssistantMD.
 
-Use the runtime contract for capability signatures and return types:
+For constrained runtime helper signatures and examples, read:
 
-- `__virtual_docs__/use/authoring.md`
+- `__virtual_docs__/tools/code_execution_local.md`
 
 Use this guide for workflow-specific structure:
 
@@ -48,7 +48,7 @@ authoring.retrieve.file: [Tasks/**/*.md, Inbox/*.md]
 authoring.retrieve.cache: [research/*, scratch/*]
 authoring.output.file: [Tasks/weekly/*.md, Reports/*.md]
 authoring.output.cache: [research/*, scratch/*]
-authoring.tools: [file_ops_safe, internal_api]
+authoring.tools: [file_ops_safe]
 ```
 
 After the frontmatter, the file must contain exactly one executable fenced Python block:
@@ -64,7 +64,7 @@ The executable workflow code belongs inside that block. Do not split execution a
 ## Workflow Authoring Rules
 
 - Treat `AssistantMD/Workflows/` as the canonical home for workflow templates.
-- Use the runtime contract to inspect capability signatures before guessing arguments or return shapes.
+- Use the constrained runtime doc to inspect helper signatures before guessing arguments or return shapes.
 - Use compile-only workflow testing before execution when validating a new or changed workflow.
 - Keep workflow changes small, testable, and easy to review.
 - Prefer explicit orchestration in Python over hidden framework behavior.

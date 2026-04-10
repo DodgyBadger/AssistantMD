@@ -137,42 +137,14 @@ class FileOpsSafe(BaseTool):
         return """
 Read, write, append, list, search, and move files safely within the current vault or virtual mounts.
 
-DISCOVERY - Start narrow, expand as needed:
-- file_ops_safe(operation="list"): List top-level directories and .md files (START HERE)
-- file_ops_safe(operation="list", target="FolderName"): List .md files inside a folder (non-recursive)
-- file_ops_safe(operation="list", target="FolderName", recursive=True): Recursive listing (use sparingly - result cap is configurable)
-- file_ops_safe(operation="list", target="FolderName/*", include_all=True): Include non-md/hidden files
-- file_ops_safe(operation="list", target="notes/**/*.md", recursive=True): Explicit glob pattern for recursive match
+Full documentation:
+- `__virtual_docs__/tools/file_ops_safe.md`
 
-SEARCH - Find content within files:
-- file_ops_safe(operation="search", target="search-term"): Search for text in all markdown files
-- file_ops_safe(operation="search", target="TODO", scope="projects"): Limit search to a folder (folder path adds an implicit '*.md')
-- file_ops_safe(operation="search", target="regex-pattern"): Use regex patterns for advanced search
-- file_ops_safe(operation="search", target="TODO", scope="notes/*.md"): Scope using a glob
-- Search is case-insensitive and trims leading/trailing spaces in target
-- If a scoped search unexpectedly returns no matches, run list on that scope first to verify directory/glob shape
-- Results show: filename:line_number:matching_line_content
-- Search returns all matches (very large outputs may be auto-buffered by routing settings)
-
-⚠️ CONTEXT WINDOW WARNING: Avoid broad searches and recursive lists.
-Instead, explore the vault structure first, then target specific folders or file types.
-
-READING & WRITING:
-- file_ops_safe(operation="read", target="path/to/file.md"): Read file content
-- file_ops_safe(operation="read", target="path/to/image.png"): Attach image content for vision-capable models
-- file_ops_safe(operation="read", target="path/to/note.md"): If markdown embeds local images, returns ordered multimodal content
-- file_ops_safe(operation="write", target="path/to/file.md", content="text"): Create NEW file (fails if exists)
-- file_ops_safe(operation="append", target="path/to/file.md", content="text"): Append to EXISTING file (fails if not exists)
-- file_ops_safe(operation="move", target="old/path.md", destination="new/path.md"): Move files (fails if destination exists)
-- file_ops_safe(operation="mkdir", target="path/to/directory"): Create directories
-
-BEST PRACTICES:
-1. Start exploration with file_ops_safe(operation="list") to see vault structure
-2. Use 'search' to find content across files efficiently
-3. Navigate into relevant directories before doing recursive searches
-4. Read only files relevant to the user's request
-5. Write/append operations require .md files; read also supports image files
-6. All operations are SAFE - no overwriting or data loss
+Important notes:
+- start narrow with `operation="list"` or targeted `operation="search"`
+- virtual docs are available under `__virtual_docs__/...`
+- use `list`, `search`, and `read` on `__virtual_docs__/tools` to inspect tool docs
+- writes are non-destructive: no overwrite, delete, or truncate
 """
 
 
@@ -564,6 +536,7 @@ BEST PRACTICES:
         rg_cmd = [
             'rg',
             '--no-heading',
+            '--with-filename',
             '--line-number',
             '--color',
             'never',
@@ -598,6 +571,14 @@ BEST PRACTICES:
                         return "Scope escapes virtual mount boundaries"
                     search_root = abs_scope
                     glob_pattern = "*.md"
+                elif os.path.isfile(abs_scope):
+                    if (
+                        not abs_scope.startswith(root_abs + os.sep)
+                        and abs_scope != root_abs
+                    ):
+                        return "Scope escapes virtual mount boundaries"
+                    search_root = abs_scope
+                    glob_pattern = "*.md"
                 else:
                     # Treat rel as a glob relative to docs root
                     search_root = root_abs
@@ -608,6 +589,14 @@ BEST PRACTICES:
                 # If scope is a directory, search within it with markdown filter
                 abs_scope = os.path.realpath(os.path.join(vault_abs, scope))
                 if os.path.isdir(abs_scope):
+                    if (
+                        not abs_scope.startswith(vault_abs + os.sep)
+                        and abs_scope != vault_abs
+                    ):
+                        return "Scope escapes vault boundaries"
+                    search_root = abs_scope
+                    glob_pattern = "*.md"
+                elif os.path.isfile(abs_scope):
                     if (
                         not abs_scope.startswith(vault_abs + os.sep)
                         and abs_scope != vault_abs

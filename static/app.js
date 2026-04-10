@@ -527,7 +527,6 @@ function populateSelectors() {
                 tool.name === 'browser' ||
                 tool.name === 'code_execution_local' ||
                 tool.name === 'file_ops_safe' ||
-                tool.name === 'buffer_ops' ||
                 (preferredWebTool && tool.name === preferredWebTool)
             ) {
                 checkbox.checked = true;
@@ -543,14 +542,6 @@ function populateSelectors() {
             label.title = description;
         }
 
-        if (tool.name === 'buffer_ops' && state.metadata.settings?.auto_buffer_max_tokens > 0) {
-            checkbox.checked = true;
-            checkbox.disabled = true;
-            label.title = description
-                ? `${description} Auto-enabled because auto_buffer_max_tokens is set.`
-                : 'Auto-enabled because auto_buffer_max_tokens is set.';
-        }
-
         wrapper.appendChild(checkbox);
         wrapper.appendChild(label);
         return wrapper;
@@ -562,12 +553,10 @@ function populateSelectors() {
         'browser',
         'file_ops_safe',
         'file_ops_unsafe',
-        'buffer_ops',
         'documentation_access',
         'tavily_extract',
         'tavily_crawl',
-        'code_execution_local',
-        'code_execution'
+        'code_execution_local'
     ];
 
     toolOrder.forEach(name => {

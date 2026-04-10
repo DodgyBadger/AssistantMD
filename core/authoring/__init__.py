@@ -8,14 +8,10 @@ from typing import Any
 
 __all__ = [
     "compile_candidate_workflow",
-    "describe_authoring_contract",
 ]
 
 
 def __getattr__(name: str) -> Any:
     if name == "compile_candidate_workflow":
         return getattr(import_module("core.authoring.service"), name)
-    if name == "describe_authoring_contract":
-        return getattr(import_module("core.authoring.introspection"), name)
     raise AttributeError(f"module 'core.authoring' has no attribute {name!r}")
-

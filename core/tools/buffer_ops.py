@@ -93,24 +93,12 @@ class BufferOps(BaseTool):
         return """
 Inspect chat/session buffers by listing them, previewing content, reading ranges, and searching within them.
 
-DISCOVERY:
-- buffer_ops(operation="list")
-- buffer_ops(operation="info", target="buffer_name")
+This tool is not part of the normal default tool surface.
 
-READING:
-- buffer_ops(operation="peek", target="buffer_name", offset=0, max_chars=1000)
-- buffer_ops(operation="read", target="buffer_name", start_line=1, end_line=200)
-- buffer_ops(operation="read", target="buffer_name", offset=0, length=2000)
-
-SEARCH (regex):
-- buffer_ops(operation="search", target="buffer_name", query="TODO")
-- buffer_ops(operation="search", scope="buffer_name", query="\\berror\\b")
-
-NOTES:
-- All reads are capped to keep outputs small.
-- Use search + read ranges instead of trying to read full buffers.
-- For large buffers: start with info/preview, then search for anchors, then read nearby line ranges.
-- Target is the buffer name only (no 'variable:' prefix).
+Important notes:
+- use for read-only inspection of run-scoped buffers
+- target is the buffer name only
+- prefer search plus narrow reads over dumping full buffer contents
 """
 
     @staticmethod

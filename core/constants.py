@@ -77,7 +77,6 @@ SUPPORTED_READ_FILE_TYPES = {
 
 # Read-only internal API surface for authoring and metadata inspection tools.
 INTERNAL_API_ALLOWED_ENDPOINTS = {
-    "authoring_contract": "/api/authoring/contract",
     "metadata": "/api/metadata",
     "context_templates": "/api/context/templates",
 }
@@ -116,9 +115,12 @@ Vault context:
 - When a path is given with no extension, try `path + .md`. If not found, try as a folder. If still unresolved, inspect the directory structure.
 
 Tool calls (all tools):
-- On first use, call a tool with no arguments to get detailed usage instructions.
+- Tool docs live under `__virtual_docs__/tools/`. Use `file_ops_safe` to list, search, and read that path when you need tool guidance.
+- When a matching tool doc exists, do not guess arguments from memory. Read the doc first instead of causing avoidable tool churn (RTFM).
 - Always use named parameters (keyword arguments). Positional arguments and args arrays are not supported.
-- If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload. When that happens, switch to constrained-Python exploration rather than requesting the full content inline. Use `code_execution_local` when that tool is available.
+- If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload.
+- When that happens, do not ask for the full cached body inline.
+- To inspect or transform cached content, use `code_execution_local` and retrieve it with `retrieve(type="cache", ref=...)`.
 
 Grounding:
 - When the answer depends on current information, external sources, or the user's files, use available tools to verify it instead of relying on memory alone.

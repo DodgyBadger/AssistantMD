@@ -45,7 +45,6 @@ from core.settings.secrets_store import (
     secret_has_value,
 )
 from core.runtime.paths import get_system_root
-from core.authoring import describe_authoring_contract
 from core.context.store import purge_expired_cache_artifacts
 from .models import (
     VaultInfo,
@@ -85,11 +84,6 @@ logger = UnifiedLogger(tag="api-services")
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
-
-
-def get_authoring_contract_metadata() -> dict[str, object]:
-    """Return the full authoring contract metadata."""
-    return describe_authoring_contract()
 
 
 def purge_expired_cache() -> CachePurgeResponse:

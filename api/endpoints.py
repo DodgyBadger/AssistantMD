@@ -21,7 +21,6 @@ from core.llm.chat_executor import (
 )
 
 from .models import (
-    AuthoringContractResponse,
     WorkflowLoadErrorsResponse,
     CachePurgeResponse,
     VaultRescanRequest,
@@ -71,7 +70,6 @@ from .services import (
     delete_secret_entry,
     scan_import_folder,
     import_url_direct,
-    get_authoring_contract_metadata,
     get_workflow_load_errors,
     purge_expired_cache,
 )
@@ -606,15 +604,6 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         )
         response = ExecuteWorkflowResponse(**result)
         return response
-    except Exception as e:
-        return create_error_response(e)
-
-
-@router.get("/authoring/contract", response_model=AuthoringContractResponse, response_model_exclude_none=True)
-async def authoring_contract():
-    """Return the full authoring contract metadata."""
-    try:
-        return AuthoringContractResponse(**get_authoring_contract_metadata())
     except Exception as e:
         return create_error_response(e)
 

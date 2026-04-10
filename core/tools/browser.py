@@ -143,28 +143,13 @@ Policy notes:
         return """
 Open a web page in a headless browser and extract content from it, especially when simpler web tools are not enough.
 
-Prefer this order:
-- Search tools when you do not know the URL yet
-- `tavily_extract` first when you know the URL and only need page content
-- `browser` when Tavily fails, returns thin content, or the page is clearly JS-heavy
+Full documentation:
+- `__virtual_docs__/tools/browser.md`
 
-Operate conservatively:
-- Start with one exact URL
-- On the first call, do not guess `wait_for_selector` or `extract_selector` unless the user provided one
-- Avoid broad browsing or exploratory navigation unless the user explicitly wants it
-- Use `extract_selector` only after a first pass tells you the page structure
-- Use `wait_for_selector` only when the page clearly loads content asynchronously
-- Set `include_links=True` only when links are important to the task
-
-If a call fails:
-- If the tool says the URL starts a download, switch to a different page URL; selector retries will not help
-- If the tool says your selector was not found, retry without selectors or with one of the suggested candidate roots
-- Prefer one clean retry over repeated selector guesses
-
-Examples:
-- browser(url="https://example.com/docs")
-- browser(url="https://example.com/app", wait_for_selector="main")
-- browser(url="https://example.com/help", extract_selector="article", include_links=True)
+Important notes:
+- prefer `tavily_extract` first when the URL is already known
+- use one exact URL per call
+- avoid broad exploratory browsing unless explicitly needed
 """ + WEB_TOOL_SECURITY_NOTICE
 
     @classmethod

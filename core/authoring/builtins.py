@@ -495,10 +495,10 @@ def _call_tool_contract() -> dict[str, Any]:
                 "code": (
                     'await call_tool('
                     'name="internal_api", '
-                    'arguments={"endpoint": "authoring_contract"}'
+                    'arguments={"endpoint": "metadata"}'
                     ")"
                 ),
-                "description": "Read structured internal metadata through an allowlisted internal tool.",
+                "description": "Read structured system metadata through an allowlisted internal tool.",
             },
         ],
     }

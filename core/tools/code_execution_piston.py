@@ -208,7 +208,10 @@ class CodeExecutionPiston(BaseTool):
         return """
 Run code in a remote Piston sandbox when you need broader language support than the local constrained Python tool provides.
 
-Supports many languages, pass language or language@version (e.g., python@3.10.0).
-Optional stdin is supported.
-Example: execute_code(code="print('hi')", language="python", stdin="").
+This tool is not part of the normal default tool surface.
+
+Important notes:
+- use named arguments
+- pass `language` or `language@version`
+- optional `stdin` is supported
 """

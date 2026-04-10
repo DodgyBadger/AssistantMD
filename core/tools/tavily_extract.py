@@ -95,16 +95,10 @@ class TavilyExtract(BaseTool):
         return """
 Extract full content from specific web pages, articles, and documentation URLs.
 
-- Extracting documentation from specific pages
-- Getting full article content for analysis
-- Pulling content from multiple related URLs
-- Converting web pages to clean markdown for processing
+Full documentation:
+- `__virtual_docs__/tools/tavily_extract.md`
 
-OPERATE CONSERVATIVELY:
-- Start with a single URL and the 'basic' extract depth; review the output before requesting more.
-- If you need additional sections, run a second extract on the next specific URL or switch to 'advanced' only after confirming scope.
-- Avoid batching many URLs at once—break large jobs into multiple extract calls to prevent oversized responses.
-
-Always specify the exact URL(s) you want to extract content from.
-Example: tavily_extract(urls="https://example.com/docs", extract_depth="basic").
+Important notes:
+- prefer this before `browser` when the URL is known
+- start with one URL and `extract_depth="basic"`
 """ + WEB_TOOL_SECURITY_NOTICE

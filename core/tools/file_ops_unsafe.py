@@ -92,51 +92,13 @@ class FileOpsUnsafe(BaseTool):
         return """
 Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed.
 
-⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
+Full documentation:
+- `__virtual_docs__/tools/file_ops_unsafe.md`
 
-CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).
-Before performing ANY file operations, you MUST:
-1. Check if file_ops_safe is also enabled
-2. If NOT enabled, immediately notify the user: "I need file_ops_safe enabled to read and verify files. Please add it.
-3. Do NOT proceed with any operations until file_ops_safe is available
-
-**DESTRUCTIVE OPERATIONS - USE WITH CAUTION:**
-
-EDIT LINE (modify specific line in file):
-- file_ops_unsafe(operation="edit_line", path="path/to/file.md", line_number=5, old_content="expected line", new_content="new line")
-- Line numbers are 1-indexed
-- old_content must match current line EXACTLY or operation fails
-- new_content can contain \\n for multi-line replacements
-- Safety: Fails if old_content doesn't match
-
-DELETE FILE (permanently remove file):
-- file_ops_unsafe(operation="delete", path="path/to/file.md", confirm_path="path/to/file.md")
-- Requires confirm_path to match path exactly
-- Safety: Requires explicit path confirmation
-
-REPLACE TEXT (search and replace in file):
-- file_ops_unsafe(operation="replace_text", path="path/to/file.md", old_content="find this", new_content="replace with", count=1)
-- Replaces up to 'count' occurrences (default 1)
-- Safety: Limited replacement count prevents mass changes
-
-MOVE WITH OVERWRITE (move file, overwriting destination):
-- file_ops_unsafe(operation="move_overwrite", path="source.md", destination="dest.md")
-- Will overwrite destination if it exists
-- Safety: Operation name clearly indicates overwrite risk
-
-TRUNCATE (clear all file contents):
-- file_ops_unsafe(operation="truncate", path="path/to/file.md", confirm_path="path/to/file.md")
-- Empties file completely
-- Requires confirm_path to match path exactly
-- Safety: Requires explicit path confirmation
-
-⚠️ CRITICAL SAFETY RULES:
-1. All files must use .md extension
-2. All operations stay within vault boundaries
-3. Delete and truncate require path confirmation
-4. Edit operations require exact content match
-5. NO UNDO - changes are permanent
-6. Double-check paths before destructive operations
+Important notes:
+- read and verify with `file_ops_safe` first
+- use only for explicit destructive changes
+- all arguments must be named
 """
 
     @classmethod

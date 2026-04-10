@@ -265,12 +265,6 @@ tools:
     description: "Read, write, append, list, search"
     requires_secrets: []
     user_editable: false
-  buffer_ops:
-    module: core.tools.buffer_ops
-    description: "Read-only buffer inspection (compatibility tool for buffer-era flows)"
-    requires_secrets: []
-    user_editable: false
-    chat_visible: false
   file_ops_unsafe:
     module: core.tools.file_ops_unsafe
     description: "Edit, delete, move/overwrite (use with caution)"
@@ -291,11 +285,6 @@ tools:
   browser:
     module: core.tools.browser
     description: "Browser-based page extraction using Playwright"
-    requires_secrets: []
-    user_editable: false
-  code_execution:
-    module: core.tools.code_execution_piston
-    description: "Multi-language code execution via Piston API"
     requires_secrets: []
     user_editable: false
   workflow_run:

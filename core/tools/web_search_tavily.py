@@ -81,5 +81,6 @@ class WebSearchTavily(BaseTool):
         return """
 Search the web with Tavily when you want higher-quality research-oriented results.
 
-Example: web_search_tavily(query="latest fastapi release").
+Full documentation:
+- `__virtual_docs__/tools/web_search_tavily.md`
 """ + WEB_TOOL_SECURITY_NOTICE

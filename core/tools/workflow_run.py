@@ -125,23 +125,12 @@ class WorkflowRun(BaseTool):
         return """
 List workflows in the current vault and run, test, enable, or disable them.
 
-Discovery:
-- workflow_run(operation="list")
+Full documentation:
+- `__virtual_docs__/tools/workflow_run.md`
 
-Validation:
-- workflow_run(operation="test", workflow_name="weekly-planner")
-
-Execution:
-- workflow_run(operation="run", workflow_name="weekly-planner")
-- workflow_run(operation="run", workflow_name="weekly-planner", step_name="Monday - due")
-
-Lifecycle:
-- workflow_run(operation="enable_workflow", workflow_name="weekly-planner")
-- workflow_run(operation="disable_workflow", workflow_name="weekly-planner")
-
-Notes:
-- Vault is inferred from current chat/workflow context.
-- Use workflow names relative to AssistantMD/Workflows in the current vault.
+Important notes:
+- start with `operation="list"` when you do not know the workflow name
+- use names relative to `AssistantMD/Workflows`
 """
 
     @staticmethod

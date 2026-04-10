@@ -67,5 +67,6 @@ class WebSearchDuckDuckGo(BaseTool):
         return """
 Search the web with DuckDuckGo for lightweight general-purpose results.
 
-Example: web_search_duckduckgo(query="latest postgres release notes").
+Full documentation:
+- `__virtual_docs__/tools/web_search_duckduckgo.md`
 """ + WEB_TOOL_SECURITY_NOTICE

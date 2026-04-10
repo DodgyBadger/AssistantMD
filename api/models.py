@@ -309,18 +309,6 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict] = Field(None, description="Additional error details")
 
 
-class AuthoringContractResponse(BaseModel):
-    """Structured authoring contract inspection payload."""
-
-    overview: Optional[str] = Field(None, description="High-level description of the constrained-Python runtime surface")
-    runtime_environment: Optional[str] = Field(None, description="Runtime capabilities, object model, and host-boundary behavior")
-    rules: Optional[str] = Field(None, description="Compiler-facing runtime rules and constraints")
-    capabilities: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Inspectable capability metadata for the constrained-Python runtime",
-    )
-
-
 class WorkflowLoadErrorsResponse(BaseModel):
     """Structured workflow load errors for authoring and repair loops."""
 

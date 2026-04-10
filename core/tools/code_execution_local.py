@@ -5,14 +5,12 @@ Python tasks.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.tools import Tool
 
-from core.authoring import describe_authoring_contract
 from core.authoring.runtime import (
     AuthoringMontyExecutionError,
     WorkflowAuthoringHost,
@@ -73,15 +71,7 @@ class CodeExecutionLocal(BaseTool):
                         "vault_name and session_id available."
                     )
                 if not code.strip():
-                    return json.dumps(
-                        {
-                            "usage": cls.get_instructions().strip(),
-                            "authoring_contract": describe_authoring_contract(),
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                        sort_keys=True,
-                    )
+                    return cls.get_instructions().strip()
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
                 allow_file_scope = "file_ops_safe" in enabled_tools
@@ -131,98 +121,15 @@ class CodeExecutionLocal(BaseTool):
         return """
 Run constrained local Python against the current chat session, cache scope, and optional vault file scope.
 
-Use this for:
-- small calculations and transformations
-- iterative inspection of cached artifacts by ref
-- direct vault file exploration when chat also has `file_ops_safe`
-- tightly scoped local summarization or extraction loops
+Use this for small Python tasks tied to chat history, cache artifacts, or vault files.
 
-This tool runs constrained local Python with a small host API and narrow
-current-chat execution context.
+Full documentation:
+- `__virtual_docs__/tools/code_execution_local.md`
 
-If you call `code_execution_local()` with no arguments, it returns these usage
-instructions plus the current structured authoring contract metadata.
-
-What it supports well right now:
-- `retrieve(type="cache", ref=...)`
-- `retrieve(type="file", ref=...)` when `file_ops_safe` is enabled for the chat run
-- `retrieve(type="run", ref="session", options=...)`
-- `output(type="cache", ref=..., data=...)`
-- `output(type="file", ref=..., data=...)` when `file_ops_safe` is enabled for the chat run
-- `generate(...)`
-- `assemble_context(...)`
-- ordinary Python logic around those calls
-
-For broader language support or a remote sandbox, use the Piston-backed
-`code_execution` tool.
-
-Discovery:
-- `code_execution_local()`
-
-Execution:
-- `code_execution_local(code="...")`
-
-Optional arguments:
-- writable_cache_refs=["scratch/*"] to persist derived cache artifacts
-- readable_file_paths=[...] or writable_file_paths=[...] to narrow file scope explicitly
-
-Patterns:
-- Simple calculation:
-  code_execution_local(
-    code=\"\"\"
-total = sum([17, 23, 41])
-str(total)
-\"\"\",
-  )
-
-- Retrieve and inspect a cached artifact:
-  code_execution_local(
-    code=\"\"\"
-artifact = await retrieve(type="cache", ref="tool/example/ref")
-artifact.items[0].content[:2000]
-\"\"\",
-    readable_cache_refs=["tool/example/ref"],
-  )
-
-- Summarize a cached artifact:
-  code_execution_local(
-    code=\"\"\"
-artifact = await retrieve(type="cache", ref="tool/example/ref")
-summary = await generate(
-    prompt=artifact.items[0].content[:4000],
-    instructions="Summarize the main points briefly.",
-    cache="daily",
-)
-summary.output
-\"\"\",
-    readable_cache_refs=["tool/example/ref"],
-  )
-
-- Retrieve recent chat history and assemble a validated downstream context:
-  code_execution_local(
-    code=\"\"\"
-history = await retrieve(type="run", ref="session", options={"limit": 3})
-assembled = await assemble_context(
-    history=history.items,
-    instructions=["Keep the response concise."],
-)
-[(message.role, message.content) for message in assembled.messages]
-\"\"\",
-  )
-
-- Explore a vault file directly when `file_ops_safe` is enabled:
-  code_execution_local(
-    code=\"\"\"
-doc = await retrieve(type="file", ref="notes/project.md")
-doc.items[0].content[:2000]
-\"\"\",
-  )
-
-Notes:
-- This tool can always read the current chat session history.
-- It can read/write explicitly granted cache refs.
-- If chat has `file_ops_safe`, this tool also gets vault file read/write access by default. Use `readable_file_paths` or `writable_file_paths` to narrow that scope when helpful.
-- Prefer returning a compact final value rather than printing large text.
+Important notes:
+- pass code with `code="..."`
+- always use named arguments
+- this tool exposes constrained helpers such as `retrieve`, `output`, `generate`, `assemble_context`, `parse_markdown`, and `finish`
 """
 
     @staticmethod
