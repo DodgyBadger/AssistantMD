@@ -56,6 +56,15 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
                 contract=_assemble_context_contract(),
             ),
             _host_dispatch_capability(
+                name="parse_markdown",
+                handler_name="handle_parse_markdown",
+                doc=(
+                    "Parse markdown content into frontmatter, body, headings, sections, "
+                    "code blocks, and image references for structured exploration."
+                ),
+                contract=_parse_markdown_contract(),
+            ),
+            _host_dispatch_capability(
                 name="import_content",
                 handler_name="handle_import_content",
                 doc="Import external content through the host ingestion pipeline.",
@@ -490,6 +499,92 @@ def _call_tool_contract() -> dict[str, Any]:
                     ")"
                 ),
                 "description": "Read structured internal metadata through an allowlisted internal tool.",
+            },
+        ],
+    }
+
+
+def _parse_markdown_contract() -> dict[str, Any]:
+    return {
+        "signature": "parse_markdown(*, value: RetrievedItem | str)",
+        "summary": (
+            "Parse markdown content into a stable structured object. Accepts either a "
+            "RetrievedItem from retrieve(type=\"file\", ...) or a raw markdown string."
+        ),
+        "arguments": {
+            "value": {
+                "type": "RetrievedItem | string",
+                "required": True,
+                "description": (
+                    "Markdown source to parse. When a RetrievedItem is provided, its content "
+                    "field is parsed directly."
+                ),
+            },
+        },
+        "return_shape": {
+            "frontmatter": "Parsed flat frontmatter key/value mapping.",
+            "body": "Document body with frontmatter removed.",
+            "headings": [
+                {
+                    "level": "Heading depth such as 1 for # and 2 for ##.",
+                    "text": "Heading text.",
+                    "line_start": "1-based line number in the body where the heading starts.",
+                }
+            ],
+            "sections": [
+                {
+                    "heading": "Heading text for the section.",
+                    "level": "Heading depth for the section heading.",
+                    "content": "Body content that belongs to the section.",
+                    "line_start": "1-based line number in the body where the section heading starts.",
+                }
+            ],
+            "code_blocks": [
+                {
+                    "language": "Fence language when present, otherwise null.",
+                    "content": "Fenced code block body.",
+                    "line_start": "1-based line number where the code block starts when available.",
+                }
+            ],
+            "images": [
+                {
+                    "src": "Image source path or URL from markdown.",
+                    "alt": "Alt text from the markdown image.",
+                    "title": "Optional title attribute when present.",
+                    "line_start": "1-based line number where the image was discovered when available.",
+                }
+            ],
+        },
+        "notes": [
+            (
+                "Use parse_markdown(...) for structural discovery and common extraction. "
+                "Use normal Python to select or combine the parsed pieces you care about."
+            )
+        ],
+        "examples": [
+            {
+                "code": (
+                    'note = (await retrieve(type="file", ref="notes/reference.md")).items[0]\n'
+                    'parsed = await parse_markdown(value=note)\n'
+                    'titles = [heading.text for heading in parsed.headings]'
+                ),
+                "description": "Inspect the top-level structure of a retrieved markdown file.",
+            },
+            {
+                "code": (
+                    'skill = (await retrieve(type="file", ref="Skills/example.md")).items[0]\n'
+                    'parsed = await parse_markdown(value=skill)\n'
+                    'name = parsed.frontmatter.get("name")\n'
+                    'description = parsed.frontmatter.get("description")'
+                ),
+                "description": "Extract frontmatter fields from a retrieved markdown file.",
+            },
+            {
+                "code": (
+                    'parsed = await parse_markdown(value=markdown_text)\n'
+                    'target = next((section for section in parsed.sections if section.heading == "AI In Fiction"), None)'
+                ),
+                "description": "Parse raw markdown text and select one section in ordinary Python.",
             },
         ],
     }

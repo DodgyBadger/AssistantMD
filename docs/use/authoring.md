@@ -15,6 +15,7 @@ The current built-in runtime capabilities are:
 - `generate(...)` to perform one explicit model call, optionally with an explicit tool subset
 - `output(...)` to write selected results out
 - `call_tool(...)` to invoke one declared host tool explicitly
+- `parse_markdown(...)` to deconstruct markdown into frontmatter, headings, sections, code blocks, and images
 - `assemble_context(...)` to build validated downstream chat context from structured history and instructions
 
 Capability results are returned as Python objects with attribute access, for example:
@@ -41,6 +42,7 @@ Current built-ins and conventions:
 - `generate(prompt=..., inputs=..., instructions=..., model=..., tools=..., cache=..., options=...)`
 - `output(type=..., ref=..., data=..., options=...)`
 - `call_tool(name=..., arguments=..., options=...)`
+- `parse_markdown(value=...)`
 - `assemble_context(history=..., context_messages=..., instructions=..., latest_user_message=...)`
 
 Capability return values use attribute access:
@@ -106,6 +108,7 @@ The security boundary is enforced by the host:
 - Treat `type`, `ref`, and `options` as the stable contract shape for resource-oriented capabilities.
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
 - Use `generate(..., inputs=...)` when retrieved file artifacts should stay file-aware, including images and markdown with embedded images.
+- Use `parse_markdown(...)` for structural discovery and common markdown extraction before writing custom Python selection logic.
 - Prefer attribute access on returned objects, for example `source.items[0].content` and `draft.output`.
 - Use `generate(..., cache=...)` for repeated generation memoization.
 - Use `generate(..., tools=[...])` only when you want explicit bounded tool use inside one generation call.
@@ -168,5 +171,18 @@ summary = await generate(
     prompt="Summarize this note, taking both the text and embedded images into account.",
     inputs=note.items,
     instructions="Be concise and factual.",
+)
+```
+
+Markdown exploration can stay structured:
+
+```python
+doc = (await retrieve(type="file", ref="notes/reference.md")).items[0]
+parsed = await parse_markdown(value=doc)
+
+section_titles = [heading.text for heading in parsed.headings]
+target = next(
+    (section for section in parsed.sections if section.heading == "AI In Fiction"),
+    None,
 )
 ```

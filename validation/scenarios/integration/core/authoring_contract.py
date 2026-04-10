@@ -21,6 +21,8 @@ class AuthoringContractScenario(BaseScenario):
 
         self.create_file(vault, "notes/seed.md", "SEED_CONTENT")
         self.create_file(vault, "notes/extra.md", "EXTRA_CONTENT")
+        self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
+        self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
 
         self.create_file(
             vault,
@@ -144,6 +146,22 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="authoring_parse_markdown_started",
+            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
+        )
+        self.assert_event_contains(
+            events,
+            name="authoring_parse_markdown_completed",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "heading_count": 2,
+                "section_count": 2,
+                "code_block_count": 1,
+                "image_count": 1,
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="authoring_output_written",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
@@ -180,6 +198,14 @@ class AuthoringContractScenario(BaseScenario):
                 generated_output.stat().st_size > 0,
                 "Expected generate output file to be non-empty",
             )
+        parsed_output = vault / "outputs" / "parse-markdown.md"
+        self.soft_assert(parsed_output.exists(), "Expected markdown parse output file")
+        if parsed_output.exists():
+            parsed_content = parsed_output.read_text(encoding="utf-8")
+            self.soft_assert("Skill Example" in parsed_content, "Expected parsed frontmatter name in output")
+            self.soft_assert("AI In Fiction" in parsed_content, "Expected parsed section heading in output")
+            self.soft_assert("python" in parsed_content, "Expected parsed code block language in output")
+            self.soft_assert("../images/test_image.jpg" in parsed_content, "Expected parsed image ref in output")
 
         # Daily cache semantics should match existing cache behavior.
         self.set_date("2026-04-06")
@@ -349,10 +375,10 @@ AUTHORING_CONTRACT_SUCCESS_WORKFLOW = """---
 workflow_engine: monty
 enabled: false
 description: Deterministic authoring contract success workflow
-authoring.capabilities: [retrieve, generate, output, call_tool]
-authoring.retrieve.file: [notes/*.md]
+authoring.capabilities: [retrieve, generate, output, call_tool, parse_markdown]
+authoring.retrieve.file: [notes/*.md, images/*]
 authoring.retrieve.cache: [scratch/*]
-authoring.output.file: [outputs/*.md]
+authoring.output.file: [outputs/*.md, outputs/*.txt]
 authoring.output.cache: [scratch/*]
 authoring.tools: [file_ops_safe]
 ---
@@ -380,6 +406,8 @@ listing = await call_tool(
     name="file_ops_safe",
     arguments={"operation": "list", "target": "notes"},
 )
+structured = await retrieve(type="file", ref="notes/structured.md")
+parsed = await parse_markdown(value=structured.items[0])
 
 draft = await generate(
     prompt=(
@@ -403,6 +431,17 @@ await output(
     type="file",
     ref="outputs/generate-success.md",
     data=draft.output,
+    options={"mode": "replace"},
+)
+await output(
+    type="file",
+    ref="outputs/parse-markdown.md",
+    data=(
+        f"name={parsed.frontmatter.get('name')}\\n"
+        f"heading={parsed.sections[1].heading}\\n"
+        f"code={parsed.code_blocks[0].language}\\n"
+        f"image={parsed.images[0].src}"
+    ),
     options={"mode": "replace"},
 )
 ```
@@ -546,4 +585,23 @@ authoring.capabilities: [call_tool]
 ```python
 await call_tool(name="file_ops_safe", arguments={"operation": "list", "target": "notes"})
 ```
+"""
+
+
+STRUCTURED_NOTE = """---
+name: Skill Example
+description: Structured markdown sample
+---
+
+# Overview
+
+General context.
+
+## AI In Fiction
+
+```python
+print("hello")
+```
+
+![Example image](../images/test_image.jpg)
 """

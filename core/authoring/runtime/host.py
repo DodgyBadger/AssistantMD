@@ -32,6 +32,7 @@ from core.utils.file_state import WorkflowFileStateManager
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.authoring.shared.execution_prep import build_step_prompt, resolve_step_model_execution
 from core.authoring.shared.input_resolution import build_input_request, resolve_input_request
+from core.authoring.shared.markdown_parse import parse_markdown_content
 from core.authoring.shared.output_resolution import (
     build_output_request,
     normalize_write_mode,
@@ -51,8 +52,13 @@ from core.authoring.contracts import (
     ContextMessage,
     FinishResult,
     GenerationResult,
+    MarkdownCodeBlock,
+    MarkdownHeading,
+    MarkdownImage,
+    MarkdownSection,
     OutputItem,
     OutputResult,
+    ParsedMarkdown,
     RetrieveResult,
     RetrievedItem,
 )
@@ -154,7 +160,14 @@ class WorkflowAuthoringHost(AuthoringHost):
 
     def get_monty_dataclasses(self) -> tuple[type, ...]:
         """Return dataclass types Monty should expose for reserved globals."""
-        return (MontyDateTokens,)
+        return (
+            MontyDateTokens,
+            MarkdownHeading,
+            MarkdownSection,
+            MarkdownCodeBlock,
+            MarkdownImage,
+            ParsedMarkdown,
+        )
 
     async def handle_retrieve(
         self,
@@ -505,6 +518,51 @@ class WorkflowAuthoringHost(AuthoringHost):
             model=resolved_model_value or "default",
             output=text,
         )
+
+    async def handle_parse_markdown(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> ParsedMarkdown:
+        source = _parse_markdown_source(call)
+        logger.info(
+            "authoring_parse_markdown_started",
+            data={
+                "workflow_id": context.workflow_id,
+                "source_type": type(source).__name__,
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_parse_markdown_started",
+            data={
+                "workflow_id": context.workflow_id,
+                "source_type": type(source).__name__,
+            },
+        )
+        parsed = parse_markdown_content(source)
+        logger.info(
+            "authoring_parse_markdown_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "heading_count": len(parsed.headings),
+                "section_count": len(parsed.sections),
+                "code_block_count": len(parsed.code_blocks),
+                "image_count": len(parsed.images),
+                "frontmatter_keys": sorted(parsed.frontmatter),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_parse_markdown_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "heading_count": len(parsed.headings),
+                "section_count": len(parsed.sections),
+                "code_block_count": len(parsed.code_blocks),
+                "image_count": len(parsed.images),
+                "frontmatter_keys": sorted(parsed.frontmatter),
+            },
+        )
+        return parsed
 
     async def handle_call_tool(
         self,
@@ -1088,6 +1146,20 @@ def _parse_finish_call(call: AuthoringCapabilityCall) -> tuple[str, str]:
         raise ValueError("finish status must be one of: completed, skipped")
     reason = str(call.kwargs.get("reason") or "").strip()
     return status, reason
+
+
+def _parse_markdown_source(call: AuthoringCapabilityCall) -> str:
+    if call.args:
+        raise ValueError("parse_markdown only supports keyword arguments")
+    unknown = sorted(set(call.kwargs) - {"value"})
+    if unknown:
+        raise ValueError(f"Unsupported parse_markdown arguments: {', '.join(unknown)}")
+    value = call.kwargs.get("value")
+    if isinstance(value, RetrievedItem):
+        return value.content
+    if isinstance(value, str):
+        return value
+    raise ValueError("parse_markdown value must be a RetrievedItem or string")
 
 
 def _parse_assemble_context_call(

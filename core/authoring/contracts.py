@@ -9,7 +9,16 @@ from typing import Any, Protocol, runtime_checkable
 
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
-    {"retrieve", "output", "generate", "call_tool", "assemble_context", "import_content", "finish"}
+    {
+        "retrieve",
+        "output",
+        "generate",
+        "call_tool",
+        "assemble_context",
+        "parse_markdown",
+        "import_content",
+        "finish",
+    }
 )
 
 
@@ -197,6 +206,56 @@ class AssembleContextResult:
 
 
 @dataclass(frozen=True)
+class MarkdownHeading:
+    """One markdown heading discovered in parsed content."""
+
+    level: int
+    text: str
+    line_start: int
+
+
+@dataclass(frozen=True)
+class MarkdownSection:
+    """One heading-delimited markdown section."""
+
+    heading: str
+    level: int
+    content: str
+    line_start: int
+
+
+@dataclass(frozen=True)
+class MarkdownCodeBlock:
+    """One fenced code block discovered in parsed content."""
+
+    language: str | None
+    content: str
+    line_start: int | None = None
+
+
+@dataclass(frozen=True)
+class MarkdownImage:
+    """One markdown image reference discovered in parsed content."""
+
+    src: str
+    alt: str
+    title: str | None = None
+    line_start: int | None = None
+
+
+@dataclass(frozen=True)
+class ParsedMarkdown:
+    """Structured markdown decomposition for authored Python exploration."""
+
+    frontmatter: dict[str, Any] = field(default_factory=dict)
+    body: str = ""
+    headings: tuple[MarkdownHeading, ...] = ()
+    sections: tuple[MarkdownSection, ...] = ()
+    code_blocks: tuple[MarkdownCodeBlock, ...] = ()
+    images: tuple[MarkdownImage, ...] = ()
+
+
+@dataclass(frozen=True)
 class FinishResult:
     """Envelope for an intentional authored termination."""
 
@@ -237,6 +296,12 @@ class AuthoringHost(Protocol):
     ) -> Any: ...
 
     async def handle_assemble_context(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> Any: ...
+
+    async def handle_parse_markdown(
         self,
         call: AuthoringCapabilityCall,
         context: AuthoringExecutionContext,
