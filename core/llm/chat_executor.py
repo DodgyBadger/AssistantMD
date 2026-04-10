@@ -126,6 +126,9 @@ def _log_chat_lifecycle(
         payload["prompt_length"] = prompt_length
     if attached_image_count is not None:
         payload["attached_image_count"] = attached_image_count
+    rss_bytes = _get_process_rss_bytes()
+    if rss_bytes is not None:
+        payload["memory_rss_bytes"] = rss_bytes
     if extra:
         payload.update(extra)
     logger.info(message, data=payload)
@@ -149,6 +152,9 @@ def _log_chat_failure(
     payload = _serialize_exception(exc)
     if extra:
         payload.update(extra)
+    rss_bytes = _get_process_rss_bytes()
+    if rss_bytes is not None:
+        payload["memory_rss_bytes"] = rss_bytes
     logger.error(
         message,
         data={
@@ -164,6 +170,21 @@ def _log_chat_failure(
             **payload,
         },
     )
+
+
+def _get_process_rss_bytes() -> int | None:
+    """Return current process RSS in bytes when available."""
+    try:
+        with open("/proc/self/status", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.startswith("VmRSS:"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    return int(parts[1]) * 1024
+    except OSError:
+        return None
+    return None
 
 
 def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
@@ -503,6 +524,35 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
 
     Saves to {vault_path}/AssistantMD/Chat_Sessions/{session_id}.md
     """
+    history_file = _resolve_history_file(vault_path, session_id)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(history_file, "a", encoding="utf-8") as handle:
+        handle.write(f"*{timestamp}*\n\n")
+        handle.write(f"**User:**\n {prompt}\n\n")
+        handle.write(f"**Assistant:**\n {response}\n\n")
+    return str(history_file)
+
+
+def persist_chat_user_message(vault_path: str, session_id: str, prompt: str) -> str:
+    """Persist the user prompt immediately so abrupt failures still leave a transcript trail."""
+    history_file = _resolve_history_file(vault_path, session_id)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(history_file, "a", encoding="utf-8") as handle:
+        handle.write(f"*{timestamp}*\n\n")
+        handle.write(f"**User:**\n {prompt}\n\n")
+    return str(history_file)
+
+
+def append_chat_assistant_response(vault_path: str, session_id: str, response: str) -> str:
+    """Append the assistant response to an existing chat transcript."""
+    history_file = _resolve_history_file(vault_path, session_id)
+    with open(history_file, "a", encoding="utf-8") as handle:
+        handle.write(f"**Assistant:**\n {response}\n\n")
+    return str(history_file)
+
+
+def _resolve_history_file(vault_path: str, session_id: str) -> Path:
+    """Return the chat history file path, creating parent directories and header when needed."""
     sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -512,20 +562,11 @@ def save_chat_history(vault_path: str, session_id: str, prompt: str, response: s
     resolved_sessions = sessions_dir.resolve()
     if resolved_sessions not in resolved_history.parents:
         raise ValueError("Resolved chat history path is outside the chat sessions directory.")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Create file with header if it doesn't exist
     if not history_file.exists():
-        with open(history_file, 'w') as f:
-            f.write(f"Chat Session: {session_id}\n\n")
-
-    # Append exchange
-    with open(history_file, 'a') as f:
-        f.write(f"*{timestamp}*\n\n")
-        f.write(f"**User:**\n {prompt}\n\n")
-        f.write(f"**Assistant:**\n {response}\n\n")
-
-    return str(history_file)
+        with open(history_file, "w", encoding="utf-8") as handle:
+            handle.write(f"Chat Session: {session_id}\n\n")
+    return history_file
 
 
 def _resolve_image_prompt(
@@ -782,6 +823,18 @@ async def execute_chat_prompt(
         phase=phase,
         prompt_length=len(prompt),
     )
+    history_file = persist_chat_user_message(vault_path, session_id, prompt)
+    _log_chat_lifecycle(
+        "Chat user message persisted",
+        vault_name=vault_name,
+        session_id=session_id,
+        model=model,
+        tools=tools,
+        streaming=False,
+        phase="session_persist_start",
+        prompt_length=len(prompt),
+        extra={"history_file": history_file},
+    )
     try:
         prepared = await _prepare_chat_execution(
             vault_name=vault_name,
@@ -806,6 +859,10 @@ async def execute_chat_prompt(
             phase=phase,
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
+            extra={
+                "history_message_count": len(prepared.message_history or []),
+                "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
+            },
         )
 
         phase = "agent_run"
@@ -827,12 +884,7 @@ async def execute_chat_prompt(
 
         phase = "session_persist"
         session_manager.add_messages(session_id, vault_name, result.new_messages())
-        history_file = save_chat_history(
-            vault_path,
-            session_id,
-            prepared.prompt_for_history,
-            result.output,
-        )
+        history_file = append_chat_assistant_response(vault_path, session_id, result.output)
         _log_chat_lifecycle(
             "Chat execution completed",
             vault_name=vault_name,
@@ -846,6 +898,7 @@ async def execute_chat_prompt(
             extra={
                 "history_file": history_file,
                 "message_count": len(result.all_messages()),
+                "response_length": len(result.output or ""),
             },
         )
 
@@ -903,6 +956,10 @@ async def _stream_prepared_chat_prompt(
         phase="agent_stream",
         prompt_length=len(prepared.prompt_for_history),
         attached_image_count=prepared.attached_image_count,
+        extra={
+            "history_message_count": len(prepared.message_history or []),
+            "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
+        },
     )
 
     try:
@@ -967,6 +1024,17 @@ async def _stream_prepared_chat_prompt(
                     "tool_name": tool_name,
                     "arguments": _normalize_tool_args(tool_args)
                 }
+                logger.info(
+                    "Streaming tool call started",
+                    data={
+                        "vault_name": vault_name,
+                        "session_id": session_id,
+                        "tool_call_id": tool_id,
+                        "tool_name": tool_name,
+                        "arguments_length": len(tool_args or ""),
+                        "memory_rss_bytes": _get_process_rss_bytes(),
+                    },
+                )
                 yield f"data: {json.dumps(metadata_chunk)}\n\n"
 
             elif isinstance(event, FunctionToolResultEvent):
@@ -991,6 +1059,19 @@ async def _stream_prepared_chat_prompt(
                     "tool_name": tool_name,
                     "result": _normalize_tool_result(result_content)
                 }
+                result_text = _tool_result_as_text(result_content)
+                logger.info(
+                    "Streaming tool call finished",
+                    data={
+                        "vault_name": vault_name,
+                        "session_id": session_id,
+                        "tool_call_id": tool_id,
+                        "tool_name": tool_name,
+                        "result_length": len(result_text),
+                        "result_token_estimate": estimate_token_count(result_text) if result_text else 0,
+                        "memory_rss_bytes": _get_process_rss_bytes(),
+                    },
+                )
                 yield f"data: {json.dumps(metadata_chunk)}\n\n"
 
             elif isinstance(event, AgentRunResultEvent):
@@ -1053,12 +1134,7 @@ async def _stream_prepared_chat_prompt(
 
     # Save chat history to markdown file
     if final_result:
-        history_file = save_chat_history(
-            vault_path,
-            session_id,
-            prepared.prompt_for_history,
-            full_response,
-        )
+        history_file = append_chat_assistant_response(vault_path, session_id, full_response)
         _log_chat_lifecycle(
             "Streaming chat execution completed",
             vault_name=vault_name,
@@ -1072,6 +1148,7 @@ async def _stream_prepared_chat_prompt(
             extra={
                 "history_file": history_file,
                 "tool_activity": tool_activity,
+                "response_length": len(full_response),
             },
         )
 
@@ -1089,6 +1166,18 @@ async def execute_chat_prompt_stream(
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Preflight streaming chat execution and yield SSE chunks."""
+    history_file = persist_chat_user_message(vault_path, session_id, prompt)
+    _log_chat_lifecycle(
+        "Streaming chat user message persisted",
+        vault_name=vault_name,
+        session_id=session_id,
+        model=model,
+        tools=tools,
+        streaming=True,
+        phase="session_persist_start",
+        prompt_length=len(prompt),
+        extra={"history_file": history_file},
+    )
     try:
         prepared = await _prepare_chat_execution(
             vault_name=vault_name,

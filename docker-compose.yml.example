@@ -6,6 +6,7 @@ services:
     image: ghcr.io/dodgybadger/assistantmd:latest
     container_name: assistantMD
     restart: unless-stopped
+    init: true
     ports:
       - "127.0.0.1:8000:8000"    # FastAPI - localhost only
     volumes:
@@ -14,15 +15,17 @@ services:
     environment:
       - TZ=UTC
       - API_PORT=8000
+    shm_size: "1gb"
     
-    # Resource limits for better container security
+    # Resource guidance for a browser-capable runtime.
+    # Browser-heavy research tasks benefit from at least 2G of memory.
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
           cpus: '1.0'
         reservations:
-          memory: 512M
+          memory: 1G
           cpus: '0.5'
     
     # Security options

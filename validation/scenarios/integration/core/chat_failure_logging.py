@@ -27,18 +27,27 @@ class ChatFailureLoggingScenario(BaseScenario):
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
         chat_executor._prepare_chat_execution = _forced_failure
         try:
+            prompt = "Trigger the forced chat failure."
             response = self.call_api(
                 "/api/chat/execute",
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Trigger the forced chat failure.",
+                    "prompt": prompt,
                     "session_id": "chat_failure_session",
                     "tools": [],
                     "model": "test",
                 },
             )
             assert response.status_code == 500, "Forced chat failure should return 500"
+
+            transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_failure_session.md"
+            assert transcript.exists(), "User prompt should be persisted even when chat execution fails"
+            content_text = transcript.read_text(encoding="utf-8")
+            assert prompt in content_text, "Transcript should include the failed request prompt"
+            assert "**Assistant:**" not in content_text, (
+                "Failed chat execution should not append an assistant response"
+            )
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"

@@ -48,10 +48,11 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
         chat_executor._prepare_chat_execution = _prepared_failure
         try:
+            prompt = "Trigger the forced streaming chat failure."
             stream = execute_chat_prompt_stream(
                 vault_name=vault.name,
                 vault_path=str(vault),
-                prompt="Trigger the forced streaming chat failure.",
+                prompt=prompt,
                 image_paths=[],
                 image_uploads=[],
                 session_id="chat_stream_failure_session",
@@ -75,6 +76,14 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             )
             assert any('"event": "error"' in chunk for chunk in chunks), (
                 "Streaming failure should emit an SSE error chunk before raising"
+            )
+
+            transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_stream_failure_session.md"
+            assert transcript.exists(), "User prompt should be persisted even when streaming chat fails"
+            content_text = transcript.read_text(encoding="utf-8")
+            assert prompt in content_text, "Transcript should include the failed streaming prompt"
+            assert "**Assistant:**" not in content_text, (
+                "Failed streaming chat execution should not append an assistant response"
             )
 
             activity_log = self.call_api("/api/system/activity-log")

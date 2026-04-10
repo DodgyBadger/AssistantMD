@@ -71,6 +71,15 @@ The model should be able to:
 
 This should be the main discovery path for deeper usage guidance.
 
+Tool docs should also carry preference guidance where it materially affects efficiency or stability.
+
+Example:
+
+- for web research, prefer `tavily_extract` first when the URL is known and simple extraction is likely sufficient
+- use `browser` only when extraction fails, returns thin content, or the page is clearly JavaScript-heavy
+
+These preference rules should live in docs instead of being repeated inconsistently across prompt layers.
+
 ### 3. Exact Contract Documentation
 
 For authoring and helper surfaces, the exact callable contract should also be documented in the docs corpus.

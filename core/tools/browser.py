@@ -12,6 +12,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -40,10 +41,32 @@ class BrowserTool(BaseTool):
     _VALID_WAIT_UNTIL = {"load", "domcontentloaded", "networkidle"}
     _BLOCKED_RESOURCE_TYPES = {"image", "media", "font"}
     _ALLOWED_HTTP_METHODS = {"GET", "HEAD"}
+    _MAX_EXTRACTED_TEXT_CHARS = 40_000
+    _MAX_FALLBACK_HTML_CHARS = 120_000
+    _MIN_PRIMARY_TEXT_CHARS = 500
+
+    @staticmethod
+    def _get_process_rss_bytes() -> int | None:
+        """Return the current process RSS in bytes when available."""
+        status_path = Path("/proc/self/status")
+        try:
+            for line in status_path.read_text(encoding="utf-8").splitlines():
+                if not line.startswith("VmRSS:"):
+                    continue
+                parts = line.split()
+                if len(parts) < 2:
+                    return None
+                return int(parts[1]) * 1024
+        except OSError:
+            return None
+        return None
 
     @classmethod
     def _log_event(cls, event: str, **data: Any) -> None:
         """Emit browser lifecycle events to both activity and validation logs."""
+        rss_bytes = cls._get_process_rss_bytes()
+        if rss_bytes is not None:
+            data.setdefault("memory_rss_bytes", rss_bytes)
         logger.add_sink("validation").info(event, data=data)
 
     @classmethod
@@ -247,12 +270,14 @@ Examples:
     ) -> dict[str, Any]:
         """Launch a browser session, navigate, extract a region, and return structured results."""
         # Use Chromium's newer headless mode for closer parity with full browser behavior.
+        cls._log_event("browser_session_launch_started", tool="browser", url=url)
         browser_instance = await playwright.chromium.launch(
             headless=True,
             channel="chromium",
         )
         context = None
         try:
+            cls._log_event("browser_session_launch_completed", tool="browser", url=url)
             context = await browser_instance.new_context(accept_downloads=False)
             page = await context.new_page()
             page.set_default_timeout(timeout_ms)
@@ -261,6 +286,13 @@ Examples:
                 url,
                 wait_until=normalized_wait_until,
                 timeout=timeout_ms,
+            )
+            cls._log_event(
+                "browser_navigation_response_received",
+                tool="browser",
+                url=url,
+                final_url=page.url,
+                status_code=response.status if response else None,
             )
             if wait_for_selector.strip():
                 await cls._wait_for_selector(
@@ -273,12 +305,30 @@ Examples:
                 page=page,
                 extract_selector=extract_selector,
             )
+            cls._log_event(
+                "browser_extraction_started",
+                tool="browser",
+                url=url,
+                selector=target_selector,
+                root_strategy=root_strategy,
+                include_links=include_links,
+            )
             extracted = await cls._extract_region(
                 locator=locator,
                 include_links=include_links,
             )
             final_url = page.url
             cls._validate_url(final_url)
+            cls._log_event(
+                "browser_extraction_completed",
+                tool="browser",
+                url=url,
+                final_url=final_url,
+                selector=target_selector,
+                root_strategy=root_strategy,
+                content_chars=len(extracted["content"]),
+                link_count=len(extracted["links"]),
+            )
             return {
                 "final_url": final_url,
                 "status_code": response.status if response else None,
@@ -292,6 +342,7 @@ Examples:
             if context is not None:
                 await context.close()
             await browser_instance.close()
+            cls._log_event("browser_session_closed", tool="browser", url=url)
 
     @classmethod
     async def _resolve_target_region(
@@ -438,12 +489,108 @@ Examples:
     async def _extract_region(cls, *, locator: Any, include_links: bool) -> dict[str, Any]:
         """Extract compact content and optional links from a selected page region."""
         payload = await locator.evaluate(
-            """(node, includeLinks) => {
+            """(node, options) => {
+                const { includeLinks, maxTextChars, maxHtmlChars, minPrimaryTextChars } = options;
                 const clone = node.cloneNode(true);
                 clone.querySelectorAll('script,style,noscript,template').forEach(
                     (element) => element.remove()
                 );
-                const html = clone.innerHTML || '';
+                const blockTags = new Set([
+                    'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'BR', 'CAPTION', 'CODE',
+                    'DD', 'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER',
+                    'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN',
+                    'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD',
+                    'TR', 'UL'
+                ]);
+                const normalizeWhitespace = (text) => (text || '')
+                    .replace(/\\u00a0/g, ' ')
+                    .replace(/\\r\\n?/g, '\\n')
+                    .replace(/[ \\t]+/g, ' ')
+                    .replace(/ *\\n */g, '\\n')
+                    .replace(/\\n{3,}/g, '\\n\\n')
+                    .trim();
+                const appendTruncationNotice = (text, notice) => {
+                    const base = normalizeWhitespace(text);
+                    return base ? `${base}\\n\\n${notice}` : notice;
+                };
+                const extractStructuredText = (root) => {
+                    const lines = [];
+                    const pushLine = (value = '') => {
+                        lines.push(value);
+                    };
+                    const visit = (current) => {
+                        if (current.nodeType === Node.TEXT_NODE) {
+                            const text = normalizeWhitespace(current.textContent || '');
+                            if (text) {
+                                lines.push(text);
+                            }
+                            return;
+                        }
+                        if (current.nodeType !== Node.ELEMENT_NODE) {
+                            return;
+                        }
+
+                        const element = current;
+                        const tagName = element.tagName || '';
+                        if (tagName === 'BR') {
+                            pushLine('');
+                            return;
+                        }
+                        const isBlock = blockTags.has(tagName);
+                        if (isBlock && lines.length && lines[lines.length - 1] !== '') {
+                            pushLine('');
+                        }
+
+                        if (tagName === 'PRE') {
+                            const preText = (element.textContent || '').replace(/\\r\\n?/g, '\\n').trim();
+                            if (preText) {
+                                lines.push('```');
+                                lines.push(preText);
+                                lines.push('```');
+                            }
+                        } else {
+                            for (const child of element.childNodes) {
+                                visit(child);
+                            }
+                        }
+
+                        if (tagName === 'LI') {
+                            let index = lines.length - 1;
+                            while (index >= 0 && lines[index] === '') {
+                                index--;
+                            }
+                            if (index >= 0 && !lines[index].startsWith('- ')) {
+                                lines[index] = `- ${lines[index]}`;
+                            }
+                        }
+
+                        if (isBlock && lines.length && lines[lines.length - 1] !== '') {
+                            pushLine('');
+                        }
+                    };
+
+                    visit(root);
+                    return normalizeWhitespace(lines.join('\\n'));
+                };
+                let text = extractStructuredText(clone);
+                let textTruncated = false;
+                if (text.length > maxTextChars) {
+                    text = text.slice(0, maxTextChars).trimEnd();
+                    text = appendTruncationNotice(
+                        text,
+                        '*Content truncated for compact extraction.*'
+                    );
+                    textTruncated = true;
+                }
+                let html = '';
+                let htmlTruncated = false;
+                if (text.length < minPrimaryTextChars) {
+                    html = (clone.innerHTML || '').trim();
+                    if (html.length > maxHtmlChars) {
+                        html = `${html.slice(0, maxHtmlChars).trimEnd()}<!-- truncated -->`;
+                        htmlTruncated = true;
+                    }
+                }
                 const links = includeLinks
                     ? Array.from(clone.querySelectorAll('a[href]'))
                         .slice(0, 20)
@@ -453,12 +600,33 @@ Examples:
                         }))
                         .filter((item) => item.href)
                     : [];
-                return { html, links };
+                return { html, htmlTruncated, links, text, textTruncated };
             }""",
-            include_links,
+            {
+                "includeLinks": include_links,
+                "maxTextChars": cls._MAX_EXTRACTED_TEXT_CHARS,
+                "maxHtmlChars": cls._MAX_FALLBACK_HTML_CHARS,
+                "minPrimaryTextChars": cls._MIN_PRIMARY_TEXT_CHARS,
+            },
         )
-        markdown = html_to_markdown(str(payload.get("html", "")).strip(), heading_style="ATX")
-        content = cls._clean_extracted_text(markdown)
+        text = cls._clean_extracted_text(str(payload.get("text", "")).strip())
+        html = str(payload.get("html", "")).strip()
+        cls._log_event(
+            "browser_extraction_payload_captured",
+            tool="browser",
+            text_chars=len(text),
+            text_truncated=bool(payload.get("textTruncated")),
+            html_chars=len(html),
+            html_truncated=bool(payload.get("htmlTruncated")),
+            raw_link_count=len(payload.get("links", [])),
+            include_links=include_links,
+        )
+        content = text
+        if len(content) < cls._MIN_PRIMARY_TEXT_CHARS and html:
+            markdown = html_to_markdown(html, heading_style="ATX")
+            content = cls._clean_extracted_text(markdown)
+            if bool(payload.get("htmlTruncated")) and content:
+                content = cls._append_truncation_notice(content)
         links = cls._format_links(payload.get("links", [])) if include_links else []
         if not content:
             content = "*No extractable content found in the selected region.*"
@@ -471,6 +639,12 @@ Examples:
         while "\n\n\n" in compact:
             compact = compact.replace("\n\n\n", "\n\n")
         return compact
+
+    @staticmethod
+    def _append_truncation_notice(text: str) -> str:
+        """Append a compact truncation note when extracted content was capped."""
+        notice = "*Content truncated for compact extraction.*"
+        return f"{text}\n\n{notice}" if text else notice
 
     @classmethod
     def _format_links(cls, raw_links: list[dict[str, Any]]) -> list[str]:
