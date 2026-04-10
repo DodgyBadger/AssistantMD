@@ -132,7 +132,10 @@ class AuthoringContractScenario(BaseScenario):
         self.assert_event_contains(
             events,
             name="authoring_generate_started",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "input_count": 1,
+            },
         )
         self.assert_event_contains(
             events,
@@ -385,6 +388,7 @@ draft = await generate(
         + "\\n\\nListing:\\n"
         + listing.output
     ),
+    inputs=source.items,
     instructions="Return one short deterministic line.",
     model="test",
 )

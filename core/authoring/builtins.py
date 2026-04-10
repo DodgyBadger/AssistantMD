@@ -168,6 +168,7 @@ def _retrieve_contract() -> dict[str, Any]:
                         "filename": "Base filename without extension when available.",
                         "filepath": "Vault-relative path normalized without the implicit .md suffix.",
                         "source_path": "Vault-relative source path including extension when available.",
+                        "refs_only": "Whether the file record omitted text content intentionally.",
                         "extension": "Resolved file extension such as .md or .png.",
                         "size_bytes": "Filesystem size for found files.",
                         "char_count": "Exact text character count for textual files.",
@@ -286,21 +287,31 @@ def _output_contract() -> dict[str, Any]:
 def _generate_contract() -> dict[str, Any]:
     return {
         "signature": (
-            "generate(*, prompt: str, instructions: str | None = None, "
+            "generate(*, prompt: str, inputs: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...] | None = None, instructions: str | None = None, "
             "model: str | None = None, tools: list[str] | tuple[str, ...] | None = None, "
             "cache: str | dict | None = None, "
             "options: dict | None = None)"
         ),
         "summary": (
             "Run one explicit model generation using the shared agent runtime. "
-            "Instructions are first-class, while optional tool use, generation caching, "
-            "and less common model controls stay explicit."
+            "Instructions are first-class, while optional file-backed inputs, tool use, "
+            "generation caching, and less common model controls stay explicit."
         ),
         "arguments": {
             "prompt": {
                 "type": "string",
                 "required": True,
                 "description": "Primary user prompt passed to the shared agent runtime.",
+            },
+            "inputs": {
+                "type": "RetrieveResult | RetrievedItem | list | tuple",
+                "required": False,
+                "description": (
+                    "Optional retrieved file artifacts to assemble as source material. "
+                    "Text files are inlined, direct images are attached when the model "
+                    "supports vision, and markdown files may interleave embedded images "
+                    "using the shared prompt builder."
+                ),
             },
             "instructions": {
                 "type": "string",
@@ -370,6 +381,10 @@ def _generate_contract() -> dict[str, Any]:
                 "Tool use is opt-in. Pass tools=[...] to enable an explicit subset "
                 "of authoring.tools for one generation call."
             ),
+            (
+                "inputs=... reuses the shared file prompt builder. Use it when retrieved "
+                "source material should stay file-aware, including images and embedded markdown images."
+            ),
         ],
         "examples": [
             {
@@ -385,6 +400,31 @@ def _generate_contract() -> dict[str, Any]:
                     'model="test", options={"thinking": False})'
                 ),
                 "description": "Use an explicit model alias with a supported generation option.",
+            },
+            {
+                "code": (
+                    'image = await retrieve(type="file", ref="images/test_image.jpg")\n'
+                    'await generate(prompt="Describe this image briefly.", inputs=image.items)'
+                ),
+                "description": "Attach one retrieved image file as model input when the model supports vision.",
+            },
+            {
+                "code": (
+                    'note = await retrieve(type="file", ref="notes/trip-report.md")\n'
+                    'await generate('
+                    'prompt="Summarize this note and its embedded images.", '
+                    'inputs=note.items, '
+                    'instructions="Be concise."'
+                    ')'
+                ),
+                "description": "Feed one retrieved markdown file through the shared multimodal prompt builder.",
+            },
+            {
+                "code": (
+                    'note = await retrieve(type="file", ref="notes/today.md")\n'
+                    'await generate(prompt="Summarize this note.", inputs=note.items)'
+                ),
+                "description": "Use inputs=... for plain text files too when you want host-managed source assembly.",
             },
             {
                 "code": (

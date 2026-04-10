@@ -38,7 +38,7 @@ The runtime is intentionally small and explicit.
 Current built-ins and conventions:
 
 - `retrieve(type=..., ref=..., options=...)`
-- `generate(prompt=..., instructions=..., model=..., tools=..., cache=..., options=...)`
+- `generate(prompt=..., inputs=..., instructions=..., model=..., tools=..., cache=..., options=...)`
 - `output(type=..., ref=..., data=..., options=...)`
 - `call_tool(name=..., arguments=..., options=...)`
 - `assemble_context(history=..., context_messages=..., instructions=..., latest_user_message=...)`
@@ -105,6 +105,7 @@ The security boundary is enforced by the host:
 - Treat the host scope as a real security boundary.
 - Treat `type`, `ref`, and `options` as the stable contract shape for resource-oriented capabilities.
 - Build prompts explicitly in Python so retrieved content can be placed exactly where it belongs.
+- Use `generate(..., inputs=...)` when retrieved file artifacts should stay file-aware, including images and markdown with embedded images.
 - Prefer attribute access on returned objects, for example `source.items[0].content` and `draft.output`.
 - Use `generate(..., cache=...)` for repeated generation memoization.
 - Use `generate(..., tools=[...])` only when you want explicit bounded tool use inside one generation call.
@@ -146,5 +147,26 @@ await output(
     ref=f"reports/summary-{date.today()}.md",
     data=draft.output,
     options={"mode": "replace"},
+)
+```
+
+Multimodal file inputs use the shared host prompt builder:
+
+```python
+image = await retrieve(type="file", ref="images/test_image.jpg")
+
+caption = await generate(
+    prompt="Describe this image in one short paragraph.",
+    inputs=image.items,
+)
+```
+
+```python
+note = await retrieve(type="file", ref="notes/trip-report.md")
+
+summary = await generate(
+    prompt="Summarize this note, taking both the text and embedded images into account.",
+    inputs=note.items,
+    instructions="Be concise and factual.",
 )
 ```

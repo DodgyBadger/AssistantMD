@@ -30,6 +30,7 @@ from core.context.store import (
 from core.utils.patterns import PatternUtilities
 from core.utils.file_state import WorkflowFileStateManager
 from core.authoring.shared.tool_binding import resolve_tool_binding
+from core.authoring.shared.execution_prep import build_step_prompt, resolve_step_model_execution
 from core.authoring.shared.input_resolution import build_input_request, resolve_input_request
 from core.authoring.shared.output_resolution import (
     build_output_request,
@@ -331,10 +332,21 @@ class WorkflowAuthoringHost(AuthoringHost):
         from core.llm.agents import create_agent, generate_response
         from core.llm.model_selection import ModelExecutionSpec
 
-        prompt, instructions, model_value, tool_names, cache_policy, options = _parse_generate_call(call)
+        prompt, inputs, instructions, model_value, tool_names, cache_policy, options = _parse_generate_call(call)
         resolved_model_value = _apply_generate_options_to_model(model_value, options)
         if tool_names:
             _ensure_generate_tools_allowed(tool_names=tool_names, scope=context.scope)
+        prompt_input: Any = prompt
+        attached_image_count = 0
+        input_warnings: list[str] = []
+        if inputs:
+            model_execution = resolve_step_model_execution(resolved_model_value)
+            prompt_input, _prompt_text, attached_image_count, input_warnings = build_step_prompt(
+                base_prompt=prompt,
+                input_file_data=_build_generate_input_file_data(inputs),
+                vault_path=self.vault_path or "",
+                model_execution=model_execution,
+            )
         cache_mode: str | None = None
         cache_ttl_seconds: int | None = None
         cache_ref: str | None = None
@@ -342,6 +354,7 @@ class WorkflowAuthoringHost(AuthoringHost):
             cache_mode, cache_ttl_seconds = _parse_generate_cache_policy(cache_policy)
             cache_ref = _build_generate_cache_ref(
                 prompt=prompt,
+                inputs=inputs,
                 instructions=instructions,
                 model_value=resolved_model_value or "default",
                 tool_names=tool_names,
@@ -395,6 +408,9 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
                 "instructions_present": bool(instructions),
+                "input_count": len(inputs),
+                "attached_image_count": attached_image_count,
+                "input_warnings": input_warnings,
                 "tool_names": list(tool_names),
                 "cache_mode": cache_mode,
             },
@@ -405,6 +421,9 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "workflow_id": context.workflow_id,
                 "model": resolved_model_value or "default",
                 "instructions_present": bool(instructions),
+                "input_count": len(inputs),
+                "attached_image_count": attached_image_count,
+                "input_warnings": input_warnings,
                 "tool_names": list(tool_names),
                 "cache_mode": cache_mode,
             },
@@ -420,7 +439,7 @@ class WorkflowAuthoringHost(AuthoringHost):
         agent = await create_agent(model=model, tools=bound_tools)
         if instructions:
             agent.instructions(lambda _ctx, text=instructions: text)
-        output = await generate_response(agent, prompt)
+        output = await generate_response(agent, prompt_input)
         text = _coerce_output_data(output)
         if cache_mode is not None and cache_ref is not None:
             upsert_cache_artifact(
@@ -910,12 +929,22 @@ def _parse_output_call(call: AuthoringCapabilityCall) -> tuple[str, str, Any, di
 
 def _parse_generate_call(
     call: AuthoringCapabilityCall,
-) -> tuple[str, str | None, str | None, tuple[str, ...], str | dict[str, Any] | None, dict[str, Any]]:
+) -> tuple[
+    str,
+    tuple[RetrievedItem, ...],
+    str | None,
+    str | None,
+    tuple[str, ...],
+    str | dict[str, Any] | None,
+    dict[str, Any],
+]:
     if call.args:
         raise ValueError("generate only supports keyword arguments")
     prompt = str(call.kwargs.get("prompt") or "")
     if not prompt.strip():
         raise ValueError("generate requires a non-empty 'prompt'")
+    raw_inputs = call.kwargs.get("inputs")
+    inputs = _normalize_generate_inputs(raw_inputs)
     raw_instructions = call.kwargs.get("instructions")
     instructions = None if raw_instructions is None else str(raw_instructions).strip() or None
     raw_model = call.kwargs.get("model")
@@ -951,7 +980,24 @@ def _parse_generate_call(
         options = dict(raw_options)
     else:
         raise ValueError("generate options must be a dictionary when provided")
-    return prompt, instructions, model_value, tool_names, cache_value, options
+    return prompt, inputs, instructions, model_value, tool_names, cache_value, options
+
+
+def _normalize_generate_inputs(value: Any) -> tuple[RetrievedItem, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, RetrieveResult):
+        return tuple(value.items)
+    if isinstance(value, RetrievedItem):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        items: list[RetrievedItem] = []
+        for item in value:
+            if not isinstance(item, RetrievedItem):
+                raise ValueError("generate inputs entries must be RetrievedItem values")
+            items.append(item)
+        return tuple(items)
+    raise ValueError("generate inputs must be a RetrieveResult, RetrievedItem, list, or tuple when provided")
 
 
 def _parse_generate_cache_policy(cache_value: str | dict[str, Any]) -> tuple[str, int | None]:
@@ -975,6 +1021,7 @@ def _parse_generate_cache_policy(cache_value: str | dict[str, Any]) -> tuple[str
 def _build_generate_cache_ref(
     *,
     prompt: str,
+    inputs: tuple[RetrievedItem, ...],
     instructions: str | None,
     model_value: str,
     tool_names: tuple[str, ...],
@@ -985,6 +1032,15 @@ def _build_generate_cache_ref(
         "kind": "generate",
         "model": model_value,
         "prompt": prompt,
+        "inputs": [
+            {
+                "ref": item.ref,
+                "content": item.content,
+                "exists": item.exists,
+                "metadata": item.metadata,
+            }
+            for item in inputs
+        ],
         "instructions": instructions or "",
         "tools": list(tool_names),
         "cache_mode": cache_mode,
@@ -1122,6 +1178,33 @@ def _normalize_optional_string(value: Any) -> str | None:
         raise ValueError("assemble_context instructions must be a string when provided")
     normalized = value.strip()
     return normalized or None
+
+
+def _build_generate_input_file_data(inputs: tuple[RetrievedItem, ...]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for item in inputs:
+        metadata = dict(item.metadata or {})
+        source_path = str(metadata.get("source_path") or item.ref or "").strip()
+        filepath = str(metadata.get("filepath") or "").strip()
+        if not filepath and source_path:
+            filepath = source_path[:-3] if source_path.endswith(".md") else source_path
+        if not source_path and item.ref:
+            source_path = str(item.ref)
+        if not source_path:
+            raise ValueError("generate inputs must come from retrieve(file) results with source paths")
+
+        records.append(
+            {
+                "filepath": filepath or source_path,
+                "source_path": source_path,
+                "filename": metadata.get("filename"),
+                "content": item.content,
+                "found": item.exists,
+                "error": metadata.get("error"),
+                "refs_only": bool(metadata.get("refs_only")),
+            }
+        )
+    return records
 
 
 def _normalize_context_message(value: Any, *, default_role: str | None = None) -> ContextMessage:
@@ -1268,6 +1351,7 @@ def _normalize_file_record(record: dict[str, Any]) -> RetrievedItem:
     metadata = {
         "filename": record.get("filename"),
         "error": record.get("error"),
+        "refs_only": bool(record.get("refs_only")),
         "extension": record.get("extension"),
         "size_bytes": record.get("size_bytes"),
         "char_count": record.get("char_count"),
