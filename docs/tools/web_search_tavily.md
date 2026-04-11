@@ -10,11 +10,6 @@ Search the web with Tavily when you want higher-quality research-oriented result
 - you are gathering leads before extracting specific pages
 - you want better starting material for multi-step research
 
-## When Not To Use
-
-- you already know the URL and should use `tavily_extract`
-- a lightweight search is sufficient
-
 ## Arguments
 
 - `query`: required search query

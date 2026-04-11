@@ -10,12 +10,6 @@ Extract full content from specific web pages, articles, and documentation URLs.
 - you want page content without a full browser session
 - you need a better first pass than raw search snippets
 
-## When Not To Use
-
-- you do not know the URL yet
-- you need broad multi-page coverage
-- the site is clearly JavaScript-heavy and extract keeps returning thin content
-
 ## Arguments
 
 - `urls`: one URL or a list of URLs

@@ -15,10 +15,12 @@ from validation.core.base_scenario import BaseScenario
 
 
 class CodeExecutionLocalScenario(BaseScenario):
-    """Validate code_execution_local cache read/write scope enforcement."""
+    """Validate code_execution_local helper parity and scope enforcement."""
 
     async def test_scenario(self):
         vault = self.create_vault("CodeExecutionLocalVault")
+        self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
+        self.create_file(vault, "notes/blocked.md", "BLOCKED_CONTENT")
 
         await self.start_system()
 
@@ -58,29 +60,56 @@ class CodeExecutionLocalScenario(BaseScenario):
                         "code": (
                             'artifact = await retrieve(type="cache", ref="tool/demo/allowed")\n'
                             "artifact.items[0].content"
-                        ),
-                        "readable_cache_refs": ["tool/demo/allowed"],
-                        "writable_cache_refs": [],
+                        )
                     }
                 if case_name == "discovery":
                     return {}
                 if case_name == "deny_read":
                     return {
                         "code": (
-                            'artifact = await retrieve(type="cache", ref="tool/demo/allowed")\n'
+                            'artifact = await retrieve(type="file", ref="notes/blocked.md")\n'
                             "artifact.items[0].content"
-                        ),
-                        "readable_cache_refs": ["tool/demo/other"],
-                        "writable_cache_refs": [],
+                        )
                     }
                 if case_name == "allow_write":
                     return {
                         "code": (
                             'await output(type="cache", ref="scratch/derived", data="DERIVED_RESULT")\n'
                             '"WRITE_OK"'
-                        ),
-                        "readable_cache_refs": [],
-                        "writable_cache_refs": ["scratch/derived"],
+                        )
+                    }
+                if case_name == "full_surface":
+                    return {
+                        "code": (
+                            'doc = await retrieve(type="file", ref="notes/structured.md")\n'
+                            'parsed = await parse_markdown(value=doc.items[0])\n'
+                            'history = await retrieve(type="run", ref="session", options={"limit": 1})\n'
+                            'assembled = await assemble_context(\n'
+                            '    history=history.items,\n'
+                            '    instructions="Keep the output concise.",\n'
+                            ')\n'
+                            'listing = await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "list", "target": "notes"},\n'
+                            ')\n'
+                            'draft = await generate(\n'
+                            '    prompt=(\n'
+                            '        f"heading={parsed.sections[1].heading}; "\n'
+                            '        f"messages={len(assembled.messages)}; "\n'
+                            '        f"listing={listing.output}"\n'
+                            '    ),\n'
+                            '    instructions="Return one short deterministic line.",\n'
+                            '    model="test",\n'
+                            ')\n'
+                            'await output(\n'
+                            '    type="cache",\n'
+                            '    ref="scratch/full-surface",\n'
+                            '    data=draft.output,\n'
+                            '    options={"mode": "replace", "ttl": "session"},\n'
+                            ')\n'
+                            'await finish(status="completed", reason="full-surface-ok")\n'
+                            '"UNREACHABLE"'
+                        )
                     }
                 raise AssertionError(f"Unexpected scenario case: {case_name}")
 
@@ -154,8 +183,8 @@ class CodeExecutionLocalScenario(BaseScenario):
             assert deny_read.status_code == 200, "Denied cache read should still return a tool result"
             deny_text = deny_read.json()["response"]
             self.soft_assert(
-                "outside the configured read scope" in deny_text,
-                "Denied cache read should surface the cache read scope error",
+                "authoring.retrieve.file" in deny_text,
+                "Denied file read should surface the missing file tool-scope error",
             )
 
             current_case["name"] = "allow_write"
@@ -177,6 +206,78 @@ class CodeExecutionLocalScenario(BaseScenario):
                 "Allowed cache write should return the snippet result",
             )
 
+            current_case["name"] = "full_surface"
+            checkpoint = self.event_checkpoint()
+            full_surface = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Exercise the full code_execution_local helper surface.",
+                    "session_id": "code_execution_local_full_surface",
+                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "model": "test",
+                },
+            )
+            assert full_surface.status_code == 200, "Full helper-surface run should succeed"
+            full_surface_text = full_surface.json()["response"]
+            self.soft_assert(
+                "failed:" not in full_surface_text.lower(),
+                "Full helper-surface run should not return a Monty failure",
+            )
+            full_surface_events = self.events_since(checkpoint)
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_parse_markdown_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "heading_count": 2,
+                    "section_count": 2,
+                    "code_block_count": 1,
+                    "image_count": 1,
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_assemble_context_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "message_count": 1,
+                    "instruction_count": 1,
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_call_tool_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "tool": "file_ops_safe",
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_generate_completed",
+                expected={"workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface"},
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_finish_requested",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "status": "completed",
+                    "reason": "full-surface-ok",
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_monty_execution_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "status": "completed",
+                    "reason": "full-surface-ok",
+                },
+            )
+
             runtime = get_runtime_context()
             derived = get_cache_artifact(
                 owner_id=f"{vault.name}/chat/code_execution_local_allow_write",
@@ -192,7 +293,41 @@ class CodeExecutionLocalScenario(BaseScenario):
                 "DERIVED_RESULT",
                 "Derived cache artifact should preserve the written content",
             )
+            full_surface_artifact = get_cache_artifact(
+                owner_id=f"{vault.name}/chat/code_execution_local_full_surface",
+                session_key="code_execution_local_full_surface",
+                artifact_ref="scratch/full-surface",
+                now=reference_time,
+                week_start_day=0,
+                system_root=runtime.config.system_root,
+            )
+            assert full_surface_artifact is not None, "Full helper-surface run should write a cache artifact"
+            self.soft_assert(
+                bool((full_surface_artifact.get("raw_content") or "").strip()),
+                "Full helper-surface run should write non-empty generated output to cache",
+            )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
             await self.stop_system()
             self.teardown_scenario()
+
+
+STRUCTURED_NOTE = """---
+name: Skill Example
+description: Deterministic markdown structure fixture
+---
+
+# Overview
+
+Intro text for the structured note.
+
+## AI In Fiction
+
+This section is about fictional AI examples.
+
+```python
+print("hello")
+```
+
+![Fixture image](../images/test_image.jpg)
+"""

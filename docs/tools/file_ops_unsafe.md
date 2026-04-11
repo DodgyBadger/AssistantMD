@@ -10,12 +10,6 @@ Modify, overwrite, truncate, move-overwrite, or delete vault files when destruct
 - you already inspected the target file with `file_ops_safe`
 - you need a narrow, deliberate text replacement or deletion
 
-## When Not To Use
-
-- `file_ops_safe` can do the job
-- you have not read and verified the file first
-- the user has not clearly authorized destructive changes
-
 ## Operations
 
 - `edit_line`

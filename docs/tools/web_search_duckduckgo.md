@@ -10,11 +10,6 @@ Search the web with DuckDuckGo for lightweight general-purpose results.
 - you want a lightweight first pass
 - premium Tavily search is unavailable or unnecessary
 
-## When Not To Use
-
-- you need higher-quality research-oriented results
-- you already know the exact URL and should use `tavily_extract`
-
 ## Arguments
 
 - `query`: required search query

@@ -11,11 +11,6 @@ List workflows in the current vault and run, test, enable, or disable them.
 - you want to run a workflow manually
 - you want to enable or disable a workflow
 
-## When Not To Use
-
-- you only need to inspect workflow files directly
-- you are doing general vault exploration rather than workflow operations
-
 ## Arguments
 
 - `operation`: one of `list`, `test`, `run`, `enable_workflow`, `disable_workflow`

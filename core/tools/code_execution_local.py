@@ -5,6 +5,7 @@ Python tasks.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -37,18 +38,10 @@ class CodeExecutionLocal(BaseTool):
             ctx: RunContext,
             *,
             code: str = "",
-            readable_cache_refs: list[str] | None = None,
-            writable_cache_refs: list[str] | None = None,
-            readable_file_paths: list[str] | None = None,
-            writable_file_paths: list[str] | None = None,
         ) -> str:
             """Run constrained local Python in the current chat session.
 
             :param code: Optional constrained-Python snippet to execute
-            :param readable_cache_refs: Cache refs or glob patterns the snippet may retrieve
-            :param writable_cache_refs: Cache refs or glob patterns the snippet may write
-            :param readable_file_paths: Optional explicit file read scope when file_ops_safe is enabled
-            :param writable_file_paths: Optional explicit file write scope when file_ops_safe is enabled
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -75,18 +68,25 @@ class CodeExecutionLocal(BaseTool):
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
                 allow_file_scope = "file_ops_safe" in enabled_tools
-                readable_file_scope = (
-                    list(readable_file_paths or ["*"]) if allow_file_scope else []
-                )
-                writable_file_scope = (
-                    list(writable_file_paths or ["*"]) if allow_file_scope else []
-                )
                 frontmatter = {
-                    "authoring.capabilities": ["retrieve", "output", "generate", "assemble_context"],
-                    "authoring.retrieve.cache": list(readable_cache_refs or []),
-                    "authoring.output.cache": list(writable_cache_refs or []),
-                    "authoring.retrieve.file": readable_file_scope,
-                    "authoring.output.file": writable_file_scope,
+                    "authoring.capabilities": [
+                        "retrieve",
+                        "output",
+                        "generate",
+                        "call_tool",
+                        "assemble_context",
+                        "parse_markdown",
+                        "finish",
+                    ],
+                    "authoring.tools": sorted(
+                        tool_name
+                        for tool_name in enabled_tools
+                        if tool_name and tool_name != "code_execution_local"
+                    ),
+                    "authoring.retrieve.cache": ["*"],
+                    "authoring.output.cache": ["*"],
+                    "authoring.retrieve.file": ["*"] if allow_file_scope else [],
+                    "authoring.output.file": ["*"] if allow_file_scope else [],
                 }
                 host = WorkflowAuthoringHost(
                     workflow_id=workflow_id,
@@ -105,9 +105,9 @@ class CodeExecutionLocal(BaseTool):
                 )
                 return cls._format_execution_result(result.value, result.prints)
             except AuthoringMontyExecutionError as exc:
-                return f"code_execution_local failed: {exc}"
+                return cls._format_execution_error(str(exc))
             except Exception as exc:  # noqa: BLE001
-                return f"code_execution_local failed: {exc}"
+                return cls._format_execution_error(str(exc))
 
         return Tool(
             code_execution_local,
@@ -119,7 +119,7 @@ class CodeExecutionLocal(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for constrained local code execution."""
         return """
-Run constrained local Python against the current chat session, cache scope, and optional vault file scope.
+Run constrained local Python against the current chat session, chat-derived cache scope, and optional vault file scope.
 
 Use this for small Python tasks tied to chat history, cache artifacts, or vault files.
 
@@ -129,7 +129,9 @@ Full documentation:
 Important notes:
 - pass code with `code="..."`
 - always use named arguments
-- this tool exposes constrained helpers such as `retrieve`, `output`, `generate`, `assemble_context`, `parse_markdown`, and `finish`
+- cache scope comes from the current chat session
+- file scope is available when `file_ops_safe` is enabled for the chat run
+- this tool exposes constrained helpers such as `retrieve`, `output`, `generate`, `call_tool`, `assemble_context`, `parse_markdown`, and `finish`
 """
 
     @staticmethod
@@ -152,3 +154,35 @@ Important notes:
             return "\n".join(prints)
 
         return "code_execution_local completed with no return value."
+
+    @classmethod
+    def _format_execution_error(cls, message: str) -> str:
+        hint = cls._hint_for_execution_error(message)
+        if hint:
+            return f"code_execution_local failed: {message}\n\nHint: {hint}"
+        return f"code_execution_local failed: {message}"
+
+    @staticmethod
+    def _hint_for_execution_error(message: str) -> str | None:
+        lowered = str(message or "").lower()
+        if "multi-module import statements" in lowered:
+            return (
+                "Monty currently expects one import per line. Split grouped imports like "
+                "`import re, json` into separate statements."
+            )
+        if "takes no keyword arguments" in lowered and "re.findall" in lowered:
+            return (
+                "Prefer positional regex arguments in Monty, for example "
+                "`re.findall(pattern, text)` or `re.findall(pattern, text, re.IGNORECASE)`."
+            )
+        if "name 'json' is not defined" in lowered:
+            return (
+                "Import stdlib modules explicitly inside the snippet, for example "
+                "`import json`, or use simpler string/Python structures when possible."
+            )
+        if "unable to find 'parse_markdown' in external functions dict" in lowered:
+            return (
+                "Use the current `code_execution_local` surface and helper docs at "
+                "`__virtual_docs__/tools/code_execution_local.md`; this should now be available."
+            )
+        return None

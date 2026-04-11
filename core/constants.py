@@ -121,6 +121,7 @@ Tool calls (all tools):
 - If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload.
 - When that happens, do not ask for the full cached body inline.
 - To inspect or transform cached content, use `code_execution_local` and retrieve it with `retrieve(type="cache", ref=...)`.
+- When doing online research, prefer tavily_extract and only fall back to the browser tool when extraction fails.
 
 Grounding:
 - When the answer depends on current information, external sources, or the user's files, use available tools to verify it instead of relying on memory alone.

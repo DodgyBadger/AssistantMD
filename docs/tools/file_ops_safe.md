@@ -11,11 +11,6 @@ Read, write, append, list, search, and move files safely within the current vaul
 - you need non-destructive file writes
 - you need to read markdown, text, or supported image files
 
-## When Not To Use
-
-- you need destructive edits like delete, truncate, or overwrite
-- the task is better served by `workflow_run` or `code_execution_local`
-
 ## Operations
 
 - `list`

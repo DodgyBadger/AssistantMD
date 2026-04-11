@@ -10,12 +10,6 @@ Explore a website across multiple related pages when you need broader coverage t
 - you are exploring documentation or help-center sections
 - you want a broader pass before targeted follow-up extracts
 
-## When Not To Use
-
-- you already know the exact page you need
-- a single `tavily_extract` call is sufficient
-- the site is heavily JavaScript-driven and crawling is likely to be thin
-
 ## Arguments
 
 - `url`: required starting URL

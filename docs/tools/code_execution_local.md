@@ -4,42 +4,31 @@
 
 Run constrained local Python against the current chat session, cache scope, and optional vault file scope.
 
-## When To Use
-
-- you need small calculations or transformations
-- you want to inspect cache artifacts by ref
-- you want to explore vault files directly and `file_ops_safe` is enabled
-- you need a small local loop around `retrieve`, `generate`, or `assemble_context`
-
-## When Not To Use
-
-- you need broader language support
-- you need an external sandbox
-- the task is simple enough to solve directly with another tool
-
-## Arguments
+## Tool Argument
 
 - `code`: constrained Python snippet to execute
-- `readable_cache_refs`: optional readable cache refs or glob patterns
-- `writable_cache_refs`: optional writable cache refs or glob patterns
-- `readable_file_paths`: optional explicit read scope when `file_ops_safe` is enabled
-- `writable_file_paths`: optional explicit write scope when `file_ops_safe` is enabled
 
 ## Local Runtime Surface
 
 The code runs inside the same constrained authoring runtime used by Monty workflows.
 
-The most important helpers are:
+Scope comes from the active chat session:
 
-- `retrieve(...)`
-- `output(...)`
-- `generate(...)`
-- `call_tool(...)`
-- `assemble_context(...)`
-- `parse_markdown(...)`
-- `finish(...)`
+- cache access is available for the current chat session
+- file access is available when `file_ops_safe` is enabled for the chat run
+- tool access mirrors the enabled chat tools, excluding `code_execution_local` itself
 
-Use ordinary Python for filtering, sorting, selection, and control flow around those helpers.
+Inside the runtime you have access to the following helper functions. Prefer these for the tasks described:
+
+- `retrieve(...)`: load scoped files, cache artifacts, or recent chat-session history into the script.
+- `output(...)`: write selected results back to a file or cache artifact.
+- `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use.
+- `call_tool(...)`: invoke one already-enabled chat tool from inside the script.
+- `assemble_context(...)`: build structured message history for downstream chat-style generation.
+- `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs.
+- `finish(...)`: end the script intentionally with a completed or skipped terminal status.
+
+Use ordinary Python for everything else and for filtering, sorting, selection, and control flow around those helpers.
 
 ## Helper Signatures
 
@@ -68,53 +57,8 @@ Supported `type` values:
 
 - `limit: int | "all" = "all"`
 
-Return shape:
-
-- `result.type`
-- `result.ref`
-- `result.items`
-
-Each retrieved item has:
-
-- `item.ref`
-- `item.content`
-- `item.exists`
-- `item.metadata`
-
-Common file metadata fields:
-
-- `filename`
-- `filepath`
-- `source_path`
-- `extension`
-- `size_bytes`
-- `char_count`
-- `token_estimate`
-- `mtime_epoch`
-- `ctime_epoch`
-- `mtime`
-- `ctime`
-- `filename_dt`
-- `error`
-
-Examples:
-
-```python
-note = await retrieve(type="file", ref="notes/today.md")
-```
-
-```python
-notes = await retrieve(type="file", ref="notes/*.md")
-latest_three = sorted(
-    [item for item in notes.items if item.exists],
-    key=lambda item: item.metadata.get("mtime_epoch") or 0,
-    reverse=True,
-)[:3]
-```
-
-```python
-history = await retrieve(type="run", ref="session", options={"limit": 3})
-```
+Results come back in `result.items`. For most scripts, the important fields are
+`item.content`, `item.exists`, and `item.metadata`.
 
 ### `output`
 
@@ -136,30 +80,6 @@ Supported `type` values:
 - `mode: "append" | "replace" = "append"`
 - `ttl: str = "session"`
 
-Return shape:
-
-- `result.type`
-- `result.ref`
-- `result.status`
-- `result.item.ref`
-- `result.item.resolved_ref`
-- `result.item.mode`
-
-Examples:
-
-```python
-await output(type="file", ref="reports/daily.md", data=summary_text)
-```
-
-```python
-await output(
-    type="cache",
-    ref="research/browser-page",
-    data=page_text,
-    options={"mode": "replace", "ttl": "24h"},
-)
-```
-
 ### `generate`
 
 ```python
@@ -175,22 +95,6 @@ await generate(
 )
 ```
 
-Arguments:
-
-- `prompt`: required primary prompt
-- `inputs`: optional retrieved source material
-- `instructions`: optional extra system-style instruction
-- `model`: optional model alias
-- `tools`: optional explicit subset of allowed tools for this generation
-- `cache`: optional generation memoization policy
-- `options`: optional less-common controls such as `thinking`
-
-Return shape:
-
-- `result.status`
-- `result.model`
-- `result.output`
-
 Notes:
 
 - use `inputs=...` when you want host-managed source assembly
@@ -199,64 +103,16 @@ Notes:
 - markdown files with embedded images can go through `inputs=...`
 - tool use is opt-in; omit `tools` for plain generation
 
-Examples:
-
-```python
-await generate(
-    prompt="Summarize this note.",
-    instructions="Be concise and factual.",
-)
-```
-
-```python
-image = await retrieve(type="file", ref="images/test_image.jpg")
-await generate(
-    prompt="Describe this image briefly.",
-    inputs=image.items,
-)
-```
-
-```python
-note = await retrieve(type="file", ref="notes/trip-report.md")
-await generate(
-    prompt="Summarize this note and its embedded images.",
-    inputs=note.items,
-    instructions="Be concise.",
-)
-```
-
-```python
-await generate(
-    prompt="Summarize and verify these leads.",
-    instructions="Use search sparingly and cite concrete details.",
-    tools=["web_search_tavily"],
-)
-```
-
 ### `call_tool`
 
 ```python
 await call_tool(*, name: str, arguments: dict | None = None, options: dict | None = None)
 ```
 
-Arguments:
+Notes:
 
-- `name`: configured tool name
-- `arguments`: optional keyword arguments for the tool
-- `options`: reserved; keep empty or omit
-
-Return shape:
-
-- `result.name`
-- `result.status`
-- `result.output`
-- `result.metadata`
-
-Example:
-
-```python
-await call_tool(name="workflow_run", arguments={"operation": "list"})
-```
+- this can only call tools already enabled for the chat run
+- `code_execution_local` itself is excluded to avoid recursive self-invocation
 
 ### `assemble_context`
 
@@ -270,39 +126,13 @@ await assemble_context(
 )
 ```
 
-Return shape:
-
-- `result.messages`
-- `result.instructions`
-
-Each message has:
-
-- `message.role`
-- `message.content`
-- `message.metadata`
-
-Examples:
-
-```python
-history = await retrieve(type="run", ref="session", options={"limit": 3})
-final = await assemble_context(history=history.items)
-```
-
-```python
-history = await retrieve(type="run", ref="session", options={"limit": 3})
-final = await assemble_context(
-    history=history.items,
-    instructions="Prefer exact quoted text when possible.",
-)
-```
-
 ### `parse_markdown`
 
 ```python
 await parse_markdown(*, value: RetrievedItem | str)
 ```
 
-Return shape:
+Top-level fields:
 
 - `parsed.frontmatter`
 - `parsed.body`
@@ -310,47 +140,6 @@ Return shape:
 - `parsed.sections`
 - `parsed.code_blocks`
 - `parsed.images`
-
-Each heading has:
-
-- `level`
-- `text`
-- `line_start`
-
-Each section has:
-
-- `heading`
-- `level`
-- `content`
-- `line_start`
-
-Each code block has:
-
-- `language`
-- `content`
-- `line_start`
-
-Each image has:
-
-- `src`
-- `alt`
-- `title`
-- `line_start`
-
-Examples:
-
-```python
-doc = (await retrieve(type="file", ref="notes/reference.md")).items[0]
-parsed = await parse_markdown(value=doc)
-titles = [heading.text for heading in parsed.headings]
-```
-
-```python
-skill = (await retrieve(type="file", ref="Skills/example.md")).items[0]
-parsed = await parse_markdown(value=skill)
-name = parsed.frontmatter.get("name")
-description = parsed.frontmatter.get("description")
-```
 
 ### `finish`
 
@@ -362,17 +151,6 @@ Supported `status` values:
 
 - `completed`
 - `skipped`
-
-Return shape:
-
-- `result.status`
-- `result.reason`
-
-Example:
-
-```python
-await finish(status="skipped", reason="No inputs matched today.")
-```
 
 ## Common Patterns
 
@@ -399,6 +177,22 @@ artifact.items[0].content[:2000]
 )
 ```
 
+### Explore extracted markdown before reaching for regex
+
+```python
+code_execution_local(
+    code="""
+artifact = await retrieve(type="cache", ref="research/article")
+parsed = await parse_markdown(value=artifact.items[0].content)
+{
+    "title": parsed.frontmatter.get("title"),
+    "headings": [heading.text for heading in parsed.headings],
+}
+""",
+    readable_cache_refs=["research/article"],
+)
+```
+
 ### Explore markdown structure
 
 ```python
@@ -408,6 +202,23 @@ doc = await retrieve(type="file", ref="notes/project.md")
 parsed = await parse_markdown(value=doc.items[0])
 [section.heading for section in parsed.sections]
 """,
+)
+```
+
+### Pull one section from extracted markdown
+
+```python
+code_execution_local(
+    code="""
+artifact = await retrieve(type="cache", ref="research/article")
+parsed = await parse_markdown(value=artifact.items[0].content)
+target = next(
+    (section for section in parsed.sections if section.heading == "AI In Fiction"),
+    None,
+)
+target.content if target else "SECTION_NOT_FOUND"
+""",
+    readable_cache_refs=["research/article"],
 )
 ```
 
@@ -426,13 +237,43 @@ result.output
 )
 ```
 
-## Output Shape
+### End-to-end markdown exploration
 
-Returns:
-
-- the script return value when present
-- printed output when present
-- or a compact completion message
+```python
+code_execution_local(
+    code="""
+article = await retrieve(type="cache", ref="research/article")
+parsed = await parse_markdown(value=article.items[0].content)
+history = await retrieve(type="run", ref="session", options={"limit": 2})
+assembled = await assemble_context(
+    history=history.items,
+    instructions="Keep the summary concise.",
+)
+listing = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "list", "target": "notes"},
+)
+draft = await generate(
+    prompt=(
+        f"title={parsed.frontmatter.get('title')}; "
+        f"headings={len(parsed.headings)}; "
+        f"messages={len(assembled.messages)}; "
+        f"listing={listing.output}"
+    ),
+    instructions="Return one short deterministic line.",
+)
+await output(
+    type="cache",
+    ref="scratch/article-summary",
+    data=draft.output,
+    options={"mode": "replace", "ttl": "session"},
+)
+await finish(status="completed", reason="article summarized")
+""",
+    readable_cache_refs=["research/article"],
+    writable_cache_refs=["scratch/article-summary"],
+)
+```
 
 ## Notes
 
@@ -440,3 +281,11 @@ Returns:
 - cache and file access still depend on the granted scope
 - prefer returning a compact final value instead of printing large text
 - use this doc as the primary reference for the local helper surface
+
+## Common Monty Limits
+
+- treat this as a constrained Monty runtime, not full CPython
+- prefer host helpers such as `parse_markdown(...)` over regex/manual parsing when the content is markdown
+- use one import per line
+- prefer simpler Python and positional stdlib calls when possible
+- if the script starts getting parser-heavy or utility-heavy, simplify the approach instead of layering more imports and boilerplate

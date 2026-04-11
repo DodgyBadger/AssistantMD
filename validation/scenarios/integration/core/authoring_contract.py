@@ -146,6 +146,15 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="authoring_assemble_context_completed",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "message_count": 3,
+                "instruction_count": 1,
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="authoring_parse_markdown_started",
             expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
         )
@@ -180,8 +189,21 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="authoring_finish_requested",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "status": "completed",
+                "reason": "all-helpers-exercised",
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="authoring_monty_execution_completed",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "status": "completed",
+                "reason": "all-helpers-exercised",
+            },
         )
 
         contract_output = vault / "outputs" / "contract-success.md"
@@ -190,6 +212,7 @@ class AuthoringContractScenario(BaseScenario):
             content = contract_output.read_text(encoding="utf-8")
             self.soft_assert("SEED_CONTENT" in content, "Expected retrieved file content in output")
             self.soft_assert("APPENDED_CACHE" in content, "Expected appended cache content in output")
+            self.soft_assert("ASSEMBLED=3" in content, "Expected assembled context count in output")
 
         generated_output = vault / "outputs" / "generate-success.md"
         self.soft_assert(generated_output.exists(), "Expected generate output file")
@@ -375,7 +398,7 @@ AUTHORING_CONTRACT_SUCCESS_WORKFLOW = """---
 workflow_engine: monty
 enabled: false
 description: Deterministic authoring contract success workflow
-authoring.capabilities: [retrieve, generate, output, call_tool, parse_markdown]
+authoring.capabilities: [retrieve, generate, output, call_tool, assemble_context, parse_markdown, finish]
 authoring.retrieve.file: [notes/*.md, images/*]
 authoring.retrieve.cache: [scratch/*]
 authoring.output.file: [outputs/*.md, outputs/*.txt]
@@ -406,6 +429,11 @@ listing = await call_tool(
     name="file_ops_safe",
     arguments={"operation": "list", "target": "notes"},
 )
+assembled = await assemble_context(
+    instructions="Keep the response concise.",
+    context_messages=[{"role": "system", "content": "Validation context"}],
+    latest_user_message={"role": "user", "content": "Summarize the retrieved material."},
+)
 structured = await retrieve(type="file", ref="notes/structured.md")
 parsed = await parse_markdown(value=structured.items[0])
 
@@ -415,6 +443,8 @@ draft = await generate(
         + cached.items[0].content
         + "\\n\\nListing:\\n"
         + listing.output
+        + "\\n\\nAssembled messages:\\n"
+        + str(len(assembled.messages))
     ),
     inputs=source.items,
     instructions="Return one short deterministic line.",
@@ -424,7 +454,7 @@ draft = await generate(
 await output(
     type="file",
     ref="outputs/contract-success.md",
-    data=cached.items[0].content,
+    data=cached.items[0].content + f"\\nASSEMBLED={len(assembled.messages)}",
     options={"mode": "replace"},
 )
 await output(
@@ -444,6 +474,8 @@ await output(
     ),
     options={"mode": "replace"},
 )
+
+await finish(status="completed", reason="all-helpers-exercised")
 ```
 """
 
