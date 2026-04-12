@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic_monty import Monty, run_monty_async
 
-from core.authoring.builtins import create_builtin_registry
+from core.authoring.helper_catalog import create_builtin_registry
 from core.authoring.contracts import (
     AuthoringFinishSignal,
     AuthoringExecutionContext,

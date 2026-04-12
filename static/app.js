@@ -526,6 +526,7 @@ function populateSelectors() {
             } else if (
                 tool.name === 'browser' ||
                 tool.name === 'code_execution_local' ||
+                tool.name === 'memory_ops' ||
                 tool.name === 'file_ops_safe' ||
                 (preferredWebTool && tool.name === preferredWebTool)
             ) {
@@ -551,6 +552,7 @@ function populateSelectors() {
         'web_search_duckduckgo',
         'web_search_tavily',
         'browser',
+        'memory_ops',
         'file_ops_safe',
         'file_ops_unsafe',
         'documentation_access',

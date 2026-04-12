@@ -287,6 +287,11 @@ tools:
     description: "Browser-based page extraction using Playwright"
     requires_secrets: []
     user_editable: false
+  memory_ops:
+    module: core.tools.memory_ops
+    description: "Read structured conversation history through a source-agnostic memory provider"
+    requires_secrets: []
+    user_editable: false
   workflow_run:
     module: core.tools.workflow_run
     description: "List, run, enable, and disable workflows in the current vault"

@@ -1,0 +1,123 @@
+"""
+Conversation memory tool with a source-agnostic provider boundary.
+"""
+
+from __future__ import annotations
+
+import json
+
+from pydantic_ai import RunContext
+from pydantic_ai.tools import Tool
+
+from core.logger import UnifiedLogger
+from core.memory import resolve_conversation_history_provider
+
+from .base import BaseTool
+
+
+logger = UnifiedLogger(tag="memory-ops-tool")
+
+
+class MemoryOps(BaseTool):
+    """Read structured conversation history for the current chat session."""
+
+    allow_routing = True
+
+    @classmethod
+    def get_tool(cls, vault_path: str | None = None):
+        """Get the conversation memory tool."""
+
+        async def memory_ops(
+            ctx: RunContext,
+            *,
+            operation: str,
+            scope: str = "session",
+            session_id: str = "",
+            limit: int | str = "all",
+        ) -> str:
+            """Read structured conversation history.
+
+            :param operation: Operation name. Currently only "get_history" is supported.
+            :param scope: History scope. Currently only "session" is supported.
+            :param session_id: Optional explicit session id. Defaults to the active session when available.
+            :param limit: Positive integer or "all"
+            """
+            del vault_path
+            try:
+                deps = getattr(ctx, "deps", None)
+                active_session_id = str(getattr(deps, "session_id", "") or "").strip() or None
+                message_history = list(getattr(deps, "message_history", []) or [])
+                op = (operation or "").strip().lower()
+
+                logger.set_sinks(["validation"]).info(
+                    "tool_invoked",
+                    data={
+                        "tool": "memory_ops",
+                        "operation": op,
+                        "scope": scope,
+                    },
+                )
+
+                if op != "get_history":
+                    return "Unknown operation. Available: get_history"
+
+                provider = resolve_conversation_history_provider(
+                    message_history=message_history,
+                    session_id=active_session_id,
+                )
+                resolved_limit = cls._parse_limit(limit)
+                result = provider.get_history(
+                    scope=scope,
+                    session_id=(session_id or "").strip() or None,
+                    limit=resolved_limit,
+                )
+                return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "memory_ops failed",
+                    data={
+                        "operation": operation,
+                        "scope": scope,
+                        "session_id": session_id,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                return f"Error performing '{operation}' operation: {exc}"
+
+        return Tool(
+            memory_ops,
+            name="memory_ops",
+            description="Read structured conversation history through a source-agnostic memory provider.",
+        )
+
+    @classmethod
+    def get_instructions(cls) -> str:
+        """Get usage instructions for conversation memory access."""
+        return """
+Read structured conversation history through a source-agnostic memory provider.
+
+Full documentation:
+- `__virtual_docs__/tools/memory_ops.md`
+
+Important notes:
+- use `operation="get_history"` to read conversation history
+- default `scope="session"` reads the active chat session when available
+- prefer this over `retrieve(type="run", ...)` for new history-aware flows
+"""
+
+    @staticmethod
+    def _parse_limit(value: int | str) -> int | str:
+        if isinstance(value, int):
+            if value <= 0:
+                raise ValueError("limit must be a positive integer or 'all'")
+            return value
+        normalized = str(value or "").strip().lower()
+        if not normalized or normalized == "all":
+            return "all"
+        if normalized.isdigit():
+            parsed = int(normalized)
+            if parsed <= 0:
+                raise ValueError("limit must be a positive integer or 'all'")
+            return parsed
+        raise ValueError("limit must be a positive integer or 'all'")

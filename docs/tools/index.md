@@ -23,7 +23,7 @@ General guidance:
 - prefer `tavily_extract` over `browser` when you already know the URL and only need page content
 - use `browser` when extract fails, returns thin content, or the page is clearly JavaScript-heavy
 - prefer `code_execution_local` for small Python tasks tied to the current chat session
-- `code_execution_local.md` is also the main reference for constrained runtime helpers such as `retrieve(...)`, `generate(...)`, and `parse_markdown(...)`
+- `code_execution_local.md` is also the main reference for constrained runtime helpers such as `call_tool(...)`, `generate(...)`, and `parse_markdown(...)`
 - use `file_ops_safe` for exploration and non-destructive file work
 - use `file_ops_unsafe` only when a destructive edit is explicitly needed
 
@@ -33,6 +33,7 @@ Available tool docs:
 - `code_execution_local`
 - `file_ops_safe`
 - `file_ops_unsafe`
+- `memory_ops`
 - `tavily_crawl`
 - `tavily_extract`
 - `web_search_duckduckgo`

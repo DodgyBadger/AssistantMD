@@ -9,9 +9,7 @@ from typing import Any, Protocol, runtime_checkable
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
-        "retrieve",
-        "complete_pending",
-        "output",
+        "pending_files",
         "generate",
         "call_tool",
         "assemble_context",
@@ -28,10 +26,6 @@ class AuthoringCapabilityError(ValueError):
 
 class UnknownAuthoringCapabilityError(AuthoringCapabilityError):
     """Raised when code or frontmatter references an unknown capability."""
-
-
-class CapabilityHandlerMissingError(AuthoringCapabilityError):
-    """Raised when a capability is registered but the host adapter is missing."""
 
 
 class AuthoringFinishSignal(RuntimeError):
@@ -122,12 +116,14 @@ class OutputResult:
 
 
 @dataclass(frozen=True)
-class CompletePendingResult:
-    """Envelope for complete_pending(...) results."""
+class PendingFilesResult:
+    """Envelope for pending_files(...) results."""
 
+    operation: str
     status: str
-    completed_count: int
     pattern: str
+    items: tuple[RetrievedItem, ...] = ()
+    completed_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -217,71 +213,11 @@ class FinishResult:
 
 @runtime_checkable
 class AuthoringHost(Protocol):
-    """Host-side adapter implemented by the caller of the Monty runtime."""
+    """Host-side runtime state exposed to helper executors."""
 
     def get_monty_inputs(self) -> dict[str, Any]: ...
 
     def get_monty_dataclasses(self) -> tuple[type, ...]: ...
-
-    async def handle_retrieve(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> RetrieveResult: ...
-
-    async def handle_complete_pending(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> CompletePendingResult: ...
-
-    async def handle_retrieve(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_output(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_generate(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_call_tool(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_assemble_context(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_parse_markdown(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_import_content(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
-
-    async def handle_finish(
-        self,
-        call: AuthoringCapabilityCall,
-        context: AuthoringExecutionContext,
-    ) -> Any: ...
 
 
 CapabilityHandler = Any

@@ -20,11 +20,9 @@ Scope comes from the active chat session:
 
 Inside the runtime you have access to the following helper functions. Prefer these for the tasks described:
 
-- `retrieve(...)`: load scoped files, cache artifacts, or recent chat-session history into the script.
-- `complete_pending(...)`: mark selected pending file items as processed after successful handling.
-- `output(...)`: write selected results back to a file or cache artifact.
-- `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use.
 - `call_tool(...)`: invoke one already-enabled chat tool from inside the script.
+- `pending_files(...)`: filter a file result set to the pending subset and explicitly complete the items you finished.
+- `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use.
 - `assemble_context(...)`: build structured message history for downstream chat-style generation.
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs.
 - `finish(...)`: end the script intentionally with a completed or skipped terminal status.
@@ -34,71 +32,22 @@ Use ordinary Python for everything else and for filtering, sorting, selection, a
 
 ## Helper Signatures
 
-### `retrieve`
+### `pending_files`
 
 ```python
-await retrieve(*, type: str, ref: str, options: dict | None = None)
-```
-
-Supported `type` values:
-
-- `file`
-- `cache`
-- `run`
-
-`file` options:
-
-- `refs_only: bool = False`
-- `pending: bool = False`
-
-`cache` options:
-
-- none
-
-`run` options:
-
-- `limit: int | "all" = "all"`
-
-Results come back in `result.items`. For most scripts, the important fields are
-`item.content`, `item.exists`, and `item.metadata`.
-
-For simple boolean flags, `options` may also be written as a set of flag names,
-for example `options={"pending"}`.
-
-### `output`
-
-```python
-await output(*, type: str, ref: str, data: object, options: dict | None = None)
-```
-
-Supported `type` values:
-
-- `file`
-- `cache`
-
-`file` options:
-
-- `mode: "append" | "replace" | "new" = "append"`
-
-`cache` options:
-
-- `mode: "append" | "replace" = "append"`
-- `ttl: str = "session"`
-
-### `complete_pending`
-
-```python
-await complete_pending(
+await pending_files(
     *,
-    items: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
+    operation: str,
+    pattern: str,
+    items: CallToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
 )
 ```
 
 Notes:
 
-- use this only with items returned from `retrieve(type="file", ..., options={"pending"})`
-- acknowledge only the items you actually finished processing
-- this is what prevents those files from being returned as pending on the next run
+- use `operation="get"` to filter a `file_ops_safe` result down to pending items
+- use `operation="complete"` to mark only the items you actually finished processing
+- `pattern` is the stable tracking key, usually the watched glob such as `tasks/*.md`
 
 ### `generate`
 
@@ -106,7 +55,7 @@ Notes:
 await generate(
     *,
     prompt: str,
-    inputs: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...] | None = None,
+    inputs: RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...] | None = None,
     instructions: str | None = None,
     model: str | None = None,
     tools: list[str] | tuple[str, ...] | None = None,
@@ -117,11 +66,8 @@ await generate(
 
 Notes:
 
-- use `inputs=...` when you want host-managed source assembly
-- plain text files can go through `inputs=...`
-- direct images can go through `inputs=...`
-- markdown files with embedded images can go through `inputs=...`
 - tool use is opt-in; omit `tools` for plain generation
+- prefer tool-first access patterns and keep `generate(...)` focused on the actual model call
 
 ### `call_tool`
 
@@ -133,6 +79,7 @@ Notes:
 
 - this can only call tools already enabled for the chat run
 - `code_execution_local` itself is excluded to avoid recursive self-invocation
+- use this for file access, memory access, web tools, and other operational work
 
 ### `assemble_context`
 
@@ -225,63 +172,40 @@ code_execution_local(
 ```python
 code_execution_local(
     code="""
-artifact = await retrieve(type="cache", ref="tool/example/ref")
-artifact.items[0].content[:2000]
+artifact = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "read", "target": "__virtual_docs__/tools/code_execution_local"},
+)
+artifact.output[:2000]
 """,
 )
 ```
 
-### Explore extracted markdown before reaching for regex
+### Read conversation history with `memory_ops`
 
 ```python
 code_execution_local(
     code="""
-artifact = await retrieve(type="cache", ref="research/article")
-parsed = await parse_markdown(value=artifact.items[0].content)
-{
-    "title": parsed.frontmatter.get("title"),
-    "headings": [heading.text for heading in parsed.headings],
-}
+history = await call_tool(
+    name="memory_ops",
+    arguments={"operation": "get_history", "scope": "session", "limit": 5},
+)
+history.output
 """,
 )
 ```
 
-### Explore markdown structure
+### Explore a vault note structure
 
 ```python
 code_execution_local(
     code="""
-doc = await retrieve(type="file", ref="notes/project.md")
-parsed = await parse_markdown(value=doc.items[0])
+doc = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "read", "target": "notes/project.md"},
+)
+parsed = await parse_markdown(value=doc.output)
 [section.heading for section in parsed.sections]
-""",
-)
-```
-
-### Enumerate pending files
-
-```python
-code_execution_local(
-    code="""
-pending = await retrieve(
-    type="file",
-    ref="tasks/*.md",
-    options={"pending": True, "refs_only": True},
-)
-[item.ref for item in pending.items if item.exists]
-""",
-)
-```
-
-### Complete a processed pending batch
-
-```python
-code_execution_local(
-    code="""
-pending = await retrieve(type="file", ref="tasks/*.md", options={"pending"})
-selected = tuple(pending.items[:3])
-# ...process selected...
-await complete_pending(items=selected)
 """,
 )
 ```
@@ -291,8 +215,11 @@ await complete_pending(items=selected)
 ```python
 code_execution_local(
     code="""
-artifact = await retrieve(type="cache", ref="research/article")
-parsed = await parse_markdown(value=artifact.items[0].content)
+extracted = await call_tool(
+    name="tavily_extract",
+    arguments={"urls": ["https://example.com"]},
+)
+parsed = await parse_markdown(value=extracted.output)
 target = next(
     (section for section in parsed.sections if section.heading == "AI In Fiction"),
     None,
@@ -307,10 +234,9 @@ target.content if target else "SECTION_NOT_FOUND"
 ```python
 code_execution_local(
     code="""
-image = await retrieve(type="file", ref="images/test_image.jpg")
 result = await generate(
-    prompt="Describe this image briefly.",
-    inputs=image.items,
+    prompt="Describe this topic briefly.",
+    instructions="Return one short factual sentence.",
 )
 result.output
 """,
@@ -322,11 +248,17 @@ result.output
 ```python
 code_execution_local(
     code="""
-article = await retrieve(type="cache", ref="research/article")
-parsed = await parse_markdown(value=article.items[0].content)
-history = await retrieve(type="run", ref="session", options={"limit": 2})
+article = await call_tool(
+    name="tavily_extract",
+    arguments={"urls": ["https://example.com"]},
+)
+parsed = await parse_markdown(value=article.output)
+history = await call_tool(
+    name="memory_ops",
+    arguments={"operation": "get_history", "scope": "session", "limit": 2},
+)
 assembled = await assemble_context(
-    history=history.items,
+    context_messages=[{"role": "system", "content": history.output}],
     instructions="Keep the summary concise.",
 )
 listing = await call_tool(
@@ -342,13 +274,34 @@ draft = await generate(
     ),
     instructions="Return one short deterministic line.",
 )
-await output(
-    type="cache",
-    ref="scratch/article-summary",
-    data=draft.output,
-    options={"mode": "replace", "ttl": "session"},
-)
 await finish(status="completed", reason="article summarized")
+""",
+)
+```
+
+### Filter and complete pending files
+
+```python
+code_execution_local(
+    code="""
+listed = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "list", "target": "tasks"},
+)
+pending = await pending_files(
+    operation="get",
+    pattern="tasks/*.md",
+    items=listed,
+)
+selected = pending.items[:3]
+
+# ...process selected...
+
+await pending_files(
+    operation="complete",
+    pattern="tasks/*.md",
+    items=selected,
+)
 """,
 )
 ```
@@ -356,7 +309,7 @@ await finish(status="completed", reason="article summarized")
 ## Notes
 
 - this tool always has access to the current chat session history
-- cache and file access come from the current AssistantMD runtime
+- file, memory, and web access should generally go through `call_tool(...)`
 - prefer returning a compact final value instead of printing large text
 - use this doc as the primary reference for the local helper surface
 
