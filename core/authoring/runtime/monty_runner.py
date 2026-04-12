@@ -153,9 +153,6 @@ async def run_authoring_monty(
             "printed_line_count": len(capture.lines),
         },
     )
-    finalize = getattr(host, "finalize_authoring_run", None)
-    if callable(finalize):
-        finalize(status=terminal_status)
     return AuthoringMontyExecutionResult(
         value=value,
         status=terminal_status,

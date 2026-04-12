@@ -10,6 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
         "retrieve",
+        "complete_pending",
         "output",
         "generate",
         "call_tool",
@@ -121,6 +122,15 @@ class OutputResult:
 
 
 @dataclass(frozen=True)
+class CompletePendingResult:
+    """Envelope for complete_pending(...) results."""
+
+    status: str
+    completed_count: int
+    pattern: str
+
+
+@dataclass(frozen=True)
 class GenerationResult:
     """Envelope for generate(...) results."""
 
@@ -212,6 +222,18 @@ class AuthoringHost(Protocol):
     def get_monty_inputs(self) -> dict[str, Any]: ...
 
     def get_monty_dataclasses(self) -> tuple[type, ...]: ...
+
+    async def handle_retrieve(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> RetrieveResult: ...
+
+    async def handle_complete_pending(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> CompletePendingResult: ...
 
     async def handle_retrieve(
         self,

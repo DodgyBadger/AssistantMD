@@ -29,6 +29,12 @@ def create_builtin_registry() -> AuthoringCapabilityRegistry:
                 contract=_retrieve_contract(),
             ),
             _host_dispatch_capability(
+                name="complete_pending",
+                handler_name="handle_complete_pending",
+                doc="Mark selected pending file items as completed for this workflow.",
+                contract=_complete_pending_contract(),
+            ),
+            _host_dispatch_capability(
                 name="output",
                 handler_name="handle_output",
                 doc="Emit selected results to files or cache sinks.",
@@ -293,6 +299,40 @@ def _output_contract() -> dict[str, Any]:
                 ),
                 "description": "Store a temporary cache artifact for later scripted exploration.",
             },
+        ],
+    }
+
+
+def _complete_pending_contract() -> dict[str, Any]:
+    return {
+        "signature": (
+            "complete_pending(*, items: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...])"
+        ),
+        "summary": (
+            "Mark selected pending file items as processed for future runs. "
+            "Use this only with items returned from retrieve(type='file', options={'pending'})."
+        ),
+        "types": {
+            "items": {
+                "type": "RetrieveResult|RetrievedItem|list|tuple",
+                "description": "Pending file items to acknowledge as processed.",
+            }
+        },
+        "return_shape": {
+            "status": "Always 'completed' when the acknowledgment succeeds.",
+            "completed_count": "Number of pending items marked processed.",
+            "pattern": "Pending selector tracking pattern used for the acknowledgment.",
+        },
+        "examples": [
+            {
+                "code": (
+                    'artifact = await retrieve(type="file", ref="tasks/*.md", options={"pending"})\n'
+                    "selected = artifact.items[:3]\n"
+                    "# ...process selected...\n"
+                    "await complete_pending(items=selected)"
+                ),
+                "description": "Acknowledge only the pending files actually processed in this run.",
+            }
         ],
     }
 

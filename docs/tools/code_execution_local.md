@@ -21,6 +21,7 @@ Scope comes from the active chat session:
 Inside the runtime you have access to the following helper functions. Prefer these for the tasks described:
 
 - `retrieve(...)`: load scoped files, cache artifacts, or recent chat-session history into the script.
+- `complete_pending(...)`: mark selected pending file items as processed after successful handling.
 - `output(...)`: write selected results back to a file or cache artifact.
 - `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use.
 - `call_tool(...)`: invoke one already-enabled chat tool from inside the script.
@@ -83,6 +84,21 @@ Supported `type` values:
 
 - `mode: "append" | "replace" = "append"`
 - `ttl: str = "session"`
+
+### `complete_pending`
+
+```python
+await complete_pending(
+    *,
+    items: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
+)
+```
+
+Notes:
+
+- use this only with items returned from `retrieve(type="file", ..., options={"pending"})`
+- acknowledge only the items you actually finished processing
+- this is what prevents those files from being returned as pending on the next run
 
 ### `generate`
 
@@ -174,7 +190,7 @@ date.month_name(fmt: str | None = None) -> str
 Notes:
 
 - these resolve the same shared date tokens used elsewhere in AssistantMD
-- pass `fmt` to control formatting, for example `date.today("%Y-%m-%d")`
+- pass `fmt` to control formatting, using strftime, for example `date.today("%Y-%m-%d")`
 - week-based values honor the current workflow or runtime `week_start_day`
 
 ## Common Patterns
@@ -253,6 +269,19 @@ pending = await retrieve(
     options={"pending": True, "refs_only": True},
 )
 [item.ref for item in pending.items if item.exists]
+""",
+)
+```
+
+### Complete a processed pending batch
+
+```python
+code_execution_local(
+    code="""
+pending = await retrieve(type="file", ref="tasks/*.md", options={"pending"})
+selected = tuple(pending.items[:3])
+# ...process selected...
+await complete_pending(items=selected)
 """,
 )
 ```

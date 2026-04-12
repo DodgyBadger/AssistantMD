@@ -23,6 +23,7 @@ class AuthoringContractScenario(BaseScenario):
         self.create_file(vault, "notes/extra.md", "EXTRA_CONTENT")
         self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
         self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
+        self.create_file(vault, "tasks/pending-one.md", "PENDING_ONE")
 
         self.create_file(
             vault,
@@ -142,6 +143,14 @@ class AuthoringContractScenario(BaseScenario):
                 "section_count": 2,
                 "code_block_count": 1,
                 "image_count": 1,
+            },
+        )
+        self.assert_event_contains(
+            events,
+            name="authoring_complete_pending_completed",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "completed_count": 1,
             },
         )
         self.assert_event_contains(
@@ -357,6 +366,8 @@ assembled = await assemble_context(
 )
 structured = await retrieve(type="file", ref="notes/structured.md")
 parsed = await parse_markdown(value=structured.items[0])
+pending = await retrieve(type="file", ref="tasks/*.md", options={"pending": True, "refs_only": True})
+await complete_pending(items=(pending.items[0],))
 
 draft = await generate(
     prompt=(

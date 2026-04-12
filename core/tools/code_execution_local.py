@@ -102,7 +102,7 @@ Full documentation:
 Important notes:
 - pass code with `code="..."`
 - always use named arguments
-- this tool exposes constrained helpers such as `retrieve`, `output`, `generate`, `call_tool`, `assemble_context`, `parse_markdown`, and `finish`
+- this tool exposes constrained helpers such as `retrieve`, `complete_pending`, `output`, `generate`, `call_tool`, `assemble_context`, `parse_markdown`, and `finish`
 """
 
     @staticmethod

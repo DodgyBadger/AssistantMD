@@ -21,6 +21,7 @@ class CodeExecutionLocalScenario(BaseScenario):
         vault = self.create_vault("CodeExecutionLocalVault")
         self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
         self.create_file(vault, "notes/blocked.md", "BLOCKED_CONTENT")
+        self.create_file(vault, "tasks/pending-one.md", "PENDING_ONE")
 
         await self.start_system()
 
@@ -83,6 +84,12 @@ class CodeExecutionLocalScenario(BaseScenario):
                         "code": (
                             'doc = await retrieve(type="file", ref="notes/structured.md")\n'
                             'parsed = await parse_markdown(value=doc.items[0])\n'
+                            'pending = await retrieve(\n'
+                            '    type="file",\n'
+                            '    ref="tasks/*.md",\n'
+                            '    options={"pending": True, "refs_only": True},\n'
+                            ')\n'
+                            'await complete_pending(items=(pending.items[0],))\n'
                             'history = await retrieve(type="run", ref="session", options={"limit": 1})\n'
                             'assembled = await assemble_context(\n'
                             '    history=history.items,\n'
@@ -235,6 +242,14 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "section_count": 2,
                     "code_block_count": 1,
                     "image_count": 1,
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_complete_pending_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "completed_count": 1,
                 },
             )
             self.assert_event_contains(

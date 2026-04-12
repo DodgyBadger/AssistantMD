@@ -26,6 +26,7 @@ from core.context.store import (
     purge_expired_cache_artifacts,
     upsert_cache_artifact,
 )
+from core.utils.hash import hash_file_bytes, hash_file_content
 from core.utils.patterns import PatternUtilities
 from core.utils.file_state import WorkflowFileStateManager
 from core.authoring.shared.tool_binding import resolve_tool_binding
@@ -46,6 +47,7 @@ from core.authoring.contracts import (
     AuthoringHost,
     AuthoringFinishSignal,
     CallToolResult,
+    CompletePendingResult,
     ContextMessage,
     FinishResult,
     GenerationResult,
@@ -158,7 +160,6 @@ class WorkflowAuthoringHost(AuthoringHost):
     run_buffers: BufferStore = field(default_factory=BufferStore)
     session_buffers: BufferStore = field(default_factory=BufferStore)
     state_manager: WorkflowFileStateManager | None = None
-    pending_state_updates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     session_key: str | None = None
     chat_session_id: str | None = None
     message_history: list[ModelMessage] | None = None
@@ -247,7 +248,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "session": self.session_buffers,
             },
         )
-        self._capture_pending_state_updates(resolved)
+        _propagate_pending_metadata(resolved)
         items = [_normalize_file_record(record) for record in resolved]
         logger.info(
             "authoring_retrieve_resolved",
@@ -273,14 +274,37 @@ class WorkflowAuthoringHost(AuthoringHost):
             items=tuple(items),
         )
 
-    def finalize_authoring_run(self, *, status: str) -> None:
-        """Persist pending-file state after a successful execution."""
-        if status != "completed" or not self.state_manager or not self.pending_state_updates:
-            return
-        for pattern, file_records in self.pending_state_updates.items():
-            if file_records:
-                self.state_manager.mark_files_processed(file_records, pattern)
-        self.pending_state_updates.clear()
+    async def handle_complete_pending(
+        self,
+        call: AuthoringCapabilityCall,
+        context: AuthoringExecutionContext,
+    ) -> CompletePendingResult:
+        items = _parse_complete_pending_items(call)
+        if not self.state_manager:
+            raise ValueError("complete_pending requires workflow file-state tracking to be available")
+        pattern, file_records = _build_complete_pending_records(items, vault_path=self.vault_path or "")
+        self.state_manager.mark_files_processed(file_records, pattern)
+        logger.info(
+            "authoring_complete_pending_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "pattern": pattern,
+                "completed_count": len(file_records),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "authoring_complete_pending_completed",
+            data={
+                "workflow_id": context.workflow_id,
+                "pattern": pattern,
+                "completed_count": len(file_records),
+            },
+        )
+        return CompletePendingResult(
+            status="completed",
+            completed_count=len(file_records),
+            pattern=pattern,
+        )
 
     async def handle_output(
         self,
@@ -734,32 +758,6 @@ class WorkflowAuthoringHost(AuthoringHost):
             },
         )
         raise AuthoringFinishSignal(status=status, reason=reason)
-
-    def _capture_pending_state_updates(self, resolved_records: list[dict[str, Any]]) -> None:
-        for record in resolved_records:
-            if not isinstance(record, dict):
-                continue
-            state_metadata = record.get("_state_metadata")
-            if not isinstance(state_metadata, dict) or not state_metadata.get("requires_tracking"):
-                continue
-            pattern = str(state_metadata.get("pattern") or "").strip()
-            if not pattern:
-                continue
-            raw_records = state_metadata.get("file_records")
-            if not isinstance(raw_records, list):
-                continue
-            normalized_records: list[dict[str, Any]] = []
-            for entry in raw_records:
-                if not isinstance(entry, dict):
-                    continue
-                content_hash = str(entry.get("content_hash") or "").strip()
-                filepath = str(entry.get("filepath") or "").strip()
-                if content_hash and filepath:
-                    normalized_records.append(
-                        {"content_hash": content_hash, "filepath": filepath}
-                    )
-            if normalized_records:
-                self.pending_state_updates[pattern] = normalized_records
 
     def _handle_cache_retrieve(
         self,
@@ -1230,6 +1228,81 @@ def _normalize_optional_string(value: Any) -> str | None:
     return normalized or None
 
 
+def _parse_complete_pending_items(call: AuthoringCapabilityCall) -> tuple[RetrievedItem, ...]:
+    if call.args:
+        raise ValueError("complete_pending only supports keyword arguments")
+    if "items" not in call.kwargs:
+        raise ValueError("complete_pending requires 'items'")
+    return _normalize_retrieved_items_input(call.kwargs.get("items"))
+
+
+def _normalize_retrieved_items_input(value: Any) -> tuple[RetrievedItem, ...]:
+    if isinstance(value, RetrieveResult):
+        return tuple(value.items)
+    if isinstance(value, RetrievedItem):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        normalized: list[RetrievedItem] = []
+        for item in value:
+            if not isinstance(item, RetrievedItem):
+                raise ValueError(
+                    "complete_pending items must be RetrievedItem values or a RetrieveResult"
+                )
+            normalized.append(item)
+        return tuple(normalized)
+    raise ValueError("complete_pending items must be a RetrieveResult, RetrievedItem, list, or tuple")
+
+
+def _build_complete_pending_records(
+    items: tuple[RetrievedItem, ...],
+    *,
+    vault_path: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    if not items:
+        raise ValueError("complete_pending requires at least one pending item")
+
+    pattern: str | None = None
+    file_records: list[dict[str, Any]] = []
+    for item in items:
+        metadata = dict(item.metadata or {})
+        item_pattern = str(metadata.get("pending_pattern") or "").strip()
+        if not item_pattern:
+            raise ValueError(
+                "complete_pending only accepts items returned from retrieve(type='file', options={'pending'})"
+            )
+        if pattern is None:
+            pattern = item_pattern
+        elif item_pattern != pattern:
+            raise ValueError("complete_pending items must all come from the same pending retrieval")
+
+        source_path = str(metadata.get("source_path") or item.ref or "").strip()
+        if not source_path:
+            raise ValueError("complete_pending items must include a source path")
+        full_path = source_path if os.path.isabs(source_path) else os.path.join(vault_path, source_path)
+        if os.path.isfile(full_path):
+            content_hash = hash_file_bytes(full_path, length=None)
+        elif item.content:
+            content_hash = hash_file_content(item.content, length=None)
+        else:
+            raise ValueError("complete_pending could not hash one or more selected items")
+        file_records.append({"content_hash": content_hash, "filepath": source_path})
+
+    return pattern or "", file_records
+
+
+def _propagate_pending_metadata(resolved_records: list[dict[str, Any]]) -> None:
+    state_metadata = None
+    for record in resolved_records:
+        if isinstance(record, dict) and isinstance(record.get("_state_metadata"), dict):
+            state_metadata = dict(record["_state_metadata"])
+            break
+    if state_metadata is None:
+        return
+    for record in resolved_records:
+        if isinstance(record, dict) and "_state_metadata" not in record:
+            record["_state_metadata"] = dict(state_metadata)
+
+
 def _build_generate_input_file_data(inputs: tuple[RetrievedItem, ...]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for item in inputs:
@@ -1416,6 +1489,11 @@ def _normalize_file_record(record: dict[str, Any]) -> RetrievedItem:
         metadata["filepath"] = record.get("filepath")
     if record.get("source_path") is not None:
         metadata["source_path"] = record.get("source_path")
+    state_metadata = record.get("_state_metadata")
+    if isinstance(state_metadata, dict):
+        pattern = str(state_metadata.get("pattern") or "").strip()
+        if pattern:
+            metadata["pending_pattern"] = pattern
     return RetrievedItem(
         ref=source_ref,
         content=record.get("content", ""),
