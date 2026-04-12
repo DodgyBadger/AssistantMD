@@ -1,7 +1,7 @@
 """
 Integration scenario for the chat-facing code_execution_local tool.
 
-Validates deterministic cache-scoped execution through the real /api/chat/execute
+Validates deterministic chat-scoped execution through the real /api/chat/execute
 path using a patched TestModel argument generator.
 """
 
@@ -15,7 +15,7 @@ from validation.core.base_scenario import BaseScenario
 
 
 class CodeExecutionLocalScenario(BaseScenario):
-    """Validate code_execution_local helper parity and scope enforcement."""
+    """Validate code_execution_local helper parity and simplified runtime access."""
 
     async def test_scenario(self):
         vault = self.create_vault("CodeExecutionLocalVault")
@@ -64,7 +64,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     }
                 if case_name == "discovery":
                     return {}
-                if case_name == "deny_read":
+                if case_name == "allow_file_read":
                     return {
                         "code": (
                             'artifact = await retrieve(type="file", ref="notes/blocked.md")\n'
@@ -168,23 +168,23 @@ class CodeExecutionLocalScenario(BaseScenario):
                 "No-arg code_execution_local should return a non-empty discovery response",
             )
 
-            current_case["name"] = "deny_read"
-            deny_read = self.call_api(
+            current_case["name"] = "allow_file_read"
+            allow_file_read = self.call_api(
                 "/api/chat/execute",
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Attempt an ungranted cache read through code_execution_local.",
-                    "session_id": "code_execution_local_deny_read",
+                    "prompt": "Read a vault file through code_execution_local.",
+                    "session_id": "code_execution_local_allow_file_read",
                     "tools": ["code_execution_local"],
                     "model": "test",
                 },
             )
-            assert deny_read.status_code == 200, "Denied cache read should still return a tool result"
-            deny_text = deny_read.json()["response"]
+            assert allow_file_read.status_code == 200, "Vault file read should succeed"
+            allow_file_read_text = allow_file_read.json()["response"]
             self.soft_assert(
-                "authoring.retrieve.file" in deny_text,
-                "Denied file read should surface the missing file tool-scope error",
+                "BLOCKED_CONTENT" in allow_file_read_text,
+                "Vault file read should return the file content",
             )
 
             current_case["name"] = "allow_write"

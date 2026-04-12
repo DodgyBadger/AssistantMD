@@ -131,7 +131,8 @@ def _retrieve_contract() -> dict[str, Any]:
         "signature": "retrieve(*, type: str, ref: str, options: dict | None = None)",
         "summary": (
             "Retrieve scoped external inputs. The host interprets ref according to type "
-            "and validates options against the published per-type schema."
+            "and validates options against the published per-type schema. "
+            "For simple boolean flags, options may also be passed as a set/list/tuple of flag names."
         ),
         "types": {
             "file": {
@@ -143,10 +144,9 @@ def _retrieve_contract() -> dict[str, Any]:
                         "description": "Return file references and metadata without loading textual file bodies.",
                     },
                     "pending": {
-                        "type": "enum",
-                        "values": ["include", "only"],
-                        "default": "include",
-                        "description": "When set to 'only', resolve only unprocessed files for the pattern.",
+                        "type": "bool",
+                        "default": False,
+                        "description": "When true, return pending unprocessed files for the pattern.",
                     },
                 },
             },
@@ -209,8 +209,12 @@ def _retrieve_contract() -> dict[str, Any]:
                 "description": "Retrieve files, then sort and slice explicitly in Python using metadata.",
             },
             {
-                "code": 'await retrieve(type="file", ref="notes/*.md", options={"pending": "only", "refs_only": True})',
+                "code": 'await retrieve(type="file", ref="notes/*.md", options={"pending": True, "refs_only": True})',
                 "description": "Enumerate pending file refs without loading file bodies into content fields.",
+            },
+            {
+                "code": 'await retrieve(type="file", ref="notes/*.md", options={"pending"})',
+                "description": "Use set-style flag shorthand for simple boolean file options.",
             },
             {
                 "code": 'await retrieve(type="cache", ref="research/browser-page")',
@@ -336,7 +340,7 @@ def _generate_contract() -> dict[str, Any]:
                 "type": "list|tuple",
                 "required": False,
                 "description": (
-                    "Optional explicit subset of authoring.tools enabled for this generation. "
+                    "Optional explicit subset of available runtime tools for this generation. "
                     "When omitted, generate runs without tool use."
                 ),
             },
@@ -388,7 +392,7 @@ def _generate_contract() -> dict[str, Any]:
             ),
             (
                 "Tool use is opt-in. Pass tools=[...] to enable an explicit subset "
-                "of authoring.tools for one generation call."
+                "of available runtime tools for one generation call."
             ),
             (
                 "inputs=... reuses the shared file prompt builder. Use it when retrieved "
@@ -465,7 +469,7 @@ def _call_tool_contract() -> dict[str, Any]:
             "name": {
                 "type": "string",
                 "required": True,
-                "description": "Configured tool name from system settings and authoring frontmatter.",
+                "description": "Configured runtime tool name.",
             },
             "arguments": {
                 "type": "dict",

@@ -52,11 +52,6 @@ class CodeExecutionLocal(BaseTool):
                 deps = getattr(ctx, "deps", None)
                 session_id = str(getattr(deps, "session_id", "") or "").strip()
                 vault_name = str(getattr(deps, "vault_name", "") or "").strip()
-                enabled_tools = {
-                    str(name).strip()
-                    for name in (getattr(deps, "tools", []) or [])
-                    if str(name).strip()
-                }
                 reference_date = getattr(deps, "context_manager_now", None) or datetime.today()
                 if not session_id or not vault_name:
                     return (
@@ -67,27 +62,6 @@ class CodeExecutionLocal(BaseTool):
                     return cls.get_instructions().strip()
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
-                allow_file_scope = "file_ops_safe" in enabled_tools
-                frontmatter = {
-                    "authoring.capabilities": [
-                        "retrieve",
-                        "output",
-                        "generate",
-                        "call_tool",
-                        "assemble_context",
-                        "parse_markdown",
-                        "finish",
-                    ],
-                    "authoring.tools": sorted(
-                        tool_name
-                        for tool_name in enabled_tools
-                        if tool_name and tool_name != "code_execution_local"
-                    ),
-                    "authoring.retrieve.cache": ["*"],
-                    "authoring.output.cache": ["*"],
-                    "authoring.retrieve.file": ["*"] if allow_file_scope else [],
-                    "authoring.output.file": ["*"] if allow_file_scope else [],
-                }
                 host = WorkflowAuthoringHost(
                     workflow_id=workflow_id,
                     vault_path=vault_path,
@@ -100,7 +74,6 @@ class CodeExecutionLocal(BaseTool):
                     workflow_id=workflow_id,
                     code=code,
                     host=host,
-                    frontmatter=frontmatter,
                     script_name="chat_explore.py",
                 )
                 return cls._format_execution_result(result.value, result.prints)
@@ -112,14 +85,14 @@ class CodeExecutionLocal(BaseTool):
         return Tool(
             code_execution_local,
             name="code_execution_local",
-            description="Run constrained local Python against the current chat session, cache scope, and optional vault file scope.",
+            description="Run constrained local Python against the current chat session and current AssistantMD runtime.",
         )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for constrained local code execution."""
         return """
-Run constrained local Python against the current chat session, chat-derived cache scope, and optional vault file scope.
+Run constrained local Python against the current chat session and current AssistantMD runtime.
 
 Use this for small Python tasks tied to chat history, cache artifacts, or vault files.
 
@@ -129,8 +102,6 @@ Full documentation:
 Important notes:
 - pass code with `code="..."`
 - always use named arguments
-- cache scope comes from the current chat session
-- file scope is available when `file_ops_safe` is enabled for the chat run
 - this tool exposes constrained helpers such as `retrieve`, `output`, `generate`, `call_tool`, `assemble_context`, `parse_markdown`, and `finish`
 """
 

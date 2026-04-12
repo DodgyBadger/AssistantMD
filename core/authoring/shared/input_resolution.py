@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import traceback
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -181,9 +182,15 @@ def load_file_with_metadata(file_path: str, vault_root: str, *, include_content:
             "extension": extension,
         }
     except Exception as exc:
-        logger.exception(
+        logger.error(
             "Failed to load file metadata",
-            metadata={"file_path": normalized_path, "vault_root": vault_root},
+            data={
+                "file_path": normalized_path,
+                "vault_root": vault_root,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            },
         )
         if get_virtual_mount_key(normalized_path):
             return {

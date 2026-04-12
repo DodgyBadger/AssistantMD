@@ -53,18 +53,14 @@ class ChatCacheMultiPassScenario(BaseScenario):
                         "code": (
                             f'artifact = await retrieve(type="cache", ref="{cache_ref}")\n'
                             "artifact.items[0].content[:80]"
-                        ),
-                        "readable_cache_refs": [cache_ref],
-                        "writable_cache_refs": [],
+                        )
                     }
                 if call_index["value"] == 3:
                     return {
                         "code": (
                             f'artifact = await retrieve(type="cache", ref="{cache_ref}")\n'
                             'str(artifact.items[0].content.count("OVERFLOW_SEGMENT"))'
-                        ),
-                        "readable_cache_refs": [cache_ref],
-                        "writable_cache_refs": [],
+                        )
                     }
                 raise AssertionError("Unexpected code_execution_local phase")
 

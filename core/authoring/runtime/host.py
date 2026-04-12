@@ -7,8 +7,7 @@ import inspect
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
-from fnmatch import fnmatchcase
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -43,12 +42,10 @@ from core.authoring.shared.output_resolution import (
 from core.authoring.contracts import (
     AssembleContextResult,
     AuthoringCapabilityCall,
-    AuthoringCapabilityScope,
     AuthoringExecutionContext,
     AuthoringHost,
     AuthoringFinishSignal,
     CallToolResult,
-    CapabilityNotAllowedError,
     ContextMessage,
     FinishResult,
     GenerationResult,
@@ -110,12 +107,44 @@ class MontyDateTokens:
         return self._resolve("month-name", fmt)
 
     def _resolve(self, token: str, fmt: str | None) -> str:
-        pattern = token if fmt is None else f"{token}:{fmt}"
-        return PatternUtilities.resolve_date_pattern(
-            pattern,
-            reference_date=self.reference_date,
-            week_start_day=self.week_start_day,
-        )
+        resolved = self._resolve_datetime(token)
+        if resolved is None:
+            return token
+        if fmt is None:
+            return PatternUtilities.resolve_date_pattern(
+                token,
+                reference_date=self.reference_date,
+                week_start_day=self.week_start_day,
+            )
+        return resolved.strftime(fmt)
+
+    def _resolve_datetime(self, token: str) -> datetime | None:
+        if token == "today":
+            return self.reference_date
+        if token == "yesterday":
+            return self.reference_date - timedelta(days=1)
+        if token == "tomorrow":
+            return self.reference_date + timedelta(days=1)
+        if token == "this-week":
+            return PatternUtilities._get_week_start_date(
+                self.reference_date, self.week_start_day, 0
+            )
+        if token == "last-week":
+            return PatternUtilities._get_week_start_date(
+                self.reference_date, self.week_start_day, -1
+            )
+        if token == "next-week":
+            return PatternUtilities._get_week_start_date(
+                self.reference_date, self.week_start_day, 1
+            )
+        if token == "this-month":
+            return self.reference_date.replace(day=1)
+        if token == "last-month":
+            last_month = self.reference_date.replace(day=1) - timedelta(days=1)
+            return last_month.replace(day=1)
+        if token in {"day-name", "month-name"}:
+            return self.reference_date
+        return None
 
 
 @dataclass
@@ -129,6 +158,7 @@ class WorkflowAuthoringHost(AuthoringHost):
     run_buffers: BufferStore = field(default_factory=BufferStore)
     session_buffers: BufferStore = field(default_factory=BufferStore)
     state_manager: WorkflowFileStateManager | None = None
+    pending_state_updates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     session_key: str | None = None
     chat_session_id: str | None = None
     message_history: list[ModelMessage] | None = None
@@ -184,7 +214,6 @@ class WorkflowAuthoringHost(AuthoringHost):
                 f"Unsupported retrieve type '{request_type}'. Supported types are: file, cache, run."
             )
 
-        _ensure_file_ref_allowed(ref=ref, scope=context.scope)
         parameters = _build_file_parameters(options)
 
         logger.info(
@@ -218,6 +247,7 @@ class WorkflowAuthoringHost(AuthoringHost):
                 "session": self.session_buffers,
             },
         )
+        self._capture_pending_state_updates(resolved)
         items = [_normalize_file_record(record) for record in resolved]
         logger.info(
             "authoring_retrieve_resolved",
@@ -243,6 +273,15 @@ class WorkflowAuthoringHost(AuthoringHost):
             items=tuple(items),
         )
 
+    def finalize_authoring_run(self, *, status: str) -> None:
+        """Persist pending-file state after a successful execution."""
+        if status != "completed" or not self.state_manager or not self.pending_state_updates:
+            return
+        for pattern, file_records in self.pending_state_updates.items():
+            if file_records:
+                self.state_manager.mark_files_processed(file_records, pattern)
+        self.pending_state_updates.clear()
+
     async def handle_output(
         self,
         call: AuthoringCapabilityCall,
@@ -256,7 +295,6 @@ class WorkflowAuthoringHost(AuthoringHost):
                 f"Unsupported output type '{request_type}'. Supported types are: file, cache."
             )
 
-        _ensure_file_output_allowed(ref=ref, scope=context.scope)
         write_mode, header = _build_file_output_options(options, reference_date=self.reference_date, week_start_day=self.week_start_day)
         resolved_target = resolve_output_request(
             build_output_request(target_type="file", target=ref, parameters={}),
@@ -347,8 +385,6 @@ class WorkflowAuthoringHost(AuthoringHost):
 
         prompt, inputs, instructions, model_value, tool_names, cache_policy, options = _parse_generate_call(call)
         resolved_model_value = _apply_generate_options_to_model(model_value, options)
-        if tool_names:
-            _ensure_generate_tools_allowed(tool_names=tool_names, scope=context.scope)
         prompt_input: Any = prompt
         attached_image_count = 0
         input_warnings: list[str] = []
@@ -570,8 +606,6 @@ class WorkflowAuthoringHost(AuthoringHost):
         context: AuthoringExecutionContext,
     ) -> CallToolResult:
         tool_name, arguments, options = _parse_call_tool_call(call)
-        _ensure_tool_allowed(tool_name=tool_name, scope=context.scope)
-
         logger.info(
             "authoring_call_tool_started",
             data={
@@ -701,6 +735,32 @@ class WorkflowAuthoringHost(AuthoringHost):
         )
         raise AuthoringFinishSignal(status=status, reason=reason)
 
+    def _capture_pending_state_updates(self, resolved_records: list[dict[str, Any]]) -> None:
+        for record in resolved_records:
+            if not isinstance(record, dict):
+                continue
+            state_metadata = record.get("_state_metadata")
+            if not isinstance(state_metadata, dict) or not state_metadata.get("requires_tracking"):
+                continue
+            pattern = str(state_metadata.get("pattern") or "").strip()
+            if not pattern:
+                continue
+            raw_records = state_metadata.get("file_records")
+            if not isinstance(raw_records, list):
+                continue
+            normalized_records: list[dict[str, Any]] = []
+            for entry in raw_records:
+                if not isinstance(entry, dict):
+                    continue
+                content_hash = str(entry.get("content_hash") or "").strip()
+                filepath = str(entry.get("filepath") or "").strip()
+                if content_hash and filepath:
+                    normalized_records.append(
+                        {"content_hash": content_hash, "filepath": filepath}
+                    )
+            if normalized_records:
+                self.pending_state_updates[pattern] = normalized_records
+
     def _handle_cache_retrieve(
         self,
         *,
@@ -708,7 +768,6 @@ class WorkflowAuthoringHost(AuthoringHost):
         options: dict[str, Any],
         context: AuthoringExecutionContext,
     ) -> RetrieveResult:
-        _ensure_cache_ref_allowed(ref=ref, scope=context.scope)
         _ensure_cache_retrieve_options_supported(options)
         purge_expired_cache_artifacts(now=self.reference_date)
         artifact = get_cache_artifact(
@@ -786,7 +845,6 @@ class WorkflowAuthoringHost(AuthoringHost):
         options: dict[str, Any],
         context: AuthoringExecutionContext,
     ) -> OutputResult:
-        _ensure_cache_output_allowed(ref=ref, scope=context.scope)
         write_mode, cache_mode, ttl_seconds = _build_cache_output_options(options)
         purge_expired_cache_artifacts(now=self.reference_date)
 
@@ -862,71 +920,18 @@ def _parse_retrieve_call(call: AuthoringCapabilityCall) -> tuple[str, str, dict[
         options: dict[str, Any] = {}
     elif isinstance(raw_options, dict):
         options = dict(raw_options)
+    elif isinstance(raw_options, (set, frozenset, list, tuple)):
+        options = {}
+        for entry in raw_options:
+            key = str(entry or "").strip()
+            if not key:
+                raise ValueError("retrieve options flags must be non-empty strings")
+            options[key] = True
     else:
-        raise ValueError("retrieve options must be a dictionary when provided")
+        raise ValueError(
+            "retrieve options must be a dictionary or a set/list/tuple of flag names when provided"
+        )
     return request_type, ref, options
-
-
-def _ensure_file_ref_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> None:
-    if os.path.isabs(ref):
-        raise CapabilityNotAllowedError("retrieve file refs must be vault-relative paths")
-    normalized_candidates = {ref.strip()}
-    if "." not in os.path.basename(ref):
-        normalized_candidates.add(f"{ref}.md")
-    allowed_patterns = tuple(path.strip() for path in scope.readable_paths if path.strip())
-    if not allowed_patterns:
-        raise CapabilityNotAllowedError(
-            "retrieve(file) requires explicit authoring.retrieve.file frontmatter entries"
-        )
-    if any(
-        fnmatchcase(candidate, pattern)
-        for candidate in normalized_candidates
-        for pattern in allowed_patterns
-    ):
-        return
-    raise CapabilityNotAllowedError(f"File ref '{ref}' is outside the configured read scope")
-
-
-def _ensure_file_output_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> None:
-    if os.path.isabs(ref):
-        raise CapabilityNotAllowedError("output file refs must be vault-relative paths")
-    normalized_candidates = {ref.strip()}
-    if "." not in os.path.basename(ref):
-        normalized_candidates.add(f"{ref}.md")
-    allowed_patterns = tuple(path.strip() for path in scope.writable_paths if path.strip())
-    if not allowed_patterns:
-        raise CapabilityNotAllowedError(
-            "output(file) requires explicit authoring.output.file frontmatter entries"
-        )
-    if any(
-        fnmatchcase(candidate, pattern)
-        for candidate in normalized_candidates
-        for pattern in allowed_patterns
-    ):
-        return
-    raise CapabilityNotAllowedError(f"File ref '{ref}' is outside the configured write scope")
-
-
-def _ensure_cache_ref_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> None:
-    allowed_patterns = tuple(pattern.strip() for pattern in scope.readable_cache_refs if pattern.strip())
-    if not allowed_patterns:
-        raise CapabilityNotAllowedError(
-            "retrieve(cache) requires explicit authoring.retrieve.cache frontmatter entries"
-        )
-    if any(fnmatchcase(ref, pattern) for pattern in allowed_patterns):
-        return
-    raise CapabilityNotAllowedError(f"Cache ref '{ref}' is outside the configured read scope")
-
-
-def _ensure_cache_output_allowed(*, ref: str, scope: AuthoringCapabilityScope) -> None:
-    allowed_patterns = tuple(pattern.strip() for pattern in scope.writable_cache_refs if pattern.strip())
-    if not allowed_patterns:
-        raise CapabilityNotAllowedError(
-            "output(cache) requires explicit authoring.output.cache frontmatter entries"
-        )
-    if any(fnmatchcase(ref, pattern) for pattern in allowed_patterns):
-        return
-    raise CapabilityNotAllowedError(f"Cache ref '{ref}' is outside the configured write scope")
 
 
 def _ensure_cache_retrieve_options_supported(options: dict[str, Any]) -> None:
@@ -953,15 +958,11 @@ def _build_file_parameters(options: dict[str, Any]) -> dict[str, Any]:
     if pending is None:
         return parameters
     if isinstance(pending, bool):
-        parameters["pending"] = pending
+        if pending:
+            parameters["pending"] = True
         return parameters
-    normalized = str(pending).strip().lower()
-    if normalized == "include":
-        return parameters
-    if normalized == "only":
-        parameters["pending"] = True
-        return parameters
-    raise ValueError("retrieve(file) option 'pending' must be true/false or one of: include, only")
+    raise ValueError("retrieve(file) option 'pending' must be true or false")
+    return parameters
 
 
 def _parse_output_call(call: AuthoringCapabilityCall) -> tuple[str, str, Any, dict[str, Any]]:
@@ -1173,29 +1174,6 @@ def _parse_assemble_context_call(
     instructions = _normalize_optional_string(call.kwargs.get("instructions"))
     latest_user_message = call.kwargs.get("latest_user_message")
     return history, context_messages, instructions, latest_user_message
-
-
-def _ensure_tool_allowed(*, tool_name: str, scope: AuthoringCapabilityScope) -> None:
-    allowed_tools = tuple(name.strip() for name in scope.allowed_tools if name.strip())
-    if not allowed_tools:
-        raise CapabilityNotAllowedError(
-            "call_tool requires explicit authoring.tools frontmatter entries for allowed tool names"
-        )
-    if tool_name not in allowed_tools:
-        raise CapabilityNotAllowedError(f"Tool '{tool_name}' is outside the configured tool scope")
-
-
-def _ensure_generate_tools_allowed(*, tool_names: tuple[str, ...], scope: AuthoringCapabilityScope) -> None:
-    allowed_tools = tuple(name.strip() for name in scope.allowed_tools if name.strip())
-    if not allowed_tools:
-        raise CapabilityNotAllowedError(
-            "generate(..., tools=[...]) requires explicit authoring.tools frontmatter entries"
-        )
-    for tool_name in tool_names:
-        if tool_name not in allowed_tools:
-            raise CapabilityNotAllowedError(
-                f"Tool '{tool_name}' is outside the configured tool scope"
-            )
 
 
 def _parse_history_limit(options: dict[str, Any], *, default: int | str) -> int | str:

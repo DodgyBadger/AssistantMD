@@ -62,9 +62,6 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             workflow_id=workflow_id,
             code=AUTHORING_CONTEXT_ASSEMBLY_CODE,
             host=host,
-            frontmatter={
-                "authoring.capabilities": ["retrieve", "assemble_context"],
-            },
             script_name="context_assembly.py",
         )
         events = self.events_since(checkpoint)

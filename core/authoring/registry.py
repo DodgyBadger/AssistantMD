@@ -11,8 +11,6 @@ from core.authoring.contracts import (
     AuthoringCapabilityDefinition,
     AuthoringCapabilityError,
     AuthoringExecutionContext,
-    AuthoringCapabilityScope,
-    CapabilityNotAllowedError,
     UnknownAuthoringCapabilityError,
 )
 
@@ -57,11 +55,10 @@ class AuthoringCapabilityRegistry:
         self,
         *,
         context: AuthoringExecutionContext,
-        scope: AuthoringCapabilityScope,
     ) -> dict[str, Any]:
-        """Build the Monty external-functions mapping for one scoped execution."""
+        """Build the Monty external-functions mapping for one execution."""
         external_functions: dict[str, Any] = {}
-        for capability_name in sorted(scope.enabled):
+        for capability_name in sorted(self._definitions):
             definition = self.resolve(capability_name)
 
             async def _external_function(
@@ -69,11 +66,6 @@ class AuthoringCapabilityRegistry:
                 _definition: AuthoringCapabilityDefinition = definition,
                 **kwargs: Any,
             ) -> Any:
-                if not scope.allows(_definition.name):
-                    raise CapabilityNotAllowedError(
-                        f"Capability '{_definition.name}' is not enabled for this execution"
-                    )
-
                 call = AuthoringCapabilityCall(
                     capability_name=_definition.name,
                     args=args,

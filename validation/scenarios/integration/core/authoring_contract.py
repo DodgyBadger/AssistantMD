@@ -39,31 +39,6 @@ class AuthoringContractScenario(BaseScenario):
             "AssistantMD/Workflows/authoring_generate_cache_daily.md",
             AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW,
         )
-        self.create_file(
-            vault,
-            "AssistantMD/Workflows/authoring_missing_file_scope.md",
-            AUTHORING_MISSING_FILE_SCOPE_WORKFLOW,
-        )
-        self.create_file(
-            vault,
-            "AssistantMD/Workflows/authoring_missing_file_output_scope.md",
-            AUTHORING_MISSING_FILE_OUTPUT_SCOPE_WORKFLOW,
-        )
-        self.create_file(
-            vault,
-            "AssistantMD/Workflows/authoring_missing_cache_scope.md",
-            AUTHORING_MISSING_CACHE_SCOPE_WORKFLOW,
-        )
-        self.create_file(
-            vault,
-            "AssistantMD/Workflows/authoring_missing_cache_output_scope.md",
-            AUTHORING_MISSING_CACHE_OUTPUT_SCOPE_WORKFLOW,
-        )
-        self.create_file(
-            vault,
-            "AssistantMD/Workflows/authoring_missing_tool_scope.md",
-            AUTHORING_MISSING_TOOL_SCOPE_WORKFLOW,
-        )
 
         checkpoint = self.event_checkpoint()
         await self.start_system()
@@ -341,69 +316,15 @@ class AuthoringContractScenario(BaseScenario):
             },
         )
 
-        await self._assert_workflow_fails_with(
-            vault,
-            "authoring_missing_file_scope",
-            "authoring.retrieve.file",
-        )
-        await self._assert_workflow_fails_with(
-            vault,
-            "authoring_missing_file_output_scope",
-            "authoring.output.file",
-        )
-        await self._assert_workflow_fails_with(
-            vault,
-            "authoring_missing_cache_scope",
-            "authoring.retrieve.cache",
-        )
-        await self._assert_workflow_fails_with(
-            vault,
-            "authoring_missing_cache_output_scope",
-            "authoring.output.cache",
-        )
-        await self._assert_workflow_fails_with(
-            vault,
-            "authoring_missing_tool_scope",
-            "authoring.tools",
-        )
-
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
-
-    async def _assert_workflow_fails_with(
-        self,
-        vault: Path,
-        workflow_name: str,
-        expected_substring: str,
-    ) -> None:
-        checkpoint = self.event_checkpoint()
-        result = await self.run_workflow(vault, workflow_name, expect_failure=True)
-        self.soft_assert_equal(result.status, "failed", f"{workflow_name} should fail")
-        self.soft_assert(
-            expected_substring in (result.error_message or ""),
-            f"{workflow_name} should include expected error text: {expected_substring}",
-        )
-        events = self.events_since(checkpoint)
-        self.assert_event_contains(
-            events,
-            name="authoring_monty_execution_failed",
-            expected={
-                "workflow_id": f"AuthoringContractVault/{workflow_name}",
-            },
-        )
 
 
 AUTHORING_CONTRACT_SUCCESS_WORKFLOW = """---
 workflow_engine: monty
 enabled: false
 description: Deterministic authoring contract success workflow
-authoring.capabilities: [retrieve, generate, output, call_tool, assemble_context, parse_markdown, finish]
-authoring.retrieve.file: [notes/*.md, images/*]
-authoring.retrieve.cache: [scratch/*]
-authoring.output.file: [outputs/*.md, outputs/*.txt]
-authoring.output.cache: [scratch/*]
-authoring.tools: [file_ops_safe]
 ---
 
 ## Run
@@ -484,10 +405,6 @@ AUTHORING_CACHE_DAILY_WORKFLOW = """---
 workflow_engine: monty
 enabled: false
 description: Deterministic daily cache semantics workflow
-authoring.capabilities: [retrieve, output]
-authoring.retrieve.cache: [scratch/*]
-authoring.output.file: [outputs/*.md]
-authoring.output.cache: [scratch/*]
 ---
 
 ## Run
@@ -521,8 +438,6 @@ AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW = """---
 workflow_engine: monty
 enabled: false
 description: Deterministic generate cache semantics workflow
-authoring.capabilities: [generate, output]
-authoring.output.file: [outputs/*.md]
 ---
 
 ## Run
@@ -541,81 +456,6 @@ await output(
     data=f"status={draft.status}",
     options={"mode": "replace"},
 )
-```
-"""
-
-
-AUTHORING_MISSING_FILE_SCOPE_WORKFLOW = """---
-workflow_engine: monty
-enabled: false
-description: Missing retrieve.file scope
-authoring.capabilities: [retrieve]
----
-
-## Run
-
-```python
-await retrieve(type="file", ref="notes/seed.md")
-```
-"""
-
-
-AUTHORING_MISSING_FILE_OUTPUT_SCOPE_WORKFLOW = """---
-workflow_engine: monty
-enabled: false
-description: Missing output.file scope
-authoring.capabilities: [output]
----
-
-## Run
-
-```python
-await output(type="file", ref="outputs/missing-file-scope.md", data="x")
-```
-"""
-
-
-AUTHORING_MISSING_CACHE_SCOPE_WORKFLOW = """---
-workflow_engine: monty
-enabled: false
-description: Missing retrieve.cache scope
-authoring.capabilities: [retrieve]
----
-
-## Run
-
-```python
-await retrieve(type="cache", ref="scratch/missing")
-```
-"""
-
-
-AUTHORING_MISSING_CACHE_OUTPUT_SCOPE_WORKFLOW = """---
-workflow_engine: monty
-enabled: false
-description: Missing output.cache scope
-authoring.capabilities: [output]
----
-
-## Run
-
-```python
-await output(type="cache", ref="scratch/missing", data="x")
-```
-"""
-
-
-AUTHORING_MISSING_TOOL_SCOPE_WORKFLOW = """---
-workflow_engine: monty
-enabled: false
-description: Missing tool scope
-authoring.capabilities: [call_tool]
----
-
-## Run
-
-```python
-await call_tool(name="file_ops_safe", arguments={"operation": "list", "target": "notes"})
 ```
 """
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -23,15 +22,11 @@ BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
 
 
 class AuthoringCapabilityError(ValueError):
-    """Base error for capability registration and scoping failures."""
+    """Base error for capability registration failures."""
 
 
 class UnknownAuthoringCapabilityError(AuthoringCapabilityError):
     """Raised when code or frontmatter references an unknown capability."""
-
-
-class CapabilityNotAllowedError(AuthoringCapabilityError):
-    """Raised when sandboxed code tries to call a capability outside its scope."""
 
 
 class CapabilityHandlerMissingError(AuthoringCapabilityError):
@@ -71,64 +66,11 @@ class AuthoringCapabilityCall:
 
 
 @dataclass(frozen=True)
-class AuthoringCapabilityScope:
-    """Frontmatter-derived capability and policy scope for one artifact."""
-
-    enabled: frozenset[str]
-    readable_paths: tuple[str, ...] = ()
-    readable_cache_refs: tuple[str, ...] = ()
-    writable_paths: tuple[str, ...] = ()
-    writable_cache_refs: tuple[str, ...] = ()
-    import_paths: tuple[str, ...] = ()
-    allowed_models: tuple[str, ...] = ()
-    allowed_tools: tuple[str, ...] = ()
-
-    def allows(self, capability_name: str) -> bool:
-        """Return True when the capability is enabled for this execution."""
-        return capability_name in self.enabled
-
-    @classmethod
-    def from_frontmatter(
-        cls,
-        frontmatter: Mapping[str, Any] | None,
-        *,
-        default_enabled: Sequence[str] = (),
-    ) -> "AuthoringCapabilityScope":
-        """Build a scope from experimental authoring frontmatter."""
-        if not frontmatter:
-            return cls(enabled=frozenset(default_enabled))
-
-        authoring_config = _extract_authoring_mapping(frontmatter)
-        if not isinstance(authoring_config, Mapping):
-            authoring_config = frontmatter
-
-        raw_capabilities = authoring_config.get("capabilities")
-        if raw_capabilities is None:
-            enabled = frozenset(default_enabled)
-        elif isinstance(raw_capabilities, Mapping):
-            enabled = _normalize_string_set(raw_capabilities.get("enabled", ()))
-        else:
-            enabled = _normalize_string_set(raw_capabilities)
-
-        return cls(
-            enabled=enabled,
-            readable_paths=_normalize_string_tuple(authoring_config.get("retrieve.file", ())),
-            readable_cache_refs=_normalize_string_tuple(authoring_config.get("retrieve.cache", ())),
-            writable_paths=_normalize_string_tuple(authoring_config.get("output.file", ())),
-            writable_cache_refs=_normalize_string_tuple(authoring_config.get("output.cache", ())),
-            import_paths=_normalize_string_tuple(authoring_config.get("import_paths", ())),
-            allowed_models=_normalize_string_tuple(authoring_config.get("models", ())),
-            allowed_tools=_normalize_string_tuple(authoring_config.get("tools", ())),
-        )
-
-
-@dataclass(frozen=True)
 class AuthoringExecutionContext:
     """Stable execution context passed to capability handlers."""
 
     workflow_id: str
     host: "AuthoringHost"
-    scope: AuthoringCapabilityScope
 
 
 @dataclass(frozen=True)

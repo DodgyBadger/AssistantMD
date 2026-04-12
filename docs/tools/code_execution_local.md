@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Run constrained local Python against the current chat session, cache scope, and optional vault file scope.
+Run constrained local Python against the current chat session and current AssistantMD runtime.
 
 ## Tool Argument
 
@@ -15,7 +15,7 @@ The code runs inside the same constrained authoring runtime used by Monty workfl
 Scope comes from the active chat session:
 
 - cache access is available for the current chat session
-- file access is available when `file_ops_safe` is enabled for the chat run
+- file access is available through the current AssistantMD runtime
 - tool access mirrors the enabled chat tools, excluding `code_execution_local` itself
 
 Inside the runtime you have access to the following helper functions. Prefer these for the tasks described:
@@ -27,6 +27,7 @@ Inside the runtime you have access to the following helper functions. Prefer the
 - `assemble_context(...)`: build structured message history for downstream chat-style generation.
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs.
 - `finish(...)`: end the script intentionally with a completed or skipped terminal status.
+- `date`: resolve common date tokens such as today, yesterday, week boundaries, and month names.
 
 Use ordinary Python for everything else and for filtering, sorting, selection, and control flow around those helpers.
 
@@ -47,7 +48,7 @@ Supported `type` values:
 `file` options:
 
 - `refs_only: bool = False`
-- `pending: "include" | "only" = "include"`
+- `pending: bool = False`
 
 `cache` options:
 
@@ -59,6 +60,9 @@ Supported `type` values:
 
 Results come back in `result.items`. For most scripts, the important fields are
 `item.content`, `item.exists`, and `item.metadata`.
+
+For simple boolean flags, `options` may also be written as a set of flag names,
+for example `options={"pending"}`.
 
 ### `output`
 
@@ -152,6 +156,27 @@ Supported `status` values:
 - `completed`
 - `skipped`
 
+### `date`
+
+```python
+date.today(fmt: str | None = None) -> str
+date.yesterday(fmt: str | None = None) -> str
+date.tomorrow(fmt: str | None = None) -> str
+date.this_week(fmt: str | None = None) -> str
+date.last_week(fmt: str | None = None) -> str
+date.next_week(fmt: str | None = None) -> str
+date.this_month(fmt: str | None = None) -> str
+date.last_month(fmt: str | None = None) -> str
+date.day_name(fmt: str | None = None) -> str
+date.month_name(fmt: str | None = None) -> str
+```
+
+Notes:
+
+- these resolve the same shared date tokens used elsewhere in AssistantMD
+- pass `fmt` to control formatting, for example `date.today("%Y-%m-%d")`
+- week-based values honor the current workflow or runtime `week_start_day`
+
 ## Common Patterns
 
 ### Simple calculation
@@ -165,6 +190,20 @@ str(total)
 )
 ```
 
+### Use the built-in date helper
+
+```python
+code_execution_local(
+    code="""
+{
+    "today": date.today("%Y-%m-%d"),
+    "this_week": date.this_week("%Y-%m-%d"),
+    "day_name": date.day_name(),
+}
+""",
+)
+```
+
 ### Inspect a cache artifact
 
 ```python
@@ -173,7 +212,6 @@ code_execution_local(
 artifact = await retrieve(type="cache", ref="tool/example/ref")
 artifact.items[0].content[:2000]
 """,
-    readable_cache_refs=["tool/example/ref"],
 )
 ```
 
@@ -189,7 +227,6 @@ parsed = await parse_markdown(value=artifact.items[0].content)
     "headings": [heading.text for heading in parsed.headings],
 }
 """,
-    readable_cache_refs=["research/article"],
 )
 ```
 
@@ -201,6 +238,21 @@ code_execution_local(
 doc = await retrieve(type="file", ref="notes/project.md")
 parsed = await parse_markdown(value=doc.items[0])
 [section.heading for section in parsed.sections]
+""",
+)
+```
+
+### Enumerate pending files
+
+```python
+code_execution_local(
+    code="""
+pending = await retrieve(
+    type="file",
+    ref="tasks/*.md",
+    options={"pending": True, "refs_only": True},
+)
+[item.ref for item in pending.items if item.exists]
 """,
 )
 ```
@@ -218,7 +270,6 @@ target = next(
 )
 target.content if target else "SECTION_NOT_FOUND"
 """,
-    readable_cache_refs=["research/article"],
 )
 ```
 
@@ -270,15 +321,13 @@ await output(
 )
 await finish(status="completed", reason="article summarized")
 """,
-    readable_cache_refs=["research/article"],
-    writable_cache_refs=["scratch/article-summary"],
 )
 ```
 
 ## Notes
 
 - this tool always has access to the current chat session history
-- cache and file access still depend on the granted scope
+- cache and file access come from the current AssistantMD runtime
 - prefer returning a compact final value instead of printing large text
 - use this doc as the primary reference for the local helper surface
 

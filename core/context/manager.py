@@ -220,7 +220,6 @@ async def _build_authoring_context_history(
             workflow_id=workflow_id,
             code=source.code,
             host=host,
-            frontmatter=template.frontmatter,
             inputs={
                 "latest_user_message": latest_user_payload,
                 "latest_user_text": latest_text,

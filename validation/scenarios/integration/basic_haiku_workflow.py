@@ -155,9 +155,6 @@ schedule: cron: 0 10 * * *
 workflow_engine: monty
 enabled: true
 description: Monty haiku writing workflow
-authoring.capabilities: [retrieve, generate, output]
-authoring.retrieve.file: [notes/haiku_seed.md]
-authoring.output.file: [haiku-monty-*.md]
 ---
 ```python
 \"\"\"Write one haiku from the seed note and save it to today's Monty output file.\"\"\"

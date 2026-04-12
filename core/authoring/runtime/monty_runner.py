@@ -1,8 +1,7 @@
-"""Minimal Monty runtime wrapper for the experimental authoring surface."""
+"""Minimal Monty runtime wrapper for the Monty-backed authoring surface."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,7 +10,6 @@ from pydantic_monty import Monty, run_monty_async
 from core.authoring.builtins import create_builtin_registry
 from core.authoring.contracts import (
     AuthoringFinishSignal,
-    AuthoringCapabilityScope,
     AuthoringExecutionContext,
     AuthoringHost,
 )
@@ -34,7 +32,6 @@ class AuthoringMontyExecutionResult:
     status: str = "completed"
     reason: str = ""
     prints: tuple[str, ...] = ()
-    enabled_capabilities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,23 +47,19 @@ async def run_authoring_monty(
     workflow_id: str,
     code: str,
     host: AuthoringHost,
-    frontmatter: Mapping[str, Any] | None = None,
     inputs: dict[str, Any] | None = None,
     script_name: str = "main.py",
     type_check: bool = False,
     registry: AuthoringCapabilityRegistry | None = None,
 ) -> AuthoringMontyExecutionResult:
     """Execute one experimental authoring artifact with Monty."""
-    capability_scope = AuthoringCapabilityScope.from_frontmatter(frontmatter)
     runtime_registry = registry or create_builtin_registry()
     context = AuthoringExecutionContext(
         workflow_id=workflow_id,
         host=host,
-        scope=capability_scope,
     )
     external_functions = runtime_registry.build_external_functions(
         context=context,
-        scope=capability_scope,
     )
     reserved_inputs = dict(host.get_monty_inputs())
     effective_inputs = {**reserved_inputs, **(inputs or {})}
@@ -77,7 +70,6 @@ async def run_authoring_monty(
         data={
             "workflow_id": workflow_id,
             "script_name": script_name,
-            "enabled_capabilities": sorted(capability_scope.enabled),
             "type_check": type_check,
         },
     )
@@ -86,7 +78,6 @@ async def run_authoring_monty(
         data={
             "workflow_id": workflow_id,
             "script_name": script_name,
-            "enabled_capabilities": sorted(capability_scope.enabled),
             "type_check": type_check,
         },
     )
@@ -125,7 +116,6 @@ async def run_authoring_monty(
             data={
                 "workflow_id": workflow_id,
                 "script_name": script_name,
-                "enabled_capabilities": sorted(capability_scope.enabled),
                 "error_message": str(exc),
                 "error_type": type(exc).__name__,
             },
@@ -135,7 +125,6 @@ async def run_authoring_monty(
             data={
                 "workflow_id": workflow_id,
                 "script_name": script_name,
-                "enabled_capabilities": sorted(capability_scope.enabled),
                 "error_message": str(exc),
                 "error_type": type(exc).__name__,
             },
@@ -149,7 +138,6 @@ async def run_authoring_monty(
         data={
             "workflow_id": workflow_id,
             "script_name": script_name,
-            "enabled_capabilities": sorted(capability_scope.enabled),
             "status": terminal_status,
             "reason": terminal_reason,
             "printed_line_count": len(capture.lines),
@@ -160,18 +148,19 @@ async def run_authoring_monty(
         data={
             "workflow_id": workflow_id,
             "script_name": script_name,
-            "enabled_capabilities": sorted(capability_scope.enabled),
             "status": terminal_status,
             "reason": terminal_reason,
             "printed_line_count": len(capture.lines),
         },
     )
+    finalize = getattr(host, "finalize_authoring_run", None)
+    if callable(finalize):
+        finalize(status=terminal_status)
     return AuthoringMontyExecutionResult(
         value=value,
         status=terminal_status,
         reason=terminal_reason,
         prints=tuple(capture.lines),
-        enabled_capabilities=tuple(sorted(capability_scope.enabled)),
     )
 
 

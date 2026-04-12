@@ -10,7 +10,6 @@ Use this guide for workflow-specific structure:
 
 - markdown artifact location
 - frontmatter fields
-- workflow capability manifest shape
 - compile-before-run workflow habits
 
 ## Workflow File Shape
@@ -34,22 +33,6 @@ Frontmatter notes:
 - `schedule:` is optional; omit it for manual-only workflows
 - `enabled: true` or `enabled: false` controls whether scheduled runs are active
 - `description:` is optional but useful for workflow discovery
-
-Capability manifest notes:
-
-- top-level `authoring.*` properties are the canonical scope shape for workflow files
-- file reads, cache reads, file writes, cache writes, and tool calls are fail-closed unless the relevant scope is declared
-
-Example capability manifest:
-
-```yaml
-authoring.capabilities: [retrieve, generate, output, call_tool]
-authoring.retrieve.file: [Tasks/**/*.md, Inbox/*.md]
-authoring.retrieve.cache: [research/*, scratch/*]
-authoring.output.file: [Tasks/weekly/*.md, Reports/*.md]
-authoring.output.cache: [research/*, scratch/*]
-authoring.tools: [file_ops_safe]
-```
 
 After the frontmatter, the file must contain exactly one executable fenced Python block:
 

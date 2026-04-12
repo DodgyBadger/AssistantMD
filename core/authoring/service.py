@@ -130,26 +130,13 @@ async def _run_loaded_template(
     source: AuthoringTemplateSource,
 ) -> AuthoringMontyExecutionResult:
     frontmatter = dict(source.frontmatter)
-    authoring = _extract_authoring_frontmatter(frontmatter)
-    frontmatter["authoring"] = authoring
     week_start_day = _resolve_week_start_day(frontmatter)
 
     return await run_authoring_monty(
         workflow_id=workflow_id,
         code=source.code,
         host=WorkflowAuthoringHost(workflow_id=workflow_id, week_start_day=week_start_day),
-        frontmatter=frontmatter,
     )
-
-
-def _extract_authoring_frontmatter(frontmatter: dict[str, object]) -> dict[str, object]:
-    extracted: dict[str, object] = {}
-    for raw_key, value in frontmatter.items():
-        if isinstance(raw_key, str) and raw_key.startswith("authoring."):
-            nested_key = raw_key[len("authoring.") :].strip()
-            if nested_key:
-                extracted[nested_key] = value
-    return extracted
 
 def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
     """Split workflow_id into vault and workflow name for validation context."""

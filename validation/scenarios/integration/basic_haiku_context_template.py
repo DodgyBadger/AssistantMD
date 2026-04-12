@@ -233,9 +233,6 @@ SEED_WORDS: word1, word2, word3
 BASIC_HAIKU_CONTEXT_TEMPLATE_MONTY = """---
 workflow_engine: monty
 description: Basic haiku context-template happy path (Monty)
-authoring.capabilities: [retrieve, generate, output, assemble_context]
-authoring.retrieve.file: [notes/haiku_context_seed.md]
-authoring.output.file: [outputs/*.md]
 ---
 ```python
 \"\"\"Build haiku seed words into downstream chat context and persist the seed artifact.\"\"\"

@@ -72,9 +72,16 @@ class WorkflowRun(BaseTool):
                         result = await cls._execute_workflow(global_id, single_step)
                         return cls._format_run_result(result)
                     except Exception as exc:  # pylint: disable=broad-except
-                        logger.exception(
+                        logger.error(
                             "workflow_run execution failed",
-                            metadata={"operation": op, "global_id": global_id, "step_name": single_step},
+                            data={
+                                "operation": op,
+                                "global_id": global_id,
+                                "step_name": single_step,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                                "traceback": traceback.format_exc(),
+                            },
                         )
                         return cls._format_run_error(global_id, single_step, exc)
 
@@ -86,9 +93,16 @@ class WorkflowRun(BaseTool):
                         result = cls._test_workflow_file(vault_path=vault_path, vault_name=vault_name, workflow_name=name)
                         return cls._format_test_result(result)
                     except Exception as exc:  # pylint: disable=broad-except
-                        logger.exception(
+                        logger.error(
                             "workflow_run test failed",
-                            metadata={"operation": op, "workflow_name": name, "vault": vault_name},
+                            data={
+                                "operation": op,
+                                "workflow_name": name,
+                                "vault": vault_name,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                                "traceback": traceback.format_exc(),
+                            },
                         )
                         return cls._format_test_error(vault_name=vault_name, workflow_name=name, exc=exc)
 
@@ -107,9 +121,15 @@ class WorkflowRun(BaseTool):
             except RuntimeStateError as exc:
                 return f"Runtime unavailable: {exc}"
             except Exception as exc:  # pylint: disable=broad-except
-                logger.exception(
+                logger.error(
                     "workflow_run operation failed",
-                    metadata={"operation": operation, "workflow_name": workflow_name},
+                    data={
+                        "operation": operation,
+                        "workflow_name": workflow_name,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
                 )
                 return f"Error performing '{operation}' operation: {exc}"
 
