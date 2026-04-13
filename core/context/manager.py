@@ -125,6 +125,15 @@ def _combined_context_text(messages: Sequence[ContextMessage]) -> str:
     ).strip()
 
 
+def _prompt_to_user_message(prompt: PromptInput) -> ModelMessage | None:
+    if isinstance(prompt, str):
+        text = prompt.strip()
+        if not text:
+            return None
+        return ModelRequest(parts=[UserPromptPart(content=text)])
+    return None
+
+
 def _compiled_history_includes_latest_user(
     messages: Sequence[ContextMessage],
     latest_user_message: ModelMessage | None,
@@ -195,6 +204,15 @@ async def _build_authoring_context_history(
 
     workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
     reference_date = resolve_cache_now(run_context)
+    current_prompt_message = _prompt_to_user_message(run_context.prompt)
+    history_for_memory = list(messages)
+    if current_prompt_message is not None:
+        prompt_role, prompt_text = extract_role_and_text(current_prompt_message)
+        last_role, last_text = ("", "")
+        if history_for_memory:
+            last_role, last_text = extract_role_and_text(history_for_memory[-1])
+        if prompt_role != last_role or prompt_text != last_text:
+            history_for_memory.append(current_prompt_message)
     host = WorkflowAuthoringHost(
         workflow_id=workflow_id,
         vault_path=vault_path,
@@ -202,7 +220,7 @@ async def _build_authoring_context_history(
         week_start_day=resolve_week_start_day(template.frontmatter),
         session_key=session_id,
         chat_session_id=session_id,
-        message_history=list(messages),
+        message_history=history_for_memory,
     )
 
     try:

@@ -185,6 +185,56 @@ Initial desired fields:
 - `exists` where applicable
 - `error_type` where applicable
 
+Status:
+
+- completed for `file_ops_safe` and `file_ops_unsafe`
+- `call_tool(...)` now preserves structured tool metadata for scripted branching
+
+### 6. Oversized Tool Result Reuse
+
+Current problem:
+
+- chat can store oversized tool results in cache and return only a cache ref plus preview
+- normal chat history does not preserve those large artifacts in a reusable structured form
+- without an explicit reuse path, the model tends to rerun extraction/search tools unnecessarily
+
+Recommendation:
+
+- keep normal access tool-first, but allow code-mode reuse of oversized cached artifacts
+- do not expose a broad public cache tool unless it proves necessary
+- use a minimal code-mode-only helper for cache refs
+
+Status:
+
+- completed first slice with `read_cache(ref=...)` inside `code_execution_local`
+- oversized-result notices now point the model to `code_execution_local` plus `read_cache(...)`
+
+Next tightening steps:
+
+- strengthen prompt/doc steering so the model prefers `read_cache(ref=...)` before rerunning the external tool when a live cache ref is available
+- add one focused validation scenario or assertion for the chat-overflow notice and follow-up cache reuse path
+- evaluate whether the current preview/notice text is enough to reliably trigger the code-mode transition in real chats
+
+### 7. Tool Result Memory Shape
+
+Current problem:
+
+- session history currently flattens tool calls and tool returns into plain text-like conversation items
+- this makes prior tool results visible, but weakly reusable
+- the model often rereads docs or reruns extraction because prior tool artifacts are not preserved as rich structured memory
+
+Recommendation:
+
+- keep current flattened behavior for now, but treat it as an intermediate state
+- explore a richer history/artifact representation for tool events and important tool outputs
+- keep this separate from the normal user-visible markdown transcript shape
+
+Next tightening steps:
+
+- audit which tool-result fields should survive into conversation memory as structured metadata
+- decide whether this belongs in `memory_ops`, a future DB-backed memory provider, or a separate artifact-memory layer
+- avoid trying to solve repeated tool reuse only with prompt wording when the underlying history representation is too lossy
+
 ## Scope
 
 ### In Scope
@@ -316,11 +366,38 @@ Completed in this direction:
 - Remove docs for helper paths that no longer fit the design
 - Replace context-template-specific hidden runtime inputs with explicit tool-based history access
 
+Status: in progress
+
+Completed in this direction:
+
+- System Monty context templates now use `memory_ops` explicitly for conversation history
+- Hidden `latest_user_message` / `latest_user_text` injection was removed from Monty context-template execution
+- `memory_ops` docs now show the explicit `json.loads(...)` plus `assemble_context(...)` pattern
+- `code_execution_local` docs and notices now teach `read_cache(ref=...)` for oversized cached tool results
+
+Still to tighten:
+
+- steer chat more strongly to reuse cache refs through `code_execution_local` before rerunning the same extraction/search tool
+- align remaining tool docs to the compact current-contract style where useful
+
 ### Phase 3. Add Validation Coverage
 
 - Add a scenario proving the intended tool/helper split in real Monty execution
 - Add a scenario for explicit pending filtering/completion with partial batches
 - Add a scenario for `memory_ops` in both chat and Monty contexts
+
+Status: in progress
+
+Completed in this direction:
+
+- migrated Monty validation scenarios to the tool-first boundary
+- added direct validation for `memory_ops` use in Monty paths
+- added direct validation for `read_cache(...)` in `integration/core/code_execution_local`
+
+Still to add:
+
+- one scenario or assertion for real chat-overflow follow-up reuse using the cache notice path
+- one scenario or assertion for richer tool-result reuse expectations once the memory shape is improved
 
 ### Phase 4. Remove Experimental Mismatches
 
@@ -330,6 +407,13 @@ Completed in this direction:
 - Migrate experimental workflows/templates in this branch to the new model without compatibility shims
 
 Status: in progress
+
+Completed in this direction:
+
+- removed helper-based file access from the Monty helper surface
+- introduced `memory_ops`
+- introduced `pending_files(...)`
+- introduced `read_cache(...)` for code-mode-only cache reuse
 
 ### Optional Final Step
 
