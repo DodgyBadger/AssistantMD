@@ -13,6 +13,7 @@ Fight entropy and leave the codebase better than you found it.
 - Validation ownership: maintainers run full validation (`python validation/run_validation.py ...`); agents should request results instead of running the suite.
 - Validation-first delivery: follow [Testing and Validation](docs/agent-guides/testing-and-validation.md#validation-first-workflow).
 - Planning output is required: planning work must end with a root-level markdown implementation plan, either by creating a new file or updating the existing one for that effort.
+- Documentation should describe the current contract only. Do not document behavior as “instead of the old way” or teach migrations inside product docs unless the task explicitly calls for migration guidance.
 - Never commit real API keys or populated `system/secrets.yaml`.
 - Treat `/app/data` and `/app/system` as persistent runtime state during local testing.
 - Commit message expectations live in [Git and Review Workflow](docs/agent-guides/git-and-review.md).

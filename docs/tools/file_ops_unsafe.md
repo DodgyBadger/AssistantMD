@@ -40,7 +40,16 @@ file_ops_unsafe(
 
 ## Output Shape
 
-Returns plain text success or error messages.
+Returns human-readable output plus structured metadata.
+
+When used through `call_tool(...)`, use `result.metadata` for control flow:
+
+- `status`: `completed`, `not_found`, `invalid_target`, or `error`
+- `operation`
+- `path`
+- `destination` when applicable
+- `exists` when applicable
+- operation-specific fields such as `line_number` or `replacement_count`
 
 ## Notes
 
@@ -48,3 +57,4 @@ Returns plain text success or error messages.
 - use `file_ops_safe` first to inspect and verify the target
 - delete and truncate require explicit path confirmation
 - destructive changes have no undo
+- in scripted Monty flows, use `result.metadata["status"]` for branching

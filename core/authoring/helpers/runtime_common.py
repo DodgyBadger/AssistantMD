@@ -230,11 +230,9 @@ async def invoke_bound_tool(
 
 def normalize_tool_result(result: Any) -> tuple[str, dict[str, Any]]:
     if isinstance(result, ToolReturn):
-        metadata = {
-            "return_type": "tool_return",
-            "has_content": result.content is not None,
-            "metadata": result.metadata if isinstance(result.metadata, dict) else {},
-        }
+        metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
+        metadata["return_type"] = "tool_return"
+        metadata["has_content"] = result.content is not None
         return coerce_output_data(result.return_value), metadata
     if isinstance(result, (dict, list, tuple)):
         try:

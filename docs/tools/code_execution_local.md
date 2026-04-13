@@ -80,6 +80,7 @@ Notes:
 - this can only call tools already enabled for the chat run
 - `code_execution_local` itself is excluded to avoid recursive self-invocation
 - use this for file access, memory access, web tools, and other operational work
+- prefer branching on `result.metadata` when the tool returns structured status
 
 ### `assemble_context`
 

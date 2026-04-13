@@ -331,6 +331,30 @@ Completed in this direction:
 
 Status: in progress
 
+### Optional Final Step
+
+Evaluate a first-class subagent tool as a complement to `generate(...)`.
+
+Intent:
+
+- allow normal chat flows to delegate bounded work through the same primitive
+- allow Monty scripts to invoke richer bounded agent runs through `call_tool(...)`
+- preserve `generate(...)` as the simple one-shot model primitive
+
+Recommended boundary:
+
+- keep `generate(...)` for deterministic single-call generation
+- add a tool-first subagent surface for delegated multi-step work
+- do not replace `generate(...)` immediately
+
+Initial design goals:
+
+- explicit task and instruction inputs
+- explicit tool subset
+- bounded runtime / step budget
+- structured result with status, output, and tool activity
+- strong observability at the tool layer
+
 ## Risks
 
 - Over-correcting and making Monty too verbose for common authoring tasks

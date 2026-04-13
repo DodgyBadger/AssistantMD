@@ -45,9 +45,20 @@ file_ops_safe(
 
 ## Output Shape
 
-Returns plain text for most operations.
+Returns human-readable output plus structured metadata.
 
-Some reads may return multimodal tool content:
+When used through `call_tool(...)`, use `result.metadata` for control flow:
+
+- `status`: `completed`, `not_found`, `already_exists`, `invalid_target`, `unsupported`, or `error`
+- `operation`: resolved operation name
+- `path` / `target`
+- `exists` when applicable
+- operation-specific fields such as:
+  - `file_count`, `directory_count`, `files`, `directories` for `list`
+  - `match_count`, `matches` for `search`
+  - `content_chars`, `media_mode` for `read`
+
+Some reads may also return multimodal tool content:
 
 - image files can be attached directly
 - markdown files with embedded local images can return ordered multimodal content
@@ -58,3 +69,4 @@ Some reads may return multimodal tool content:
 - avoid broad recursive lists and searches unless needed
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
+- in scripted Monty flows, use `result.metadata["status"]` for branching
