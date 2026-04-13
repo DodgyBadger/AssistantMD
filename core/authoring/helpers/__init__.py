@@ -10,11 +10,13 @@ from core.authoring.helpers.generate import build_definition as build_generate_d
 from core.authoring.helpers.import_content import build_definition as build_import_content_definition
 from core.authoring.helpers.pending_files import build_definition as build_pending_files_definition
 from core.authoring.helpers.parse_markdown import build_definition as build_parse_markdown_definition
+from core.authoring.helpers.read_cache import build_definition as build_read_cache_definition
 
 
 def get_builtin_helper_definitions() -> tuple[AuthoringCapabilityDefinition, ...]:
     """Return the default helper catalog in a stable registration order."""
     return (
+        build_read_cache_definition(),
         build_pending_files_definition(),
         build_generate_definition(),
         build_call_tool_definition(),

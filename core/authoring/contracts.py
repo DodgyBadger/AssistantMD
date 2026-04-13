@@ -9,6 +9,7 @@ from typing import Any, Protocol, runtime_checkable
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
+        "read_cache",
         "pending_files",
         "generate",
         "call_tool",

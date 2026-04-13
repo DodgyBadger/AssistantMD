@@ -303,8 +303,8 @@ def _build_cached_tool_overflow_notice(
     return (
         f"Tool '{tool_name}' produced a large result ({token_count} estimated tokens > {token_limit}) "
         f"and it was stored in cache ref '{cache_ref}'. Preview:\n\n{preview}\n\n"
-        "Do not request the full content inline. Switch to constrained-Python exploration and retrieve "
-        "the cached artifact by ref when you need to inspect it."
+        "Do not request the full content inline. Switch to `code_execution_local` and use "
+        f"`await read_cache(ref={cache_ref!r})` to inspect the cached artifact by ref."
     )
 
 

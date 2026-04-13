@@ -26,6 +26,8 @@ class CodeExecutionLocalScenario(BaseScenario):
 
         await self.start_system()
 
+        from core.context.store import upsert_cache_artifact
+
         import core.llm.chat_executor as chat_executor
         from pydantic_ai.models.test import TestModel
         current_case = {"name": "allow_memory_read"}
@@ -53,6 +55,13 @@ class CodeExecutionLocalScenario(BaseScenario):
                     }
                 if case_name == "discovery":
                     return {}
+                if case_name == "allow_cache_read":
+                    return {
+                        "code": (
+                            'artifact = await read_cache(ref="tool/tavily_extract/call_seeded")\n'
+                            'artifact.content if artifact.exists else "CACHE_NOT_FOUND"'
+                        )
+                    }
                 if case_name == "allow_file_read":
                     return {
                         "code": (
@@ -77,6 +86,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     return {
                         "code": (
                             'import json\n'
+                            'cached = await read_cache(ref="tool/tavily_extract/call_seeded_full_surface")\n'
                             'await call_tool(\n'
                             '    name="file_ops_safe",\n'
                             '    arguments={"operation": "read", "target": "notes/structured.md"},\n'
@@ -104,6 +114,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                             'draft = await generate(\n'
                             '    prompt=(\n'
                             '        f"heading={parsed.sections[1].heading}; "\n'
+                            '        f"cached={cached.content}; "\n'
                             '        f"messages={len(assembled.messages)}; "\n'
                             '        f"listed={listed.metadata.get(\'file_count\')}"\n'
                             '    ),\n'
@@ -138,6 +149,31 @@ class CodeExecutionLocalScenario(BaseScenario):
         original_prepare_agent_config = chat_executor._prepare_agent_config
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         try:
+            upsert_cache_artifact(
+                owner_id=f"{vault.name}/chat/code_execution_local_allow_cache_read",
+                session_key="code_execution_local_allow_cache_read",
+                artifact_ref="tool/tavily_extract/call_seeded",
+                cache_mode="session",
+                ttl_seconds=None,
+                raw_content="SEEDED_CACHE_CONTENT",
+                metadata={"origin": "validation"},
+                origin="validation",
+                now=datetime(2026, 4, 7, 12, 0, 0),
+                week_start_day=0,
+            )
+            upsert_cache_artifact(
+                owner_id=f"{vault.name}/chat/code_execution_local_full_surface",
+                session_key="code_execution_local_full_surface",
+                artifact_ref="tool/tavily_extract/call_seeded_full_surface",
+                cache_mode="session",
+                ttl_seconds=None,
+                raw_content="FULL_SURFACE_CACHE_CONTENT",
+                metadata={"origin": "validation"},
+                origin="validation",
+                now=datetime(2026, 4, 7, 12, 0, 0),
+                week_start_day=0,
+            )
+
             allow_read = self.call_api(
                 "/api/chat/execute",
                 method="POST",
@@ -158,6 +194,25 @@ class CodeExecutionLocalScenario(BaseScenario):
             self.soft_assert(
                 any(digit in allow_text for digit in ("0", "1")),
                 "Memory read should return a structured item count",
+            )
+
+            current_case["name"] = "allow_cache_read"
+            allow_cache_read = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Read a cached oversized tool artifact through code_execution_local.",
+                    "session_id": "code_execution_local_allow_cache_read",
+                    "tools": ["code_execution_local"],
+                    "model": "test",
+                },
+            )
+            assert allow_cache_read.status_code == 200, "Cache read should succeed"
+            allow_cache_read_text = allow_cache_read.json()["response"]
+            self.soft_assert(
+                "SEEDED_CACHE_CONTENT" in allow_cache_read_text,
+                "Cache read should return the cached artifact content",
             )
 
             current_case["name"] = "discovery"
@@ -246,6 +301,15 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "section_count": 2,
                     "code_block_count": 1,
                     "image_count": 1,
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_read_cache_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "ref": "tool/tavily_extract/call_seeded_full_surface",
+                    "exists": True,
                 },
             )
             self.assert_event_contains(

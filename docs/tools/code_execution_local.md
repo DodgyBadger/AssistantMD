@@ -23,6 +23,7 @@ Inside the runtime you have access to the following helper functions. Prefer the
 - `pending_files(...)`: filter a file result set to the pending subset and explicitly complete the items you finished.
 - `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use.
 - `assemble_context(...)`: build structured message history for downstream chat-style generation.
+- `read_cache(...)`: open one cached oversized tool result by cache ref inside the current chat session.
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs.
 - `finish(...)`: end the script intentionally with a completed or skipped terminal status.
 - `date`: resolve common date tokens such as today, yesterday, week boundaries, and month names.
@@ -30,6 +31,18 @@ Inside the runtime you have access to the following helper functions. Prefer the
 Use ordinary Python for everything else and for filtering, sorting, selection, and control flow around those helpers.
 
 ## Helper Signatures
+
+### `read_cache`
+
+```python
+await read_cache(*, ref: str)
+```
+
+Notes:
+
+- use this when chat tells you a large tool result was stored in a cache ref
+- it reads cached content for the current chat session only
+- the result has `artifact.content`, `artifact.exists`, and `artifact.metadata`
 
 ### `pending_files`
 
@@ -186,6 +199,17 @@ artifact.output[:2000]
 )
 ```
 
+### Inspect a cached oversized tool result
+
+```python
+code_execution_local(
+    code="""
+artifact = await read_cache(ref="tool/tavily_extract/call_abc123")
+artifact.content[:2000] if artifact.exists else "CACHE_NOT_FOUND"
+""",
+)
+```
+
 ### Read conversation history with `memory_ops`
 
 ```python
@@ -314,6 +338,7 @@ await pending_files(
 ## Notes
 
 - chat-session history is available through `memory_ops`
+- cached oversized tool results are available through `read_cache(ref=...)`
 - file, memory, and web access should generally go through `call_tool(...)`
 - prefer returning a compact final value instead of printing large text
 - use this doc as the primary reference for the local helper surface
