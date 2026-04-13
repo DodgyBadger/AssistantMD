@@ -1,10 +1,8 @@
 """
-Integration scenario validating same-session multi-pass cache exploration in chat.
+Integration scenario validating same-session multi-pass local exploration in chat.
 """
 
-import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
@@ -13,19 +11,18 @@ from validation.core.base_scenario import BaseScenario
 
 
 class ChatCacheMultiPassScenario(BaseScenario):
-    """Validate one cached artifact can be revisited across multiple chat turns."""
+    """Validate one local artifact can be revisited across multiple chat turns."""
 
     async def test_scenario(self):
         vault = self.create_vault("ChatCacheMultiPassVault")
+        self.create_file(vault, "notes/repeated.md", "OVERFLOW_SEGMENT " * 1200)
 
         await self.start_system()
 
         import api.endpoints as api_endpoints
         import core.llm.chat_executor as chat_executor
         from core.authoring.shared.tool_binding import resolve_tool_binding
-        from core.context.store import get_cache_artifact
         from core.logger import UnifiedLogger
-        from core.runtime.state import get_runtime_context
         from pydantic_ai.models.test import TestModel
 
         session_id = "chat_cache_multi_pass_session"
@@ -47,19 +44,26 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 name = getattr(tool_def, "name", "")
                 if name != "code_execution_local":
                     return super().gen_tool_args(tool_def)
-                cache_ref = "tool/overflow_probe/pyd_ai_tool_call_id__overflow_probe"
                 if call_index["value"] == 2:
                     return {
                         "code": (
-                            f'artifact = await retrieve(type="cache", ref="{cache_ref}")\n'
-                            "artifact.items[0].content[:80]"
+                            'artifact = await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "read", "target": "notes/repeated.md"},\n'
+                            ')\n'
+                            'text = artifact.output.split("\\n\\n", 1)[1] if "\\n\\n" in artifact.output else artifact.output\n'
+                            "text[:80]"
                         )
                     }
                 if call_index["value"] == 3:
                     return {
                         "code": (
-                            f'artifact = await retrieve(type="cache", ref="{cache_ref}")\n'
-                            'str(artifact.items[0].content.count("OVERFLOW_SEGMENT"))'
+                            'artifact = await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "read", "target": "notes/repeated.md"},\n'
+                            ')\n'
+                            'text = artifact.output.split("\\n\\n", 1)[1] if "\\n\\n" in artifact.output else artifact.output\n'
+                            'str(text.count("OVERFLOW_SEGMENT"))'
                         )
                     }
                 raise AssertionError("Unexpected code_execution_local phase")
@@ -113,32 +117,23 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 },
             )
             assert first.status_code == 200, "Initial oversized tool call should succeed"
-            first_text = first.json()["response"]
-            match = re.search(r"cache ref '([^']+)'", first_text)
-            assert match, "Initial response should include a cache ref"
-            cache_ref = match.group(1)
-            self.soft_assert_equal(
-                cache_ref,
-                "tool/overflow_probe/pyd_ai_tool_call_id__overflow_probe",
-                "Initial cache ref should use the deterministic overflow_probe tool call id",
-            )
 
             second = self.call_api(
                 "/api/chat/execute",
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Inspect the cached artifact and show the beginning.",
+                    "prompt": "Inspect the repeated note and show the beginning.",
                     "session_id": session_id,
-                    "tools": ["code_execution_local"],
+                    "tools": ["code_execution_local", "file_ops_safe"],
                     "model": "test",
                 },
             )
-            assert second.status_code == 200, "First cache exploration pass should succeed"
+            assert second.status_code == 200, "First local exploration pass should succeed"
             second_text = second.json()["response"]
             self.soft_assert(
                 "OVERFLOW_SEGMENT" in second_text,
-                "First cache exploration pass should read the cached artifact content",
+                "First local exploration pass should read the repeated note content",
             )
 
             third = self.call_api(
@@ -146,29 +141,18 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Inspect the same cached artifact again and count the repeated token.",
+                    "prompt": "Inspect the same repeated note again and count the repeated token.",
                     "session_id": session_id,
-                    "tools": ["code_execution_local"],
+                    "tools": ["code_execution_local", "file_ops_safe"],
                     "model": "test",
                 },
             )
-            assert third.status_code == 200, "Second cache exploration pass should succeed"
+            assert third.status_code == 200, "Second local exploration pass should succeed"
             third_text = third.json()["response"]
             self.soft_assert(
                 "1200" in third_text,
-                "Second cache exploration pass should revisit the same artifact and compute a deterministic result",
+                "Second local exploration pass should revisit the same note and compute a deterministic result",
             )
-
-            runtime = get_runtime_context()
-            artifact = get_cache_artifact(
-                owner_id=f"{vault.name}/chat/{session_id}",
-                session_key=session_id,
-                artifact_ref=cache_ref,
-                now=datetime.now(),
-                week_start_day=0,
-                system_root=runtime.config.system_root,
-            )
-            assert artifact is not None, "Original cached overflow artifact should still exist for later passes"
 
             events = self.events_since(checkpoint)
             overflow_events = self.find_events(events, name="tool_invoked", tool="overflow_probe")

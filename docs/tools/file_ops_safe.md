@@ -4,13 +4,6 @@
 
 Read, write, append, list, search, and move files safely within the current vault or virtual mounts.
 
-## When To Use
-
-- you need to explore the vault structure
-- you need to search markdown files for content
-- you need non-destructive file writes
-- you need to read markdown, text, or supported image files
-
 ## Operations
 
 - `list`

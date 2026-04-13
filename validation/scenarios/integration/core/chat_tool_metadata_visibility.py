@@ -28,6 +28,10 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
                 "Chat metadata should expose code_execution_local",
             )
             self.soft_assert(
+                "memory_ops" in tool_names,
+                "Chat metadata should expose memory_ops",
+            )
+            self.soft_assert(
                 "buffer_ops" not in tool_names,
                 "Chat metadata should hide buffer_ops because it is compatibility-only for chat",
             )

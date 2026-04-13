@@ -1,8 +1,8 @@
 """
-Integration scenario for constrained-Python authoring host contract coverage.
+Integration scenario for current Monty helper contract coverage.
 
-Covers the currently implemented Monty host functions using deterministic model
-execution and stable validation events rather than end-use wording.
+Validates the current tool-first authoring surface using deterministic model
+execution and stable validation events.
 """
 
 import sys
@@ -20,7 +20,6 @@ class AuthoringContractScenario(BaseScenario):
         vault = self.create_vault("AuthoringContractVault")
 
         self.create_file(vault, "notes/seed.md", "SEED_CONTENT")
-        self.create_file(vault, "notes/extra.md", "EXTRA_CONTENT")
         self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
         self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
         self.create_file(vault, "tasks/pending-one.md", "PENDING_ONE")
@@ -29,11 +28,6 @@ class AuthoringContractScenario(BaseScenario):
             vault,
             "AssistantMD/Workflows/authoring_contract_success.md",
             AUTHORING_CONTRACT_SUCCESS_WORKFLOW,
-        )
-        self.create_file(
-            vault,
-            "AssistantMD/Workflows/authoring_cache_daily.md",
-            AUTHORING_CACHE_DAILY_WORKFLOW,
         )
         self.create_file(
             vault,
@@ -64,35 +58,6 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="authoring_retrieve_allowed",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "type": "file",
-                "ref": "notes/seed.md",
-            },
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_retrieve_resolved",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "type": "file",
-                "ref": "notes/seed.md",
-                "item_count": 1,
-            },
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_retrieve_cache_resolved",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "type": "cache",
-                "ref": "scratch/summary",
-                "exists": True,
-            },
-        )
-        self.assert_event_contains(
-            events,
             name="authoring_call_tool_started",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
@@ -110,10 +75,7 @@ class AuthoringContractScenario(BaseScenario):
         self.assert_event_contains(
             events,
             name="authoring_generate_started",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "input_count": 1,
-            },
+            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
         )
         self.assert_event_contains(
             events,
@@ -147,28 +109,18 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="authoring_complete_pending_completed",
+            name="authoring_pending_files_filtered",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "pending_count": 1,
+            },
+        )
+        self.assert_event_contains(
+            events,
+            name="authoring_pending_files_completed",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
                 "completed_count": 1,
-            },
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_output_written",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "type": "file",
-                "ref": "outputs/contract-success.md",
-            },
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_output_cache_written",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "type": "cache",
-                "ref": "scratch/summary",
             },
         )
         self.assert_event_contains(
@@ -195,7 +147,6 @@ class AuthoringContractScenario(BaseScenario):
         if contract_output.exists():
             content = contract_output.read_text(encoding="utf-8")
             self.soft_assert("SEED_CONTENT" in content, "Expected retrieved file content in output")
-            self.soft_assert("APPENDED_CACHE" in content, "Expected appended cache content in output")
             self.soft_assert("ASSEMBLED=3" in content, "Expected assembled context count in output")
 
         generated_output = vault / "outputs" / "generate-success.md"
@@ -213,42 +164,6 @@ class AuthoringContractScenario(BaseScenario):
             self.soft_assert("AI In Fiction" in parsed_content, "Expected parsed section heading in output")
             self.soft_assert("python" in parsed_content, "Expected parsed code block language in output")
             self.soft_assert("../images/test_image.jpg" in parsed_content, "Expected parsed image ref in output")
-
-        # Daily cache semantics should match existing cache behavior.
-        self.set_date("2026-04-06")
-        first_daily = await self.run_workflow(vault, "authoring_cache_daily")
-        self.soft_assert_equal(first_daily.status, "completed", "First daily cache workflow run should succeed")
-        daily_status = vault / "outputs" / "daily-status.md"
-        self.soft_assert(
-            daily_status.read_text(encoding="utf-8").strip() == "before=False; after=True",
-            "First daily cache run should miss then populate cache",
-        )
-
-        second_daily = await self.run_workflow(vault, "authoring_cache_daily")
-        self.soft_assert_equal(second_daily.status, "completed", "Second same-day cache run should succeed")
-        self.soft_assert(
-            daily_status.read_text(encoding="utf-8").strip() == "before=True; after=True",
-            "Second same-day cache run should hit cache",
-        )
-
-        self.set_date("2026-04-07")
-        checkpoint = self.event_checkpoint()
-        third_daily = await self.run_workflow(vault, "authoring_cache_daily")
-        self.soft_assert_equal(third_daily.status, "completed", "Next-day cache run should succeed")
-        self.soft_assert(
-            daily_status.read_text(encoding="utf-8").strip() == "before=False; after=True",
-            "Next-day cache run should treat daily cache as expired",
-        )
-        daily_events = self.events_since(checkpoint)
-        self.assert_event_contains(
-            daily_events,
-            name="authoring_retrieve_cache_resolved",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_cache_daily",
-                "ref": "scratch/daily",
-                "exists": False,
-            },
-        )
 
         # Generate-level cache semantics should skip repeated LLM work within the TTL window.
         self.set_date("2026-04-06")
@@ -330,7 +245,7 @@ class AuthoringContractScenario(BaseScenario):
         self.assert_no_failures()
 
 
-AUTHORING_CONTRACT_SUCCESS_WORKFLOW = """---
+AUTHORING_CONTRACT_SUCCESS_WORKFLOW_TEMPLATE = """---
 workflow_engine: monty
 enabled: false
 description: Deterministic authoring contract success workflow
@@ -339,22 +254,36 @@ description: Deterministic authoring contract success workflow
 ## Run
 
 ```python
-source = await retrieve(type="file", ref="notes/seed.md")
+def _strip_read_output(value):
+    return value.split("\\n\\n", 1)[1] if "\\n\\n" in value else value
 
-await output(
-    type="cache",
-    ref="scratch/summary",
-    data=source.items[0].content,
-    options={"mode": "replace", "ttl": "daily"},
-)
-await output(
-    type="cache",
-    ref="scratch/summary",
-    data="\\nAPPENDED_CACHE",
-    options={"mode": "append", "ttl": "daily"},
-)
 
-cached = await retrieve(type="cache", ref="scratch/summary")
+async def _write_replace(path, content):
+    existing = await call_tool(
+        name="file_ops_safe",
+        arguments={"operation": "read", "target": path},
+    )
+    if existing.metadata.get("status") == "completed":
+        await call_tool(
+            name="file_ops_unsafe",
+            arguments={"operation": "truncate", "path": path, "confirm_path": path},
+        )
+        await call_tool(
+            name="file_ops_safe",
+            arguments={"operation": "append", "target": path, "content": content},
+        )
+    else:
+        await call_tool(
+            name="file_ops_safe",
+            arguments={"operation": "write", "target": path, "content": content},
+        )
+
+
+source = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "read", "target": "notes/seed.md"},
+)
+source_text = _strip_read_output(source.output)
 listing = await call_tool(
     name="file_ops_safe",
     arguments={"operation": "list", "target": "notes"},
@@ -364,83 +293,50 @@ assembled = await assemble_context(
     context_messages=[{"role": "system", "content": "Validation context"}],
     latest_user_message={"role": "user", "content": "Summarize the retrieved material."},
 )
-structured = await retrieve(type="file", ref="notes/structured.md")
-parsed = await parse_markdown(value=structured.items[0])
-pending = await retrieve(type="file", ref="tasks/*.md", options={"pending": True, "refs_only": True})
-await complete_pending(items=(pending.items[0],))
+structured = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "read", "target": "notes/structured.md"},
+)
+parsed = await parse_markdown(value=STRUCTURED_NOTE_PLACEHOLDER)
+task_listing = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "list", "target": "tasks"},
+)
+pending = await pending_files(operation="get", pattern="tasks/*.md", items=task_listing)
+await pending_files(operation="complete", pattern="tasks/*.md", items=(pending.items[0],))
 
 draft = await generate(
     prompt=(
         "Seed:\\n"
-        + cached.items[0].content
+        + source_text
         + "\\n\\nListing:\\n"
         + listing.output
         + "\\n\\nAssembled messages:\\n"
         + str(len(assembled.messages))
     ),
-    inputs=source.items,
     instructions="Return one short deterministic line.",
     model="test",
 )
 
-await output(
-    type="file",
-    ref="outputs/contract-success.md",
-    data=cached.items[0].content + f"\\nASSEMBLED={len(assembled.messages)}",
-    options={"mode": "replace"},
+await _write_replace(
+    "outputs/contract-success.md",
+    source_text + f"\\nASSEMBLED={len(assembled.messages)}",
 )
-await output(
-    type="file",
-    ref="outputs/generate-success.md",
-    data=draft.output,
-    options={"mode": "replace"},
+await _write_replace(
+    "outputs/generate-success.md",
+    draft.output,
 )
-await output(
-    type="file",
-    ref="outputs/parse-markdown.md",
-    data=(
+await _write_replace(
+    "outputs/parse-markdown.md",
+    (
         f"name={parsed.frontmatter.get('name')}\\n"
         f"heading={parsed.sections[1].heading}\\n"
         f"code={parsed.code_blocks[0].language}\\n"
         f"image={parsed.images[0].src}"
     ),
-    options={"mode": "replace"},
 )
 
 await finish(status="completed", reason="all-helpers-exercised")
-```
-"""
-
-
-AUTHORING_CACHE_DAILY_WORKFLOW = """---
-workflow_engine: monty
-enabled: false
-description: Deterministic daily cache semantics workflow
----
-
-## Run
-
-```python
-cached_before = await retrieve(type="cache", ref="scratch/daily")
-before = cached_before.items[0].exists
-
-if not before:
-    await output(
-        type="cache",
-        ref="scratch/daily",
-        data="DAILY_CACHE",
-        options={"mode": "replace", "ttl": "daily"},
-    )
-
-cached_after = await retrieve(type="cache", ref="scratch/daily")
-after = cached_after.items[0].exists
-
-await output(
-    type="file",
-    ref="outputs/daily-status.md",
-    data=f"before={before}; after={after}",
-    options={"mode": "replace"},
-)
 ```
 """
 
@@ -454,6 +350,26 @@ description: Deterministic generate cache semantics workflow
 ## Run
 
 ```python
+async def _write_replace(path, content):
+    existing = await call_tool(
+        name="file_ops_safe",
+        arguments={"operation": "read", "target": path},
+    )
+    if existing.metadata.get("status") == "completed":
+        await call_tool(
+            name="file_ops_unsafe",
+            arguments={"operation": "truncate", "path": path, "confirm_path": path},
+        )
+        await call_tool(
+            name="file_ops_safe",
+            arguments={"operation": "append", "target": path, "content": content},
+        )
+    else:
+        await call_tool(
+            name="file_ops_safe",
+            arguments={"operation": "write", "target": path, "content": content},
+        )
+
 draft = await generate(
     prompt="Deterministic prompt",
     instructions="Return a short stable line.",
@@ -461,12 +377,7 @@ draft = await generate(
     cache="daily",
 )
 
-await output(
-    type="file",
-    ref="outputs/generate-cache-status.md",
-    data=f"status={draft.status}",
-    options={"mode": "replace"},
-)
+await _write_replace("outputs/generate-cache-status.md", f"status={draft.status}")
 ```
 """
 
@@ -488,3 +399,9 @@ print("hello")
 
 ![Example image](../images/test_image.jpg)
 """
+
+
+AUTHORING_CONTRACT_SUCCESS_WORKFLOW = AUTHORING_CONTRACT_SUCCESS_WORKFLOW_TEMPLATE.replace(
+    "STRUCTURED_NOTE_PLACEHOLDER",
+    repr(STRUCTURED_NOTE),
+)

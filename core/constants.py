@@ -120,7 +120,7 @@ Tool calls (all tools):
 - Always use named parameters (keyword arguments). Positional arguments and args arrays are not supported.
 - If tool output is very large, the system may store it in cache and return a cache ref plus preview instead of inlining the full payload.
 - When that happens, do not ask for the full cached body inline.
-- To inspect or transform cached content, use `code_execution_local` and retrieve it with `retrieve(type="cache", ref=...)`.
+- Work from the preview when it is sufficient. Otherwise rerun a narrower tool call or choose a tool that can return the specific subset you need.
 - When doing online research, prefer tavily_extract and only fall back to the browser tool when extraction fails.
 
 Grounding:

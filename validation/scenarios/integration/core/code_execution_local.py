@@ -5,6 +5,7 @@ Validates deterministic chat-scoped execution through the real /api/chat/execute
 path using a patched TestModel argument generator.
 """
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,26 +27,8 @@ class CodeExecutionLocalScenario(BaseScenario):
         await self.start_system()
 
         import core.llm.chat_executor as chat_executor
-        from core.context.store import get_cache_artifact, upsert_cache_artifact
-        from core.runtime.state import get_runtime_context
         from pydantic_ai.models.test import TestModel
-
-        reference_time = datetime(2026, 4, 6, 12, 0, 0)
-
-        upsert_cache_artifact(
-            owner_id=f"{vault.name}/chat/code_execution_local_allow_read",
-            session_key="code_execution_local_allow_read",
-            artifact_ref="tool/demo/allowed",
-            cache_mode="session",
-            ttl_seconds=None,
-            raw_content="ALPHA BETA GAMMA",
-            metadata={"origin": "validation_fixture"},
-            origin="validation_fixture",
-            now=reference_time,
-            week_start_day=0,
-        )
-
-        current_case = {"name": "allow_read"}
+        current_case = {"name": "allow_memory_read"}
 
         class _DeterministicToolModel(TestModel):
             def __init__(self):
@@ -56,11 +39,16 @@ class CodeExecutionLocalScenario(BaseScenario):
                     return super().gen_tool_args(tool_def)
 
                 case_name = current_case["name"]
-                if case_name == "allow_read":
+                if case_name == "allow_memory_read":
                     return {
                         "code": (
-                            'artifact = await retrieve(type="cache", ref="tool/demo/allowed")\n'
-                            "artifact.items[0].content"
+                            'import json\n'
+                            'history = await call_tool(\n'
+                            '    name="memory_ops",\n'
+                            '    arguments={"operation": "get_history", "scope": "session", "limit": 1},\n'
+                            ')\n'
+                            'payload = json.loads(history.output)\n'
+                            'str(payload["item_count"])'
                         )
                     }
                 if case_name == "discovery":
@@ -68,51 +56,63 @@ class CodeExecutionLocalScenario(BaseScenario):
                 if case_name == "allow_file_read":
                     return {
                         "code": (
-                            'artifact = await retrieve(type="file", ref="notes/blocked.md")\n'
-                            "artifact.items[0].content"
+                            'doc = await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "read", "target": "notes/blocked.md"},\n'
+                            ')\n'
+                            'doc.output.split("\\n\\n", 1)[1] if "\\n\\n" in doc.output else doc.output'
                         )
                     }
                 if case_name == "allow_write":
                     return {
                         "code": (
-                            'await output(type="cache", ref="scratch/derived", data="DERIVED_RESULT")\n'
+                            'await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "write", "target": "notes/derived.md", "content": "DERIVED_RESULT"},\n'
+                            ')\n'
                             '"WRITE_OK"'
                         )
                     }
                 if case_name == "full_surface":
                     return {
                         "code": (
-                            'doc = await retrieve(type="file", ref="notes/structured.md")\n'
-                            'parsed = await parse_markdown(value=doc.items[0])\n'
-                            'pending = await retrieve(\n'
-                            '    type="file",\n'
-                            '    ref="tasks/*.md",\n'
-                            '    options={"pending": True, "refs_only": True},\n'
-                            ')\n'
-                            'await complete_pending(items=(pending.items[0],))\n'
-                            'history = await retrieve(type="run", ref="session", options={"limit": 1})\n'
-                            'assembled = await assemble_context(\n'
-                            '    history=history.items,\n'
-                            '    instructions="Keep the output concise.",\n'
-                            ')\n'
-                            'listing = await call_tool(\n'
+                            'import json\n'
+                            'await call_tool(\n'
                             '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "list", "target": "notes"},\n'
+                            '    arguments={"operation": "read", "target": "notes/structured.md"},\n'
+                            ')\n'
+                            f'parsed = await parse_markdown(value={STRUCTURED_NOTE!r})\n'
+                            'listed = await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "list", "target": "tasks"},\n'
+                            ')\n'
+                            'pending = await pending_files(\n'
+                            '    operation="get",\n'
+                            '    pattern="tasks/*.md",\n'
+                            '    items=listed,\n'
+                            ')\n'
+                            'await pending_files(operation="complete", pattern="tasks/*.md", items=(pending.items[0],))\n'
+                            'history = await call_tool(\n'
+                            '    name="memory_ops",\n'
+                            '    arguments={"operation": "get_history", "scope": "session", "limit": 1},\n'
+                            ')\n'
+                            'history_payload = json.loads(history.output)\n'
+                            'assembled = await assemble_context(\n'
+                            '    history=[{"role": item["role"], "content": item["content"]} for item in history_payload["items"]],\n'
+                            '    instructions="Keep the output concise.",\n'
                             ')\n'
                             'draft = await generate(\n'
                             '    prompt=(\n'
                             '        f"heading={parsed.sections[1].heading}; "\n'
                             '        f"messages={len(assembled.messages)}; "\n'
-                            '        f"listing={listing.output}"\n'
+                            '        f"listed={listed.metadata.get(\'file_count\')}"\n'
                             '    ),\n'
                             '    instructions="Return one short deterministic line.",\n'
                             '    model="test",\n'
                             ')\n'
-                            'await output(\n'
-                            '    type="cache",\n'
-                            '    ref="scratch/full-surface",\n'
-                            '    data=draft.output,\n'
-                            '    options={"mode": "replace", "ttl": "session"},\n'
+                            'await call_tool(\n'
+                            '    name="file_ops_safe",\n'
+                            '    arguments={"operation": "write", "target": "notes/full-surface.md", "content": draft.output},\n'
                             ')\n'
                             'await finish(status="completed", reason="full-surface-ok")\n'
                             '"UNREACHABLE"'
@@ -143,17 +143,21 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Read the allowed cache artifact through code_execution_local.",
+                    "prompt": "Read session history through code_execution_local.",
                     "session_id": "code_execution_local_allow_read",
-                    "tools": ["code_execution_local"],
+                    "tools": ["code_execution_local", "memory_ops"],
                     "model": "test",
                 },
             )
-            assert allow_read.status_code == 200, "Allowed cache read should succeed"
+            assert allow_read.status_code == 200, "Memory read should succeed"
             allow_text = allow_read.json()["response"]
             self.soft_assert(
-                "ALPHA BETA GAMMA" in allow_text,
-                "Allowed cache read should return the cached artifact content",
+                "failed:" not in allow_text.lower(),
+                "Memory read should not return a Monty failure",
+            )
+            self.soft_assert(
+                any(digit in allow_text for digit in ("0", "1")),
+                "Memory read should return a structured item count",
             )
 
             current_case["name"] = "discovery"
@@ -183,7 +187,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Read a vault file through code_execution_local.",
                     "session_id": "code_execution_local_allow_file_read",
-                    "tools": ["code_execution_local"],
+                    "tools": ["code_execution_local", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -202,7 +206,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Write a derived cache artifact through code_execution_local.",
                     "session_id": "code_execution_local_allow_write",
-                    "tools": ["code_execution_local"],
+                    "tools": ["code_execution_local", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -222,7 +226,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Exercise the full code_execution_local helper surface.",
                     "session_id": "code_execution_local_full_surface",
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "tools": ["code_execution_local", "file_ops_safe", "memory_ops"],
                     "model": "test",
                 },
             )
@@ -246,7 +250,7 @@ class CodeExecutionLocalScenario(BaseScenario):
             )
             self.assert_event_contains(
                 full_surface_events,
-                name="authoring_complete_pending_completed",
+                name="authoring_pending_files_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
                     "completed_count": 1,
@@ -267,6 +271,14 @@ class CodeExecutionLocalScenario(BaseScenario):
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
                     "tool": "file_ops_safe",
+                },
+            )
+            self.assert_event_contains(
+                full_surface_events,
+                name="authoring_call_tool_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "tool": "memory_ops",
                 },
             )
             self.assert_event_contains(
@@ -293,33 +305,18 @@ class CodeExecutionLocalScenario(BaseScenario):
                 },
             )
 
-            runtime = get_runtime_context()
-            derived = get_cache_artifact(
-                owner_id=f"{vault.name}/chat/code_execution_local_allow_write",
-                session_key="code_execution_local_allow_write",
-                artifact_ref="scratch/derived",
-                now=reference_time,
-                week_start_day=0,
-                system_root=runtime.config.system_root,
-            )
-            assert derived is not None, "Allowed cache write should persist the derived cache artifact"
+            derived_path = vault / "notes" / "derived.md"
+            assert derived_path.exists(), "Allowed write should create the derived file"
             self.soft_assert_equal(
-                derived["raw_content"],
+                derived_path.read_text(encoding="utf-8"),
                 "DERIVED_RESULT",
-                "Derived cache artifact should preserve the written content",
+                "Derived file should preserve the written content",
             )
-            full_surface_artifact = get_cache_artifact(
-                owner_id=f"{vault.name}/chat/code_execution_local_full_surface",
-                session_key="code_execution_local_full_surface",
-                artifact_ref="scratch/full-surface",
-                now=reference_time,
-                week_start_day=0,
-                system_root=runtime.config.system_root,
-            )
-            assert full_surface_artifact is not None, "Full helper-surface run should write a cache artifact"
+            full_surface_path = vault / "notes" / "full-surface.md"
+            assert full_surface_path.exists(), "Full helper-surface run should write a file"
             self.soft_assert(
-                bool((full_surface_artifact.get("raw_content") or "").strip()),
-                "Full helper-surface run should write non-empty generated output to cache",
+                bool(full_surface_path.read_text(encoding="utf-8").strip()),
+                "Full helper-surface run should write non-empty generated output",
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config

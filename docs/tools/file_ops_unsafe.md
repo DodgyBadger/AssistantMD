@@ -4,12 +4,6 @@
 
 Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed.
 
-## When To Use
-
-- the user explicitly wants a destructive or overwrite-capable file operation
-- you already inspected the target file with `file_ops_safe`
-- you need a narrow, deliberate text replacement or deletion
-
 ## Operations
 
 - `edit_line`

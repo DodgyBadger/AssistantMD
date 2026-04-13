@@ -141,7 +141,7 @@ def _normalize_pending_items_input(value: Any) -> tuple[RetrievedItem, ...]:
 def _items_from_tool_result(result: CallToolResult) -> tuple[RetrievedItem, ...]:
     if result.name != "file_ops_safe":
         raise ValueError("pending_files only accepts CallToolResult values from file_ops_safe")
-    paths = _extract_paths_from_file_ops_output(result.output)
+    paths = _extract_paths_from_file_ops_result(result)
     return tuple(
         RetrievedItem(
             ref=path,
@@ -151,6 +151,36 @@ def _items_from_tool_result(result: CallToolResult) -> tuple[RetrievedItem, ...]
         )
         for path in paths
     )
+
+
+def _extract_paths_from_file_ops_result(result: CallToolResult) -> tuple[str, ...]:
+    metadata = dict(result.metadata or {})
+    files = metadata.get("files")
+    if isinstance(files, list):
+        normalized = tuple(
+            str(path).strip()
+            for path in files
+            if str(path).strip()
+        )
+        if normalized:
+            return normalized
+
+    matches = metadata.get("matches")
+    if isinstance(matches, list):
+        extracted: list[str] = []
+        seen: set[str] = set()
+        for raw_match in matches:
+            if not isinstance(raw_match, str):
+                continue
+            candidate = raw_match.split(":", 1)[0].strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            extracted.append(candidate)
+        if extracted:
+            return tuple(extracted)
+
+    return _extract_paths_from_file_ops_output(result.output)
 
 
 def _extract_paths_from_file_ops_output(output: str) -> tuple[str, ...]:

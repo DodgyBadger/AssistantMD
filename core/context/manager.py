@@ -193,16 +193,6 @@ async def _build_authoring_context_history(
                 curated_history.append(latest_user_message)
             return curated_history
 
-    latest_role, latest_text = ("user", "")
-    if latest_user_message is not None:
-        latest_role, latest_text = extract_role_and_text(latest_user_message)
-    latest_user_payload = None
-    if latest_user_message is not None and latest_text:
-        latest_user_payload = {
-            "role": latest_role,
-            "content": latest_text,
-        }
-
     workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
     reference_date = resolve_cache_now(run_context)
     host = WorkflowAuthoringHost(
@@ -212,7 +202,7 @@ async def _build_authoring_context_history(
         week_start_day=resolve_week_start_day(template.frontmatter),
         session_key=session_id,
         chat_session_id=session_id,
-        message_history=list(history_before_latest),
+        message_history=list(messages),
     )
 
     try:
@@ -220,10 +210,7 @@ async def _build_authoring_context_history(
             workflow_id=workflow_id,
             code=source.code,
             host=host,
-            inputs={
-                "latest_user_message": latest_user_payload,
-                "latest_user_text": latest_text,
-            },
+            inputs={},
             script_name=template.name,
         )
     except AuthoringMontyExecutionError as exc:

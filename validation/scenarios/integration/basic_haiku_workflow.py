@@ -108,7 +108,7 @@ class BasicHaikuWorkflowScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="authoring_output_written",
+            name="authoring_call_tool_completed",
             expected={"workflow_id": "HaikuVault/haiku_writer_monty"},
         )
 
@@ -159,8 +159,11 @@ description: Monty haiku writing workflow
 ```python
 \"\"\"Write one haiku from the seed note and save it to today's Monty output file.\"\"\"
 
-source = await retrieve(type="file", ref="notes/haiku_seed.md")
-note_content = source.items[0].content
+source = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "read", "target": "notes/haiku_seed.md"},
+)
+note_content = source.output.split("\\n\\n", 1)[1] if "\\n\\n" in source.output else source.output
 
 draft = await generate(
     prompt=(
@@ -171,10 +174,13 @@ draft = await generate(
     model="gpt-mini",
 )
 
-await output(
-    type="file",
-    ref=f"haiku-monty-{date.today()}",
-    data=draft.output,
+await call_tool(
+    name="file_ops_safe",
+    arguments={
+        "operation": "write",
+        "target": f"haiku-monty-{date.today()}.md",
+        "content": draft.output,
+    },
 )
 ```
 """

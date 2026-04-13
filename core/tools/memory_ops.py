@@ -42,7 +42,6 @@ class MemoryOps(BaseTool):
             :param session_id: Optional explicit session id. Defaults to the active session when available.
             :param limit: Positive integer or "all"
             """
-            del vault_path
             try:
                 deps = getattr(ctx, "deps", None)
                 active_session_id = str(getattr(deps, "session_id", "") or "").strip() or None
@@ -103,7 +102,6 @@ Full documentation:
 Important notes:
 - use `operation="get_history"` to read conversation history
 - default `scope="session"` reads the active chat session when available
-- prefer this over `retrieve(type="run", ...)` for new history-aware flows
 """
 
     @staticmethod

@@ -14,8 +14,7 @@ The code runs inside the same constrained authoring runtime used by Monty workfl
 
 Scope comes from the active chat session:
 
-- cache access is available for the current chat session
-- file access is available through the current AssistantMD runtime
+- file and history access come from the enabled tool surface
 - tool access mirrors the enabled chat tools, excluding `code_execution_local` itself
 
 Inside the runtime you have access to the following helper functions. Prefer these for the tasks described:
@@ -94,6 +93,11 @@ await assemble_context(
 )
 ```
 
+Notes:
+
+- for conversation history, fetch explicit messages through `memory_ops` and pass them as `history`
+- `latest_user_message` is only an explicit optional argument; it is not injected automatically by the runtime
+
 ### `parse_markdown`
 
 ```python
@@ -168,7 +172,7 @@ code_execution_local(
 )
 ```
 
-### Inspect a cache artifact
+### Read a tool doc
 
 ```python
 code_execution_local(
@@ -309,7 +313,7 @@ await pending_files(
 
 ## Notes
 
-- this tool always has access to the current chat session history
+- chat-session history is available through `memory_ops`
 - file, memory, and web access should generally go through `call_tool(...)`
 - prefer returning a compact final value instead of printing large text
 - use this doc as the primary reference for the local helper surface

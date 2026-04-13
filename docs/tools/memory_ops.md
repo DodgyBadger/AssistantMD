@@ -4,12 +4,6 @@
 
 Read structured conversation history.
 
-## When To Use
-
-- use this when you need chat/session history as structured data
-- use this for new history-aware flows.
-- use this directly in chat or through `call_tool(...)` inside Monty
-
 ## Arguments
 
 - `operation`: currently only `get_history`
@@ -30,9 +24,25 @@ await call_tool(
 )
 ```
 
-## Output Shape
+```python
+import json
 
-Returns JSON with:
+history_result = await call_tool(
+    name="memory_ops",
+    arguments={"operation": "get_history", "scope": "session", "limit": "all"},
+)
+history_payload = json.loads(history_result.output)
+
+assembled = await assemble_context(
+    history=[
+        {"role": item["role"], "content": item["content"]}
+        for item in history_payload["items"]
+    ],
+    instructions="Keep the answer concise.",
+)
+```
+
+The result is JSON with top-level fields:
 
 - `source`
 - `scope`
@@ -40,15 +50,8 @@ Returns JSON with:
 - `item_count`
 - `items`
 
-Each item includes:
-
-- `role`
-- `content`
-- `session_id`
-- `run_id`
-- `message_type`
-- `metadata`
-
 ## Notes
 
 - when called from Monty in a chat session, the current session context is passed through automatically
+- use this directly in chat or through `call_tool(...)` inside Monty
+- in Monty context templates, use `memory_ops` explicitly for conversation history

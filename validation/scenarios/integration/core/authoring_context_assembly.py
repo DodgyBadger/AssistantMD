@@ -1,8 +1,8 @@
 """
-Integration scenario for structured run retrieval and context assembly.
+Integration scenario for memory-backed context assembly.
 
-Validates the first unified-context slice directly against the authoring Monty
-runtime without depending on live chat behavior.
+Validates structured session history access through memory_ops plus
+assemble_context(...) without depending on live chat behavior.
 """
 
 import sys
@@ -17,7 +17,7 @@ from validation.core.base_scenario import BaseScenario
 
 
 class AuthoringContextAssemblyScenario(BaseScenario):
-    """Validate retrieve(run) and assemble_context(...) deterministically."""
+    """Validate memory_ops and assemble_context(...) deterministically."""
 
     async def test_scenario(self):
         vault = self.create_vault("AuthoringContextAssemblyVault")
@@ -68,12 +68,10 @@ class AuthoringContextAssemblyScenario(BaseScenario):
 
         self.assert_event_contains(
             events,
-            name="authoring_retrieve_resolved",
+            name="authoring_call_tool_completed",
             expected={
                 "workflow_id": workflow_id,
-                "type": "run",
-                "ref": "session",
-                "item_count": 4,
+                "tool": "memory_ops",
             },
         )
         self.assert_event_contains(
@@ -106,15 +104,24 @@ class AuthoringContextAssemblyScenario(BaseScenario):
 
 
 AUTHORING_CONTEXT_ASSEMBLY_CODE = """
-history = await retrieve(type="run", ref="session", options={"limit": 2})
+import json
+
+history = await call_tool(
+    name="memory_ops",
+    arguments={"operation": "get_history", "scope": "session", "limit": 2},
+)
+history_payload = json.loads(history.output)
 assembled = await assemble_context(
-    history=history.items,
+    history=[
+        {"role": item["role"], "content": item["content"]}
+        for item in history_payload["items"]
+    ],
     instructions="Use exact text.",
     latest_user_message={"role": "user", "content": "What should happen next?"},
 )
 
 {
-    "history_count": len(history.items),
+    "history_count": history_payload["item_count"],
     "roles": [message.role for message in assembled.messages],
     "last_message": assembled.messages[-1].content,
     "instruction_seen": any("Use exact text." in message.content for message in assembled.messages),
