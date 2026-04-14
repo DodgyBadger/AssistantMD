@@ -392,7 +392,7 @@ def run_slice(msgs: List[ModelMessage], runs_to_take: int) -> List[ModelMessage]
         if role and role.lower() == "user":
             last_user_idx = idx
             break
-        if isinstance(m, ModelRequest):
+        if isinstance(m, ModelRequest) and _model_request_has_user_prompt(m):
             last_user_idx = idx
             break
     if last_user_idx is not None:
@@ -406,9 +406,17 @@ def find_last_user_idx(msgs: List[ModelMessage]) -> Optional[int]:
         role = getattr(m, "role", None)
         if role and role.lower() == "user":
             return idx
-        if isinstance(m, ModelRequest):
+        if isinstance(m, ModelRequest) and _model_request_has_user_prompt(m):
             return idx
     return None
+
+
+def _model_request_has_user_prompt(message: ModelRequest) -> bool:
+    parts = getattr(message, "parts", None) or ()
+    for part in parts:
+        if isinstance(part, UserPromptPart):
+            return True
+    return False
 
 
 def extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:

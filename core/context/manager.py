@@ -149,6 +149,14 @@ def _compiled_history_includes_latest_user(
     return False
 
 
+def _latest_turn_messages(messages: Sequence[ModelMessage]) -> List[ModelMessage]:
+    """Return the active turn suffix starting at the latest real user prompt."""
+    last_user_idx = find_last_user_idx(list(messages))
+    if last_user_idx is None:
+        return list(messages)
+    return list(messages[last_user_idx:])
+
+
 async def _build_authoring_context_history(
     *,
     run_context: RunContext[Any],
@@ -164,9 +172,9 @@ async def _build_authoring_context_history(
     if not messages:
         return []
 
-    last_user_idx = find_last_user_idx(messages)
-    latest_user_message = messages[last_user_idx] if last_user_idx is not None else None
-    history_before_latest = messages[:last_user_idx] if last_user_idx is not None else messages
+    latest_turn_messages = _latest_turn_messages(messages)
+    latest_user_message = latest_turn_messages[0] if latest_turn_messages else None
+    history_before_latest = messages[:-len(latest_turn_messages)] if latest_turn_messages else messages
 
     if template_token_threshold > 0:
         estimate_parts: List[str] = []
@@ -198,8 +206,7 @@ async def _build_authoring_context_history(
             if chat_instruction_message:
                 curated_history.append(chat_instruction_message)
             curated_history.extend(history_before_latest)
-            if latest_user_message is not None:
-                curated_history.append(latest_user_message)
+            curated_history.extend(latest_turn_messages)
             return curated_history
 
     workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
@@ -251,8 +258,7 @@ async def _build_authoring_context_history(
         if chat_instruction_message:
             curated_history.append(chat_instruction_message)
         curated_history.append(ModelRequest(parts=[SystemPromptPart(content=warning)]))
-        if latest_user_message is not None:
-            curated_history.append(latest_user_message)
+        curated_history.extend(latest_turn_messages)
         return curated_history
 
     assembled = _normalize_authoring_context_result(result.value)
@@ -317,6 +323,11 @@ async def _build_authoring_context_history(
     if chat_instruction_message:
         curated_history.append(chat_instruction_message)
     curated_history.extend(_context_message_to_model_message(message) for message in assembled.messages)
+    if latest_turn_messages:
+        if _compiled_history_includes_latest_user(assembled.messages, latest_user_message):
+            curated_history.extend(latest_turn_messages[1:])
+        else:
+            curated_history.extend(latest_turn_messages)
     logger.set_sinks(["validation"]).info(
         "Context history compiled",
         data={
@@ -547,9 +558,8 @@ def build_context_manager_history_processor(
         if not messages:
             return []
 
-        last_user_idx = find_last_user_idx(messages)
-        latest_user_message = messages[last_user_idx] if last_user_idx is not None else None
-        history_before_latest = messages[:last_user_idx] if last_user_idx is not None else messages
+        latest_turn_messages = _latest_turn_messages(messages)
+        history_before_latest = messages[:-len(latest_turn_messages)] if latest_turn_messages else messages
         passthrough_slice = run_slice(history_before_latest, passthrough_runs)
 
         if not default_sections:
@@ -557,8 +567,7 @@ def build_context_manager_history_processor(
             if chat_instruction_message:
                 curated_history.append(chat_instruction_message)
             curated_history.extend(passthrough_slice)
-            if latest_user_message is not None:
-                curated_history.append(latest_user_message)
+            curated_history.extend(latest_turn_messages)
             return curated_history
 
         token_estimate = None
@@ -614,8 +623,7 @@ def build_context_manager_history_processor(
                 if chat_instruction_message:
                     curated_history.append(chat_instruction_message)
                 curated_history.extend(passthrough_slice)
-                if latest_user_message is not None:
-                    curated_history.append(latest_user_message)
+                curated_history.extend(latest_turn_messages)
                 return curated_history
 
         run_buffer_store = BufferStore()
@@ -737,8 +745,7 @@ def build_context_manager_history_processor(
             curated_history.append(chat_instruction_message)
         curated_history.extend(summary_messages)
         curated_history.extend(passthrough_slice)
-        if latest_user_message is not None:
-            curated_history.append(latest_user_message)
+        curated_history.extend(latest_turn_messages)
         summary_sections: List[str] = []
         for msg in summary_messages:
             parts = getattr(msg, "parts", None)
@@ -763,7 +770,7 @@ def build_context_manager_history_processor(
                 "summary_section_count": len(summary_sections),
                 "summary_sections": summary_sections,
                 "passthrough_count": len(passthrough_slice),
-                "latest_user_included": latest_user_message is not None,
+                "latest_user_included": bool(latest_turn_messages),
             },
         )
         return curated_history

@@ -29,6 +29,11 @@ class SystemDatabaseDefinition:
 
 
 SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
+    "chat_sessions": SystemDatabaseDefinition(
+        name="chat_sessions",
+        owner="core.chat.chat_store",
+        description="Durable structured chat sessions and provider-native messages.",
+    ),
     "cache": SystemDatabaseDefinition(
         name="cache",
         owner="core.context.store",
@@ -107,7 +112,14 @@ def create_engine_from_system_db(db_name: str):
 
 
 def connect_sqlite_from_system_db(db_name: str, system_root: str = None) -> sqlite3.Connection:
-    """Open a raw sqlite3 connection for a declared system DB."""
+    """Open a raw sqlite3 connection for a declared system DB.
+
+    Mirrors `create_engine_from_system_db(...)` by honoring the active runtime
+    system root when no explicit override is provided.
+    """
+    if system_root is None and has_runtime_context():
+        runtime = get_runtime_context()
+        system_root = str(runtime.config.system_root)
     database_path = get_system_database_path(db_name, system_root)
     return sqlite3.connect(database_path)
 

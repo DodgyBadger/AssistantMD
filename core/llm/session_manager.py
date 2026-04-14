@@ -1,12 +1,14 @@
 """
 Session management for chat conversation history.
 
-Stores Pydantic AI ModelMessage objects for stateful chat execution.
+Stores Pydantic AI ModelMessage objects in durable SQLite-backed session storage.
 """
 
 from typing import Optional
 from typing import Callable
 from pydantic_ai.messages import ModelMessage
+
+from core.chat import ChatStore
 
 
 class SessionManager:
@@ -19,7 +21,7 @@ class SessionManager:
     """
 
     def __init__(self):
-        self._sessions: dict[str, list[ModelMessage]] = {}
+        self._store = ChatStore()
 
     def get_history(
         self,
@@ -31,7 +33,7 @@ class SessionManager:
 
         Returns None if no history exists (first message in conversation).
         """
-        return self._sessions.get(session_id)
+        return self._store.get_history(session_id, vault_name)
 
     def get_recent(
         self,
@@ -45,10 +47,7 @@ class SessionManager:
         Returns an empty list if no history exists or limit <= 0.
         Always returns a new list (safe to mutate).
         """
-        history = self._sessions.get(session_id)
-        if not history or limit <= 0:
-            return []
-        return list(history[-limit:])
+        return self._store.get_recent(session_id, vault_name, limit)
 
     def get_recent_matching(
         self,
@@ -63,23 +62,7 @@ class SessionManager:
         Iterates from the end and stops once limit matches are found.
         Returns in chronological order (oldest to newest of the matched set).
         """
-        if limit <= 0:
-            return []
-        history = self._sessions.get(session_id)
-        if not history:
-            return []
-
-        matched: list[ModelMessage] = []
-        for msg in reversed(history):
-            try:
-                if predicate(msg):
-                    matched.append(msg)
-                    if len(matched) >= limit:
-                        break
-            except Exception:
-                continue
-        matched.reverse()
-        return matched
+        return self._store.get_recent_matching(session_id, vault_name, limit, predicate)
 
     def add_messages(
         self,
@@ -92,16 +75,12 @@ class SessionManager:
 
         Messages should come from result.new_messages() after agent run.
         """
-        if session_id not in self._sessions:
-            self._sessions[session_id] = []
-        self._sessions[session_id].extend(messages)
+        self._store.add_messages(session_id, vault_name, messages)
 
     def clear_history(self, session_id: str, vault_name: str):
         """Clear conversation history for specific session."""
-        if session_id in self._sessions:
-            del self._sessions[session_id]
+        self._store.clear_history(session_id, vault_name)
 
     def get_message_count(self, session_id: str, vault_name: str) -> int:
         """Get count of messages in session."""
-        history = self.get_history(session_id, vault_name)
-        return len(history) if history else 0
+        return self._store.get_message_count(session_id, vault_name)

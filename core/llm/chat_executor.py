@@ -23,6 +23,7 @@ from pydantic_ai.messages import UserContent
 
 from core.llm.agents import create_agent
 from core.llm.session_manager import SessionManager
+from core.chat import ChatStore, rewrite_chat_transcript
 from core.constants import (
     REGULAR_CHAT_INSTRUCTIONS,
     ASSISTANTMD_ROOT_DIR,
@@ -55,6 +56,9 @@ logger = UnifiedLogger(tag="chat-executor")
 
 
 PromptInput = str | Sequence[UserContent]
+
+
+_CHAT_STORE = ChatStore()
 
 
 @dataclass(frozen=True)
@@ -385,26 +389,62 @@ def _build_chat_tool_overflow_capability(
     session_id: str,
     now: datetime | None,
 ) -> Any | None:
-    token_limit = get_auto_buffer_max_tokens()
-    if token_limit <= 0:
-        return None
-
     from pydantic_ai.capabilities import Hooks
 
     hooks = Hooks()
 
+    @hooks.on.before_tool_execute
+    async def persist_tool_call(ctx, *, call, tool_def, args):
+        del ctx, tool_def
+        _CHAT_STORE.add_tool_event(
+            session_id=session_id,
+            vault_name=vault_name,
+            tool_call_id=call.tool_call_id,
+            tool_name=call.tool_name,
+            event_type="call",
+            args=args if isinstance(args, dict) else None,
+        )
+        return args
+
     @hooks.on.after_tool_execute
     async def cache_oversized_tool_output(ctx, *, call, tool_def, args, result):
         del ctx, tool_def
+        token_limit = get_auto_buffer_max_tokens()
+
         if _tool_result_has_multimodal_payload(result):
+            _CHAT_STORE.add_tool_event(
+                session_id=session_id,
+                vault_name=vault_name,
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                event_type="result",
+                result_text="[multimodal tool result]",
+                result_metadata={"multimodal": True},
+            )
             return result
 
         text = _tool_result_as_text(result)
         if not text:
+            _CHAT_STORE.add_tool_event(
+                session_id=session_id,
+                vault_name=vault_name,
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                event_type="result",
+            )
             return result
 
         token_count = estimate_token_count(text)
-        if token_count <= token_limit:
+        if token_limit <= 0 or token_count <= token_limit:
+            _CHAT_STORE.add_tool_event(
+                session_id=session_id,
+                vault_name=vault_name,
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                event_type="result",
+                result_text=text,
+                result_metadata={"token_count": token_count},
+            )
             return result
 
         if _should_preserve_vault_backed_tool_result(call.tool_name, args):
@@ -419,12 +459,26 @@ def _build_chat_tool_overflow_capability(
                     "token_limit": token_limit,
                 },
             )
-            return _build_large_vault_read_notice(
+            notice = _build_large_vault_read_notice(
                 tool_name=call.tool_name,
                 args=args,
                 token_count=token_count,
                 token_limit=token_limit,
             )
+            _CHAT_STORE.add_tool_event(
+                session_id=session_id,
+                vault_name=vault_name,
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                event_type="result",
+                result_text=notice,
+                result_metadata={
+                    "token_count": token_count,
+                    "token_limit": token_limit,
+                    "vault_backed_file_ref": True,
+                },
+            )
+            return notice
 
         reference_time = now or datetime.now()
         cache_ref = _chat_cache_ref(tool_name=call.tool_name, tool_call_id=call.tool_call_id)
@@ -462,6 +516,20 @@ def _build_chat_tool_overflow_capability(
                 "token_count": token_count,
                 "token_limit": token_limit,
             },
+        )
+        _CHAT_STORE.add_tool_event(
+            session_id=session_id,
+            vault_name=vault_name,
+            tool_call_id=call.tool_call_id,
+            tool_name=call.tool_name,
+            event_type="overflow_cached",
+            args=args if isinstance(args, dict) else None,
+            result_text=preview,
+            result_metadata={
+                "token_count": token_count,
+                "token_limit": token_limit,
+            },
+            artifact_ref=cache_ref,
         )
         return _build_cached_tool_overflow_notice(
             tool_name=call.tool_name,
@@ -884,7 +952,12 @@ async def execute_chat_prompt(
 
         phase = "session_persist"
         session_manager.add_messages(session_id, vault_name, result.new_messages())
-        history_file = append_chat_assistant_response(vault_path, session_id, result.output)
+        history_file = rewrite_chat_transcript(
+            store=_CHAT_STORE,
+            vault_path=vault_path,
+            vault_name=vault_name,
+            session_id=session_id,
+        )
         _log_chat_lifecycle(
             "Chat execution completed",
             vault_name=vault_name,
@@ -1134,7 +1207,12 @@ async def _stream_prepared_chat_prompt(
 
     # Save chat history to markdown file
     if final_result:
-        history_file = append_chat_assistant_response(vault_path, session_id, full_response)
+        history_file = rewrite_chat_transcript(
+            store=_CHAT_STORE,
+            vault_path=vault_path,
+            vault_name=vault_name,
+            session_id=session_id,
+        )
         _log_chat_lifecycle(
             "Streaming chat execution completed",
             vault_name=vault_name,

@@ -34,17 +34,21 @@ class MemoryOps(BaseTool):
             scope: str = "session",
             session_id: str = "",
             limit: int | str = "all",
+            message_filter: str = "all",
         ) -> str:
             """Read structured conversation history.
 
-            :param operation: Operation name. Currently only "get_history" is supported.
+            :param operation: Operation name. Supported: "get_history", "get_tool_events".
             :param scope: History scope. Currently only "session" is supported.
             :param session_id: Optional explicit session id. Defaults to the active session when available.
             :param limit: Positive integer or "all"
+            :param message_filter: For get_history only: "all", "exclude_tools", or "only_tools"
             """
             try:
                 deps = getattr(ctx, "deps", None)
                 active_session_id = str(getattr(deps, "session_id", "") or "").strip() or None
+                active_vault_name = str(getattr(deps, "vault_name", "") or "").strip() or None
+                requested_session_id = str(session_id or "").strip() or None
                 message_history = list(getattr(deps, "message_history", []) or [])
                 op = (operation or "").strip().lower()
 
@@ -57,19 +61,27 @@ class MemoryOps(BaseTool):
                     },
                 )
 
-                if op != "get_history":
-                    return "Unknown operation. Available: get_history"
-
                 provider = resolve_conversation_history_provider(
                     message_history=message_history,
-                    session_id=active_session_id,
+                    session_id=requested_session_id or active_session_id,
+                    vault_name=active_vault_name,
                 )
                 resolved_limit = cls._parse_limit(limit)
-                result = provider.get_history(
-                    scope=scope,
-                    session_id=(session_id or "").strip() or None,
-                    limit=resolved_limit,
-                )
+                if op == "get_history":
+                    result = provider.get_history(
+                        scope=scope,
+                        session_id=requested_session_id,
+                        limit=resolved_limit,
+                        message_filter=message_filter,
+                    )
+                elif op == "get_tool_events":
+                    result = provider.get_tool_events(
+                        scope=scope,
+                        session_id=requested_session_id,
+                        limit=resolved_limit,
+                    )
+                else:
+                    return "Unknown operation. Available: get_history, get_tool_events"
                 return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
             except Exception as exc:  # noqa: BLE001
                 logger.error(
@@ -101,6 +113,9 @@ Full documentation:
 
 Important notes:
 - use `operation="get_history"` to read conversation history
+- `get_history` is the primary agent-facing operation over canonical ordered message history
+- `get_history` supports `message_filter="all" | "exclude_tools" | "only_tools"`
+- use `operation="get_tool_events"` only for explicit inspection/debug retrieval of structured tool activity
 - default `scope="session"` reads the active chat session when available
 """
 
