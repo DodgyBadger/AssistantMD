@@ -280,6 +280,12 @@ Recommendation for first implementation:
   - the active turn suffix is preserved during history processing
   - authoring-style context templates reattach the active turn correctly on follow-up requests
 - Reproduced the `Processed history must end with a ModelRequest` bug against the live FastAPI endpoint and verified the fix with a real two-turn same-session chat.
+- Added minimal chat-session browse APIs for the UI:
+  - vault-scoped session listing ordered by `last_activity_at`
+  - session-detail loading for message-area rehydration
+- Added a compact chat-session dropdown to the chat settings UI scoped to the selected vault.
+- Implemented session selection so choosing a persisted session rehydrates the visible chat history, not just `session_id`.
+- Updated session rehydration to suppress raw persisted tool-call/tool-return text bubbles and rebuild tool activity into the assistant bubble’s collapsible tool-calls section.
 
 ## Validation Completed
 
@@ -291,9 +297,10 @@ Recommendation for first implementation:
 ## Remaining Work
 
 - UI/session lifecycle work:
-  - list resumable chat sessions
-  - reopen prior sessions cleanly
   - delete/purge sessions and associated derived transcript artifacts
+- session UI refinement:
+  - improve session labels beyond raw session ids
+  - add richer session metadata when useful
 - Decide whether `chat_tool_events` needs explicit linkage back to canonical messages for future merged UI/debug timelines.
 - Update user-facing/tooling docs for the current `memory_ops` contract, including `message_filter` and the diagnostic `get_tool_events` path.
 

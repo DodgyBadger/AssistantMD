@@ -46,6 +46,7 @@ from core.settings.secrets_store import (
 )
 from core.runtime.paths import get_system_root
 from core.context.store import purge_expired_cache_artifacts
+from core.chat import ChatStore
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -70,6 +71,10 @@ from .models import (
     SystemLogResponse,
     SystemSettingsResponse,
     TemplateInfo,
+    ChatSessionInfo,
+    ChatSessionDetailResponse,
+    ChatSessionMessageInfo,
+    ChatSessionToolEventInfo,
 )
 from .exceptions import SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
@@ -81,6 +86,7 @@ from core.context.templates import list_templates
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
+_chat_store = ChatStore()
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
@@ -157,6 +163,70 @@ def list_context_templates(vault_name: str) -> List[TemplateInfo]:
             )
         )
     return results
+
+
+def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
+    """List persisted chat sessions for a vault ordered by latest activity."""
+    sessions = _chat_store.list_sessions(vault_name)
+    return [
+        ChatSessionInfo(
+            session_id=session.session_id,
+            created_at=session.created_at,
+            last_activity_at=session.last_activity_at,
+        )
+        for session in sessions
+    ]
+
+
+def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDetailResponse:
+    """Return persisted chat messages for one session."""
+    messages = _chat_store.get_stored_messages(session_id, vault_name)
+    tool_events = _chat_store.get_tool_events(session_id, vault_name)
+    return ChatSessionDetailResponse(
+        session_id=session_id,
+        vault_name=vault_name,
+        messages=[
+            ChatSessionMessageInfo(
+                sequence_index=message.sequence_index,
+                role=message.role,
+                content=message.content_text,
+                message_type=message.message_type,
+                direction=message.direction,
+                is_tool_message=_is_tool_message_text(message.content_text),
+            )
+            for message in messages
+        ],
+        tool_events=[
+            ChatSessionToolEventInfo(
+                tool_call_id=event.tool_call_id,
+                tool_name=event.tool_name,
+                event_type=event.event_type,
+                created_at=event.created_at,
+                args=_load_json_object(event.args_json),
+                result_text=event.result_text,
+                result_metadata=_load_json_object(event.result_metadata_json) or {},
+                artifact_ref=event.artifact_ref,
+            )
+            for event in tool_events
+        ],
+    )
+
+
+def _is_tool_message_text(content: str) -> bool:
+    text = (content or "").strip()
+    return text.startswith("[") and "]" in text
+
+
+def _load_json_object(raw_value: str | None) -> Dict[str, Any] | None:
+    if not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return {"raw": raw_value}
+    if isinstance(parsed, dict):
+        return parsed
+    return {"value": parsed}
 
 
 async def collect_vault_status() -> List[VaultInfo]:

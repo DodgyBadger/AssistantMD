@@ -210,6 +210,47 @@ class TemplateInfo(BaseModel):
     path: Optional[str] = Field(None, description="Full path to template, if available")
 
 
+class ChatSessionInfo(BaseModel):
+    """Persisted chat session summary for UI selection."""
+
+    session_id: str = Field(..., description="Session identifier")
+    created_at: str = Field(..., description="Session creation timestamp")
+    last_activity_at: str = Field(..., description="Most recent activity timestamp")
+
+
+class ChatSessionMessageInfo(BaseModel):
+    """Persisted normalized chat message for session rehydration."""
+
+    sequence_index: int = Field(..., description="Stable sequence index within the session")
+    role: str = Field(..., description="Normalized role for rendering")
+    content: str = Field(..., description="Normalized rendered message content")
+    message_type: str = Field(..., description="Provider-native message class name")
+    direction: str = Field(..., description="Request/response direction for the provider-native message")
+    is_tool_message: bool = Field(False, description="Whether this row represents a tool call/return message")
+
+
+class ChatSessionToolEventInfo(BaseModel):
+    """Persisted structured tool event for UI rehydration."""
+
+    tool_call_id: str = Field(..., description="Tool call identifier")
+    tool_name: str = Field(..., description="Tool name")
+    event_type: str = Field(..., description="Event type such as call, result, or overflow_cached")
+    created_at: str = Field(..., description="Event timestamp")
+    args: Optional[Dict[str, Any]] = Field(None, description="Tool arguments when captured")
+    result_text: Optional[str] = Field(None, description="Tool result text or summary")
+    result_metadata: Dict[str, Any] = Field(default_factory=dict, description="Structured tool result metadata")
+    artifact_ref: Optional[str] = Field(None, description="Cache/artifact reference when present")
+
+
+class ChatSessionDetailResponse(BaseModel):
+    """Persisted chat session payload for client-side rehydration."""
+
+    session_id: str = Field(..., description="Session identifier")
+    vault_name: str = Field(..., description="Owning vault name")
+    messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
+    tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")
+
+
 class ModelConfigRequest(BaseModel):
     """Payload for creating or updating a model mapping."""
 

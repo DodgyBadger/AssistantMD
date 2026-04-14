@@ -44,6 +44,8 @@ from .models import (
     SettingUpdateRequest,
     MetadataResponse,
     TemplateInfo,
+    ChatSessionInfo,
+    ChatSessionDetailResponse,
 )
 from .exceptions import APIException, ChatCapabilityMismatchError
 from .utils import create_error_response, generate_session_id, serialize_exception
@@ -53,6 +55,8 @@ from .services import (
     execute_workflow_manually,
     get_metadata,
     list_context_templates,
+    list_chat_sessions,
+    get_chat_session_detail,
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
@@ -678,6 +682,28 @@ async def context_templates(vault_name: str):
     """
     try:
         return list_context_templates(vault_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions", response_model=List[ChatSessionInfo])
+async def chat_sessions(vault_name: str):
+    """
+    List persisted chat sessions for a vault ordered by latest activity.
+    """
+    try:
+        return list_chat_sessions(vault_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
+async def chat_session_detail(session_id: str, vault_name: str):
+    """
+    Load one persisted chat session for UI rehydration.
+    """
+    try:
+        return get_chat_session_detail(vault_name, session_id)
     except Exception as e:
         return create_error_response(e)
 

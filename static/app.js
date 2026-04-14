@@ -26,6 +26,7 @@ const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
 
 const state = {
     sessionId: null,
+    sessions: [],
     metadata: null,
     isLoading: false,
     systemStatus: null,
@@ -34,7 +35,8 @@ const state = {
 };
 const chatComposeState = {
     pendingAttachments: [],
-    popoverOpen: false
+    popoverOpen: false,
+    toolMenuOpen: false
 };
 
 let mathTypesetQueue = Promise.resolve();
@@ -44,6 +46,11 @@ const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
+    sessionSelector: document.getElementById('session-selector'),
+    toolDropdown: document.getElementById('tool-dropdown'),
+    toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
+    toolDropdownMenu: document.getElementById('tool-dropdown-menu'),
+    toolDropdownSummary: document.getElementById('tool-dropdown-summary'),
     toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
@@ -261,6 +268,228 @@ function syncChatControlLocks() {
     chatElements.vaultSelector.title = lockVaultSelector
         ? 'Vault is locked for this chat session. Start a new session (+) to switch vaults.'
         : '';
+
+    if (chatElements.toolDropdownTrigger) {
+        chatElements.toolDropdownTrigger.disabled = state.isLoading;
+    }
+    if (chatElements.sessionSelector) {
+        chatElements.sessionSelector.disabled = state.isLoading;
+    }
+}
+
+function getSelectedToolNames() {
+    return Array.from(chatElements.toolsCheckboxes?.querySelectorAll('input:checked') || [])
+        .map((input) => input.value);
+}
+
+function updateToolDropdownSummary() {
+    if (!chatElements.toolDropdownSummary) return;
+
+    const selectedTools = getSelectedToolNames();
+    if (selectedTools.length === 0) {
+        chatElements.toolDropdownSummary.textContent = '(none selected)';
+        return;
+    }
+
+    chatElements.toolDropdownSummary.textContent = `(${selectedTools.length} selected)`;
+}
+
+function setToolMenuOpen(open) {
+    chatComposeState.toolMenuOpen = Boolean(open);
+    if (chatElements.toolDropdown) {
+        chatElements.toolDropdown.classList.toggle('open', chatComposeState.toolMenuOpen);
+    }
+    if (chatElements.toolDropdownMenu) {
+        chatElements.toolDropdownMenu.classList.toggle('hidden', !chatComposeState.toolMenuOpen);
+    }
+    if (chatElements.toolDropdownTrigger) {
+        chatElements.toolDropdownTrigger.setAttribute('aria-expanded', chatComposeState.toolMenuOpen ? 'true' : 'false');
+    }
+}
+
+function formatSessionOptionLabel(session) {
+    if (!session || !session.session_id) {
+        return 'New session';
+    }
+    const rawDate = session.last_activity_at || session.created_at || '';
+    if (!rawDate) {
+        return session.session_id;
+    }
+    const parsed = new Date(rawDate.replace(' ', 'T'));
+    const suffix = Number.isNaN(parsed.getTime())
+        ? rawDate
+        : parsed.toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit'
+        });
+    return `${session.session_id} (${suffix})`;
+}
+
+function renderSessionSelector() {
+    if (!chatElements.sessionSelector) return;
+
+    const previousValue = chatElements.sessionSelector.value;
+    chatElements.sessionSelector.innerHTML = '<option value="">New session</option>';
+
+    state.sessions.forEach((session) => {
+        const option = document.createElement('option');
+        option.value = session.session_id;
+        option.textContent = formatSessionOptionLabel(session);
+        chatElements.sessionSelector.appendChild(option);
+    });
+
+    const activeValue = state.sessionId || previousValue || '';
+    if (activeValue && state.sessions.some((session) => session.session_id === activeValue)) {
+        chatElements.sessionSelector.value = activeValue;
+    } else {
+        chatElements.sessionSelector.value = '';
+    }
+}
+
+async function fetchSessions(vault, preferredSessionId = '') {
+    state.sessions = [];
+    renderSessionSelector();
+    if (!vault) {
+        return;
+    }
+    try {
+        const response = await fetch(`api/chat/sessions?vault_name=${encodeURIComponent(vault)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch chat sessions');
+        }
+        state.sessions = await response.json();
+        renderSessionSelector();
+        if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
+            chatElements.sessionSelector.value = preferredSessionId;
+        }
+    } catch (error) {
+        console.error('Error fetching chat sessions:', error);
+    }
+}
+
+async function loadSession(sessionId) {
+    const vault = chatElements.vaultSelector?.value || '';
+    if (!vault || !sessionId) {
+        return;
+    }
+    try {
+        state.isLoading = true;
+        syncChatControlLocks();
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`
+        );
+        if (!response.ok) {
+            throw new Error('Failed to load chat session');
+        }
+        const payload = await response.json();
+        state.sessionId = payload.session_id || sessionId;
+        renderPersistedSession(payload);
+        renderSessionSelector();
+        updateStatus();
+    } catch (error) {
+        console.error('Error loading chat session:', error);
+        addChatErrorMessage(error.message);
+    } finally {
+        state.isLoading = false;
+        syncChatControlLocks();
+    }
+}
+
+function renderPersistedSession(payload) {
+    chatElements.chatMessages.innerHTML = '';
+
+    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+    const toolEventsQueue = Array.isArray(payload?.tool_events) ? [...payload.tool_events] : [];
+    const pendingToolEvents = [];
+
+    if (messages.length === 0) {
+        renderChatEmptyState('Selected session has no persisted messages.');
+        return;
+    }
+
+    messages.forEach((message) => {
+        if (message.is_tool_message) {
+            const nextToolEvent = toolEventsQueue.shift();
+            if (nextToolEvent) {
+                pendingToolEvents.push(nextToolEvent);
+            }
+            return;
+        }
+
+        if (message.role === 'assistant') {
+            const assistantToolEvents = pendingToolEvents.splice(0, pendingToolEvents.length);
+            renderPersistedAssistantMessage(message.content || '', assistantToolEvents);
+            return;
+        }
+
+        addMessage('user', message.content || '');
+    });
+
+    if (pendingToolEvents.length > 0) {
+        renderPersistedAssistantMessage('', pendingToolEvents.splice(0, pendingToolEvents.length));
+    }
+}
+
+function renderPersistedAssistantMessage(content, toolEvents) {
+    const context = createAssistantStreamingMessage();
+    context.fullText = content || '';
+    renderAssistantMarkdown(context, { finalize: true });
+    hydratePersistedToolEvents(context, toolEvents);
+    finalizeAssistantMessage(context, {
+        sessionId: state.sessionId || 'unknown',
+        messageCount: 1,
+        toolCount: Array.isArray(toolEvents) ? toolEvents.length : 0,
+        status: 'done'
+    });
+}
+
+function hydratePersistedToolEvents(context, toolEvents) {
+    if (!context || !Array.isArray(toolEvents) || toolEvents.length === 0) {
+        return;
+    }
+
+    toolEvents.forEach((event) => {
+        if (!event || !event.tool_call_id) {
+            return;
+        }
+
+        let entry = context.toolStatusMap.get(event.tool_call_id);
+        if (!entry) {
+            ensureToolCallsSection(context);
+            entry = createToolStatusEntry(context, event.tool_call_id, {
+                tool_name: event.tool_name,
+                arguments: event.args || null
+            });
+        }
+
+        entry.container.classList.remove('tool-status-running');
+        entry.container.classList.add('tool-status-complete');
+
+        if (event.args) {
+            entry.args = event.args;
+        }
+
+        if (event.event_type !== 'call') {
+            const resultPayload = {};
+            if (event.result_text) {
+                resultPayload.text = event.result_text;
+            }
+            if (event.artifact_ref) {
+                resultPayload.artifact_ref = event.artifact_ref;
+            }
+            if (event.result_metadata && Object.keys(event.result_metadata).length > 0) {
+                resultPayload.metadata = event.result_metadata;
+            }
+            entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
+        }
+
+        updateToolDetail(entry);
+        entry.chevron.textContent = entry.container.open ? '▾' : '▸';
+    });
+
+    updateToolCallsSummary(context);
 }
 
 // Tab management
@@ -445,10 +674,7 @@ function populateSelectors() {
     const previousVault = chatElements.vaultSelector?.value || '';
     const previousModel = chatElements.modelSelector?.value || '';
     const previousTemplate = chatElements.templateSelector?.value || '';
-    const previousTools = new Set(
-        Array.from(chatElements.toolsCheckboxes?.querySelectorAll('input:checked') || [])
-            .map((input) => input.value)
-    );
+    const previousTools = new Set(getSelectedToolNames());
 
     chatElements.vaultSelector.innerHTML = '<option value="">Select vault...</option>';
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
@@ -501,6 +727,7 @@ function populateSelectors() {
     // Trigger template fetch if a vault is already selected (e.g., persisted UI state in future)
     if (chatElements.vaultSelector && chatElements.vaultSelector.value) {
         fetchTemplates(chatElements.vaultSelector.value, previousTemplate);
+        fetchSessions(chatElements.vaultSelector.value, state.sessionId || '');
     }
 
     const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
@@ -513,6 +740,9 @@ function populateSelectors() {
     const createToolElement = (tool) => {
         const wrapper = document.createElement('div');
         wrapper.className = 'tool-checkbox-wrapper';
+
+        const label = document.createElement('label');
+        label.htmlFor = `tool-${tool.name}`;
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -534,16 +764,12 @@ function populateSelectors() {
             }
         }
 
-        const label = document.createElement('label');
-        label.htmlFor = `tool-${tool.name}`;
-        label.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'tool-checkbox-name';
+        nameSpan.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        label.appendChild(checkbox);
+        label.appendChild(nameSpan);
 
-        const description = tool.description ? String(tool.description).trim() : '';
-        if (description) {
-            label.title = description;
-        }
-
-        wrapper.appendChild(checkbox);
         wrapper.appendChild(label);
         return wrapper;
     };
@@ -575,6 +801,8 @@ function populateSelectors() {
         chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
     });
 
+    updateToolDropdownSummary();
+    renderSessionSelector();
     syncChatControlLocks();
 }
 
@@ -753,6 +981,33 @@ function setupEventListeners() {
         chatElements.newSessionBtn.addEventListener('click', clearSession);
     }
 
+    if (chatElements.sessionSelector) {
+        chatElements.sessionSelector.addEventListener('change', async (event) => {
+            const selectedSessionId = event.target.value || '';
+            if (!selectedSessionId) {
+                await clearSession(false);
+                return;
+            }
+            await loadSession(selectedSessionId);
+        });
+    }
+
+    if (chatElements.toolDropdownTrigger) {
+        chatElements.toolDropdownTrigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (chatElements.toolDropdownTrigger.disabled) {
+                return;
+            }
+            setToolMenuOpen(!chatComposeState.toolMenuOpen);
+        });
+    }
+
+    if (chatElements.toolsCheckboxes) {
+        chatElements.toolsCheckboxes.addEventListener('change', () => {
+            updateToolDropdownSummary();
+        });
+    }
+
     if (chatElements.attachBtn && chatElements.attachInput) {
         chatElements.attachBtn.addEventListener('click', () => {
             if (chatComposeState.pendingAttachments.length > 0) {
@@ -812,13 +1067,22 @@ function setupEventListeners() {
     }
 
     document.addEventListener('click', (event) => {
-        if (!chatComposeState.popoverOpen) return;
         const target = event.target;
         if (!(target instanceof Node)) return;
-        const clickedAttachBtn = chatElements.attachBtn && chatElements.attachBtn.contains(target);
-        const clickedPopover = chatElements.attachmentPopover && chatElements.attachmentPopover.contains(target);
-        if (!clickedAttachBtn && !clickedPopover) {
-            setAttachmentPopoverOpen(false);
+
+        if (chatComposeState.popoverOpen) {
+            const clickedAttachBtn = chatElements.attachBtn && chatElements.attachBtn.contains(target);
+            const clickedPopover = chatElements.attachmentPopover && chatElements.attachmentPopover.contains(target);
+            if (!clickedAttachBtn && !clickedPopover) {
+                setAttachmentPopoverOpen(false);
+            }
+        }
+
+        if (chatComposeState.toolMenuOpen) {
+            const clickedToolDropdown = chatElements.toolDropdown && chatElements.toolDropdown.contains(target);
+            if (!clickedToolDropdown) {
+                setToolMenuOpen(false);
+            }
         }
     });
 
@@ -843,9 +1107,15 @@ function setupEventListeners() {
 
 function handleVaultChange() {
     const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
+    state.sessionId = null;
+    state.sessions = [];
+    renderSessionSelector();
+    renderChatEmptyState();
+    updateStatus();
     populateTemplates([]); // reset while loading
     if (vault) {
         fetchTemplates(vault);
+        fetchSessions(vault);
     }
 }
 
@@ -985,6 +1255,7 @@ async function sendMessage() {
         if (sessionId) {
             state.sessionId = sessionId;
             syncChatControlLocks();
+            renderSessionSelector();
         }
 
         // Fallback for environments that do not support streaming
@@ -1070,6 +1341,9 @@ async function sendMessage() {
             toolCount: assistantMessage.toolStatusMap.size,
             status: finished ? 'done' : 'incomplete'
         });
+        if (vault) {
+            await fetchSessions(vault, state.sessionId || '');
+        }
 
     } catch (error) {
         console.error('Error sending message:', error);
@@ -1746,13 +2020,16 @@ function flashCopyFeedback(button, didCopy) {
 }
 
 // Clear session
-async function clearSession() {
-    const confirmed = window.confirm('Do you want to start a new chat session? The current session is saved as a markdown file in your vault.');
+async function clearSession(confirmReset = true) {
+    const confirmed = confirmReset
+        ? window.confirm('Do you want to start a new chat session? The current session is saved as a markdown file in your vault.')
+        : true;
     if (!confirmed) return;
 
     state.sessionId = null;
     clearPendingAttachments();
     renderChatEmptyState();
+    renderSessionSelector();
     syncChatControlLocks();
     updateStatus();
 }

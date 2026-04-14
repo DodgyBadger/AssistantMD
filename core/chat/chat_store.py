@@ -57,6 +57,18 @@ class StoredChatToolEvent:
     artifact_ref: str | None = None
 
 
+@dataclass(frozen=True)
+class StoredChatSession:
+    """One stored chat session summary."""
+
+    session_id: str
+    vault_name: str
+    created_at: str
+    last_activity_at: str
+    title: str | None = None
+    metadata_json: str | None = None
+
+
 class ChatStore:
     """Persistent structured chat session store."""
 
@@ -312,6 +324,46 @@ class ChatStore:
                 result_metadata_json,
                 artifact_ref,
             ) in rows
+        ]
+
+    def list_sessions(self, vault_name: str, *, limit: int | None = None) -> list[StoredChatSession]:
+        """Return chat sessions for one vault ordered by latest activity descending."""
+        conn = self._connect()
+        try:
+            if limit is None:
+                rows = conn.execute(
+                    """
+                    SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                    FROM chat_sessions
+                    WHERE vault_name = ?
+                    ORDER BY last_activity_at DESC, created_at DESC, session_id DESC
+                    """,
+                    (vault_name,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                    FROM chat_sessions
+                    WHERE vault_name = ?
+                    ORDER BY last_activity_at DESC, created_at DESC, session_id DESC
+                    LIMIT ?
+                    """,
+                    (vault_name, limit),
+                ).fetchall()
+        finally:
+            conn.close()
+
+        return [
+            StoredChatSession(
+                session_id=str(session_id),
+                vault_name=str(session_vault_name),
+                created_at=str(created_at or ""),
+                last_activity_at=str(last_activity_at or ""),
+                title=None if title is None else str(title),
+                metadata_json=None if metadata_json is None else str(metadata_json),
+            )
+            for session_id, session_vault_name, created_at, last_activity_at, title, metadata_json in rows
         ]
 
     def _fetch_messages(

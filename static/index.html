@@ -149,42 +149,142 @@
         details summary::-webkit-details-marker {
             display: none;
         }
+        .chat-settings-secondary-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.75rem;
+            align-items: start;
+        }
+        .tool-dropdown {
+            position: relative;
+        }
+        .tool-dropdown-trigger {
+            display: inline-flex;
+            width: 100%;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.5rem 0.875rem;
+            border: 1px solid rgb(var(--border-secondary));
+            border-radius: 0.5rem;
+            background: rgb(var(--bg-card));
+            color: rgb(var(--text-primary));
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+        .tool-dropdown-trigger:hover {
+            border-color: rgb(var(--border-primary));
+            background: rgb(var(--bg-elevated));
+        }
+        .tool-dropdown-trigger:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .tool-dropdown-label {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            overflow: hidden;
+            white-space: nowrap;
+            font-size: 0.92rem;
+            font-weight: 500;
+        }
+        .tool-dropdown-summary-text {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tool-dropdown-chevron {
+            width: 1rem;
+            height: 1rem;
+            color: rgb(var(--text-secondary));
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+        .tool-dropdown.open .tool-dropdown-chevron {
+            transform: rotate(180deg);
+        }
+        .tool-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 0.45rem);
+            right: 0;
+            z-index: 40;
+            width: min(18rem, 80vw);
+            max-height: 15rem;
+            overflow-y: auto;
+            padding: 0.4rem;
+            border: 1px solid rgb(var(--border-primary));
+            border-radius: 0.6rem;
+            background: rgb(var(--bg-card));
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+        }
+        .tool-dropdown-menu.hidden {
+            display: none;
+        }
+        .tool-dropdown-menu-header {
+            padding: 0.15rem 0.25rem 0.4rem;
+            font-size: 0.74rem;
+            color: rgb(var(--text-secondary));
+        }
+        .tool-dropdown-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+        }
         .tool-checkbox-wrapper {
             position: relative;
         }
         .tool-checkbox-wrapper input[type="checkbox"] {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
+            width: 0.95rem;
+            height: 0.95rem;
+            margin: 0;
+            accent-color: rgb(var(--accent-primary));
+            flex-shrink: 0;
         }
         .tool-checkbox-wrapper label {
-            display: inline-block;
-            padding: 6px 14px;
-            border: 1.5px solid rgb(var(--border-secondary));
-            border-radius: 9999px;
-            background: rgb(var(--bg-card));
-            color: rgb(var(--text-secondary));
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            padding: 0.4rem 0.45rem;
+            border-radius: 0.4rem;
+            color: rgb(var(--text-primary));
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: background 0.2s ease;
             user-select: none;
+            font-size: 0.88rem;
+            line-height: 1.25;
         }
         .tool-checkbox-wrapper label:hover {
-            border-color: rgb(var(--border-primary));
             background: rgb(var(--bg-elevated));
         }
-        .tool-checkbox-wrapper input[type="checkbox"]:checked + label {
-            background: rgb(var(--accent-primary));
-            border-color: rgb(var(--accent-primary));
-            color: rgb(var(--text-on-accent));
+        .tool-checkbox-name {
+            font-size: 0.88rem;
             font-weight: 500;
+            color: inherit;
         }
-        .tool-checkbox-wrapper input[type="checkbox"]:disabled + label {
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:checked) label {
+            background: rgb(var(--accent-primary) / 0.12);
+        }
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:checked) .tool-checkbox-name {
+            color: rgb(var(--accent-hover));
+        }
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:disabled) label {
             opacity: 0.5;
             cursor: not-allowed;
         }
-        .tool-checkbox-wrapper input[type="checkbox"]:disabled + label:hover {
-            border-color: rgb(var(--border-secondary));
-            background: rgb(var(--bg-card));
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:disabled) label:hover {
+            background: transparent;
+        }
+        @media (min-width: 768px) {
+            .chat-settings-secondary-row {
+                grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
+            }
+        }
+        .session-selector-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.75rem;
         }
         .tab-button.text-amber-600 {
             font-weight: 600;
@@ -839,15 +939,38 @@
                             <option value="">Select model...</option>
                         </select>
                     </div>
-                    <!-- Context Template -->
-                    <div class="grid grid-cols-1 gap-3">
+                    <div class="chat-settings-secondary-row">
                         <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select template...</option>
                         </select>
+                        <div id="tool-dropdown" class="tool-dropdown">
+                            <button
+                                id="tool-dropdown-trigger"
+                                type="button"
+                                class="tool-dropdown-trigger"
+                                aria-expanded="false"
+                                aria-controls="tool-dropdown-menu"
+                            >
+                                <span class="tool-dropdown-label">
+                                    <span>Tools</span>
+                                    <span id="tool-dropdown-summary" class="tool-dropdown-summary-text">(none selected)</span>
+                                </span>
+                                <svg class="tool-dropdown-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                    <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                            </button>
+                            <div id="tool-dropdown-menu" class="tool-dropdown-menu hidden">
+                                <div class="tool-dropdown-menu-header">Select the tools available to the current chat session.</div>
+                                <div id="tools-checkboxes" class="tool-dropdown-options">
+                                    <!-- Tool checkboxes will be added here -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <!-- Tools -->
-                    <div id="tools-checkboxes" class="flex flex-wrap gap-2">
-                        <!-- Tool checkboxes will be added here -->
+                    <div class="session-selector-row">
+                        <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="">New session</option>
+                        </select>
                     </div>
                 </div>
             </details>
