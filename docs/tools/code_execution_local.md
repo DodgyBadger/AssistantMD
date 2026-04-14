@@ -42,7 +42,12 @@ Notes:
 
 - use this when chat tells you a large tool result was stored in a cache ref
 - it reads cached content for the current chat session only
-- the result has `artifact.content`, `artifact.exists`, and `artifact.metadata`
+- the result is a `RetrievedItem`
+- use attribute access, not dict access
+- most scripts only need:
+  - `artifact.exists: bool`
+  - `artifact.content: str`
+  - `artifact.metadata: dict`
 
 ### `pending_files`
 
@@ -126,6 +131,41 @@ Top-level fields:
 - `parsed.code_blocks`
 - `parsed.images`
 
+Important:
+
+- `parse_markdown(...)` returns objects with attributes, not dicts
+- use `heading.text`, not `heading.get("text")`
+- use `section.heading`, not `section["heading"]`
+
+Common object shapes:
+
+- `MarkdownHeading`
+  - `text: str`
+  - `level: int`
+  - `slug: str | None`
+  - `line: int | None`
+- `MarkdownSection`
+  - `heading: str`
+  - `level: int`
+  - `content: str`
+  - `start_line: int | None`
+  - `end_line: int | None`
+- `MarkdownCodeBlock`
+  - `lang: str | None`
+  - `content: str`
+
+Minimal example:
+
+```python
+parsed = await parse_markdown(value=markdown_text)
+
+{
+    "headings": [heading.text for heading in parsed.headings],
+    "sections": [section.heading for section in parsed.sections],
+    "code_langs": [block.lang for block in parsed.code_blocks],
+}
+```
+
 ### `finish`
 
 ```python
@@ -136,6 +176,24 @@ Supported `status` values:
 
 - `completed`
 - `skipped`
+
+Important:
+
+- `finish(...)` only supports keyword arguments
+- return a value explicitly; do not rely on side effects alone
+- the script result should be:
+  - the last expression in the script, or
+  - `await finish(status="...", reason="...")`
+
+Examples:
+
+```python
+"ok"
+```
+
+```python
+await finish(status="completed", reason="article summarized")
+```
 
 ### `date`
 
@@ -210,16 +268,17 @@ artifact.content[:2000] if artifact.exists else "CACHE_NOT_FOUND"
 )
 ```
 
-### Read conversation history with `memory_ops`
+### Read cached extracted markdown and inspect headings
 
 ```python
 code_execution_local(
     code="""
-history = await call_tool(
-    name="memory_ops",
-    arguments={"operation": "get_history", "scope": "session", "limit": 5},
-)
-history.output
+artifact = await read_cache(ref="tool/tavily_extract/call_abc123")
+if not artifact.exists:
+    await finish(status="skipped", reason="cache ref not found")
+
+parsed = await parse_markdown(value=artifact.content)
+[heading.text for heading in parsed.headings[:12]]
 """,
 )
 ```
@@ -258,55 +317,13 @@ target.content if target else "SECTION_NOT_FOUND"
 )
 ```
 
-### Use multimodal inputs
+## Common Gotchas
 
-```python
-code_execution_local(
-    code="""
-result = await generate(
-    prompt="Describe this topic briefly.",
-    instructions="Return one short factual sentence.",
-)
-result.output
-""",
-)
-```
-
-### End-to-end markdown exploration
-
-```python
-code_execution_local(
-    code="""
-article = await call_tool(
-    name="tavily_extract",
-    arguments={"urls": ["https://example.com"]},
-)
-parsed = await parse_markdown(value=article.output)
-history = await call_tool(
-    name="memory_ops",
-    arguments={"operation": "get_history", "scope": "session", "limit": 2},
-)
-assembled = await assemble_context(
-    context_messages=[{"role": "system", "content": history.output}],
-    instructions="Keep the summary concise.",
-)
-listing = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "list", "target": "notes"},
-)
-draft = await generate(
-    prompt=(
-        f"title={parsed.frontmatter.get('title')}; "
-        f"headings={len(parsed.headings)}; "
-        f"messages={len(assembled.messages)}; "
-        f"listing={listing.output}"
-    ),
-    instructions="Return one short deterministic line.",
-)
-await finish(status="completed", reason="article summarized")
-""",
-)
-```
+- Do not import AssistantMD modules in these snippets. The runtime helpers are injected for you.
+- Always return a value or `await finish(...)`. `finish(...)` is keyword-only.
+- If a cached tool result already exists, use `await read_cache(ref="...")` instead of re-running the source tool.
+- Prefer `parse_markdown(...)` over regex/manual parsing when the content is markdown or extracted article text.
+- Some pages add wrapper headings such as extraction banners, navigation, or TOC chrome. Prefer the article's real prose sections over page furniture.
 
 ### Filter and complete pending files
 
