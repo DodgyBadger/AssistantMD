@@ -66,15 +66,6 @@ The constrained SDK primitive design (`Generate`, `Output`, `File`, `Var`, `Cont
 | Flow primitives (`Branch`, `ForEach`) | Native `if`/`for` |
 | Separate `Context()` sink primitive | `write_context()` external function |
 
-### Frontmatter Remains The Security Boundary
-The YAML frontmatter declares:
-- Which vault paths are accessible (read/write)
-- Which model to bind
-- Which tools are available
-- Schedule / context template mode
-
-The host-side implementation of each registered function enforces these scopes. The sandbox code can *ask* for things but only through the provided functions, and those functions reject anything outside the declared scope.
-
 ## Unified Authoring Surface
 
 ### The Core Insight

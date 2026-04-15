@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pydantic_monty import Monty, run_monty_async
@@ -18,6 +19,8 @@ from core.logger import UnifiedLogger
 
 
 logger = UnifiedLogger(tag="authoring-monty")
+
+_STUBS_PATH = Path(__file__).parent.parent / "stubs.pyi"
 
 
 class AuthoringMontyExecutionError(RuntimeError):
@@ -49,7 +52,7 @@ async def run_authoring_monty(
     host: AuthoringHost,
     inputs: dict[str, Any] | None = None,
     script_name: str = "main.py",
-    type_check: bool = False,
+    type_check: bool = True,
     registry: AuthoringCapabilityRegistry | None = None,
 ) -> AuthoringMontyExecutionResult:
     """Execute one experimental authoring artifact with Monty."""
@@ -91,11 +94,10 @@ async def run_authoring_monty(
             script_name=script_name,
             inputs=sorted(effective_inputs) if effective_inputs else None,
             type_check=type_check,
+            type_check_stubs=_STUBS_PATH.read_text(encoding="utf-8") if type_check else None,
         )
         for dataclass_type in host.get_monty_dataclasses():
             runner.register_dataclass(dataclass_type)
-        if type_check:
-            runner.type_check()
 
         try:
             value = await run_monty_async(
