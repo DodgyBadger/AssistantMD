@@ -297,7 +297,7 @@ Recommendation for first implementation:
 ## Remaining Work
 
 - UI/session lifecycle work:
-  - delete/purge sessions and associated derived transcript artifacts
+  - ~~delete/purge sessions and associated derived transcript artifacts~~ — done
 - session UI refinement:
   - improve session labels beyond raw session ids
   - add richer session metadata when useful
@@ -442,21 +442,17 @@ Still open:
 - [ ] transcript-format refinements for tool-heavy or multimodal sessions
 - [ ] dedicated read APIs/helpers for stored tool-event inspection and future UI rendering
 - [ ] decide whether `chat_tool_events` needs a stronger ordering/linkage key for future merged UI/debug views, even though replay no longer depends on it
-- [ ] UI session browsing, resume, and delete flows
+- [x] Boundary cleanup: removed `SessionManager` shim, moved `chat_executor.py` → `core/chat/executor.py`, deleted dead `chat_defaults.py`
+- [x] UI session browsing, resume, and delete flows
 - [ ] retention/cleanup policy for old sessions and derived transcript artifacts
 - [ ] follow-up validation for retrieval-time history filtering (`exclude_tools`, `only_tools`) in additional Monty/chat workflows
 
 ## Follow-On Cleanup
 
-After the core session store and tool-event persistence are stable, do a boundary cleanup pass:
+Completed: boundary cleanup pass is done.
 
-- move chat-specific persistence/lifecycle modules out of `core/llm` and under `core/chat` where appropriate
-- likely candidates:
-  - [session_manager.py](/app/core/llm/session_manager.py)
-  - transcript-writing helpers currently embedded in [chat_executor.py](/app/core/llm/chat_executor.py)
-- leave only genuinely LLM-centric concerns in `core/llm`
-
-This should happen after the behavior stabilizes, not in the middle of the persistence rollout.
+- `session_manager.py` removed; `chat_executor.py` moved to `core/chat/executor.py`
+- `core/llm` now contains only genuinely LLM-centric concerns: `agents.py`, `model_selection.py`, `model_utils.py`
 
 ## Deferred Design Questions
 

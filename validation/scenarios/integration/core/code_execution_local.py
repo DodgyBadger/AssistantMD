@@ -28,7 +28,7 @@ class CodeExecutionLocalScenario(BaseScenario):
 
         from core.context.store import upsert_cache_artifact
 
-        import core.llm.chat_executor as chat_executor
+        import core.chat.executor as chat_executor
         from pydantic_ai.models.test import TestModel
         current_case = {"name": "allow_memory_read"}
 

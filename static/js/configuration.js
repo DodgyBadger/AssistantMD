@@ -87,6 +87,10 @@
 
         miscFeedback: null,
         purgeExpiredCacheBtn: null,
+        purgeSessionsVault: null,
+        purgeSessionsAge: null,
+        purgeSessionsBtn: null,
+        purgeSessionsFeedback: null,
 
         importVaultSelect: null,
         importPdfModeSelect: null,
@@ -138,6 +142,10 @@
 
         elements.miscFeedback = document.getElementById('misc-feedback');
         elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
+        elements.purgeSessionsVault = document.getElementById('purge-sessions-vault');
+        elements.purgeSessionsAge = document.getElementById('purge-sessions-age');
+        elements.purgeSessionsBtn = document.getElementById('purge-sessions-btn');
+        elements.purgeSessionsFeedback = document.getElementById('purge-sessions-feedback');
 
         elements.importVaultSelect = document.getElementById('import-vault-select');
         elements.importPdfModeSelect = document.getElementById('import-pdf-mode');
@@ -171,6 +179,7 @@
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
+        elements.purgeSessionsBtn?.addEventListener('click', handlePurgeSessions);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
@@ -1399,6 +1408,76 @@ async function saveModelRow(rowKey) {
         return result;
     }
 
+    async function loadPurgeSessionsVaults() {
+        const select = elements.purgeSessionsVault;
+        if (!select) return;
+
+        const cachedVaults = window.App && window.App.metadata && Array.isArray(window.App.metadata.vaults)
+            ? window.App.metadata.vaults
+            : null;
+        const vaults = cachedVaults || await (async () => {
+            try {
+                const response = await fetch('api/metadata');
+                if (!response.ok) return [];
+                const data = await response.json();
+                window.App = window.App || {};
+                window.App.metadata = data;
+                return Array.isArray(data?.vaults) ? data.vaults : [];
+            } catch { return []; }
+        })();
+
+        select.innerHTML = '<option value="">Select vault…</option>';
+        vaults.forEach((vault) => {
+            const opt = document.createElement('option');
+            opt.value = vault;
+            opt.textContent = vault;
+            select.appendChild(opt);
+        });
+    }
+
+    async function handlePurgeSessions() {
+        const btn = elements.purgeSessionsBtn;
+        if (!btn || btn.disabled) return;
+
+        const vaultName = elements.purgeSessionsVault?.value;
+        if (!vaultName) {
+            setStatus(elements.purgeSessionsFeedback, 'Select a vault first.', 'warning');
+            return;
+        }
+
+        const ageValue = elements.purgeSessionsAge?.value;
+        const olderThanDays = ageValue ? parseInt(ageValue, 10) : null;
+
+        const ageLabel = ageValue ? `older than ${ageValue} days` : 'all sessions';
+        if (!confirm(`Delete ${ageLabel} in vault "${vaultName}"? This cannot be undone.`)) return;
+
+        btn.disabled = true;
+        const originalLabel = btn.textContent;
+        btn.textContent = 'Purging…';
+        setStatus(elements.purgeSessionsFeedback, 'Purging sessions…', 'info');
+
+        try {
+            const response = await fetch('api/chat/sessions/purge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vault_name: vaultName, older_than_days: olderThanDays }),
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            setStatus(elements.purgeSessionsFeedback, result.message, 'success');
+        } catch (error) {
+            setStatus(elements.purgeSessionsFeedback, `Failed to purge sessions: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        }
+    }
+
     async function handlePurgeExpiredCache() {
         if (!elements.purgeExpiredCacheBtn || state.isPurgingCache) return;
 
@@ -1467,6 +1546,7 @@ async function saveModelRow(rowKey) {
         await loadModels();
         await loadSecrets();
         await loadImportVaults();
+        await loadPurgeSessionsVaults();
         state.hasLoadedOnce = true;
     }
 

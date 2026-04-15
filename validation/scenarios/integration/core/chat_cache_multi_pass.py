@@ -19,8 +19,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
 
         await self.start_system()
 
-        import api.endpoints as api_endpoints
-        import core.llm.chat_executor as chat_executor
+        import core.chat.executor as chat_executor
         from core.authoring.shared.tool_binding import resolve_tool_binding
         from core.logger import UnifiedLogger
         from pydantic_ai.models.test import TestModel
@@ -92,9 +91,9 @@ class ChatCacheMultiPassScenario(BaseScenario):
             raise AssertionError("Unexpected chat call count")
 
         original_prepare_agent_config = chat_executor._prepare_agent_config
-        original_get_history = api_endpoints.session_manager.get_history
+        original_get_history = chat_executor._CHAT_STORE.get_history
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
-        api_endpoints.session_manager.get_history = lambda _sid, _vault: None
+        chat_executor._CHAT_STORE.get_history = lambda _sid, _vault: None
         try:
             update_setting = self.call_api(
                 "/api/system/settings/general/auto_buffer_max_tokens",
@@ -169,6 +168,6 @@ class ChatCacheMultiPassScenario(BaseScenario):
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
-            api_endpoints.session_manager.get_history = original_get_history
+            chat_executor._CHAT_STORE.get_history = original_get_history
             await self.stop_system()
             self.teardown_scenario()

@@ -146,18 +146,75 @@ class ChatStore:
         finally:
             conn.close()
 
-    def clear_history(self, session_id: str, vault_name: str) -> None:
-        """Delete one session and its message history."""
+    def set_session_title(self, session_id: str, vault_name: str, title: str | None) -> None:
+        """Set or clear the user-defined title for a session."""
         conn = self._connect()
         try:
-            conn.execute("PRAGMA foreign_keys = ON")
             conn.execute(
-                "DELETE FROM chat_sessions WHERE session_id = ? AND vault_name = ?",
-                (session_id, vault_name),
+                "UPDATE chat_sessions SET title = ? WHERE session_id = ? AND vault_name = ?",
+                (title or None, session_id, vault_name),
             )
             conn.commit()
         finally:
             conn.close()
+
+    def delete_sessions(
+        self,
+        vault_name: str,
+        *,
+        session_id: str | None = None,
+        older_than_days: int | None = None,
+    ) -> list[str]:
+        """Delete sessions for a vault, returning the list of deleted session_ids.
+
+        - session_id: delete exactly one session by ID
+        - older_than_days: delete sessions older than N days
+        - neither: delete all sessions for the vault
+
+        CASCADE deletes handle messages and tool_events automatically.
+        """
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            if session_id is not None:
+                rows = conn.execute(
+                    "SELECT session_id FROM chat_sessions WHERE session_id = ? AND vault_name = ?",
+                    (session_id, vault_name),
+                ).fetchall()
+                conn.execute(
+                    "DELETE FROM chat_sessions WHERE session_id = ? AND vault_name = ?",
+                    (session_id, vault_name),
+                )
+            elif older_than_days is not None:
+                rows = conn.execute(
+                    """
+                    SELECT session_id FROM chat_sessions
+                    WHERE vault_name = ?
+                    AND last_activity_at < datetime('now', ? || ' days')
+                    """,
+                    (vault_name, f"-{older_than_days}"),
+                ).fetchall()
+                conn.execute(
+                    """
+                    DELETE FROM chat_sessions
+                    WHERE vault_name = ?
+                    AND last_activity_at < datetime('now', ? || ' days')
+                    """,
+                    (vault_name, f"-{older_than_days}"),
+                )
+            else:
+                rows = conn.execute(
+                    "SELECT session_id FROM chat_sessions WHERE vault_name = ?",
+                    (vault_name,),
+                ).fetchall()
+                conn.execute(
+                    "DELETE FROM chat_sessions WHERE vault_name = ?",
+                    (vault_name,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return [str(row[0]) for row in rows]
 
     def get_message_count(self, session_id: str, vault_name: str) -> int:
         """Return the number of stored messages for one session."""

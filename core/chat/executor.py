@@ -22,13 +22,9 @@ from pydantic_ai import (
 from pydantic_ai.messages import UserContent
 
 from core.llm.agents import create_agent
-from core.llm.session_manager import SessionManager
-from core.chat import ChatStore, rewrite_chat_transcript
-from core.constants import (
-    REGULAR_CHAT_INSTRUCTIONS,
-    ASSISTANTMD_ROOT_DIR,
-    CHAT_SESSIONS_DIR,
-)
+from core.chat.chat_store import ChatStore
+from core.chat.transcript_writer import rewrite_chat_transcript, persist_chat_user_message
+from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.directives.model import ModelDirective
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.directives.tools import ToolsDirective
@@ -202,19 +198,6 @@ def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
     if len(value) <= limit:
         return value
     return value[: limit - 1] + "…"
-
-
-def _sanitize_session_id(session_id: str) -> str:
-    """
-    Constrain session ids to a safe filename segment.
-
-    Replaces disallowed characters (including path separators) with underscores.
-    """
-    if not session_id:
-        return "session"
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", session_id)
-    safe = safe.strip("._-")
-    return safe or "session"
 
 
 def _normalize_tool_args(args: Any) -> Optional[str]:
@@ -586,57 +569,6 @@ def _resolve_context_manager_now() -> Optional[datetime]:
     return None
 
 
-def save_chat_history(vault_path: str, session_id: str, prompt: str, response: str):
-    """
-    Append chat exchange to history file.
-
-    Saves to {vault_path}/AssistantMD/Chat_Sessions/{session_id}.md
-    """
-    history_file = _resolve_history_file(vault_path, session_id)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(history_file, "a", encoding="utf-8") as handle:
-        handle.write(f"*{timestamp}*\n\n")
-        handle.write(f"**User:**\n {prompt}\n\n")
-        handle.write(f"**Assistant:**\n {response}\n\n")
-    return str(history_file)
-
-
-def persist_chat_user_message(vault_path: str, session_id: str, prompt: str) -> str:
-    """Persist the user prompt immediately so abrupt failures still leave a transcript trail."""
-    history_file = _resolve_history_file(vault_path, session_id)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(history_file, "a", encoding="utf-8") as handle:
-        handle.write(f"*{timestamp}*\n\n")
-        handle.write(f"**User:**\n {prompt}\n\n")
-    return str(history_file)
-
-
-def append_chat_assistant_response(vault_path: str, session_id: str, response: str) -> str:
-    """Append the assistant response to an existing chat transcript."""
-    history_file = _resolve_history_file(vault_path, session_id)
-    with open(history_file, "a", encoding="utf-8") as handle:
-        handle.write(f"**Assistant:**\n {response}\n\n")
-    return str(history_file)
-
-
-def _resolve_history_file(vault_path: str, session_id: str) -> Path:
-    """Return the chat history file path, creating parent directories and header when needed."""
-    sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
-    sessions_dir.mkdir(parents=True, exist_ok=True)
-
-    safe_session_id = _sanitize_session_id(session_id)
-    history_file = sessions_dir / f"{safe_session_id}.md"
-    resolved_history = history_file.resolve()
-    resolved_sessions = sessions_dir.resolve()
-    if resolved_sessions not in resolved_history.parents:
-        raise ValueError("Resolved chat history path is outside the chat sessions directory.")
-
-    if not history_file.exists():
-        with open(history_file, "w", encoding="utf-8") as handle:
-            handle.write(f"Chat Session: {session_id}\n\n")
-    return history_file
-
-
 def _resolve_image_prompt(
     *,
     prompt_text: str,
@@ -762,7 +694,6 @@ async def _prepare_chat_execution(
     session_id: str,
     tools: List[str],
     model: str,
-    session_manager: SessionManager,
     context_template: Optional[str] = None,
 ) -> PreparedChatExecution:
     """Perform chat preflight before either sync or streaming execution begins."""
@@ -797,7 +728,7 @@ async def _prepare_chat_execution(
         if inst:
             agent.instructions(lambda _ctx, text=inst: text)
 
-    message_history = session_manager.get_history(session_id, vault_name)
+    message_history = _CHAT_STORE.get_history(session_id, vault_name)
     user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
         prompt_text=prompt,
         image_paths=image_paths,
@@ -862,7 +793,6 @@ async def execute_chat_prompt(
     session_id: str,
     tools: List[str],
     model: str,
-    session_manager: SessionManager,
     context_template: Optional[str] = None,
 ) -> ChatExecutionResult:
     """
@@ -875,7 +805,6 @@ async def execute_chat_prompt(
         session_id: Session identifier for conversation tracking
         tools: List of tool names selected by user
         model: Model name selected by user
-        session_manager: Session manager instance for history storage
     Returns:
         ChatExecutionResult with response and session metadata
     """
@@ -913,7 +842,6 @@ async def execute_chat_prompt(
             session_id=session_id,
             tools=tools,
             model=model,
-            session_manager=session_manager,
             context_template=context_template,
         )
         attached_image_count = prepared.attached_image_count
@@ -951,7 +879,7 @@ async def execute_chat_prompt(
         )
 
         phase = "session_persist"
-        session_manager.add_messages(session_id, vault_name, result.new_messages())
+        _CHAT_STORE.add_messages(session_id, vault_name, result.new_messages())
         history_file = rewrite_chat_transcript(
             store=_CHAT_STORE,
             vault_path=vault_path,
@@ -1003,7 +931,6 @@ async def _stream_prepared_chat_prompt(
     vault_name: str,
     vault_path: str,
     session_id: str,
-    session_manager: SessionManager,
 ) -> AsyncIterator[str]:
     """Stream a preflighted chat execution as SSE events."""
     full_response = ""
@@ -1203,7 +1130,7 @@ async def _stream_prepared_chat_prompt(
 
     # Store new messages in session (including tool results captured during stream)
     if final_result:
-        session_manager.add_messages(session_id, vault_name, final_result.new_messages())
+        _CHAT_STORE.add_messages(session_id, vault_name, final_result.new_messages())
 
     # Save chat history to markdown file
     if final_result:
@@ -1240,7 +1167,6 @@ async def execute_chat_prompt_stream(
     session_id: str,
     tools: List[str],
     model: str,
-    session_manager: SessionManager,
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Preflight streaming chat execution and yield SSE chunks."""
@@ -1266,7 +1192,6 @@ async def execute_chat_prompt_stream(
             session_id=session_id,
             tools=tools,
             model=model,
-            session_manager=session_manager,
             context_template=context_template,
         )
     except Exception as exc:
@@ -1287,6 +1212,5 @@ async def execute_chat_prompt_stream(
         vault_name=vault_name,
         vault_path=vault_path,
         session_id=session_id,
-        session_manager=session_manager,
     ):
         yield chunk

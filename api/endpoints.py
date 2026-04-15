@@ -12,8 +12,7 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.llm.session_manager import SessionManager
-from core.llm.chat_executor import (
+from core.chat import (
     ChatCapabilityError,
     UploadedImageAttachment,
     execute_chat_prompt,
@@ -46,6 +45,9 @@ from .models import (
     TemplateInfo,
     ChatSessionInfo,
     ChatSessionDetailResponse,
+    ChatSessionsPurgeRequest,
+    ChatSessionsPurgeResponse,
+    ChatSessionTitleRequest,
 )
 from .exceptions import APIException, ChatCapabilityMismatchError
 from .utils import create_error_response, generate_session_id, serialize_exception
@@ -57,6 +59,9 @@ from .services import (
     list_context_templates,
     list_chat_sessions,
     get_chat_session_detail,
+    purge_chat_sessions,
+    set_chat_session_title,
+    delete_chat_session,
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
@@ -89,8 +94,6 @@ from api.import_models import (
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 logger = UnifiedLogger(tag="api-endpoints")
 
-# Create module-level session manager for chat conversations
-session_manager = SessionManager()
 
 
 def _parse_form_bool(value: object, default: bool = False) -> bool:
@@ -213,7 +216,6 @@ async def _execute_chat_request(
                 session_id=session_id,
                 tools=chat_request.tools,
                 model=chat_request.model,
-                session_manager=session_manager,
                 context_template=chat_request.context_template,
             )
 
@@ -238,7 +240,6 @@ async def _execute_chat_request(
             session_id=session_id,
             tools=chat_request.tools,
             model=chat_request.model,
-            session_manager=session_manager,
             context_template=chat_request.context_template,
         )
     except ChatCapabilityError as exc:
@@ -704,6 +705,46 @@ async def chat_session_detail(session_id: str, vault_name: str):
     """
     try:
         return get_chat_session_detail(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete("/chat/sessions/{session_id}")
+async def delete_chat_session_endpoint(session_id: str, vault_name: str):
+    """Delete one chat session and its transcript file."""
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / vault_name)
+        delete_chat_session(vault_name, vault_path, session_id)
+        return {"session_id": session_id, "deleted": True}
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.patch("/chat/sessions/{session_id}/title")
+async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
+    """Set or clear the user-defined title for a chat session."""
+    try:
+        title = (request.title or "").strip() or None
+        set_chat_session_title(request.vault_name, session_id, title)
+        return {"session_id": session_id, "title": title}
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/purge", response_model=ChatSessionsPurgeResponse)
+async def purge_chat_sessions_endpoint(request: ChatSessionsPurgeRequest):
+    """
+    Delete old chat sessions and their transcript files for a vault.
+    """
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        return purge_chat_sessions(
+            request.vault_name,
+            vault_path,
+            older_than_days=request.older_than_days,
+        )
     except Exception as e:
         return create_error_response(e)
 

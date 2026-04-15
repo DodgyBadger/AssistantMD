@@ -22,7 +22,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
         await self.start_system()
 
-        import core.llm.chat_executor as chat_executor
+        import core.chat.executor as chat_executor
         from core.authoring.runtime import WorkflowAuthoringHost, run_authoring_monty
         from core.constants import ASSISTANTMD_ROOT_DIR, CHAT_SESSIONS_DIR
         from core.runtime.state import get_runtime_context
@@ -274,9 +274,8 @@ tool_events_payload = json.loads(tool_events.output)
     "tool_event_source": tool_events_payload["source"],
     "tool_event_count": tool_events_payload["item_count"],
     "tool_event_types": [item["event_type"] for item in tool_events_payload["items"]],
-    "tool_result_text": next(
-        iter([item["result_text"] for item in tool_events_payload["items"] if item["event_type"] == "result"]),
-        "",
-    ),
+    "tool_result_text": (
+        [item["result_text"] for item in tool_events_payload["items"] if item["event_type"] == "result"] or [""]
+    )[0],
 }
 """

@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from core.constants import ASSISTANTMD_ROOT_DIR, CHAT_SESSIONS_DIR
 
 from .chat_store import ChatStore, StoredChatMessage
+
+
+def persist_chat_user_message(vault_path: str, session_id: str, prompt: str) -> str:
+    """Persist the user prompt immediately so abrupt failures still leave a transcript trail."""
+    history_file = _resolve_history_file(vault_path=vault_path, session_id=session_id)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(history_file, "a", encoding="utf-8") as handle:
+        handle.write(f"*{timestamp}*\n\n")
+        handle.write(f"**User:**\n {prompt}\n\n")
+    return str(history_file)
 
 
 def rewrite_chat_transcript(

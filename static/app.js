@@ -59,7 +59,10 @@ const chatElements = {
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
     sendBtn: document.getElementById('send-btn'),
-    newSessionBtn: document.getElementById('new-session-btn')
+    sessionTitleRow: document.getElementById('session-title-row'),
+    sessionTitleInput: document.getElementById('session-title-input'),
+    sessionTitleSave: document.getElementById('session-title-save'),
+    sessionDeleteBtn: document.getElementById('session-delete-btn'),
 };
 
 // DOM elements - Dashboard
@@ -312,19 +315,12 @@ function formatSessionOptionLabel(session) {
         return 'New session';
     }
     const rawDate = session.last_activity_at || session.created_at || '';
-    if (!rawDate) {
-        return session.session_id;
-    }
-    const parsed = new Date(rawDate.replace(' ', 'T'));
-    const suffix = Number.isNaN(parsed.getTime())
-        ? rawDate
-        : parsed.toLocaleString([], {
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit'
-        });
-    return `${session.session_id} (${suffix})`;
+    const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
+    const timeStr = parsed && !Number.isNaN(parsed.getTime())
+        ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+        : rawDate;
+    const base = timeStr ? `${session.session_id} (last activity: ${timeStr})` : session.session_id;
+    return session.title ? `${base}: ${session.title}` : base;
 }
 
 function renderSessionSelector() {
@@ -387,6 +383,7 @@ async function loadSession(sessionId) {
         state.sessionId = payload.session_id || sessionId;
         renderPersistedSession(payload);
         renderSessionSelector();
+        updateSessionTitleRow();
         updateStatus();
     } catch (error) {
         console.error('Error loading chat session:', error);
@@ -977,10 +974,6 @@ function setupEventListeners() {
         });
     }
 
-    if (chatElements.newSessionBtn) {
-        chatElements.newSessionBtn.addEventListener('click', clearSession);
-    }
-
     if (chatElements.sessionSelector) {
         chatElements.sessionSelector.addEventListener('change', async (event) => {
             const selectedSessionId = event.target.value || '';
@@ -990,6 +983,20 @@ function setupEventListeners() {
             }
             await loadSession(selectedSessionId);
         });
+    }
+
+    if (chatElements.sessionTitleSave) {
+        chatElements.sessionTitleSave.addEventListener('click', saveSessionTitle);
+    }
+
+    if (chatElements.sessionTitleInput) {
+        chatElements.sessionTitleInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') saveSessionTitle();
+        });
+    }
+
+    if (chatElements.sessionDeleteBtn) {
+        chatElements.sessionDeleteBtn.addEventListener('click', deleteCurrentSession);
     }
 
     if (chatElements.toolDropdownTrigger) {
@@ -2020,6 +2027,82 @@ function flashCopyFeedback(button, didCopy) {
 }
 
 // Clear session
+function updateSessionTitleRow() {
+    const row = chatElements.sessionTitleRow;
+    const input = chatElements.sessionTitleInput;
+    if (!row || !input) return;
+
+    const sessionId = state.sessionId;
+    if (!sessionId) {
+        row.classList.add('hidden');
+        input.value = '';
+        return;
+    }
+
+    const session = state.sessions.find((s) => s.session_id === sessionId);
+    input.value = session?.title || '';
+    row.classList.remove('hidden');
+}
+
+async function saveSessionTitle() {
+    const sessionId = state.sessionId;
+    const vault = chatElements.vaultSelector?.value || '';
+    const input = chatElements.sessionTitleInput;
+    const btn = chatElements.sessionTitleSave;
+    if (!sessionId || !vault || !input || !btn) return;
+
+    const title = input.value.trim() || null;
+    btn.disabled = true;
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/title`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_name: vault, title }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        // Update local state so the picker label refreshes immediately
+        const session = state.sessions.find((s) => s.session_id === sessionId);
+        if (session) session.title = title;
+        renderSessionSelector();
+    } catch (error) {
+        console.error('Failed to save session title:', error);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function deleteCurrentSession() {
+    const sessionId = state.sessionId;
+    const vault = chatElements.vaultSelector?.value || '';
+    const btn = chatElements.sessionDeleteBtn;
+    if (!sessionId || !vault || !btn) return;
+
+    if (!confirm(`Delete session "${sessionId}"? This cannot be undone.`)) return;
+
+    btn.disabled = true;
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`,
+            { method: 'DELETE' }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        state.sessions = state.sessions.filter((s) => s.session_id !== sessionId);
+        state.sessionId = null;
+        clearPendingAttachments();
+        renderChatEmptyState();
+        renderSessionSelector();
+        updateSessionTitleRow();
+        syncChatControlLocks();
+        updateStatus();
+    } catch (error) {
+        console.error('Failed to delete session:', error);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 async function clearSession(confirmReset = true) {
     const confirmed = confirmReset
         ? window.confirm('Do you want to start a new chat session? The current session is saved as a markdown file in your vault.')
@@ -2030,6 +2113,7 @@ async function clearSession(confirmReset = true) {
     clearPendingAttachments();
     renderChatEmptyState();
     renderSessionSelector();
+    updateSessionTitleRow();
     syncChatControlLocks();
     updateStatus();
 }

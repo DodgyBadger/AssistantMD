@@ -909,9 +909,6 @@
                         <button id="theme-toggle" type="button" class="text-2xl hover:opacity-75 transition-opacity focus:outline-none cursor-pointer" style="touch-action: manipulation;" title="Change theme">
                             🎨
                         </button>
-                        <button id="new-session-btn" type="button" class="text-2xl text-txt-secondary hover:text-txt-primary focus:outline-none mr-2 cursor-pointer" style="touch-action: manipulation;" title="New Session">
-                            ➕
-                        </button>
                     </div>
                 </div>
             </div>
@@ -971,6 +968,19 @@
                         <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">New session</option>
                         </select>
+                    </div>
+                    <div id="session-title-row" class="flex gap-2 hidden">
+                        <input id="session-title-input" type="text" maxlength="120"
+                            placeholder="Add a title…"
+                            class="flex-1 px-3 py-1.5 text-sm border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
+                        <button id="session-title-save" type="button"
+                            class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                            Save
+                        </button>
+                        <button id="session-delete-btn" type="button"
+                            class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed">
+                            Delete
+                        </button>
                     </div>
                 </div>
             </details>
@@ -1366,6 +1376,31 @@
                                     Purge Expired Cache
                                 </button>
                                 <div id="misc-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
+                        </div>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Purge Chat Sessions</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Remove old chat sessions and their transcript files from the selected vault.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <select id="purge-sessions-vault" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="">Select vault…</option>
+                                    </select>
+                                    <select id="purge-sessions-age" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="7">Older than 7 days</option>
+                                        <option value="30" selected>Older than 30 days</option>
+                                        <option value="90">Older than 90 days</option>
+                                        <option value="">All sessions</option>
+                                    </select>
+                                    <button id="purge-sessions-btn" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                        Purge Sessions
+                                    </button>
+                                </div>
+                                <div id="purge-sessions-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
                     </div>

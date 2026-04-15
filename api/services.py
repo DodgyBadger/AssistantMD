@@ -75,9 +75,11 @@ from .models import (
     ChatSessionDetailResponse,
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
+    ChatSessionsPurgeResponse,
+    ChatSessionTitleRequest,
 )
 from .exceptions import SystemConfigurationError
-from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
+from core.constants import ASSISTANTMD_ROOT_DIR, CHAT_SESSIONS_DIR, IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
@@ -173,6 +175,7 @@ def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
             session_id=session.session_id,
             created_at=session.created_at,
             last_activity_at=session.last_activity_at,
+            title=session.title or None,
         )
         for session in sessions
     ]
@@ -210,6 +213,48 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
             for event in tool_events
         ],
     )
+
+
+def _remove_session_transcripts(vault_path: str, session_ids: list[str]) -> None:
+    """Unlink transcript files for a list of deleted session IDs."""
+    sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
+    for session_id in session_ids:
+        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", session_id).strip("._-") or "session"
+        try:
+            (sessions_dir / f"{safe}.md").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def set_chat_session_title(vault_name: str, session_id: str, title: str | None) -> None:
+    """Set or clear the user-defined title for a chat session."""
+    _chat_store.set_session_title(session_id, vault_name, title)
+
+
+def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
+    """Delete one chat session and its transcript file."""
+    deleted = _chat_store.delete_sessions(vault_name, session_id=session_id)
+    _remove_session_transcripts(vault_path, deleted)
+
+
+def purge_chat_sessions(
+    vault_name: str,
+    vault_path: str,
+    *,
+    older_than_days: int | None,
+) -> ChatSessionsPurgeResponse:
+    """Delete old chat sessions and their transcript files for a vault."""
+    deleted_ids = _chat_store.delete_sessions(vault_name, older_than_days=older_than_days)
+    _remove_session_transcripts(vault_path, deleted_ids)
+
+    n = len(deleted_ids)
+    if n == 0:
+        message = "No sessions matched."
+    elif n == 1:
+        message = "Deleted 1 session."
+    else:
+        message = f"Deleted {n} sessions."
+    return ChatSessionsPurgeResponse(deleted=n, message=message)
 
 
 def _is_tool_message_text(content: str) -> bool:

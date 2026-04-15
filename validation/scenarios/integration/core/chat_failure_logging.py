@@ -19,7 +19,7 @@ class ChatFailureLoggingScenario(BaseScenario):
 
         await self.start_system()
 
-        import core.llm.chat_executor as chat_executor
+        import core.chat.executor as chat_executor
 
         async def _forced_failure(*args, **kwargs):
             raise RuntimeError("forced chat failure for logging validation")

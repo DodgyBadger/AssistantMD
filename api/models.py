@@ -216,6 +216,14 @@ class ChatSessionInfo(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     created_at: str = Field(..., description="Session creation timestamp")
     last_activity_at: str = Field(..., description="Most recent activity timestamp")
+    title: Optional[str] = Field(None, description="User-defined title, if set")
+
+
+class ChatSessionTitleRequest(BaseModel):
+    """Request to set or clear the user-defined title for a session."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    title: Optional[str] = Field(None, description="New title; null or empty clears it")
 
 
 class ChatSessionMessageInfo(BaseModel):
@@ -249,6 +257,20 @@ class ChatSessionDetailResponse(BaseModel):
     vault_name: str = Field(..., description="Owning vault name")
     messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
     tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")
+
+
+class ChatSessionsPurgeRequest(BaseModel):
+    """Request to purge old chat sessions for a vault."""
+
+    vault_name: str = Field(..., description="Vault to purge sessions from")
+    older_than_days: Optional[int] = Field(None, description="Delete sessions older than this many days; null deletes all")
+
+
+class ChatSessionsPurgeResponse(BaseModel):
+    """Result of a chat session purge operation."""
+
+    deleted: int = Field(..., description="Number of sessions deleted")
+    message: str = Field(..., description="Human-readable summary")
 
 
 class ModelConfigRequest(BaseModel):
