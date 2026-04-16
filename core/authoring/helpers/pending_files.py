@@ -24,7 +24,7 @@ logger = UnifiedLogger(tag="authoring-host")
 def build_definition() -> AuthoringCapabilityDefinition:
     return build_capability(
         name="pending_files",
-        doc="Filter or complete workflow pending files using an explicit tracking pattern.",
+        doc="Filter or complete workflow pending files.",
         contract=_contract(),
         handler=execute,
     )
@@ -35,30 +35,19 @@ async def execute(
     context: AuthoringExecutionContext,
 ) -> PendingFilesResult:
     host = context.host
-    operation, pattern, items = _parse_call(call)
+    operation, items = _parse_call(call)
     if not host.state_manager:
         raise ValueError("pending_files requires workflow file-state tracking to be available")
     if operation == "get":
         pending_items = _filter_pending_items(
             items,
-            pattern=pattern,
             state_manager=host.state_manager,
             vault_path=host.vault_path or "",
         )
-        logger.info(
+        logger.add_sink("validation").info(
             "authoring_pending_files_filtered",
             data={
                 "workflow_id": context.workflow_id,
-                "pattern": pattern,
-                "candidate_count": len(items),
-                "pending_count": len(pending_items),
-            },
-        )
-        logger.set_sinks(["validation"]).info(
-            "authoring_pending_files_filtered",
-            data={
-                "workflow_id": context.workflow_id,
-                "pattern": pattern,
                 "candidate_count": len(items),
                 "pending_count": len(pending_items),
             },
@@ -66,32 +55,21 @@ async def execute(
         return PendingFilesResult(
             operation="get",
             status="completed",
-            pattern=pattern,
             items=tuple(pending_items),
         )
     if operation == "complete":
         file_records = _build_completion_records(items, vault_path=host.vault_path or "")
-        host.state_manager.mark_files_processed(file_records, pattern)
-        logger.info(
+        host.state_manager.mark_files_processed(file_records)
+        logger.add_sink("validation").info(
             "authoring_pending_files_completed",
             data={
                 "workflow_id": context.workflow_id,
-                "pattern": pattern,
-                "completed_count": len(file_records),
-            },
-        )
-        logger.set_sinks(["validation"]).info(
-            "authoring_pending_files_completed",
-            data={
-                "workflow_id": context.workflow_id,
-                "pattern": pattern,
                 "completed_count": len(file_records),
             },
         )
         return PendingFilesResult(
             operation="complete",
             status="completed",
-            pattern=pattern,
             completed_count=len(file_records),
         )
     raise ValueError("pending_files operation must be one of: get, complete")
@@ -99,22 +77,19 @@ async def execute(
 
 def _parse_call(
     call: AuthoringCapabilityCall,
-) -> tuple[str, str, tuple[RetrievedItem, ...]]:
+) -> tuple[str, tuple[RetrievedItem, ...]]:
     if call.args:
         raise ValueError("pending_files only supports keyword arguments")
-    unknown = sorted(set(call.kwargs) - {"operation", "pattern", "items"})
+    unknown = sorted(set(call.kwargs) - {"operation", "items"})
     if unknown:
         raise ValueError(f"Unsupported pending_files arguments: {', '.join(unknown)}")
     operation = str(call.kwargs.get("operation") or "").strip().lower()
-    pattern = str(call.kwargs.get("pattern") or "").strip()
     if not operation:
         raise ValueError("pending_files requires a non-empty 'operation'")
-    if not pattern:
-        raise ValueError("pending_files requires a non-empty 'pattern'")
     if "items" not in call.kwargs:
         raise ValueError("pending_files requires 'items'")
     items = _normalize_pending_items_input(call.kwargs.get("items"))
-    return operation, pattern, items
+    return operation, items
 
 
 def _normalize_pending_items_input(value: Any) -> tuple[RetrievedItem, ...]:
@@ -211,30 +186,20 @@ def _extract_paths_from_file_ops_output(output: str) -> tuple[str, ...]:
 def _filter_pending_items(
     items: tuple[RetrievedItem, ...],
     *,
-    pattern: str,
     state_manager: Any,
     vault_path: str,
 ) -> list[RetrievedItem]:
     all_paths = [_resolve_item_path(item, vault_path=vault_path) for item in items]
     pending_paths = {
         os.path.realpath(path)
-        for path in state_manager.get_pending_files(all_paths, pattern)
+        for path in state_manager.get_pending_files(all_paths)
     }
     pending_items: list[RetrievedItem] = []
     for item in items:
         resolved_path = os.path.realpath(_resolve_item_path(item, vault_path=vault_path))
         if resolved_path not in pending_paths:
             continue
-        metadata = dict(item.metadata or {})
-        metadata["pending_pattern"] = pattern
-        pending_items.append(
-            RetrievedItem(
-                ref=item.ref,
-                content=item.content,
-                exists=item.exists,
-                metadata=metadata,
-            )
-        )
+        pending_items.append(item)
     return pending_items
 
 
@@ -277,23 +242,18 @@ def _source_path_from_item(item: RetrievedItem) -> str:
 def _contract() -> dict[str, object]:
     return {
         "signature": (
-            "pending_files(*, operation: str, pattern: str, items: CallToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...])"
+            "pending_files(*, operation: str, items: CallToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...])"
         ),
         "summary": (
-            "Filter or complete workflow pending files using an explicit tracking pattern. "
-            "Use `get` to filter a file_ops_safe result set down to the pending subset and "
-            "`complete` to mark a selected subset processed."
+            "Filter or complete workflow pending files. "
+            "Use `get` to filter a file_ops_safe result set down to the unprocessed subset and "
+            "`complete` to mark a selected subset as processed."
         ),
         "arguments": {
             "operation": {
                 "type": "string",
                 "required": True,
                 "description": "Operation name. Supported values: get, complete.",
-            },
-            "pattern": {
-                "type": "string",
-                "required": True,
-                "description": "Stable pending-tracking key, usually the watched file pattern.",
             },
             "items": {
                 "type": "CallToolResult | RetrievedItem | list | tuple",
@@ -304,7 +264,6 @@ def _contract() -> dict[str, object]:
         "return_shape": {
             "operation": "Resolved operation name.",
             "status": "High-level result status.",
-            "pattern": "Pending tracking pattern.",
             "items": "Pending subset for get operations.",
             "completed_count": "Number of files marked processed for complete operations.",
         },
@@ -315,12 +274,12 @@ def _contract() -> dict[str, object]:
                     '    name="file_ops_safe",\n'
                     '    arguments={"operation": "list", "target": "tasks"},\n'
                     ')\n'
-                    'pending = await pending_files(operation="get", pattern="tasks/*.md", items=listed)\n'
+                    'pending = await pending_files(operation="get", items=listed)\n'
                     "selected = pending.items[:3]\n"
                     "# ...process selected...\n"
-                    'await pending_files(operation="complete", pattern="tasks/*.md", items=selected)'
+                    'await pending_files(operation="complete", items=selected)'
                 ),
-                "description": "Filter a watched file set to pending items and then mark only the processed subset complete.",
+                "description": "Filter a candidate file set to unprocessed items, then mark the processed subset complete.",
             }
         ],
     }

@@ -26,12 +26,12 @@ class AuthoringContractScenario(BaseScenario):
 
         self.create_file(
             vault,
-            "AssistantMD/Workflows/authoring_contract_success.md",
+            "AssistantMD/Authoring/authoring_contract_success.md",
             AUTHORING_CONTRACT_SUCCESS_WORKFLOW,
         )
         self.create_file(
             vault,
-            "AssistantMD/Workflows/authoring_generate_cache_daily.md",
+            "AssistantMD/Authoring/authoring_generate_cache_daily.md",
             AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW,
         )
 
@@ -302,8 +302,8 @@ task_listing = await call_tool(
     name="file_ops_safe",
     arguments={"operation": "list", "target": "tasks"},
 )
-pending = await pending_files(operation="get", pattern="tasks/*.md", items=task_listing)
-await pending_files(operation="complete", pattern="tasks/*.md", items=(pending.items[0],))
+pending = await pending_files(operation="get", items=task_listing)
+await pending_files(operation="complete", items=(pending.items[0],))
 
 draft = await generate(
     prompt=(

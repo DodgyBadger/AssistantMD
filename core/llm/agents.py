@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic_ai.agent import Agent
 from pydantic_ai.messages import UserContent
 from core.constants import DEFAULT_TOOL_RETRIES
-from core.directives.model import ModelDirective
+from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec
 from core.settings.store import get_general_settings
 
@@ -48,9 +48,7 @@ async def create_agent(
 
         default_model_name = str(default_model_value).lower().strip()
 
-        # Create model instance using directive processor
-        model_directive = ModelDirective()
-        model = model_directive.process_value(default_model_name, '/default')
+        model = build_model_instance(default_model_name)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
             raise ValueError(
                 "default_model cannot use skip mode ('none'). "

@@ -10,7 +10,7 @@ from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage
 
 from core.chat import ChatStore
-from core.context.manager_helpers import extract_role_and_text, run_slice
+from core.utils.messages import extract_role_and_text, run_slice
 
 
 _MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)

@@ -34,15 +34,7 @@ async def execute(
 ) -> CallToolResult:
     host = context.host
     tool_name, arguments = _parse_call(call)
-    logger.info(
-        "authoring_call_tool_started",
-        data={
-            "workflow_id": context.workflow_id,
-            "tool": tool_name,
-            "argument_keys": sorted(arguments.keys()),
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_call_tool_started",
         data={
             "workflow_id": context.workflow_id,
@@ -72,15 +64,7 @@ async def execute(
         message_history=getattr(host, "message_history", None),
     )
     output, metadata = normalize_tool_result(result)
-    logger.info(
-        "authoring_call_tool_completed",
-        data={
-            "workflow_id": context.workflow_id,
-            "tool": tool_name,
-            "output_chars": len(output),
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_call_tool_completed",
         data={
             "workflow_id": context.workflow_id,

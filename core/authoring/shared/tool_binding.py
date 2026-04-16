@@ -5,18 +5,9 @@ from __future__ import annotations
 import importlib
 import inspect
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Dict, Optional, Type
 
 from pydantic_ai import RunContext
-from pydantic_ai.messages import (
-    AudioUrl,
-    BinaryContent,
-    DocumentUrl,
-    ImageUrl,
-    ToolReturn,
-    VideoUrl,
-)
 
 from core.logger import UnifiedLogger
 from core.settings import get_routing_allowed_tools
@@ -24,13 +15,8 @@ from core.settings.secrets_store import secret_has_value
 from core.settings.store import ToolConfig, get_tools_config
 from core.tools.base import BaseTool
 from core.tools.utils import get_tool_instructions
-from core.utils.routing import build_manifest, write_output
-from core.authoring.shared.output_resolution import (
-    normalize_write_mode,
-    parse_output_value,
-    resolve_output_request,
-)
-from core.directives.parser import DirectiveValueParser
+from core.authoring.shared.output_resolution import route_tool_output
+from core.utils.value_parser import DirectiveValueParser
 
 
 logger = UnifiedLogger(tag="workflow-tool-binding")
@@ -122,7 +108,7 @@ def resolve_tool_binding(
             skipped_tools.append((tool_name, missing_secrets))
             logger.warning(
                 "Tool skipped due to missing secrets",
-                metadata={"tool": tool_name, "missing_secrets": missing_secrets},
+                data={"tool": tool_name, "missing_secrets": missing_secrets},
             )
             continue
 
@@ -319,18 +305,6 @@ def _parse_tools_with_params(value: str) -> list[tuple[str, Dict[str, str]]]:
     return parsed
 
 
-def _has_multimodal_tool_payload(result: object) -> bool:
-    if not isinstance(result, ToolReturn):
-        return False
-    content = result.content
-    if content is None or isinstance(content, str):
-        return False
-    for item in content:
-        if isinstance(item, (BinaryContent, ImageUrl, AudioUrl, DocumentUrl, VideoUrl)):
-            return True
-    return False
-
-
 def _wrap_tool_function(
     tool,
     *,
@@ -360,7 +334,7 @@ def _wrap_tool_function(
                 result = await original_func(**kwargs)
         except TypeError as exc:
             return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return _route_tool_output(
+        return route_tool_output(
             result,
             tool_name=tool_name,
             output_value=output_value,
@@ -384,7 +358,7 @@ def _wrap_tool_function(
                 result = original_func(**kwargs)
         except TypeError as exc:
             return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return _route_tool_output(
+        return route_tool_output(
             result,
             tool_name=tool_name,
             output_value=output_value,
@@ -454,112 +428,6 @@ def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
             continue
         return True
     return False
-
-
-def _route_tool_output(
-    result,
-    *,
-    tool_name: str,
-    output_value: str | None,
-    write_mode_value: str | None,
-    params: Dict[str, str],
-    vault_path: str,
-    week_start_day: int,
-    buffer_store=None,
-    buffer_store_registry=None,
-):
-    if tool_name == "buffer_ops":
-        return result
-    hard_output = params.get("output")
-    output_target = hard_output or output_value
-    scope_value = params.get("scope")
-    if _has_multimodal_tool_payload(result):
-        if output_target and output_target.strip().lower() != "inline":
-            logger.warning(
-                "Bypassing tool output routing for multimodal tool return",
-                metadata={"tool": tool_name, "output_target": output_target},
-            )
-        return result
-    if output_target is None:
-        return result
-
-    if hard_output is not None and hard_output.strip().lower() == "inline":
-        return result
-
-    write_mode_param = params.get("write-mode") or params.get("write_mode")
-    write_mode = normalize_write_mode(write_mode_param or write_mode_value)
-    try:
-        parsed_target = resolve_output_request(
-            parse_output_value(output_target),
-            vault_path=vault_path,
-            reference_date=datetime.now(),
-            week_start_day=week_start_day,
-        )
-    except Exception as exc:
-        return f"Invalid output target: {exc}. Use output=\"variable:NAME\" or output=\"file:PATH\"."
-
-    if parsed_target.type == "inline":
-        return result
-
-    content = "" if result is None else (result if isinstance(result, str) else str(result))
-    if parsed_target.type == "discard":
-        manifest = build_manifest(
-            source=tool_name,
-            destination="discard",
-            item_count=1,
-            total_chars=len(content),
-        )
-        logger.set_sinks(["validation"]).info(
-            "tool_output_routed",
-            data={
-                "event": "tool_output_routed",
-                "tool": tool_name,
-                "destination": "discard",
-                "write_mode": write_mode or "append",
-                "output_chars": len(content),
-                "forced": hard_output is not None,
-            },
-        )
-        return manifest
-
-    default_scope = "run"
-    if buffer_store_registry and "session" in buffer_store_registry and "run" not in buffer_store_registry:
-        default_scope = "session"
-    write_result = write_output(
-        target=parsed_target.target,
-        content=content,
-        write_mode=write_mode,
-        buffer_store=buffer_store,
-        buffer_store_registry=buffer_store_registry,
-        vault_path=vault_path,
-        buffer_scope=parsed_target.buffer_scope or scope_value,
-        default_scope=default_scope,
-    )
-    destination = ""
-    if write_result.get("type") == "buffer":
-        destination = f"variable: {write_result.get('name')}"
-    elif write_result.get("type") == "file":
-        destination = f"file: {write_result.get('path')}"
-    else:
-        destination = parsed_target.type
-    manifest = build_manifest(
-        source=tool_name,
-        destination=destination,
-        item_count=1,
-        total_chars=len(content),
-    )
-    logger.set_sinks(["validation"]).info(
-        "tool_output_routed",
-        data={
-            "event": "tool_output_routed",
-            "tool": tool_name,
-            "destination": destination,
-            "write_mode": write_mode or "append",
-            "output_chars": len(content),
-            "forced": hard_output is not None,
-        },
-    )
-    return manifest
 
 
 def _format_tool_type_error(tool_name: str, exc: Exception, instructions: str | None) -> str:

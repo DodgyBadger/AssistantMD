@@ -14,8 +14,12 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from core.authoring.contracts import ContextMessage, RetrieveResult, RetrievedItem
-from core.context.manager_helpers import extract_role_and_text, run_slice
+from core.utils.messages import extract_role_and_text, run_slice
+from core.logger import UnifiedLogger
 from core.runtime.buffers import BufferStore
+
+
+logger = UnifiedLogger(tag="authoring-host")
 
 
 def coerce_output_data(value: Any) -> str:
@@ -32,7 +36,11 @@ def normalize_output_ref(path: str, *, vault_path: str) -> str:
         normalized_path = os.path.realpath(path)
         if normalized_path.startswith(normalized_vault + os.sep):
             return os.path.relpath(normalized_path, normalized_vault).replace("\\", "/")
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "normalize_output_ref failed; returning raw path",
+            data={"path": path, "error": str(exc)},
+        )
         return path
     return path
 

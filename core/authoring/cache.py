@@ -1,22 +1,130 @@
+"""Cache semantics and artifact store for authoring context templates."""
+
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from core.context.cache_semantics import cache_entry_is_valid, compute_cache_expiration
 from core.database import connect_sqlite_from_system_db, get_system_database_path
 from core.logger import UnifiedLogger
 
 if TYPE_CHECKING:
-    from core.context.templates import TemplateRecord
+    from core.authoring.template_discovery import TemplateRecord
 
 logger = UnifiedLogger(tag="context-store")
 
-
 DB_NAME = "cache"
 
+# ---------------------------------------------------------------------------
+# Cache semantics
+# ---------------------------------------------------------------------------
+
+_DURATION_PATTERN = re.compile(r"^(?P<amount>\d+)\s*(?P<unit>[smhd])$")
+_UNIT_SECONDS = {
+    "s": 1,
+    "m": 60,
+    "h": 60 * 60,
+    "d": 60 * 60 * 24,
+}
+_NAMED_MODES = {"daily", "weekly", "session"}
+
+
+def parse_cache_mode_value(value: str) -> dict[str, Any]:
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("Cache mode cannot be empty")
+    if normalized in _NAMED_MODES:
+        return {"mode": normalized, "ttl_seconds": None}
+
+    match = _DURATION_PATTERN.match(normalized)
+    if not match:
+        raise ValueError(
+            "Expected cache ttl like 10m/24h/1d or one of: daily, weekly, session"
+        )
+
+    amount = int(match.group("amount"))
+    if amount <= 0:
+        raise ValueError("Cache duration must be greater than 0")
+
+    ttl_seconds = amount * _UNIT_SECONDS[match.group("unit")]
+    return {"mode": "duration", "ttl_seconds": ttl_seconds}
+
+
+def parse_db_timestamp(raw_value: str | None) -> datetime | None:
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value)
+    except ValueError:
+        try:
+            return datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+
+
+def start_of_week(value: datetime, week_start_day: int) -> datetime:
+    delta_days = (value.weekday() - week_start_day) % 7
+    return (value - timedelta(days=delta_days)).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+
+
+def cache_entry_is_valid(
+    *,
+    created_at: str | None,
+    cache_mode: str,
+    ttl_seconds: int | None,
+    now: datetime,
+    week_start_day: int,
+) -> bool:
+    created_dt = parse_db_timestamp(created_at)
+    if created_dt is None:
+        return False
+    if created_dt.tzinfo is None and now.tzinfo is not None:
+        created_dt = created_dt.replace(tzinfo=timezone.utc)
+    elif created_dt.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if cache_mode == "duration":
+        if ttl_seconds is None:
+            return False
+        return now - created_dt < timedelta(seconds=ttl_seconds)
+    if cache_mode == "daily":
+        return created_dt.date() == now.date()
+    if cache_mode == "weekly":
+        return start_of_week(created_dt, week_start_day) == start_of_week(now, week_start_day)
+    if cache_mode == "session":
+        return True
+    return False
+
+
+def compute_cache_expiration(
+    *,
+    created_at: datetime,
+    cache_mode: str,
+    ttl_seconds: int | None,
+    week_start_day: int,
+) -> datetime | None:
+    if cache_mode == "session":
+        return None
+    if cache_mode == "duration":
+        if ttl_seconds is None:
+            raise ValueError("Duration cache entries require ttl_seconds")
+        return created_at + timedelta(seconds=ttl_seconds)
+    if cache_mode == "daily":
+        return (created_at + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+    if cache_mode == "weekly":
+        return start_of_week(created_at, week_start_day) + timedelta(days=7)
+    raise ValueError(f"Unsupported cache mode '{cache_mode}'")
+
+
+# ---------------------------------------------------------------------------
+# Database helpers
+# ---------------------------------------------------------------------------
 
 def _get_db_path(system_root: Optional[Path] = None) -> str:
     return get_system_database_path(DB_NAME, str(system_root) if system_root else None)
@@ -133,6 +241,10 @@ def _ensure_db(system_root: Optional[Path] = None) -> str:
     return db_path
 
 
+# ---------------------------------------------------------------------------
+# Cache artifact store
+# ---------------------------------------------------------------------------
+
 def purge_expired_cache_artifacts(
     *,
     now: datetime,
@@ -182,39 +294,20 @@ def upsert_cache_artifact(
     conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         conn.execute(
-            """
-            DELETE FROM cache_artifacts
-            WHERE owner_id = ? AND artifact_ref = ?
-            """,
+            "DELETE FROM cache_artifacts WHERE owner_id = ? AND artifact_ref = ?",
             (owner_id, artifact_ref),
         )
         conn.execute(
             """
             INSERT INTO cache_artifacts (
-                owner_id,
-                session_key,
-                artifact_ref,
-                cache_mode,
-                ttl_seconds,
-                raw_content,
-                metadata,
-                origin,
-                created_at,
-                last_accessed_at,
-                expires_at
+                owner_id, session_key, artifact_ref, cache_mode, ttl_seconds,
+                raw_content, metadata, origin, created_at, last_accessed_at, expires_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                owner_id,
-                session_key,
-                artifact_ref,
-                cache_mode,
-                ttl_seconds,
-                raw_content,
-                metadata_json,
-                origin,
-                now.isoformat(sep=" "),
-                now.isoformat(sep=" "),
+                owner_id, session_key, artifact_ref, cache_mode, ttl_seconds,
+                raw_content, metadata_json, origin,
+                now.isoformat(sep=" "), now.isoformat(sep=" "),
                 None if expires_at is None else expires_at.isoformat(sep=" "),
             ),
         )
@@ -238,19 +331,8 @@ def get_cache_artifact(
     try:
         row = conn.execute(
             """
-            SELECT
-                id,
-                owner_id,
-                session_key,
-                artifact_ref,
-                cache_mode,
-                ttl_seconds,
-                raw_content,
-                metadata,
-                origin,
-                created_at,
-                last_accessed_at,
-                expires_at
+            SELECT id, owner_id, session_key, artifact_ref, cache_mode, ttl_seconds,
+                   raw_content, metadata, origin, created_at, last_accessed_at, expires_at
             FROM cache_artifacts
             WHERE owner_id = ? AND artifact_ref = ?
             LIMIT 1
@@ -291,17 +373,10 @@ def get_cache_artifact(
         metadata = {}
 
     return {
-        "owner_id": row[1],
-        "session_key": row[2],
-        "artifact_ref": row[3],
-        "cache_mode": cache_mode,
-        "ttl_seconds": ttl_seconds,
-        "raw_content": row[6],
-        "metadata": metadata,
-        "origin": row[8],
-        "created_at": created_at,
-        "last_accessed_at": row[10],
-        "expires_at": row[11],
+        "owner_id": row[1], "session_key": row[2], "artifact_ref": row[3],
+        "cache_mode": cache_mode, "ttl_seconds": ttl_seconds,
+        "raw_content": row[6], "metadata": metadata, "origin": row[8],
+        "created_at": created_at, "last_accessed_at": row[10], "expires_at": row[11],
     }
 
 
@@ -343,28 +418,12 @@ def upsert_cached_step_output(
         conn.execute(
             """
             INSERT INTO context_step_cache (
-                run_id,
-                session_id,
-                vault_name,
-                template_name,
-                template_hash,
-                section_key,
-                cache_mode,
-                ttl_seconds,
-                raw_output
+                run_id, session_id, vault_name, template_name, template_hash,
+                section_key, cache_mode, ttl_seconds, raw_output
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                run_id,
-                session_id,
-                vault_name,
-                template_name,
-                template_hash,
-                section_key,
-                cache_mode,
-                ttl_seconds,
-                raw_output,
-            ),
+            (run_id, session_id, vault_name, template_name, template_hash,
+             section_key, cache_mode, ttl_seconds, raw_output),
         )
         conn.commit()
     except Exception as exc:  # pragma: no cover - defensive
@@ -390,44 +449,24 @@ def get_cached_step_output(
         if cache_mode == "session":
             rows = conn.execute(
                 """
-                SELECT
-                    run_id,
-                    session_id,
-                    vault_name,
-                    template_name,
-                    template_hash,
-                    section_key,
-                    cache_mode,
-                    ttl_seconds,
-                    raw_output,
-                    created_at
+                SELECT run_id, session_id, vault_name, template_name, template_hash,
+                       section_key, cache_mode, ttl_seconds, raw_output, created_at
                 FROM context_step_cache
                 WHERE vault_name = ? AND template_name = ? AND section_key = ?
                   AND cache_mode = ? AND session_id = ?
-                ORDER BY id DESC
-                LIMIT 1
+                ORDER BY id DESC LIMIT 1
                 """,
                 (vault_name, template_name, section_key, cache_mode, session_id),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
-                SELECT
-                    run_id,
-                    session_id,
-                    vault_name,
-                    template_name,
-                    template_hash,
-                    section_key,
-                    cache_mode,
-                    ttl_seconds,
-                    raw_output,
-                    created_at
+                SELECT run_id, session_id, vault_name, template_name, template_hash,
+                       section_key, cache_mode, ttl_seconds, raw_output, created_at
                 FROM context_step_cache
                 WHERE vault_name = ? AND template_name = ? AND section_key = ?
                   AND cache_mode = ?
-                ORDER BY id DESC
-                LIMIT 1
+                ORDER BY id DESC LIMIT 1
                 """,
                 (vault_name, template_name, section_key, cache_mode),
             ).fetchall()
@@ -439,18 +478,11 @@ def get_cached_step_output(
 
     if not rows:
         return None
-
     row = rows[0]
     return {
-        "run_id": row[0],
-        "session_id": row[1],
-        "vault_name": row[2],
-        "template_name": row[3],
-        "template_hash": row[4],
-        "section_key": row[5],
-        "cache_mode": row[6],
-        "ttl_seconds": row[7],
-        "raw_output": row[8],
+        "run_id": row[0], "session_id": row[1], "vault_name": row[2],
+        "template_name": row[3], "template_hash": row[4], "section_key": row[5],
+        "cache_mode": row[6], "ttl_seconds": row[7], "raw_output": row[8],
         "created_at": row[9],
     }
 
@@ -467,10 +499,7 @@ def upsert_session(
     conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         conn.execute(
-            """
-            INSERT OR IGNORE INTO sessions (session_id, vault_name, metadata)
-            VALUES (?, ?, ?)
-            """,
+            "INSERT OR IGNORE INTO sessions (session_id, vault_name, metadata) VALUES (?, ?, ?)",
             (session_id, vault_name, meta_json),
         )
         conn.commit()
@@ -485,7 +514,7 @@ def add_context_summary(
     session_id: str,
     vault_name: str,
     turn_index: Optional[int],
-    template: TemplateRecord,
+    template: "TemplateRecord",
     model_alias: str,
     raw_output: Optional[str],
     budget_used: Optional[int] = None,
@@ -504,33 +533,16 @@ def add_context_summary(
         conn.execute(
             """
             INSERT INTO context_summaries (
-                session_id,
-                vault_name,
-                turn_index,
-                template_name,
-                template_source,
-                template_hash,
-                model_alias,
-                raw_output,
-                budget_used,
-                sections_included,
-                compiled_prompt,
-                input_payload
+                session_id, vault_name, turn_index, template_name, template_source,
+                template_hash, model_alias, raw_output, budget_used,
+                sections_included, compiled_prompt, input_payload
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                session_id,
-                vault_name,
-                turn_index,
-                template.name,
-                template.source,
-                template.sha256,
-                model_alias,
-                raw_output,
-                budget_used,
-                sections_str,
-                compiled_prompt,
-                payload_str,
+                session_id, vault_name, turn_index,
+                template.name, template.source, template.sha256,
+                model_alias, raw_output, budget_used,
+                sections_str, compiled_prompt, payload_str,
             ),
         )
         conn.commit()
@@ -548,27 +560,15 @@ def get_recent_summaries(
     limit: Optional[int] = 5,
     system_root: Optional[Path] = None,
 ) -> list[Dict[str, Any]]:
-    """
-    Fetch recent compiled summaries for a session/vault.
-
-    Returns a compact list of snapshots so tools can compare the current turn
-    with prior objectives/constraints without pulling full transcripts.
-    """
+    """Fetch recent compiled summaries for a session/vault."""
     _ensure_db(system_root)
     conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
     try:
         if limit is None:
             rows = conn.execute(
                 """
-                SELECT
-                    turn_index,
-                    template_name,
-                    template_hash,
-                    model_alias,
-                    raw_output,
-                    compiled_prompt,
-                    input_payload,
-                    created_at
+                SELECT turn_index, template_name, template_hash, model_alias,
+                       raw_output, compiled_prompt, input_payload, created_at
                 FROM context_summaries
                 WHERE session_id = ? AND vault_name = ?
                 ORDER BY id DESC
@@ -578,19 +578,11 @@ def get_recent_summaries(
         else:
             rows = conn.execute(
                 """
-                SELECT
-                    turn_index,
-                    template_name,
-                    template_hash,
-                    model_alias,
-                    raw_output,
-                    compiled_prompt,
-                    input_payload,
-                    created_at
+                SELECT turn_index, template_name, template_hash, model_alias,
+                       raw_output, compiled_prompt, input_payload, created_at
                 FROM context_summaries
                 WHERE session_id = ? AND vault_name = ?
-                ORDER BY id DESC
-                LIMIT ?
+                ORDER BY id DESC LIMIT ?
                 """,
                 (session_id, vault_name, limit),
             ).fetchall()
@@ -602,23 +594,14 @@ def get_recent_summaries(
 
     snapshots: list[Dict[str, Any]] = []
     for row in rows:
-        input_payload = None
         try:
             input_payload = json.loads(row[6]) if row[6] else None
         except Exception:
             input_payload = None
-
-        snapshots.append(
-            {
-                "turn_index": row[0],
-                "template_name": row[1],
-                "template_hash": row[2],
-                "model_alias": row[3],
-                "raw_output": row[4],
-                "compiled_prompt": row[5],
-                "input_payload": input_payload,
-                "created_at": row[7],
-            }
-        )
+        snapshots.append({
+            "turn_index": row[0], "template_name": row[1], "template_hash": row[2],
+            "model_alias": row[3], "raw_output": row[4], "compiled_prompt": row[5],
+            "input_payload": input_payload, "created_at": row[7],
+        })
 
     return snapshots

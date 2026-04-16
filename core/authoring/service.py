@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core.authoring.loader import (
+from core.authoring.template_loader import (
     AuthoringTemplateSource,
     load_authoring_template_file,
     parse_authoring_template_text,
@@ -15,7 +15,7 @@ from core.authoring.runtime import (
     run_authoring_monty,
 )
 from core.constants import VALID_WEEK_DAYS
-from core.workflow.parser import validate_config
+from core.scheduling.parser import ScheduleParsingError, parse_schedule_syntax
 from core.utils.frontmatter import parse_simple_frontmatter
 
 
@@ -68,6 +68,9 @@ async def run_authoring_template_text(
     return await _run_loaded_template(workflow_id=workflow_id, source=source)
 
 
+_VALID_RUN_TYPES: frozenset[str] = frozenset({"workflow", "context"})
+
+
 def compile_candidate_workflow(
     *,
     workflow_id: str,
@@ -76,6 +79,12 @@ def compile_candidate_workflow(
     """Compile candidate workflow markdown and return structured diagnostics."""
     frontmatter, _body = parse_simple_frontmatter(content, require_frontmatter=False)
     engine_name = str(frontmatter.get("workflow_engine") or "").strip().lower()
+    run_type = str(frontmatter.get("run_type") or "").strip().lower()
+
+    # A file with a recognised run_type is a unified Authoring template — always Monty.
+    if not engine_name and run_type in _VALID_RUN_TYPES:
+        engine_name = "monty"
+
     if engine_name != "monty":
         return AuthoringCompileResult(
             ok=False,
@@ -104,7 +113,7 @@ def _compile_monty_candidate_workflow(
             missing_error="Workflow file must start with YAML frontmatter (---)",
         )
         vault_name, workflow_name = _split_workflow_id(workflow_id)
-        validate_config(frontmatter, vault_name, workflow_name)
+        _validate_monty_frontmatter(frontmatter, vault_name, workflow_name)
         parsed = parse_authoring_template_text(content)
     except ValueError as exc:
         return AuthoringCompileResult(
@@ -145,6 +154,34 @@ def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
             f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}"
         )
     return workflow_id.split("/", 1)
+
+
+def _validate_monty_frontmatter(frontmatter: dict, vault_name: str, workflow_name: str) -> None:
+    """Validate Monty workflow frontmatter fields without DSL-schema dependencies."""
+    schedule = str(frontmatter.get("schedule") or "").strip()
+    if schedule:
+        try:
+            parse_schedule_syntax(schedule)
+        except ScheduleParsingError as exc:
+            raise ValueError(
+                f"Invalid schedule in {vault_name}/{workflow_name}: {exc}"
+            ) from exc
+
+    raw_wsd = frontmatter.get("week_start_day") or frontmatter.get("week-start-day")
+    if raw_wsd is not None:
+        normalized = str(raw_wsd).strip().lower()
+        if normalized not in VALID_WEEK_DAYS:
+            raise ValueError(
+                f"Invalid week_start_day '{raw_wsd}' in {vault_name}/{workflow_name}. "
+                f"Must be one of: {', '.join(VALID_WEEK_DAYS)}"
+            )
+
+    run_type = str(frontmatter.get("run_type") or "").strip().lower()
+    if run_type and run_type not in _VALID_RUN_TYPES:
+        raise ValueError(
+            f"Invalid run_type '{frontmatter['run_type']}' in {vault_name}/{workflow_name}. "
+            f"Must be one of: {', '.join(sorted(_VALID_RUN_TYPES))}"
+        )
 
 
 def _resolve_week_start_day(frontmatter: dict[str, object]) -> int:

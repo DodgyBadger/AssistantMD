@@ -6,7 +6,11 @@ from dataclasses import dataclass
 import os
 from typing import Any, Optional
 
+from core.logger import UnifiedLogger
 from core.runtime.buffers import get_buffer_store_for_scope
+
+
+logger = UnifiedLogger(tag="routing")
 
 
 @dataclass(frozen=True)
@@ -14,6 +18,8 @@ class OutputTarget:
     type: str  # inline | discard | buffer | file
     name: Optional[str] = None
     path: Optional[str] = None
+
+
 def build_manifest(
     *,
     source: str,
@@ -212,12 +218,22 @@ def write_output(
         else:
             file_mode = "a"
 
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        output_dir = os.path.dirname(output_file)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         with open(output_file, file_mode, encoding="utf-8") as file:
             if header:
                 file.write(f"# {header}\n\n")
             file.write(content or "")
             file.write("\n\n")
+        logger.add_sink("validation").info(
+            "file_output_written",
+            data={
+                "path": output_file,
+                "write_mode": mode,
+                "output_length": len(content or ""),
+            },
+        )
         return {"routed": True, "type": "file", "path": output_file, "write_mode": mode, "output_length": len(content or "")}
 
     raise ValueError(f"Unknown output target type: {target.type}")

@@ -261,7 +261,11 @@ class ChatStore:
                     matched.append(msg)
                     if len(matched) >= limit:
                         break
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Message predicate raised in get_recent_matching",
+                    data={"session_id": session_id, "vault_name": vault_name, "error": str(exc)},
+                )
                 continue
         matched.reverse()
         return matched
@@ -468,7 +472,7 @@ class ChatStore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "Failed to deserialize stored chat message",
-                    metadata={
+                    data={
                         "session_id": session_id,
                         "vault_name": vault_name,
                         "sequence_index": sequence_index,

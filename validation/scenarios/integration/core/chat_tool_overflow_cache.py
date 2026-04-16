@@ -22,7 +22,7 @@ class ChatToolOverflowCacheScenario(BaseScenario):
         await self.start_system()
 
         import core.chat.executor as chat_executor
-        from core.context.store import get_cache_artifact
+        from core.authoring.cache import get_cache_artifact
         from core.runtime.state import get_runtime_context
         from pydantic_ai.models.test import TestModel
 

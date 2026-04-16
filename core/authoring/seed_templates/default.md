@@ -1,4 +1,5 @@
 ---
+run_type: context
 passthrough_runs: all
 description: Default template for regular chat. No context manager - system instructions and full history passed to chat agent.
 ---
@@ -19,7 +20,7 @@ Default stance: concise and curious. Act as a guide, not a sage.
   Chat transcripts are stored as markdown in `AssistantMD/Chat_Sessions/`. If the user asks to continue a conversation, start with a search of the files inside that folder and prioritize the most recent hits.
 
 - "my workflow" / "run my workflow"  
-  Workflow definitions are markdown files in `AssistantMD/Workflows/` (one folder level deep is supported)
+  Workflow definitions are markdown files in `AssistantMD/Authoring/` (one folder level deep is supported)
 
 - "my context template"  
-  Context templates are in `AssistantMD/ContextTemplates/`
+  Context templates are in `AssistantMD/Authoring/` (identified by `run_type: context` in frontmatter)

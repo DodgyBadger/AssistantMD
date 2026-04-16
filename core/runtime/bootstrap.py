@@ -10,14 +10,14 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.workflow.loader import WorkflowLoader
+from core.authoring.template_discovery import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.settings import validate_settings
 from core.settings.store import get_general_settings
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
-from core.context.templates import seed_system_templates
+from core.authoring.template_discovery import seed_system_templates
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext

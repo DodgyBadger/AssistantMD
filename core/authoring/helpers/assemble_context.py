@@ -51,15 +51,7 @@ async def execute(
     if latest_user_message is not None:
         assembled_messages.append(normalize_context_message(latest_user_message, default_role="user"))
 
-    logger.info(
-        "authoring_assemble_context_completed",
-        data={
-            "workflow_id": context.workflow_id,
-            "message_count": len(assembled_messages),
-            "instruction_count": 1 if instructions else 0,
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_assemble_context_completed",
         data={
             "workflow_id": context.workflow_id,

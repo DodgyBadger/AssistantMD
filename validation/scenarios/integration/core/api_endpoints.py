@@ -22,7 +22,7 @@ class ApiEndpointsScenario(BaseScenario):
         # Seed a minimal step workflow for execution and status checks
         self.create_file(
             vault,
-            "AssistantMD/Workflows/status_probe.md",
+            "AssistantMD/Authoring/status_probe.md",
             STATUS_PROBE_WORKFLOW,
         )
 
@@ -239,14 +239,14 @@ class ApiEndpointsScenario(BaseScenario):
 # === WORKFLOW TEMPLATES ===
 
 STATUS_PROBE_WORKFLOW = """---
-workflow_engine: step
+run_type: workflow
 enabled: false
 description: Validation helper workflow
 ---
 
-## STEP1
-@output file: logs/{today}
-@model test
+## Run
 
-Summarize the validation run context.
+```python
+await finish(status="completed", reason="status-probe")
+```
 """

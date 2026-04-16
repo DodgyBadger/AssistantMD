@@ -45,7 +45,7 @@ from core.settings.secrets_store import (
     secret_has_value,
 )
 from core.runtime.paths import get_system_root
-from core.context.store import purge_expired_cache_artifacts
+from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore
 from .models import (
     VaultInfo,
@@ -84,7 +84,7 @@ from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
-from core.context.templates import list_templates
+from core.authoring.template_discovery import list_templates
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -1336,7 +1336,7 @@ async def execute_workflow_manually(
         start_time = datetime.now()
         try:
             # Create job arguments
-            job_args = create_job_args(target_workflow.global_id)
+            job_args = create_job_args(target_workflow.global_id, file_path=target_workflow.file_path)
 
             # Execute workflow with job arguments and optional step_name
             kwargs = {}

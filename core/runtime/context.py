@@ -12,7 +12,7 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.workflow.loader import WorkflowLoader
+from core.authoring.template_discovery import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService

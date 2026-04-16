@@ -8,10 +8,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from core.directives.parser import DirectiveValueParser
-from core.directives.write_mode import WriteModeDirective
+from pydantic_ai.messages import AudioUrl, BinaryContent, DocumentUrl, ImageUrl, ToolReturn, VideoUrl
+
+from core.utils.value_parser import DirectiveValueParser
+from core.logger import UnifiedLogger
 from core.utils.patterns import PatternUtilities
-from core.utils.routing import OutputTarget, write_output
+from core.utils.routing import OutputTarget, build_manifest, write_output
+
+
+logger = UnifiedLogger(tag="workflow-output-resolution")
 
 
 OUTPUT_ALLOWED_PARAMETERS = {"scope"}
@@ -53,14 +58,19 @@ class ResolvedOutputTarget:
         return self.type
 
 
+_VALID_WRITE_MODES: frozenset[str] = frozenset({"append", "new", "replace"})
+
+
 def normalize_write_mode(value: str | None) -> str | None:
-    """Normalize write mode using the existing directive contract."""
-    if value is None:
+    """Normalize and validate a write mode string."""
+    if not value or not value.strip():
         return None
-    value = value.strip()
-    if not value:
-        return None
-    return WriteModeDirective().process_value(value, vault_path="")
+    mode = value.strip().lower()
+    if mode not in _VALID_WRITE_MODES:
+        raise ValueError(
+            f"Invalid write mode '{value}'. Valid modes are: {', '.join(sorted(_VALID_WRITE_MODES))}"
+        )
+    return mode
 
 
 def parse_output_value(
@@ -128,7 +138,7 @@ def build_output_request(
     if set(normalized_params) - OUTPUT_ALLOWED_PARAMETERS:
         raise ValueError("Output target does not accept parameters")
 
-    scope_value = _clean_optional_string(normalized_params.get("scope"))
+    scope_value = clean_optional_string(normalized_params.get("scope"))
 
     if normalized_type == "context":
         if target not in {None, ""}:
@@ -353,8 +363,11 @@ def _find_latest_file_date(
                 file_date = pattern_utils.extract_date_from_filename(latest_files[0])
                 if file_date:
                     return file_date.strftime("%Y-%m-%d")
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "find_latest_file_date failed; using reference_date",
+            data={"vault_path": vault_path, "error": str(exc)},
+        )
     return reference_date.strftime("%Y-%m-%d")
 
 
@@ -409,7 +422,7 @@ def _normalize_markdown_extension(file_path: str) -> str:
     return f"{file_path}.md"
 
 
-def _clean_optional_string(value: Any) -> str | None:
+def clean_optional_string(value: Any) -> str | None:
     if value is None:
         return None
     cleaned = str(value).strip()
@@ -417,7 +430,124 @@ def _clean_optional_string(value: Any) -> str | None:
 
 
 def _clean_required_string(value: Any, error_message: str) -> str:
-    cleaned = _clean_optional_string(value)
+    cleaned = clean_optional_string(value)
     if cleaned is None:
         raise ValueError(error_message)
     return cleaned
+
+
+def _has_multimodal_tool_payload(result: object) -> bool:
+    if not isinstance(result, ToolReturn):
+        return False
+    content = result.content
+    if content is None or isinstance(content, str):
+        return False
+    for item in content:
+        if isinstance(item, (BinaryContent, ImageUrl, AudioUrl, DocumentUrl, VideoUrl)):
+            return True
+    return False
+
+
+def route_tool_output(
+    result: Any,
+    *,
+    tool_name: str,
+    output_value: str | None,
+    write_mode_value: str | None,
+    params: dict[str, str],
+    vault_path: str,
+    week_start_day: int,
+    buffer_store: Any = None,
+    buffer_store_registry: dict[str, Any] | None = None,
+) -> Any:
+    """Route tool output to a resolved write target, returning a manifest string."""
+    if tool_name == "buffer_ops":
+        return result
+    hard_output = params.get("output")
+    output_target = hard_output or output_value
+    scope_value = params.get("scope")
+    if _has_multimodal_tool_payload(result):
+        if output_target and output_target.strip().lower() != "inline":
+            logger.warning(
+                "Bypassing tool output routing for multimodal tool return",
+                data={"tool": tool_name, "output_target": output_target},
+            )
+        return result
+    if output_target is None:
+        return result
+
+    if hard_output is not None and hard_output.strip().lower() == "inline":
+        return result
+
+    write_mode_param = params.get("write-mode") or params.get("write_mode")
+    write_mode = normalize_write_mode(write_mode_param or write_mode_value)
+    try:
+        parsed_target = resolve_output_request(
+            parse_output_value(output_target),
+            vault_path=vault_path,
+            reference_date=datetime.now(),
+            week_start_day=week_start_day,
+        )
+    except Exception as exc:
+        return f"Invalid output target: {exc}. Use output=\"variable:NAME\" or output=\"file:PATH\"."
+
+    if parsed_target.type == "inline":
+        return result
+
+    content = "" if result is None else (result if isinstance(result, str) else str(result))
+    if parsed_target.type == "discard":
+        manifest = build_manifest(
+            source=tool_name,
+            destination="discard",
+            item_count=1,
+            total_chars=len(content),
+        )
+        logger.add_sink("validation").info(
+            "tool_output_routed",
+            data={
+                "tool": tool_name,
+                "destination": "discard",
+                "write_mode": write_mode or "append",
+                "output_chars": len(content),
+                "forced": hard_output is not None,
+            },
+        )
+        return manifest
+
+    default_scope = "run"
+    if buffer_store_registry and "session" in buffer_store_registry and "run" not in buffer_store_registry:
+        default_scope = "session"
+    write_result = write_output(
+        target=parsed_target.target,
+        content=content,
+        write_mode=write_mode,
+        buffer_store=buffer_store,
+        buffer_store_registry=buffer_store_registry,
+        vault_path=vault_path,
+        buffer_scope=parsed_target.buffer_scope or scope_value,
+        default_scope=default_scope,
+    )
+    destination = ""
+    if write_result.get("type") == "buffer":
+        destination = f"variable: {write_result.get('name')}"
+    elif write_result.get("type") == "file":
+        destination = f"file: {write_result.get('path')}"
+    else:
+        destination = parsed_target.type
+    manifest = build_manifest(
+        source=tool_name,
+        destination=destination,
+        item_count=1,
+        total_chars=len(content),
+    )
+    logger.add_sink("validation").info(
+        "tool_output_routed",
+        data={
+            "tool": tool_name,
+            "destination": destination,
+            "write_mode": write_mode or "append",
+            "output_chars": len(content),
+            "forced": hard_output is not None,
+        },
+    )
+    return manifest

@@ -122,7 +122,6 @@ class PendingFilesResult:
 
     operation: str
     status: str
-    pattern: str
     items: tuple[RetrievedItem, ...] = ()
     completed_count: int = 0
 
@@ -234,53 +233,3 @@ class AuthoringCapabilityDefinition:
     contract: dict[str, Any] = field(default_factory=dict)
 
 
-def _normalize_string_set(value: Any) -> frozenset[str]:
-    """Normalize a sequence of strings into a deduplicated frozenset."""
-    return frozenset(_normalize_string_tuple(value))
-
-
-def _extract_authoring_mapping(frontmatter: Mapping[str, Any]) -> Mapping[str, Any]:
-    extracted: dict[str, Any] = {}
-    for raw_key, value in frontmatter.items():
-        if not isinstance(raw_key, str):
-            continue
-        if not raw_key.startswith("authoring."):
-            continue
-        nested_key = raw_key[len("authoring.") :].strip()
-        if nested_key:
-            extracted[nested_key] = value
-
-    if extracted:
-        return extracted
-    return {}
-
-
-def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
-    """Normalize frontmatter string lists while rejecting invalid shapes."""
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        values = _expand_string_list_literal(value)
-    elif isinstance(value, Sequence):
-        values = tuple(value)
-    else:
-        raise AuthoringCapabilityError("frontmatter capability fields must be strings or lists")
-
-    normalized: list[str] = []
-    for item in values:
-        if not isinstance(item, str):
-            raise AuthoringCapabilityError("frontmatter capability fields must only contain strings")
-        stripped = item.strip()
-        if stripped:
-            normalized.append(stripped)
-    return tuple(normalized)
-
-
-def _expand_string_list_literal(value: str) -> tuple[str, ...]:
-    stripped = value.strip()
-    if stripped.startswith("[") and stripped.endswith("]"):
-        inner = stripped[1:-1].strip()
-        if not inner:
-            return ()
-        return tuple(part.strip() for part in inner.split(","))
-    return (value,)

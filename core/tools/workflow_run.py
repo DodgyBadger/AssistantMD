@@ -15,7 +15,7 @@ from core.authoring import compile_candidate_workflow
 from core.logger import UnifiedLogger
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.scheduling.jobs import create_job_args
-from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR
+from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
 from .base import BaseTool
 
@@ -41,7 +41,7 @@ class WorkflowRun(BaseTool):
             """Run or list workflows in the current vault.
 
             :param operation: Operation name (list, test, run, enable_workflow, disable_workflow)
-            :param workflow_name: Workflow name relative to AssistantMD/Workflows (required for test/run/enable/disable)
+            :param workflow_name: Workflow name relative to AssistantMD/Authoring (required for test/run/enable/disable)
             :param step_name: Optional step name to execute (run only)
             """
             try:
@@ -150,7 +150,7 @@ Full documentation:
 
 Important notes:
 - start with `operation="list"` when you do not know the workflow name
-- use names relative to `AssistantMD/Workflows`
+- use names relative to `AssistantMD/Authoring`
 """
 
     @staticmethod
@@ -195,8 +195,8 @@ Important notes:
             return normalized
 
         prefixes = (
-            f"{ASSISTANTMD_ROOT_DIR}/{WORKFLOW_DEFINITIONS_DIR}/",
-            f"{WORKFLOW_DEFINITIONS_DIR}/",
+            f"{ASSISTANTMD_ROOT_DIR}/{AUTHORING_DIR}/",
+            f"{AUTHORING_DIR}/",
         )
         for prefix in prefixes:
             if normalized.startswith(prefix):
@@ -388,7 +388,7 @@ Important notes:
             kwargs["step_name"] = step_name
 
         started = datetime.now()
-        job_args = create_job_args(target.global_id)
+        job_args = create_job_args(target.global_id, file_path=target.file_path)
         execution_result = await target.workflow_function(job_args, **kwargs)
         elapsed = (datetime.now() - started).total_seconds()
         terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
@@ -429,9 +429,8 @@ Important notes:
 
     @staticmethod
     def _resolve_workflow_file_path(*, vault_path: str, workflow_name: str) -> Path:
-        base_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / WORKFLOW_DEFINITIONS_DIR
         normalized = workflow_name.strip().replace("\\", "/")
-        candidate = base_dir / normalized
+        candidate = Path(vault_path) / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR / normalized
         if candidate.suffix.lower() != ".md":
             candidate = candidate.with_suffix(".md")
         return candidate
@@ -620,15 +619,12 @@ Important notes:
         data_root: str,
     ) -> None:
         """Safely update only the enabled flag in workflow frontmatter."""
-        workflows_root = os.path.realpath(
-            os.path.join(data_root, vault_name, ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR)
+        assistantmd_root = os.path.realpath(
+            os.path.join(data_root, vault_name, ASSISTANTMD_ROOT_DIR)
         )
         target_real = os.path.realpath(file_path)
-        if not (
-            target_real == workflows_root
-            or target_real.startswith(workflows_root + os.sep)
-        ):
-            raise ValueError("Workflow file path escapes vault workflow root")
+        if not target_real.startswith(assistantmd_root + os.sep):
+            raise ValueError("Workflow file path escapes vault AssistantMD root")
 
         with open(file_path, "r", encoding="utf-8") as file:
             content = file.read()

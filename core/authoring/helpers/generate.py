@@ -17,8 +17,10 @@ from core.authoring.helpers.common import build_capability
 from core.authoring.helpers.runtime_common import coerce_output_data, normalize_retrieved_items_input
 from core.authoring.shared.execution_prep import build_step_prompt, resolve_step_model_execution
 from core.authoring.shared.tool_binding import resolve_tool_binding
-from core.context.cache_semantics import parse_cache_mode_value
-from core.context.store import get_cache_artifact, purge_expired_cache_artifacts, upsert_cache_artifact
+from core.authoring.cache import parse_cache_mode_value
+from core.llm.model_factory import build_model_instance
+from core.llm.model_selection import ModelExecutionSpec
+from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts, upsert_cache_artifact
 from core.logger import UnifiedLogger
 
 
@@ -38,9 +40,7 @@ async def execute(
     call: AuthoringCapabilityCall,
     context: AuthoringExecutionContext,
 ) -> GenerationResult:
-    from core.directives.model import ModelDirective
     from core.llm.agents import create_agent, generate_response
-    from core.llm.model_selection import ModelExecutionSpec
 
     host = context.host
     prompt, inputs, instructions, model_value, tool_names, cache_policy, options = _parse_call(call)
@@ -81,17 +81,7 @@ async def execute(
             week_start_day=host.week_start_day,
         )
         if cached is not None:
-            logger.info(
-                "authoring_generate_cache_hit",
-                data={
-                    "workflow_id": context.workflow_id,
-                    "model": resolved_model_value or "default",
-                    "cache_mode": cache_mode,
-                    "cache_ref": cache_ref,
-                    "output_chars": len(cached["raw_content"]),
-                },
-            )
-            logger.set_sinks(["validation"]).info(
+            logger.add_sink("validation").info(
                 "authoring_generate_cache_hit",
                 data={
                     "workflow_id": context.workflow_id,
@@ -109,24 +99,11 @@ async def execute(
 
     model = None
     if resolved_model_value:
-        model = ModelDirective().process_value(resolved_model_value, host.vault_path or "")
+        model = build_model_instance(resolved_model_value)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
             raise ValueError("generate does not support skip model mode")
 
-    logger.info(
-        "authoring_generate_started",
-        data={
-            "workflow_id": context.workflow_id,
-            "model": resolved_model_value or "default",
-            "instructions_present": bool(instructions),
-            "input_count": len(inputs),
-            "attached_image_count": attached_image_count,
-            "input_warnings": input_warnings,
-            "tool_names": list(tool_names),
-            "cache_mode": cache_mode,
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_generate_started",
         data={
             "workflow_id": context.workflow_id,
@@ -174,18 +151,7 @@ async def execute(
             now=host.reference_date,
             week_start_day=host.week_start_day,
         )
-        logger.info(
-            "authoring_generate_cache_stored",
-            data={
-                "workflow_id": context.workflow_id,
-                "model": resolved_model_value or "default",
-                "tool_names": list(tool_names),
-                "cache_mode": cache_mode,
-                "cache_ref": cache_ref,
-                "output_chars": len(text),
-            },
-        )
-        logger.set_sinks(["validation"]).info(
+        logger.add_sink("validation").info(
             "authoring_generate_cache_stored",
             data={
                 "workflow_id": context.workflow_id,
@@ -197,16 +163,7 @@ async def execute(
             },
         )
 
-    logger.info(
-        "authoring_generate_completed",
-        data={
-            "workflow_id": context.workflow_id,
-            "model": resolved_model_value or "default",
-            "tool_names": list(tool_names),
-            "output_chars": len(text),
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_generate_completed",
         data={
             "workflow_id": context.workflow_id,

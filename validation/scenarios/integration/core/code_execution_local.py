@@ -26,7 +26,7 @@ class CodeExecutionLocalScenario(BaseScenario):
 
         await self.start_system()
 
-        from core.context.store import upsert_cache_artifact
+        from core.authoring.cache import upsert_cache_artifact
 
         import core.chat.executor as chat_executor
         from pydantic_ai.models.test import TestModel

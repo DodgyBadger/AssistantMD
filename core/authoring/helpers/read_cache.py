@@ -9,7 +9,7 @@ from core.authoring.contracts import (
     RetrievedItem,
 )
 from core.authoring.helpers.common import build_capability
-from core.context.store import get_cache_artifact, purge_expired_cache_artifacts
+from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts
 from core.logger import UnifiedLogger
 
 
@@ -31,14 +31,7 @@ async def execute(
 ) -> RetrievedItem:
     host = context.host
     ref = _parse_call(call)
-    logger.info(
-        "authoring_read_cache_started",
-        data={
-            "workflow_id": context.workflow_id,
-            "ref": ref,
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_read_cache_started",
         data={
             "workflow_id": context.workflow_id,
@@ -74,16 +67,7 @@ async def execute(
             metadata=metadata,
         )
 
-    logger.info(
-        "authoring_read_cache_completed",
-        data={
-            "workflow_id": context.workflow_id,
-            "ref": ref,
-            "exists": result.exists,
-            "content_chars": len(result.content),
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_read_cache_completed",
         data={
             "workflow_id": context.workflow_id,

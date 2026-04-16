@@ -25,16 +25,16 @@ from core.llm.agents import create_agent
 from core.chat.chat_store import ChatStore
 from core.chat.transcript_writer import rewrite_chat_transcript, persist_chat_user_message
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
-from core.directives.model import ModelDirective
+from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
-from core.directives.tools import ToolsDirective
+from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.llm.model_utils import (
     get_model_capabilities,
     model_supports_capability,
     resolve_model,
 )
-from core.context.manager import build_context_manager_history_processor
-from core.context.templates import load_template
+from core.authoring.context_manager import build_context_manager_history_processor
+from core.authoring.template_discovery import load_template
 from core.settings import (
     get_auto_buffer_max_tokens,
     get_chunking_max_image_bytes_per_image,
@@ -44,7 +44,7 @@ from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
-from core.context.store import purge_expired_cache_artifacts, upsert_cache_artifact
+from core.authoring.cache import purge_expired_cache_artifacts, upsert_cache_artifact
 from core.tools.utils import estimate_token_count
 
 
@@ -340,7 +340,11 @@ def _get_default_context_template() -> Optional[str]:
         entry = get_general_settings().get("default_context_template")
         if entry and entry.value:
             return str(entry.value).strip() or None
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to read default_context_template setting",
+            data={"error": str(exc), "error_type": type(exc).__name__},
+        )
         return None
     return None
 
@@ -358,11 +362,19 @@ def _resolve_context_template_name(vault_path: str, context_template: Optional[s
         if candidate != fallback:
             try:
                 load_template(fallback, Path(vault_path))
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Fallback context template also missing",
+                    data={"fallback": fallback, "error": str(exc)},
+                )
                 return fallback
             return fallback
         return fallback
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Failed to load context template; falling back",
+            data={"candidate": candidate, "error": str(exc), "error_type": type(exc).__name__},
+        )
         return fallback
 
 
@@ -553,7 +565,8 @@ def _resolve_context_manager_now() -> Optional[datetime]:
         return None
     try:
         runtime = get_runtime_context()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to get runtime context for context_manager_now", data={"error": str(exc)})
         return None
     features = runtime.config.features or {}
     raw_value = features.get("context_manager_now")
@@ -567,6 +580,17 @@ def _resolve_context_manager_now() -> Optional[datetime]:
         except ValueError:
             return None
     return None
+
+
+def _check_image_size(display_name: str, size_bytes: int) -> None:
+    """Raise ValueError if the image exceeds the configured per-image byte limit."""
+    max_image_bytes = get_chunking_max_image_bytes_per_image()
+    if max_image_bytes > 0 and size_bytes > max_image_bytes:
+        max_image_mb = get_chunking_max_image_mb_per_image()
+        raise ValueError(
+            f"Image '{display_name}' is too large to attach ({size_bytes} bytes). "
+            f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+        )
 
 
 def _resolve_image_prompt(
@@ -610,14 +634,7 @@ def _resolve_image_prompt(
         file_content = BinaryContent.from_path(resolved_path)
         if not file_content.is_image:
             raise ValueError(f"File is not an image and cannot be attached: {candidate}")
-        image_size_bytes = len(file_content.data)
-        max_image_bytes = get_chunking_max_image_bytes_per_image()
-        if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
-            max_image_mb = get_chunking_max_image_mb_per_image()
-            raise ValueError(
-                f"Image '{candidate}' is too large to attach ({image_size_bytes} bytes). "
-                f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
-            )
+        _check_image_size(candidate, len(file_content.data))
 
         prompt_content.append(file_content)
         display_path = resolved_path.relative_to(vault_root).as_posix()
@@ -630,14 +647,7 @@ def _resolve_image_prompt(
             raise ValueError(
                 f"Uploaded file '{display_name}' is not an image and cannot be attached."
             )
-        image_size_bytes = len(file_content.data)
-        max_image_bytes = get_chunking_max_image_bytes_per_image()
-        if max_image_bytes > 0 and image_size_bytes > max_image_bytes:
-            max_image_mb = get_chunking_max_image_mb_per_image()
-            raise ValueError(
-                f"Image '{display_name}' is too large to attach ({image_size_bytes} bytes). "
-                f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
-            )
+        _check_image_size(display_name, len(file_content.data))
         prompt_content.append(file_content)
         history_lines.append(f"- [upload] {display_name}")
 
@@ -765,16 +775,12 @@ def _prepare_agent_config(
     tool_instructions = ""
 
     if tools:  # Only process if tools list is not empty
-        tools_directive = ToolsDirective()
         tools_value = ", ".join(tools)  # Convert list to comma-separated string
-        tool_functions, tool_instructions, _ = tools_directive.process_value(
-            tools_value,
-            vault_path=vault_path
-        )
+        binding = resolve_tool_binding(tools_value, vault_path=vault_path)
+        tool_functions = binding.tool_functions
+        tool_instructions = binding.tool_instructions
 
-    # Process model directive to get Pydantic AI model instance
-    model_directive = ModelDirective()
-    model_instance = model_directive.process_value(model, f"{vault_name}/chat")
+    model_instance = build_model_instance(model)
     if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
         raise ValueError(
             "Chat execution does not support skip mode model alias 'none'. "
@@ -1005,14 +1011,14 @@ async def _stream_prepared_chat_prompt(
             elif isinstance(event, FunctionToolCallEvent):
                 # Tool is being called - optionally show progress
                 tool_id = event.tool_call_id
-                logger.info(f"Tool call started: {tool_id}")
                 tool_part = getattr(event, "part", None)
                 tool_name = getattr(tool_part, "tool_name", "tool")
                 tool_args = None
                 if tool_part is not None:
                     try:
                         tool_args = tool_part.args_as_json_str()
-                    except Exception:  # noqa: BLE001 - defensive: upstream variations
+                    except Exception as exc:  # noqa: BLE001 - defensive: upstream variations
+                        logger.debug("args_as_json_str failed; using raw args", data={"error": str(exc)})
                         tool_args = tool_part.args
                 tool_activity[tool_id] = {
                     "tool_name": tool_name,
@@ -1040,14 +1046,14 @@ async def _stream_prepared_chat_prompt(
             elif isinstance(event, FunctionToolResultEvent):
                 # Tool returned a result
                 tool_id = event.tool_call_id
-                logger.info(f"Tool result received: {tool_id}")
                 result_part = getattr(event, "result", None)
                 tool_name = getattr(result_part, "tool_name", "tool")
                 result_content = None
                 if result_part is not None:
                     try:
                         result_content = result_part.model_response_str()
-                    except Exception:  # noqa: BLE001 - defensive fallback
+                    except Exception as exc:  # noqa: BLE001 - defensive fallback
+                        logger.debug("model_response_str failed; using raw content", data={"error": str(exc)})
                         result_content = getattr(result_part, "content", None)
                 tool_activity[tool_id] = {
                     "tool_name": tool_name,
@@ -1128,12 +1134,8 @@ async def _stream_prepared_chat_prompt(
         yield f"data: {json.dumps(error_chunk)}\n\n"
         raise
 
-    # Store new messages in session (including tool results captured during stream)
     if final_result:
         _CHAT_STORE.add_messages(session_id, vault_name, final_result.new_messages())
-
-    # Save chat history to markdown file
-    if final_result:
         history_file = rewrite_chat_transcript(
             store=_CHAT_STORE,
             vault_path=vault_path,

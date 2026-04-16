@@ -68,15 +68,7 @@ async def run_authoring_monty(
     effective_inputs = {**reserved_inputs, **(inputs or {})}
     capture = _PrintCapture()
 
-    logger.info(
-        "authoring_monty_execution_started",
-        data={
-            "workflow_id": workflow_id,
-            "script_name": script_name,
-            "type_check": type_check,
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_monty_execution_started",
         data={
             "workflow_id": workflow_id,
@@ -113,16 +105,7 @@ async def run_authoring_monty(
             else:
                 raise
     except Exception as exc:
-        logger.error(
-            "authoring_monty_execution_failed",
-            data={
-                "workflow_id": workflow_id,
-                "script_name": script_name,
-                "error_message": str(exc),
-                "error_type": type(exc).__name__,
-            },
-        )
-        logger.set_sinks(["validation"]).error(
+        logger.add_sink("validation").error(
             "authoring_monty_execution_failed",
             data={
                 "workflow_id": workflow_id,
@@ -135,17 +118,7 @@ async def run_authoring_monty(
             f"Monty execution failed for '{workflow_id}': {exc}"
         ) from exc
 
-    logger.info(
-        "authoring_monty_execution_completed",
-        data={
-            "workflow_id": workflow_id,
-            "script_name": script_name,
-            "status": terminal_status,
-            "reason": terminal_reason,
-            "printed_line_count": len(capture.lines),
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_monty_execution_completed",
         data={
             "workflow_id": workflow_id,

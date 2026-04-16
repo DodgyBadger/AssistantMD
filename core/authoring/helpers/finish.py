@@ -29,15 +29,7 @@ async def execute(
     context: AuthoringExecutionContext,
 ) -> None:
     status, reason = _parse_call(call)
-    logger.info(
-        "authoring_finish_requested",
-        data={
-            "workflow_id": context.workflow_id,
-            "status": status,
-            "reason": reason,
-        },
-    )
-    logger.set_sinks(["validation"]).info(
+    logger.add_sink("validation").info(
         "authoring_finish_requested",
         data={
             "workflow_id": context.workflow_id,

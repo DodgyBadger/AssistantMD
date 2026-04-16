@@ -1,0 +1,735 @@
+"""
+Workflow and context template file discovery, validation, and loading.
+
+Handles auto-discovery of authoring files from vault directories and
+manages the WorkflowLoader used by the runtime scheduler.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from apscheduler.triggers.base import BaseTrigger
+
+from core.constants import (
+    ASSISTANTMD_ROOT_DIR,
+    AUTHORING_DIR,
+    VALID_WEEK_DAYS,
+    VAULT_IGNORE_FILE,
+)
+
+import core.authoring.engine as _engine
+from core.runtime.paths import get_data_root, get_system_root
+from core.scheduling.parser import ScheduleParsingError, parse_schedule_syntax
+from core.scheduling.triggers import create_schedule_trigger
+from core.utils.frontmatter import parse_simple_frontmatter
+from core.utils.hash import hash_file_content
+from core.utils.markdown import parse_markdown_sections
+from core.logger import UnifiedLogger
+
+logger = UnifiedLogger(tag="workflow-loader")
+
+SEED_TEMPLATE_DIR = Path(__file__).parent / "seed_templates"
+
+
+# ---------------------------------------------------------------------------
+# WorkflowDefinition
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WorkflowDefinition:
+    """Workflow configuration with fully parsed and validated objects."""
+
+    vault: str
+    name: str
+    file_path: str
+    trigger: Optional[BaseTrigger]      # APScheduler trigger; None for manual-only
+    schedule_string: Optional[str]      # Original schedule string (for display)
+    workflow_function: Callable
+    workflow_name: str                  # Engine name (e.g. "monty")
+    week_start_day: str
+    description: str
+    enabled: bool = False
+
+    @property
+    def global_id(self) -> str:
+        return f"{self.vault}/{self.name}"
+
+    @property
+    def vault_path(self) -> str:
+        return os.path.join(str(get_data_root()), self.vault)
+
+    @property
+    def scheduler_job_id(self) -> str:
+        return self.global_id.replace("/", "__")
+
+    @property
+    def week_start_day_number(self) -> int:
+        day_mapping = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6,
+        }
+        return day_mapping[self.week_start_day]
+
+
+# ---------------------------------------------------------------------------
+# TemplateRecord / TemplateSection
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TemplateRecord:
+    """Resolved context template with source metadata."""
+
+    name: str
+    content: str
+    source: str  # "vault" or "system"
+    path: Optional[Path]
+    sha256: str
+    schema_block: Optional[str] = None  # raw YAML/JSON block if present
+    frontmatter: Dict[str, Any] = field(default_factory=dict)
+    instructions: Optional[str] = None
+    chat_instructions: Optional[str] = None
+    template_section: Optional[str] = None
+    template_body: Optional[str] = None
+    template_sections: List["TemplateSection"] = field(default_factory=list)
+
+
+@dataclass
+class TemplateSection:
+    """Individual context template section (one per ## heading)."""
+
+    name: str
+    content: str
+    cleaned_content: str
+
+
+# ---------------------------------------------------------------------------
+# Configuration error record
+# ---------------------------------------------------------------------------
+
+class ConfigurationError:
+    """Represents a configuration error encountered during loading."""
+
+    def __init__(
+        self,
+        vault: str,
+        workflow_name: Optional[str],
+        file_path: str,
+        error_message: str,
+        error_type: str,
+        timestamp: datetime,
+    ):
+        self.vault = vault
+        self.workflow_name = workflow_name
+        self.file_path = file_path
+        self.error_message = error_message
+        self.error_type = error_type
+        self.timestamp = timestamp
+
+
+# ---------------------------------------------------------------------------
+# File parsing helpers — shared
+# ---------------------------------------------------------------------------
+
+def _scan_md_files_one_level(directory: str) -> List[str]:
+    """Scan for .md files directly in a directory and one level of non-underscore subfolders."""
+    files = []
+    for item in os.listdir(directory):
+        item_path = os.path.join(directory, item)
+        if item.endswith(".md") and os.path.isfile(item_path):
+            files.append(item_path)
+        elif os.path.isdir(item_path) and not item.startswith("_"):
+            for subitem in os.listdir(item_path):
+                if subitem.endswith(".md"):
+                    subitem_path = os.path.join(item_path, subitem)
+                    if os.path.isfile(subitem_path):
+                        files.append(subitem_path)
+    return files
+
+
+def _discover_template_files(template_dir: Path) -> List[Path]:
+    """
+    Discover template files with one-level subfolder rules (Path-based variant).
+    - Include *.md directly under the template root
+    - Include *.md one level deep in subfolders not prefixed with underscore
+    - Do not recurse deeper
+    """
+    if not template_dir.exists() or not template_dir.is_dir():
+        return []
+
+    template_files: List[Path] = []
+    for item in sorted(template_dir.iterdir()):
+        if item.is_file() and item.suffix.lower() == ".md":
+            template_files.append(item)
+            continue
+        if item.is_dir() and not item.name.startswith("_"):
+            for subitem in sorted(item.iterdir()):
+                if subitem.is_file() and subitem.suffix.lower() == ".md":
+                    template_files.append(subitem)
+
+    return template_files
+
+
+# ---------------------------------------------------------------------------
+# Workflow file parsing helpers
+# ---------------------------------------------------------------------------
+
+def _parse_workflow_file(file_path: str) -> Dict[str, Any]:
+    """Parse workflow file; return sections dict with __FRONTMATTER_CONFIG__ key."""
+    with open(file_path, encoding="utf-8") as fh:
+        content = fh.read()
+    frontmatter, remaining = parse_simple_frontmatter(content, require_frontmatter=False)
+    sections: Dict[str, Any] = parse_markdown_sections(remaining, "##")
+    sections["__FRONTMATTER_CONFIG__"] = frontmatter
+    return sections
+
+
+def _validate_workflow_config(raw_config: Dict[str, Any], vault: str, name: str) -> Dict[str, Any]:
+    """Validate and normalise workflow frontmatter configuration."""
+    engine_name = str(raw_config.get("workflow_engine") or "").strip().lower()
+    run_type = str(raw_config.get("run_type") or "").strip().lower()
+    # Files with run_type: workflow in the unified Authoring dir are always Monty.
+    if not engine_name and run_type == "workflow":
+        engine_name = "monty"
+    if not engine_name:
+        raise ValueError(f"Missing required field 'workflow_engine' in {vault}/{name}")
+
+    schedule = raw_config.get("schedule")
+    if schedule is not None:
+        schedule = str(schedule).strip()
+        try:
+            parse_schedule_syntax(schedule)
+        except ScheduleParsingError as exc:
+            raise ValueError(f"Invalid schedule in {vault}/{name}: {exc}") from exc
+
+    enabled = bool(raw_config.get("enabled", False))
+
+    week_start_day = str(
+        raw_config.get("week_start_day") or raw_config.get("week-start-day") or "monday"
+    ).strip().lower()
+    if week_start_day not in VALID_WEEK_DAYS:
+        raise ValueError(
+            f"Invalid week_start_day '{week_start_day}' in {vault}/{name}. "
+            f"Must be one of: {', '.join(VALID_WEEK_DAYS)}"
+        )
+
+    return {
+        "workflow_engine": engine_name,
+        "schedule": schedule,
+        "enabled": enabled,
+        "week_start_day": week_start_day,
+        "description": str(raw_config.get("description") or "").strip(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Context template parsing helpers
+# ---------------------------------------------------------------------------
+
+def _ensure_md_suffix(name: str) -> str:
+    """Normalize template names to include .md extension."""
+    if not name.lower().endswith(".md"):
+        return f"{name}.md"
+    return name
+
+
+def _hash_content(content: str) -> str:
+    return hash_file_content(content, length=None)
+
+
+def _resolve_template_path(template_dir: Path, normalized_name: str) -> Optional[Path]:
+    """Resolve a template path within one-level discovery scope."""
+    normalized_key = normalized_name.replace("\\", "/")
+    for path in _discover_template_files(template_dir):
+        rel_key = path.relative_to(template_dir).as_posix()
+        if rel_key == normalized_key:
+            return path
+    return None
+
+
+def _extract_schema_block(content: str) -> Optional[str]:
+    """
+    Extract first fenced block labeled yaml or json from the template.
+    Returns raw block content or None.
+    """
+    lines = content.splitlines()
+    in_block = False
+    block_lines: List[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not in_block:
+            if stripped.startswith("```"):
+                lang = stripped[3:].strip()
+                if lang in ("yaml", "json", ""):
+                    in_block = True
+                    block_lines = []
+            continue
+
+        # inside block
+        if stripped.startswith("```"):
+            break
+        block_lines.append(line)
+
+    if not block_lines:
+        return None
+    return "\n".join(block_lines).strip()
+
+
+def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str], str]:
+    """Parse optional frontmatter and markdown sections for templates."""
+    stripped = content.lstrip()
+    if stripped.startswith("---"):
+        frontmatter, remaining = parse_simple_frontmatter(
+            content,
+            require_frontmatter=True,
+            missing_error="Template file must start with YAML frontmatter (---)",
+        )
+    else:
+        frontmatter = {}
+        remaining = content
+
+    sections = parse_markdown_sections(remaining, "##")
+    return frontmatter, sections, remaining
+
+
+def _select_instruction_and_template_sections(
+    sections: Dict[str, str],
+    remaining: str,
+) -> tuple[Optional[str], Optional[str], List[TemplateSection]]:
+    """Pick context instructions, chat instructions, and template sections."""
+    if not sections:
+        content = remaining or ""
+        if content.strip():
+            return None, None, [TemplateSection(name="Template", content=content, cleaned_content=content)]
+        return None, None, []
+
+    section_items = list(sections.items())
+    context_instructions: Optional[str] = None
+    chat_instructions: Optional[str] = None
+    context_sections: List[str] = []
+    instruction_section_names: List[str] = []
+    for section_name, _ in section_items:
+        lowered = section_name.strip().lower()
+        if "instructions" in lowered:
+            instruction_section_names.append(section_name)
+        if lowered == "chat instructions":
+            chat_instructions = sections.get(section_name, "").strip() or None
+        if lowered == "context instructions":
+            context_sections.append(section_name)
+
+    if context_sections:
+        context_instructions = "\n\n".join(
+            [
+                sections.get(section_name, "").strip()
+                for section_name in context_sections
+                if sections.get(section_name, "").strip()
+            ]
+        ).strip() or None
+
+    template_sections: List[TemplateSection] = []
+    for section_name, section_content in section_items:
+        if section_name in instruction_section_names:
+            continue
+        content = section_content or ""
+        template_sections.append(
+            TemplateSection(name=section_name, content=content, cleaned_content=content)
+        )
+
+    return context_instructions, chat_instructions, template_sections
+
+
+def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
+    content = path.read_text(encoding="utf-8")
+    frontmatter, sections, remaining = _parse_template_content(content)
+    instructions, chat_instructions, template_sections = _select_instruction_and_template_sections(
+        sections,
+        remaining,
+    )
+    first_section = template_sections[0] if template_sections else None
+    return TemplateRecord(
+        name=name,
+        content=content,
+        source=source,
+        path=path,
+        sha256=_hash_content(content),
+        schema_block=_extract_schema_block(content),
+        frontmatter=frontmatter,
+        instructions=instructions,
+        chat_instructions=chat_instructions,
+        template_section=first_section.name if first_section else None,
+        template_body=first_section.cleaned_content if first_section else None,
+        template_sections=template_sections,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Vault / file discovery
+# ---------------------------------------------------------------------------
+
+def discover_vaults(data_root: str = None) -> List[str]:
+    """Return sorted list of vault names from first-level directories."""
+    if data_root is None:
+        data_root = str(get_data_root())
+    if not os.path.exists(data_root) or not os.path.isdir(data_root):
+        return []
+    vaults = []
+    for item in os.listdir(data_root):
+        item_path = os.path.join(data_root, item)
+        if os.path.isdir(item_path) and not os.path.exists(os.path.join(item_path, VAULT_IGNORE_FILE)):
+            vaults.append(item)
+    return sorted(vaults)
+
+
+def discover_workflow_files(vault_path: str) -> List[str]:
+    """Return sorted workflow file paths from AssistantMD/Authoring."""
+    authoring_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, AUTHORING_DIR)
+    os.makedirs(authoring_dir, exist_ok=True)
+    return sorted(_scan_md_files_one_level(authoring_dir))
+
+
+# ---------------------------------------------------------------------------
+# Workflow loading
+# ---------------------------------------------------------------------------
+
+def load_workflow_from_file(
+    file_path: str,
+    vault: str,
+    name: str,
+    validated_config: Dict[str, Any],
+    sections: Dict[str, Any],
+) -> WorkflowDefinition:
+    """Load a WorkflowDefinition from a parsed configuration."""
+    schedule_string = validated_config["schedule"]
+    trigger = None
+    if schedule_string is not None:
+        trigger = create_schedule_trigger(parse_schedule_syntax(schedule_string))
+
+    engine_name = validated_config["workflow_engine"]
+    if engine_name != "monty":
+        raise ValueError(f"Unknown workflow engine '{engine_name}' in {vault}/{name}")
+
+    workflow_id = f"{vault}/{name}"
+    _engine.validate_workflow_definition(
+        workflow_id=workflow_id,
+        file_path=file_path,
+        sections=sections,
+        validated_config=validated_config,
+    )
+
+    return WorkflowDefinition(
+        vault=vault,
+        name=name,
+        file_path=file_path,
+        trigger=trigger,
+        schedule_string=schedule_string,
+        workflow_function=_engine.run_workflow,
+        workflow_name=engine_name,
+        week_start_day=validated_config["week_start_day"],
+        description=validated_config["description"],
+        enabled=validated_config["enabled"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Context template loading
+# ---------------------------------------------------------------------------
+
+def load_template(
+    name: Optional[str],
+    vault_path: Optional[Path],
+    system_root: Optional[Path] = None,
+) -> TemplateRecord:
+    """
+    Resolve a context template by name with vault → system priority.
+
+    Args:
+        name: Template filename (required)
+        vault_path: Path to the active vault (root). If None, vault lookup is skipped.
+        system_root: Optional system root override (defaults to runtime system root).
+
+    Returns:
+        TemplateRecord describing the resolved template.
+    """
+    if not name:
+        raise ValueError("Template name is required for load_template")
+
+    normalized = _ensure_md_suffix(name)
+
+    if vault_path:
+        vault_authoring_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR
+        vault_authoring_template = _resolve_template_path(vault_authoring_dir, normalized)
+        if vault_authoring_template is not None:
+            record = _read_template(vault_authoring_template, normalized, source="vault")
+            if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
+                logger.info(f"Using vault template: {vault_authoring_template}")
+                return record
+
+    try:
+        system_root = system_root or get_system_root()
+    except Exception as exc:  # pragma: no cover - defensive: bootstrap not ready
+        logger.warning(f"System root unavailable: {exc}")
+        system_root = None
+
+    if system_root:
+        system_authoring_dir = Path(system_root) / AUTHORING_DIR
+        system_authoring_template = _resolve_template_path(system_authoring_dir, normalized)
+        if system_authoring_template is not None:
+            record = _read_template(system_authoring_template, normalized, source="system")
+            if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
+                logger.info(f"Using system template: {system_authoring_template}")
+                return record
+
+    raise FileNotFoundError(f"Template '{normalized}' not found in vault or system templates")
+
+
+def list_templates(
+    vault_path: Optional[Path],
+    system_root: Optional[Path] = None,
+) -> List[TemplateRecord]:
+    """List available context templates from vault and system locations."""
+    records: List[TemplateRecord] = []
+
+    if vault_path:
+        vault_authoring_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR
+        if vault_authoring_dir.exists():
+            for path in _discover_template_files(vault_authoring_dir):
+                try:
+                    name = path.relative_to(vault_authoring_dir).as_posix()
+                    record = _read_template(path, name, "vault")
+                    if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
+                        records.append(record)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(f"Failed to read vault template {path}: {exc}")
+
+    try:
+        sys_root = system_root or get_system_root()
+    except Exception as exc:  # pragma: no cover
+        logger.warning(f"System root unavailable while listing templates: {exc}")
+        sys_root = None
+
+    if sys_root:
+        system_authoring_dir = Path(sys_root) / AUTHORING_DIR
+        if system_authoring_dir.exists():
+            for path in _discover_template_files(system_authoring_dir):
+                try:
+                    name = path.relative_to(system_authoring_dir).as_posix()
+                    record = _read_template(path, name, "system")
+                    if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
+                        records.append(record)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(f"Failed to read system template {path}: {exc}")
+
+    return records
+
+
+def seed_system_templates(system_root: Optional[Path] = None) -> None:
+    """
+    Ensure system templates directory exists with seeded defaults.
+
+    Copies all files from core/context/template_seed into the system Authoring
+    directory if they are not already present. Does not overwrite existing templates.
+    """
+    try:
+        sys_root = system_root or get_system_root()
+    except Exception as exc:  # pragma: no cover - defensive during bootstrap
+        logger.warning(f"System root unavailable while seeding templates: {exc}")
+        return
+
+    target_dir = Path(sys_root) / AUTHORING_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    if not SEED_TEMPLATE_DIR.exists():
+        logger.warning(f"Seed template directory missing: {SEED_TEMPLATE_DIR}")
+        return
+
+    for seed_path in SEED_TEMPLATE_DIR.iterdir():
+        if not seed_path.is_file():
+            continue
+        target_path = target_dir / seed_path.name
+        if target_path.exists():
+            continue  # Preserve existing templates
+        try:
+            shutil.copyfile(seed_path, target_path)
+            logger.info(f"Seeded context template to {target_path}")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(f"Failed to seed system template {target_path}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# WorkflowLoader
+# ---------------------------------------------------------------------------
+
+class WorkflowLoader:
+    """
+    Manages loading and validation of vault-based workflow configurations.
+
+    WARNING: Direct instantiation is discouraged. Use RuntimeContext.workflow_loader
+    to ensure proper dependency injection and avoid multiple instances.
+    """
+
+    def __init__(self, _data_root: str = None, *, _allow_direct_instantiation: bool = False):
+        if not _allow_direct_instantiation:
+            raise RuntimeError(
+                "Direct WorkflowLoader instantiation is discouraged. "
+                "Use get_runtime_context().workflow_loader or bootstrap_runtime() instead."
+            )
+        self._data_root = _data_root or str(get_data_root())
+        self._workflows: List[WorkflowDefinition] = []
+        self._config_errors: List[ConfigurationError] = []
+        self._last_loaded: Optional[datetime] = None
+        self._vault_info: Dict[str, Dict[str, Any]] = {}
+
+    async def load_workflows(
+        self,
+        force_reload: bool = False,
+        target_global_id: str = None,
+    ) -> List[WorkflowDefinition]:
+        """Load workflows from all vaults or a specific workflow."""
+        target_vault = None
+        target_name = None
+        if target_global_id:
+            if "/" not in target_global_id:
+                raise ValueError(
+                    f"Invalid target_global_id format. Expected 'vault/name', got: {target_global_id}"
+                )
+            target_vault, target_name = target_global_id.split("/", 1)
+
+        vaults = discover_vaults(self._data_root)
+        if target_vault:
+            vaults = [target_vault] if target_vault in vaults else []
+            if not vaults:
+                raise ValueError(f"Target vault '{target_vault}' not found")
+
+        if not vaults:
+            if not target_global_id:
+                self._workflows = []
+                self._last_loaded = datetime.now()
+            return []
+
+        if not target_global_id:
+            self._config_errors = []
+
+        workflows: List[WorkflowDefinition] = []
+        global_ids: set = set()
+        vault_info: Dict[str, Any] = {}
+
+        for vault in vaults:
+            vault_path = os.path.join(self._data_root, vault)
+            workflow_files = discover_workflow_files(vault_path)
+
+            vault_info[vault] = {
+                "path": vault_path,
+                "workflow_files": workflow_files,
+                "workflows": [],
+            }
+
+            for file_path in workflow_files:
+                try:
+                    path_parts = file_path.replace(self._data_root, "").strip("/").split("/")
+                    if len(path_parts) < 4:
+                        continue
+                    if path_parts[1] != ASSISTANTMD_ROOT_DIR or path_parts[2] != AUTHORING_DIR:
+                        continue
+
+                    vault = path_parts[0]
+
+                    if len(path_parts) == 4:
+                        name = os.path.splitext(path_parts[3])[0]
+                    elif len(path_parts) == 5:
+                        name = f"{path_parts[3]}/{os.path.splitext(path_parts[4])[0]}"
+                    else:
+                        continue
+
+                    if target_name and name != target_name:
+                        continue
+
+                    sections = _parse_workflow_file(file_path)
+                    raw_config = sections.get("__FRONTMATTER_CONFIG__", {})
+                    if not raw_config:
+                        raise ValueError("Missing YAML frontmatter configuration")
+
+                    run_type = str(raw_config.get("run_type") or "").strip().lower()
+                    if run_type == "context":
+                        continue
+
+                    validated_config = _validate_workflow_config(raw_config, vault, name)
+                    workflow = load_workflow_from_file(file_path, vault, name, validated_config, sections)
+
+                    if workflow.global_id in global_ids:
+                        raise ValueError(f"Duplicate workflow global ID: {workflow.global_id}")
+                    global_ids.add(workflow.global_id)
+                    workflows.append(workflow)
+
+                    vault_info[vault]["workflows"].append(workflow.name)
+                    logger.set_sinks(["validation"]).info(
+                        "workflow_loaded",
+                        data={
+                            "vault": vault,
+                            "workflow_id": workflow.global_id,
+                            "workflow_path": file_path,
+                            "enabled": workflow.enabled,
+                            "schedule": workflow.schedule_string,
+                            "engine": workflow.workflow_name,
+                        },
+                    )
+
+                except Exception as e:
+                    config_error = ConfigurationError(
+                        vault=vault,
+                        workflow_name=name if "name" in locals() else None,
+                        file_path=file_path,
+                        error_message=str(e),
+                        error_type=type(e).__name__,
+                        timestamp=datetime.now(),
+                    )
+                    self._config_errors.append(config_error)
+                    vault_identifier = f"{vault}/{name}" if "name" in locals() else vault
+                    logger.add_sink("validation").error(
+                        f"Failed to load workflow file {file_path}: {e}",
+                        data={
+                            "event": "workflow_load_failed",
+                            "vault": vault,
+                            "workflow_name": name if "name" in locals() else None,
+                            "workflow_path": file_path,
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "vault_identifier": vault_identifier,
+                        },
+                    )
+                    continue
+
+        if target_global_id:
+            if not workflows:
+                raise ValueError(f"Target workflow '{target_global_id}' not found")
+            self._workflows = [w for w in self._workflows if w.global_id != target_global_id]
+            self._workflows.append(workflows[0])
+            return workflows
+        else:
+            self._workflows = workflows
+            self._vault_info = vault_info
+            self._last_loaded = datetime.now()
+            return workflows
+
+    def get_enabled_workflows(self) -> List[WorkflowDefinition]:
+        return [w for w in self._workflows if w.enabled]
+
+    def get_configuration_errors(self) -> List[ConfigurationError]:
+        return self._config_errors.copy()
+
+    def get_vault_info(self) -> Dict[str, Dict[str, Any]]:
+        return self._vault_info.copy()
+
+    def get_workflow_by_global_id(self, global_id: str) -> Optional[WorkflowDefinition]:
+        for w in self._workflows:
+            if w.global_id == global_id:
+                return w
+        return None
+
+    async def ensure_workflow_directories(self, workflow: WorkflowDefinition) -> None:
+        os.makedirs(os.path.dirname(workflow.file_path), exist_ok=True)

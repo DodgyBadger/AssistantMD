@@ -36,7 +36,6 @@ class CallToolResult:
 class PendingFilesResult:
     operation: str
     status: str
-    pattern: str
     items: tuple[RetrievedItem, ...]
     completed_count: int
 
@@ -115,7 +114,6 @@ async def read_cache(
 async def pending_files(
     *,
     operation: str,
-    pattern: str,
     items: CallToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
 ) -> PendingFilesResult: ...
 

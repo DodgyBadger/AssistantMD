@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict
 
 from core.logger import UnifiedLogger
-from core.constants import ASSISTANTMD_ROOT_DIR, WORKFLOW_DEFINITIONS_DIR, CHAT_SESSIONS_DIR
+from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR, CHAT_SESSIONS_DIR
 
 
 class VaultManager:
@@ -31,7 +31,7 @@ class VaultManager:
         vault_path.mkdir(parents=True, exist_ok=True)
         
         # Create basic directory structure
-        workflows_dir = vault_path / ASSISTANTMD_ROOT_DIR / WORKFLOW_DEFINITIONS_DIR
+        workflows_dir = vault_path / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR
         chat_sessions_dir = vault_path / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
         workflows_dir.mkdir(parents=True, exist_ok=True)
         chat_sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +43,7 @@ class VaultManager:
         """Copy files/directories from source to vault.
 
         Args:
-            source_path: Path relative to /app root (e.g., 'workflow_engines/step/templates/vault')
+            source_path: Path relative to /app root (e.g., 'validation/templates/files/test_image.jpg')
             vault: Target vault (must be a vault created by this manager)
             dest_dir: Optional subdirectory within vault (e.g., 'AssistantMD/Workflows')
             dest_filename: Optional filename to rename single file (allows overwriting)

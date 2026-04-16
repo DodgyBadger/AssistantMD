@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from core.directives.parser import DirectiveValueParser
+from core.utils.value_parser import DirectiveValueParser
 
 
 ModelExecutionMode = Literal["llm", "skip"]

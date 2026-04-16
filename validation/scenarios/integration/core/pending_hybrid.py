@@ -35,7 +35,7 @@ class PendingHybridScenario(BaseScenario):
 
         self.create_file(
             vault,
-            "AssistantMD/Workflows/pending_hybrid.md",
+            "AssistantMD/Authoring/pending_hybrid.md",
             PENDING_HYBRID_WORKFLOW,
         )
 
@@ -122,15 +122,21 @@ class PendingHybridScenario(BaseScenario):
 # === WORKFLOW TEMPLATE ===
 
 PENDING_HYBRID_WORKFLOW = """---
-workflow_engine: step
+run_type: workflow
 enabled: false
 description: Pending hybrid validation
 ---
 
-## STEP1
-@model test
-@input file: tasks/* (pending, limit=5)
-@output file: logs/run-{today}
+## Run
 
-Summarize the pending files encountered. Do not modify file contents.
+```python
+listed = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "list", "target": "tasks"},
+)
+pending = await pending_files(operation="get", items=listed)
+if pending.items:
+    await pending_files(operation="complete", items=pending.items)
+await finish(status="completed", reason="pending-hybrid-done")
+```
 """
