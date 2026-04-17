@@ -86,6 +86,13 @@ INTERNAL_API_MAX_RESPONSE_CHARS = 50_000
 # LLM Prompts and Instructions
 # ==============================================================================
 
+TOOL_ROUTING_GUIDANCE = """
+Tool output routing:
+- You may route tool output with output="variable:NAME" or output="file:PATH".
+- Use write_mode=append|replace|new when routing.
+- Only route when the user explicitly asks to save or route output.
+"""
+
 # Security notice appended to all web-facing tool instructions
 WEB_TOOL_SECURITY_NOTICE = """
 

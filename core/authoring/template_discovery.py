@@ -78,7 +78,7 @@ class WorkflowDefinition:
 
 
 # ---------------------------------------------------------------------------
-# TemplateRecord / TemplateSection
+# TemplateRecord
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -92,20 +92,6 @@ class TemplateRecord:
     sha256: str
     schema_block: Optional[str] = None  # raw YAML/JSON block if present
     frontmatter: Dict[str, Any] = field(default_factory=dict)
-    instructions: Optional[str] = None
-    chat_instructions: Optional[str] = None
-    template_section: Optional[str] = None
-    template_body: Optional[str] = None
-    template_sections: List["TemplateSection"] = field(default_factory=list)
-
-
-@dataclass
-class TemplateSection:
-    """Individual context template section (one per ## heading)."""
-
-    name: str
-    content: str
-    cleaned_content: str
 
 
 # ---------------------------------------------------------------------------
@@ -281,77 +267,10 @@ def _extract_schema_block(content: str) -> Optional[str]:
     return "\n".join(block_lines).strip()
 
 
-def _parse_template_content(content: str) -> tuple[Dict[str, Any], Dict[str, str], str]:
-    """Parse optional frontmatter and markdown sections for templates."""
-    stripped = content.lstrip()
-    if stripped.startswith("---"):
-        frontmatter, remaining = parse_simple_frontmatter(
-            content,
-            require_frontmatter=True,
-            missing_error="Template file must start with YAML frontmatter (---)",
-        )
-    else:
-        frontmatter = {}
-        remaining = content
-
-    sections = parse_markdown_sections(remaining, "##")
-    return frontmatter, sections, remaining
-
-
-def _select_instruction_and_template_sections(
-    sections: Dict[str, str],
-    remaining: str,
-) -> tuple[Optional[str], Optional[str], List[TemplateSection]]:
-    """Pick context instructions, chat instructions, and template sections."""
-    if not sections:
-        content = remaining or ""
-        if content.strip():
-            return None, None, [TemplateSection(name="Template", content=content, cleaned_content=content)]
-        return None, None, []
-
-    section_items = list(sections.items())
-    context_instructions: Optional[str] = None
-    chat_instructions: Optional[str] = None
-    context_sections: List[str] = []
-    instruction_section_names: List[str] = []
-    for section_name, _ in section_items:
-        lowered = section_name.strip().lower()
-        if "instructions" in lowered:
-            instruction_section_names.append(section_name)
-        if lowered == "chat instructions":
-            chat_instructions = sections.get(section_name, "").strip() or None
-        if lowered == "context instructions":
-            context_sections.append(section_name)
-
-    if context_sections:
-        context_instructions = "\n\n".join(
-            [
-                sections.get(section_name, "").strip()
-                for section_name in context_sections
-                if sections.get(section_name, "").strip()
-            ]
-        ).strip() or None
-
-    template_sections: List[TemplateSection] = []
-    for section_name, section_content in section_items:
-        if section_name in instruction_section_names:
-            continue
-        content = section_content or ""
-        template_sections.append(
-            TemplateSection(name=section_name, content=content, cleaned_content=content)
-        )
-
-    return context_instructions, chat_instructions, template_sections
-
 
 def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
     content = path.read_text(encoding="utf-8")
-    frontmatter, sections, remaining = _parse_template_content(content)
-    instructions, chat_instructions, template_sections = _select_instruction_and_template_sections(
-        sections,
-        remaining,
-    )
-    first_section = template_sections[0] if template_sections else None
+    frontmatter, _ = parse_simple_frontmatter(content)
     return TemplateRecord(
         name=name,
         content=content,
@@ -360,11 +279,6 @@ def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
         sha256=_hash_content(content),
         schema_block=_extract_schema_block(content),
         frontmatter=frontmatter,
-        instructions=instructions,
-        chat_instructions=chat_instructions,
-        template_section=first_section.name if first_section else None,
-        template_body=first_section.cleaned_content if first_section else None,
-        template_sections=template_sections,
     )
 
 

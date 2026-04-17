@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Read, write, append, list, search, and move files safely within the current vault or virtual mounts.
+Read, write, append, list, search, inspect frontmatter, and move files safely within the current vault or virtual mounts.
 
 ## Operations
 
@@ -13,6 +13,19 @@ Read, write, append, list, search, and move files safely within the current vaul
 - `append`
 - `move`
 - `mkdir`
+- `frontmatter`
+- `head`
+
+## Parameters
+
+- `path`: file, directory, or glob pattern (used by all operations)
+- `content`: text to write or append
+- `destination`: destination path for move
+- `include_all`: include non-markdown and hidden files in listings
+- `recursive`: recurse through subdirectories for listings
+- `search_term`: text pattern to search for (search only)
+- `keys`: comma-separated frontmatter keys to extract (frontmatter only)
+- `limit`: number of lines to return, default 20 (head only)
 
 ## Examples
 
@@ -21,19 +34,35 @@ file_ops_safe(operation="list")
 ```
 
 ```python
-file_ops_safe(operation="search", target="TODO", scope="projects")
+file_ops_safe(operation="list", path="projects")
 ```
 
 ```python
-file_ops_safe(operation="read", target="notes/project.md")
+file_ops_safe(operation="search", path="projects", search_term="TODO")
+```
+
+```python
+file_ops_safe(operation="read", path="notes/project.md")
 ```
 
 ```python
 file_ops_safe(
     operation="write",
-    target="notes/output.md",
+    path="notes/output.md",
     content="# Draft\n",
 )
+```
+
+```python
+file_ops_safe(operation="frontmatter", path="AssistantMD/Authoring")
+```
+
+```python
+file_ops_safe(operation="frontmatter", path="AssistantMD/Skills", keys="name,description")
+```
+
+```python
+file_ops_safe(operation="head", path="notes/long-file.md", limit=30)
 ```
 
 ## Output Shape
@@ -44,25 +73,22 @@ When used through `call_tool(...)`, use `result.metadata` for control flow:
 
 - `status`: `completed`, `not_found`, `already_exists`, `invalid_target`, `unsupported`, or `error`
 - `operation`: resolved operation name
-- `path` / `target`
+- `path`
 - `exists` when applicable
-- operation-specific fields such as:
+- operation-specific fields:
   - `file_count`, `directory_count`, `files`, `directories` for `list`
   - `match_count`, `matches` for `search`
   - `content_chars`, `media_mode` for `read`
-
-Some reads may also return multimodal tool content:
-
-- image files can be attached directly
-- markdown files with embedded local images can return ordered multimodal content
+  - `file_count`, `items` (list of `{path, frontmatter}`) for `frontmatter`
+  - `lines_returned`, `limit` for `head`
 
 ## Vault Exploration Pattern
 
 Orient before you synthesise:
 
 1. `list` the relevant directory to get filenames and structure
-2. Use `code_execution_local` with `parse_markdown` to extract frontmatter, headings, and sections without reading full content
-3. Filter and select structurally, then read only what you need
+2. `frontmatter` to inspect metadata across a directory without reading full content
+3. `head` or `read` only what you need
 
 Avoid broad recursive lists or searches unless the scope is already known.
 
@@ -70,4 +96,6 @@ Avoid broad recursive lists or searches unless the scope is already known.
 
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
+- `frontmatter` returns all keys by default; pass `keys` to filter
+- `head` defaults to 20 lines when `limit` is not specified
 - in scripted Monty flows, use `result.metadata["status"]` for branching

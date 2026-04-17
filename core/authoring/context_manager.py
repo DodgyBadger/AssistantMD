@@ -7,7 +7,6 @@ and core/context/manager.py.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
@@ -23,14 +22,13 @@ from pydantic_ai.messages import (
 )
 
 from core.authoring.contracts import AssembleContextResult, ContextMessage
-from core.authoring.template_discovery import TemplateRecord, TemplateSection, load_template
+from core.authoring.template_discovery import load_template
 from core.authoring.template_loader import parse_authoring_template_text
 from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, run_authoring_monty
 from core.authoring.cache import add_context_summary, upsert_session
 from core.constants import CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION, VALID_WEEK_DAYS
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
-from core.tools.utils import estimate_token_count
 from core.utils.hash import hash_file_content
 from core.utils.messages import extract_role_and_text
 
@@ -59,63 +57,8 @@ class ContextTemplateError(ValueError):
 
 
 # ---------------------------------------------------------------------------
-# ContextTemplateRuntime
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ContextTemplateRuntime:
-    """Resolved template configuration for a context manager run."""
-
-    template: TemplateRecord
-    sections: List[TemplateSection]
-    week_start_day: int
-    passthrough_runs: int
-    token_threshold: int
-    chat_instruction_message: Optional[ModelMessage]
-
-
-# ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
-
-def build_chat_instruction_message(chat_instructions: Optional[str]) -> Optional[ModelMessage]:
-    if not chat_instructions:
-        return None
-    return ModelRequest(parts=[SystemPromptPart(content=chat_instructions)])
-
-
-def prepare_template_runtime(
-    template: TemplateRecord,
-    passthrough_runs_default: int,
-    token_threshold_default: int = 0,
-) -> ContextTemplateRuntime:
-    template_sections = template.template_sections or []
-    week_start_day = resolve_week_start_day(template.frontmatter)
-    chat_instructions = (template.chat_instructions or "").strip() or None
-    passthrough_runs = resolve_passthrough_runs(template.frontmatter, passthrough_runs_default)
-    chat_instruction_message = build_chat_instruction_message(chat_instructions)
-    token_threshold = resolve_token_threshold(template.frontmatter, token_threshold_default)
-    if template_sections:
-        sections = template_sections
-    elif template.template_body:
-        sections = [
-            TemplateSection(
-                name=template.template_section or "Template",
-                content=template.template_body or "",
-                cleaned_content=template.template_body or "",
-            )
-        ]
-    else:
-        sections = []
-    return ContextTemplateRuntime(
-        template=template,
-        sections=sections,
-        week_start_day=week_start_day,
-        passthrough_runs=passthrough_runs,
-        token_threshold=token_threshold,
-        chat_instruction_message=chat_instruction_message,
-    )
-
 
 def normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any]]]:
     if not input_file_data:
@@ -267,77 +210,6 @@ def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
     return 0
 
 
-def resolve_passthrough_runs(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
-    if not frontmatter:
-        return default
-    raw_value = _frontmatter_value_with_alias(frontmatter, "passthrough_runs", "passthrough-runs")
-    if raw_value is None:
-        return default
-    if isinstance(raw_value, int):
-        if raw_value < -1:
-            logger.warning(
-                "Invalid passthrough_runs in context template; defaulting",
-                data={"value": raw_value},
-            )
-            return default
-        return raw_value
-    if isinstance(raw_value, str):
-        try:
-            normalized = raw_value.strip().lower()
-            parsed = -1 if normalized == "all" else int(normalized)
-            if parsed < -1:
-                raise ValueError("Value must be -1 or >= 0")
-            return parsed
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Invalid passthrough_runs in context template; defaulting",
-                data={"value": raw_value},
-            )
-            return default
-    logger.warning(
-        "Invalid passthrough_runs in context template; defaulting",
-        data={"value": raw_value},
-    )
-    return default
-
-
-def resolve_token_threshold(frontmatter: Optional[Dict[str, Any]], default: int) -> int:
-    if not frontmatter:
-        return default
-    raw_value = _frontmatter_value_with_alias(frontmatter, "token_threshold", "token-threshold")
-    if raw_value is None:
-        return default
-    if isinstance(raw_value, int):
-        if raw_value < 0:
-            logger.warning(
-                "Invalid token_threshold in context template; defaulting",
-                data={"value": raw_value},
-            )
-            return default
-        return raw_value
-    if isinstance(raw_value, str):
-        try:
-            parsed = int(raw_value.strip())
-        except ValueError:
-            logger.warning(
-                "Invalid token_threshold in context template; defaulting",
-                data={"value": raw_value},
-            )
-            return default
-        if parsed < 0:
-            logger.warning(
-                "Invalid token_threshold in context template; defaulting",
-                data={"value": raw_value},
-            )
-            return default
-        return parsed
-    logger.warning(
-        "Invalid token_threshold in context template; defaulting",
-        data={"value": raw_value},
-    )
-    return default
-
-
 def find_last_user_idx(msgs: List[ModelMessage]) -> Optional[int]:
     for idx in range(len(msgs) - 1, -1, -1):
         m = msgs[idx]
@@ -469,8 +341,6 @@ async def _build_authoring_context_history(
     vault_name: str,
     vault_path: str,
     template,
-    chat_instruction_message: ModelMessage | None,
-    template_token_threshold: int,
     source,
 ) -> List[ModelMessage]:
     if not messages:
@@ -478,40 +348,6 @@ async def _build_authoring_context_history(
 
     latest_turn_messages = _latest_turn_messages(messages)
     latest_user_message = latest_turn_messages[0] if latest_turn_messages else None
-    history_before_latest = messages[:-len(latest_turn_messages)] if latest_turn_messages else messages
-
-    if template_token_threshold > 0:
-        estimate_parts: List[str] = []
-        for message in messages:
-            role, text = extract_role_and_text(message)
-            if text:
-                estimate_parts.append(f"{role}: {text}")
-        estimate_basis = "\n".join(estimate_parts)
-        token_estimate = estimate_basis and estimate_token_count(estimate_basis) or 0
-        logger.debug(
-            "Context manager template threshold check",
-            metadata={
-                "run_id": run_context.run_id,
-                "token_estimate": token_estimate,
-                "threshold": template_token_threshold,
-            },
-        )
-        if token_estimate < template_token_threshold:
-            logger.set_sinks(["validation"]).info(
-                "Context template skipped (token threshold)",
-                data={
-                    "event": "context_template_skipped",
-                    "template_name": template.name,
-                    "token_estimate": token_estimate,
-                    "threshold": template_token_threshold,
-                },
-            )
-            curated_history: List[ModelMessage] = []
-            if chat_instruction_message:
-                curated_history.append(chat_instruction_message)
-            curated_history.extend(history_before_latest)
-            curated_history.extend(latest_turn_messages)
-            return curated_history
 
     workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
     reference_date = resolve_cache_now(run_context)
@@ -558,10 +394,7 @@ async def _build_authoring_context_history(
             f"template_pointer={source.docstring_summary or '```python``` block'}; "
             f"message={exc}"
         )
-        curated_history = []
-        if chat_instruction_message:
-            curated_history.append(chat_instruction_message)
-        curated_history.append(ModelRequest(parts=[SystemPromptPart(content=warning)]))
+        curated_history = [ModelRequest(parts=[SystemPromptPart(content=warning)])]
         curated_history.extend(latest_turn_messages)
         return curated_history
 
@@ -624,8 +457,6 @@ async def _build_authoring_context_history(
             logger.warning("Failed to persist authoring context summary", data={"error": str(exc)})
 
     curated_history = []
-    if chat_instruction_message:
-        curated_history.append(chat_instruction_message)
     curated_history.extend(_context_message_to_model_message(message) for message in assembled.messages)
     if latest_turn_messages:
         if _compiled_history_includes_latest_user(assembled.messages, latest_user_message):
@@ -642,7 +473,6 @@ async def _build_authoring_context_history(
             "total_messages": len(curated_history),
             "summary_section_count": 1 if summary_text else 0,
             "summary_sections": [section_name] if summary_text else [],
-            "passthrough_count": 0,
             "latest_user_included": _compiled_history_includes_latest_user(
                 assembled.messages,
                 latest_user_message,
@@ -663,7 +493,6 @@ def build_context_manager_history_processor(
     vault_path: str,
     model_alias: str,
     template_name: str,
-    passthrough_runs: int = -1,
 ) -> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
     """
     Factory for a history processor that runs a Monty authoring template and
@@ -672,12 +501,11 @@ def build_context_manager_history_processor(
     """
     try:
         template = load_template(template_name, Path(vault_path))
-        runtime = prepare_template_runtime(template, passthrough_runs, token_threshold_default=0)
         authoring_source = parse_authoring_template_text(template.content)
     except Exception as exc:
         template_error = ContextTemplateError(
             f"Failed to load/parse context template '{template_name}': {exc}",
-            template_pointer="Template frontmatter and ## section headings",
+            template_pointer="Template frontmatter and python block",
             section_name=None,
             phase="template_load",
         )
@@ -690,9 +518,6 @@ def build_context_manager_history_processor(
             },
         )
         return _build_template_error_processor(template_error)
-
-    chat_instruction_message = runtime.chat_instruction_message
-    template_token_threshold = runtime.token_threshold
 
     logger.info(
         "Context template loaded",
@@ -718,8 +543,6 @@ def build_context_manager_history_processor(
             vault_name=vault_name,
             vault_path=vault_path,
             template=template,
-            chat_instruction_message=chat_instruction_message,
-            template_token_threshold=template_token_threshold,
             source=authoring_source,
         )
 

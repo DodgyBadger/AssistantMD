@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic_ai.messages import BinaryContent, ToolReturn
 from pydantic_ai.tools import Tool
 
@@ -50,26 +51,30 @@ class FileOpsSafe(BaseTool):
 
         :param vault_path: Path to vault for file operations scope
         """
-        
+
         def file_operations(
             *,
             operation: str,
-            target: str = "",
+            path: str = "",
             content: str = "",
             destination: str = "",
             include_all: bool = False,
             recursive: bool = False,
-            scope: str = "",
+            search_term: str = "",
+            keys: str = "",
+            limit: int = 0,
         ) -> str | ToolReturn:
-            """Read/write/list/search markdown files in a vault or virtual mount.
+            """Read/write/list/search/frontmatter markdown files in a vault or virtual mount.
 
             :param operation: Operation name
-            :param target: File, directory, or glob pattern
+            :param path: File, directory, or glob pattern
             :param content: Content for write/append
             :param destination: Destination path for move
             :param include_all: Include non-markdown/hidden files in listings
             :param recursive: Recurse through subdirectories for listings
-            :param scope: Folder or glob to limit search
+            :param search_term: Text pattern to search for (search operation)
+            :param keys: Comma-separated frontmatter keys to extract (frontmatter operation)
+            :param limit: Number of lines to return (head operation)
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -82,53 +87,57 @@ class FileOpsSafe(BaseTool):
                 if not vault_path:
                     raise ValueError("vault_path is required for file operations")
 
-                # Route to appropriate helper method
                 if operation == "read":
-                    if get_virtual_mount_key(target):
-                        return cls._read_virtual_mount(target)
-                    return cls._read_file(target, vault_path)
+                    if get_virtual_mount_key(path):
+                        return cls._read_virtual_mount(path)
+                    return cls._read_file(path, vault_path)
                 elif operation == "write":
-                    if get_virtual_mount_key(target):
-                        return cls._deny_virtual_write(target, "write")
-                    return cls._write_file(target, content, vault_path)
+                    if get_virtual_mount_key(path):
+                        return cls._deny_virtual_write(path, "write")
+                    return cls._write_file(path, content, vault_path)
                 elif operation == "append":
-                    if get_virtual_mount_key(target):
-                        return cls._deny_virtual_write(target, "append")
-                    return cls._append_file(target, content, vault_path)
+                    if get_virtual_mount_key(path):
+                        return cls._deny_virtual_write(path, "append")
+                    return cls._append_file(path, content, vault_path)
                 elif operation == "move":
-                    if get_virtual_mount_key(target) or get_virtual_mount_key(destination):
-                        return cls._deny_virtual_write(target or destination, "move")
-                    return cls._move_file(target, destination, vault_path)
+                    if get_virtual_mount_key(path) or get_virtual_mount_key(destination):
+                        return cls._deny_virtual_write(path or destination, "move")
+                    return cls._move_file(path, destination, vault_path)
                 elif operation == "list":
-                    if get_virtual_mount_key(target):
+                    if get_virtual_mount_key(path):
                         return cls._list_virtual_mount(
-                            target,
+                            path,
                             include_all=include_all,
                             recursive=recursive,
                             max_results=get_file_ops_safe_list_max_results(),
                         )
                     return cls._list_files(
-                        target,
+                        path,
                         vault_path,
                         include_all=include_all,
                         recursive=recursive,
                         max_results=get_file_ops_safe_list_max_results(),
                     )
                 elif operation == "mkdir":
-                    if get_virtual_mount_key(target):
-                        return cls._deny_virtual_write(target, "mkdir")
-                    return cls._make_directory(target, vault_path)
+                    if get_virtual_mount_key(path):
+                        return cls._deny_virtual_write(path, "mkdir")
+                    return cls._make_directory(path, vault_path)
                 elif operation == "search":
-                    return cls._search_files(target, scope, vault_path)
+                    return cls._search_files(path, search_term, vault_path)
+                elif operation == "frontmatter":
+                    return cls._frontmatter_files(path, keys, vault_path)
+                elif operation == "head":
+                    return cls._head_file(path, limit, vault_path)
                 else:
                     return cls._result(
                         message=(
-                            f"Unknown operation '{operation}'. Available: read, write, append, move, list, mkdir, search"
+                            f"Unknown operation '{operation}'. "
+                            "Available: read, write, append, move, list, mkdir, search, frontmatter, head"
                         ),
                         operation=operation,
-                        target=target,
+                        path=path,
                         destination=destination,
-                        scope=scope,
+                        search_term=search_term,
                         status="error",
                         error_type="unknown_operation",
                     )
@@ -137,24 +146,24 @@ class FileOpsSafe(BaseTool):
                 return cls._result(
                     message=f"Error performing '{operation}' operation: {str(e)}",
                     operation=operation,
-                    target=target,
+                    path=path,
                     destination=destination,
-                    scope=scope,
+                    search_term=search_term,
                     status="error",
                     error_type=type(e).__name__,
                 )
-        
+
         return Tool(
             file_operations,
             name="file_ops_safe",
-            description="Read, write, append, list, search, and move files safely within the current vault or virtual mounts.",
+            description="Read, write, append, list, search, frontmatter, and move files safely within the current vault or virtual mounts.",
         )
-    
+
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for file operations."""
         return """
-Read, write, append, list, search, and move files safely within the current vault or virtual mounts.
+Read, write, append, list, search, frontmatter, and move files safely within the current vault or virtual mounts.
 
 Full documentation:
 - `__virtual_docs__/tools/file_ops_safe.md`
@@ -172,9 +181,9 @@ Important notes:
         *,
         message: str,
         operation: str,
-        target: str = "",
+        path: str = "",
         destination: str = "",
-        scope: str = "",
+        search_term: str = "",
         status: str = "completed",
         exists: bool | None = None,
         error_type: str | None = None,
@@ -185,13 +194,12 @@ Important notes:
             "status": status,
             "operation": operation,
         }
-        if target:
-            payload["target"] = target
-            payload["path"] = target
+        if path:
+            payload["path"] = path
         if destination:
             payload["destination"] = destination
-        if scope:
-            payload["scope"] = scope
+        if search_term:
+            payload["search_term"] = search_term
         if exists is not None:
             payload["exists"] = exists
         if error_type:
@@ -199,7 +207,6 @@ Important notes:
         if metadata:
             payload.update(metadata)
         return ToolReturn(return_value=message, content=content, metadata=payload)
-
 
     @classmethod
     def _validate_read_path(cls, path: str, vault_path: str) -> str:
@@ -228,10 +235,10 @@ Important notes:
             return cls._result(
                 message=(
                     f"Cannot read '{path}' - this is a directory, not a file. "
-                    f"Use file_operations('list', target='{path}') to see files in this directory."
+                    f"Use file_ops_safe(operation='list', path='{path}') to see files in this directory."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="invalid_target",
                 exists=True,
                 error_type="is_directory",
@@ -241,10 +248,10 @@ Important notes:
             return cls._result(
                 message=(
                     f"Cannot read '{path}' - file does not exist. "
-                    "Use file_operations('list') to see available files."
+                    "Use file_ops_safe(operation='list') to see available files."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="not_found",
                 exists=False,
                 error_type="file_not_found",
@@ -259,7 +266,7 @@ Important notes:
                     f"Supported extensions: {allowed}."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="unsupported",
                 exists=True,
                 error_type="unsupported_file_type",
@@ -278,7 +285,7 @@ Important notes:
                         f"chunking_max_image_mb_per_image ({max_image_mb} MB)."
                     ),
                     operation="read",
-                    target=path,
+                    path=path,
                     status="unsupported",
                     exists=True,
                     error_type="image_too_large",
@@ -300,7 +307,6 @@ Important notes:
                 metadata={
                     "status": "completed",
                     "operation": "read",
-                    "target": path,
                     "path": path,
                     "exists": True,
                     **payload.metadata,
@@ -318,7 +324,7 @@ Important notes:
                     "file_ops_safe(read) yet."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="unsupported",
                 exists=True,
                 error_type="binary_file",
@@ -331,7 +337,7 @@ Important notes:
                     "Only markdown and image files are supported."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="unsupported",
                 exists=True,
                 error_type="unsupported_read_mode",
@@ -355,7 +361,7 @@ Important notes:
                         f"{decision.normalized_text or file_content}"
                     ),
                     operation="read",
-                    target=path,
+                    path=path,
                     status="completed",
                     exists=True,
                     metadata={
@@ -393,7 +399,6 @@ Important notes:
                     metadata={
                         "status": "completed",
                         "operation": "read",
-                        "target": path,
                         "path": path,
                         "exists": True,
                         "filepath": path,
@@ -409,7 +414,7 @@ Important notes:
                     f"{built.prompt_text}"
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="completed",
                 exists=True,
                 metadata={
@@ -422,7 +427,7 @@ Important notes:
         return cls._result(
             message=f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}",
             operation="read",
-            target=path,
+            path=path,
             status="completed",
             exists=True,
             metadata={
@@ -439,7 +444,7 @@ Important notes:
             return cls._result(
                 message="Invalid virtual mount path",
                 operation="read",
-                target=path,
+                path=path,
                 status="invalid_target",
                 error_type="invalid_virtual_mount",
             )
@@ -449,10 +454,10 @@ Important notes:
             return cls._result(
                 message=(
                     f"Cannot read '{path}' - this is a directory, not a file. "
-                    f"Use file_ops_safe(operation=\"list\", target=\"{mount_key}\") to see files."
+                    f"Use file_ops_safe(operation=\"list\", path=\"{mount_key}\") to see files."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="invalid_target",
                 exists=True,
                 error_type="is_directory",
@@ -463,7 +468,7 @@ Important notes:
             return cls._result(
                 message="Only .md files are allowed in virtual mounts",
                 operation="read",
-                target=path,
+                path=path,
                 status="unsupported",
                 error_type="unsupported_file_type",
             )
@@ -476,10 +481,10 @@ Important notes:
             return cls._result(
                 message=(
                     f"Cannot read '{path}' - this is a directory, not a file. "
-                    f"Use file_ops_safe(operation=\"list\", target=\"{path}\") to see files in this directory."
+                    f"Use file_ops_safe(operation=\"list\", path=\"{path}\") to see files in this directory."
                 ),
                 operation="read",
-                target=path,
+                path=path,
                 status="invalid_target",
                 exists=True,
                 error_type="is_directory",
@@ -489,7 +494,7 @@ Important notes:
             return cls._result(
                 message=f"Cannot read '{path}' - file does not exist.",
                 operation="read",
-                target=path,
+                path=path,
                 status="not_found",
                 exists=False,
                 error_type="file_not_found",
@@ -500,7 +505,7 @@ Important notes:
         return cls._result(
             message=f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}",
             operation="read",
-            target=path,
+            path=path,
             status="completed",
             exists=True,
             metadata={
@@ -522,7 +527,7 @@ Important notes:
                     "Use 'append' operation to add content to existing files."
                 ),
                 operation="write",
-                target=path,
+                path=path,
                 status="already_exists",
                 exists=True,
                 error_type="file_exists",
@@ -534,7 +539,7 @@ Important notes:
         return cls._result(
             message=f"Successfully created new file '{path}' with {len(content)} characters",
             operation="write",
-            target=path,
+            path=path,
             status="completed",
             exists=True,
             metadata={"content_chars": len(content)},
@@ -552,7 +557,7 @@ Important notes:
                     "Use 'write' operation to create new files."
                 ),
                 operation="append",
-                target=path,
+                path=path,
                 status="not_found",
                 exists=False,
                 error_type="file_not_found",
@@ -563,7 +568,7 @@ Important notes:
         return cls._result(
             message=f"Successfully appended {len(content)} characters to '{path}'",
             operation="append",
-            target=path,
+            path=path,
             status="completed",
             exists=True,
             metadata={"content_chars": len(content)},
@@ -579,7 +584,7 @@ Important notes:
             return cls._result(
                 message=f"Cannot move '{path}' - source file does not exist",
                 operation="move",
-                target=path,
+                path=path,
                 destination=destination,
                 status="not_found",
                 exists=False,
@@ -593,7 +598,7 @@ Important notes:
                     "Choose a different destination path."
                 ),
                 operation="move",
-                target=path,
+                path=path,
                 destination=destination,
                 status="already_exists",
                 exists=True,
@@ -605,7 +610,7 @@ Important notes:
         return cls._result(
             message=f"Successfully moved '{path}' to '{destination}'",
             operation="move",
-            target=path,
+            path=path,
             destination=destination,
             status="completed",
             exists=True,
@@ -614,32 +619,28 @@ Important notes:
     @classmethod
     def _list_files(
         cls,
-        target: str,
+        path: str,
         vault_path: str,
         include_all: bool,
         recursive: bool,
         max_results: int,
     ) -> ToolReturn:
-        """List files and directories matching a target path or glob."""
-        # Default to top-level view
-        target = target.strip()
-        if not target or target == ".":
-            target = "*"
+        """List files and directories matching a path or glob."""
+        path = path.strip()
+        if not path or path == ".":
+            path = "*"
 
-        if '..' in target or target.startswith('/'):
-            raise ValueError("Target cannot contain '..' or start with '/'")
+        if '..' in path or path.startswith('/'):
+            raise ValueError("Path cannot contain '..' or start with '/'")
 
-        # If target points to a directory (no glob), list its immediate contents
-        is_glob = any(ch in target for ch in "*?[")
+        is_glob = any(ch in path for ch in "*?[")
         if not is_glob:
-            abs_target = os.path.join(vault_path, target)
-            if os.path.isdir(abs_target):
-                target = os.path.join(target, "**/*" if recursive else "*")
-            else:
-                target = target
+            abs_path = os.path.join(vault_path, path)
+            if os.path.isdir(abs_path):
+                path = os.path.join(path, "**/*" if recursive else "*")
 
-        full_pattern = os.path.join(vault_path, target)
-        matches = glob.glob(full_pattern, recursive=recursive or "**" in target)
+        full_pattern = os.path.join(vault_path, path)
+        matches = glob.glob(full_pattern, recursive=recursive or "**" in path)
 
         files = []
         directories = []
@@ -650,7 +651,6 @@ Important notes:
 
             relative_path = match[len(vault_path) + 1:] if match != vault_path else ""
 
-            # Skip hidden paths unless include_all
             parts = relative_path.split(os.sep) if relative_path else []
             if not include_all and any(part.startswith('.') for part in parts if part):
                 continue
@@ -668,9 +668,9 @@ Important notes:
 
         if not files and not directories:
             return cls._result(
-                message=f"No files or directories found for target '{target}'",
+                message=f"No files or directories found for path '{path}'",
                 operation="list",
-                target=target,
+                path=path,
                 status="completed",
                 exists=True,
                 metadata={
@@ -682,7 +682,6 @@ Important notes:
                 },
             )
 
-        # Cap results to avoid overwhelming context
         truncated = False
         if max_results > 0 and len(files) + len(directories) > max_results:
             truncated = True
@@ -700,12 +699,12 @@ Important notes:
         if files:
             result_parts.append(f"Files ({len(files)}):\n" + '\n'.join(f"  📄 {f}" for f in files))
         if truncated:
-            result_parts.append(f"... truncated to {max_results} results. Narrow your target or disable recursion.")
+            result_parts.append(f"... truncated to {max_results} results. Narrow your path or disable recursion.")
 
         return cls._result(
             message='\n\n'.join(result_parts),
             operation="list",
-            target=target,
+            path=path,
             status="completed",
             exists=True,
             metadata={
@@ -720,32 +719,31 @@ Important notes:
     @classmethod
     def _list_virtual_mount(
         cls,
-        target: str,
+        path: str,
         include_all: bool,
         recursive: bool,
         max_results: int,
     ) -> ToolReturn:
         """List files and directories under a virtual mount."""
-        target = target.strip()
-        mount_key = get_virtual_mount_key(target) or ""
-        if not target or target == mount_key:
-            target = mount_key
+        path = path.strip()
+        mount_key = get_virtual_mount_key(path) or ""
+        if not path or path == mount_key:
+            path = mount_key
 
-        normalized = target.strip().lstrip("./")
+        normalized = path.strip().lstrip("./")
         rel = normalized[len(mount_key):].lstrip("/")
 
         if ".." in rel.split(os.sep):
-            raise ValueError("Target cannot contain '..' for virtual mounts")
+            raise ValueError("Path cannot contain '..' for virtual mounts")
 
         docs_root, _mount = resolve_virtual_path(mount_key)
 
-        # If target points to a directory (no glob), list its immediate contents
         is_glob = any(ch in rel for ch in "*?[")
         if not rel:
             rel = "*"
         elif not is_glob:
-            abs_target = os.path.join(docs_root, rel)
-            if os.path.isdir(abs_target):
+            abs_path = os.path.join(docs_root, rel)
+            if os.path.isdir(abs_path):
                 rel = os.path.join(rel, "**/*" if recursive else "*")
 
         full_pattern = os.path.join(docs_root, rel)
@@ -760,7 +758,6 @@ Important notes:
 
             relative_path = match[len(docs_root) + 1:] if match != docs_root else ""
 
-            # Skip hidden paths unless include_all
             parts = relative_path.split(os.sep) if relative_path else []
             if not include_all and any(part.startswith('.') for part in parts if part):
                 continue
@@ -778,9 +775,9 @@ Important notes:
 
         if not files and not directories:
             return cls._result(
-                message=f"No files or directories found for target '{target}'",
+                message=f"No files or directories found for path '{path}'",
                 operation="list",
-                target=target,
+                path=path,
                 status="completed",
                 exists=True,
                 metadata={
@@ -810,12 +807,12 @@ Important notes:
         if files:
             result_parts.append(f"Files ({len(files)}):\n" + '\n'.join(f"  📄 {mount_key}/{f}" for f in files))
         if truncated:
-            result_parts.append(f"... truncated to {max_results} results. Narrow your target or disable recursion.")
+            result_parts.append(f"... truncated to {max_results} results. Narrow your path or disable recursion.")
 
         return cls._result(
             message='\n\n'.join(result_parts),
             operation="list",
-            target=target,
+            path=path,
             status="completed",
             exists=True,
             metadata={
@@ -829,12 +826,12 @@ Important notes:
         )
 
     @classmethod
-    def _deny_virtual_write(cls, target: str, operation: str) -> str:
-        mount_key = get_virtual_mount_key(target) or "__virtual_docs__"
+    def _deny_virtual_write(cls, path: str, operation: str) -> str:
+        mount_key = get_virtual_mount_key(path) or "__virtual_docs__"
         return cls._result(
             message=f"{operation} not allowed for '{mount_key}' (read-only virtual mount)",
             operation=operation,
-            target=target,
+            path=path,
             status="unsupported",
             error_type="virtual_mount_read_only",
         )
@@ -847,28 +844,27 @@ Important notes:
         return cls._result(
             message=f"Successfully created directory '{path}'",
             operation="mkdir",
-            target=path,
+            path=path,
             status="completed",
             exists=True,
         )
 
     @classmethod
-    def _search_files(cls, query: str, scope: str, vault_path: str) -> ToolReturn:
+    def _search_files(cls, path: str, search_term: str, vault_path: str) -> ToolReturn:
         """Search for text within markdown files using ripgrep."""
-        query = query.strip()
-        if not query:
+        search_term = search_term.strip()
+        if not search_term:
             return cls._result(
-                message="Search requires a search pattern in 'target' parameter",
+                message="Search requires a search pattern in 'search_term' parameter",
                 operation="search",
-                target=query,
-                scope=scope,
+                path=path,
+                search_term=search_term,
                 status="error",
                 error_type="missing_query",
             )
 
         vault_abs = os.path.realpath(vault_path)
 
-        # Build ripgrep command
         rg_cmd = [
             'rg',
             '--no-heading',
@@ -884,23 +880,23 @@ Important notes:
         result_base_root = vault_abs
         result_prefix = ""
 
-        scope = scope.strip()
-        if scope:
-            if '..' in scope or scope.startswith('/'):
+        path = path.strip()
+        if path:
+            if '..' in path or path.startswith('/'):
                 return cls._result(
-                    message="Scope cannot contain '..' or start with '/'",
+                    message="Path cannot contain '..' or start with '/'",
                     operation="search",
-                    target=query,
-                    scope=scope,
+                    path=path,
+                    search_term=search_term,
                     status="invalid_target",
-                    error_type="invalid_scope",
+                    error_type="invalid_path",
                 )
 
-            mount_key = get_virtual_mount_key(scope)
+            mount_key = get_virtual_mount_key(path)
             if mount_key:
                 root, _mount = resolve_virtual_path(mount_key)
                 root_abs = os.path.realpath(root)
-                rel = scope.strip().lstrip("./")[len(mount_key):].lstrip("/")
+                rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
                 if rel:
                     abs_scope = os.path.realpath(os.path.join(root_abs, rel))
                 else:
@@ -912,12 +908,12 @@ Important notes:
                         and abs_scope != root_abs
                     ):
                         return cls._result(
-                            message="Scope escapes virtual mount boundaries",
+                            message="Path escapes virtual mount boundaries",
                             operation="search",
-                            target=query,
-                            scope=scope,
+                            path=path,
+                            search_term=search_term,
                             status="invalid_target",
-                            error_type="scope_escapes_mount",
+                            error_type="path_escapes_mount",
                         )
                     search_root = abs_scope
                     glob_pattern = "*.md"
@@ -927,36 +923,34 @@ Important notes:
                         and abs_scope != root_abs
                     ):
                         return cls._result(
-                            message="Scope escapes virtual mount boundaries",
+                            message="Path escapes virtual mount boundaries",
                             operation="search",
-                            target=query,
-                            scope=scope,
+                            path=path,
+                            search_term=search_term,
                             status="invalid_target",
-                            error_type="scope_escapes_mount",
+                            error_type="path_escapes_mount",
                         )
                     search_root = abs_scope
                     glob_pattern = "*.md"
                 else:
-                    # Treat rel as a glob relative to docs root
                     search_root = root_abs
                     glob_pattern = rel
                 result_base_root = root_abs
                 result_prefix = mount_key
             else:
-                # If scope is a directory, search within it with markdown filter
-                abs_scope = os.path.realpath(os.path.join(vault_abs, scope))
+                abs_scope = os.path.realpath(os.path.join(vault_abs, path))
                 if os.path.isdir(abs_scope):
                     if (
                         not abs_scope.startswith(vault_abs + os.sep)
                         and abs_scope != vault_abs
                     ):
                         return cls._result(
-                            message="Scope escapes vault boundaries",
+                            message="Path escapes vault boundaries",
                             operation="search",
-                            target=query,
-                            scope=scope,
+                            path=path,
+                            search_term=search_term,
                             status="invalid_target",
-                            error_type="scope_escapes_vault",
+                            error_type="path_escapes_vault",
                         )
                     search_root = abs_scope
                     glob_pattern = "*.md"
@@ -966,28 +960,20 @@ Important notes:
                         and abs_scope != vault_abs
                     ):
                         return cls._result(
-                            message="Scope escapes vault boundaries",
+                            message="Path escapes vault boundaries",
                             operation="search",
-                            target=query,
-                            scope=scope,
+                            path=path,
+                            search_term=search_term,
                             status="invalid_target",
-                            error_type="scope_escapes_vault",
+                            error_type="path_escapes_vault",
                         )
                     search_root = abs_scope
                     glob_pattern = "*.md"
                 else:
-                    # Treat scope as a glob relative to vault
-                    glob_pattern = scope
-
-        # If caller used virtual docs prefix in target (query), that's a mistake
-        # Keep behavior consistent: only scope controls search root.
+                    glob_pattern = path
 
         rg_cmd.extend(['--glob', glob_pattern])
-
-        # Add search pattern
-        rg_cmd.append(query)
-
-        # Search in directory
+        rg_cmd.append(search_term)
         rg_cmd.append(search_root)
 
         try:
@@ -999,8 +985,6 @@ Important notes:
             )
 
             if result.returncode == 0:
-                # Normalize paths so the model sees logical (root-relative) paths.
-                # ripgrep output is file_path:line_number:line_content
                 lines = []
                 for raw_line in result.stdout.splitlines():
                     file_path, sep, remainder = raw_line.partition(':')
@@ -1016,7 +1000,6 @@ Important notes:
                     try:
                         rel_path = os.path.relpath(file_abs, result_base_root)
                     except ValueError:
-                        # Fallback for unexpected path formats.
                         rel_path = file_path
                     if rel_path == ".":
                         rel_path = os.path.basename(file_path)
@@ -1027,8 +1010,8 @@ Important notes:
                 return cls._result(
                     message=f"Found {len(lines)} matches:\n\n" + '\n'.join(lines),
                     operation="search",
-                    target=query,
-                    scope=scope,
+                    path=path,
+                    search_term=search_term,
                     status="completed",
                     exists=True,
                     metadata={
@@ -1037,23 +1020,21 @@ Important notes:
                     },
                 )
             elif result.returncode == 1:
-                # No matches found
                 return cls._result(
-                    message=f"No matches found for '{query}' in markdown files",
+                    message=f"No matches found for '{search_term}' in markdown files",
                     operation="search",
-                    target=query,
-                    scope=scope,
+                    path=path,
+                    search_term=search_term,
                     status="completed",
                     exists=True,
                     metadata={"match_count": 0, "matches": []},
                 )
             else:
-                # Error occurred
                 return cls._result(
                     message=f"Search error: {result.stderr or 'Unknown error'}",
                     operation="search",
-                    target=query,
-                    scope=scope,
+                    path=path,
+                    search_term=search_term,
                     status="error",
                     error_type="search_failed",
                 )
@@ -1061,8 +1042,8 @@ Important notes:
             return cls._result(
                 message="Error: ripgrep (rg) not found. Please install ripgrep to use search functionality.",
                 operation="search",
-                target=query,
-                scope=scope,
+                path=path,
+                search_term=search_term,
                 status="error",
                 error_type="ripgrep_not_found",
             )
@@ -1071,8 +1052,8 @@ Important notes:
             return cls._result(
                 message=f"Search timed out (>{timeout_seconds:g} seconds). Try narrowing your search.",
                 operation="search",
-                target=query,
-                scope=scope,
+                path=path,
+                search_term=search_term,
                 status="error",
                 error_type="timeout",
             )
@@ -1080,8 +1061,144 @@ Important notes:
             return cls._result(
                 message=f"Search error: {str(e)}",
                 operation="search",
-                target=query,
-                scope=scope,
+                path=path,
+                search_term=search_term,
                 status="error",
                 error_type=type(e).__name__,
             )
+
+    @classmethod
+    def _frontmatter_files(cls, path: str, keys: str, vault_path: str) -> ToolReturn:
+        """Extract frontmatter from markdown files matching path or glob."""
+        path = path.strip()
+        if not path or path == ".":
+            path = "*"
+
+        if '..' in path or path.startswith('/'):
+            raise ValueError("Path cannot contain '..' or start with '/'")
+
+        is_glob = any(ch in path for ch in "*?[")
+        if not is_glob:
+            abs_path = os.path.join(vault_path, path)
+            if os.path.isdir(abs_path):
+                path = os.path.join(path, "*")
+
+        full_pattern = os.path.join(vault_path, path)
+        matches = sorted(glob.glob(full_pattern, recursive=False))
+
+        vault_abs = os.path.realpath(vault_path)
+        md_files: list[tuple[str, str]] = []
+        for match in matches:
+            if not match.endswith(".md"):
+                continue
+            abs_match = os.path.realpath(match)
+            if not abs_match.startswith(vault_abs + os.sep):
+                continue
+            rel = abs_match[len(vault_abs) + 1:]
+            if any(part.startswith('.') for part in rel.split(os.sep)):
+                continue
+            md_files.append((rel, abs_match))
+
+        if not md_files:
+            return cls._result(
+                message=f"No markdown files found for path '{path}'",
+                operation="frontmatter",
+                path=path,
+                status="completed",
+                metadata={"file_count": 0, "items": []},
+            )
+
+        filter_keys = [k.strip() for k in keys.split(",") if k.strip()] if keys else []
+
+        items: list[dict[str, Any]] = []
+        for rel_path, abs_path in md_files:
+            try:
+                with open(abs_path, 'r', encoding='utf-8') as f:
+                    raw = f.read()
+                fm = cls._parse_frontmatter(raw)
+                if filter_keys:
+                    fm = {k: fm[k] for k in filter_keys if k in fm}
+                items.append({"path": rel_path, "frontmatter": fm})
+            except Exception:
+                items.append({"path": rel_path, "frontmatter": {}})
+
+        lines = []
+        for item in items:
+            fm_parts = ", ".join(f"{k}: {v}" for k, v in item["frontmatter"].items())
+            lines.append(f"  {item['path']}: {{{fm_parts}}}")
+
+        return cls._result(
+            message=f"Frontmatter for {len(items)} file(s):\n" + "\n".join(lines),
+            operation="frontmatter",
+            path=path,
+            status="completed",
+            metadata={"file_count": len(items), "items": items},
+        )
+
+    @classmethod
+    def _head_file(cls, path: str, limit: int, vault_path: str) -> ToolReturn:
+        """Read first N lines of a file."""
+        full_path = cls._validate_read_path(path, vault_path)
+
+        if not os.path.exists(full_path):
+            return cls._result(
+                message=f"Cannot read '{path}' - file does not exist.",
+                operation="head",
+                path=path,
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
+            )
+
+        if os.path.isdir(full_path):
+            return cls._result(
+                message=f"Cannot read '{path}' - this is a directory.",
+                operation="head",
+                path=path,
+                status="invalid_target",
+                exists=True,
+                error_type="is_directory",
+            )
+
+        n = limit if limit > 0 else 20
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                head_lines = []
+                for _ in range(n):
+                    line = f.readline()
+                    if not line:
+                        break
+                    head_lines.append(line)
+            text = "".join(head_lines)
+            return cls._result(
+                message=f"First {len(head_lines)} lines of '{path}':\n\n{text}",
+                operation="head",
+                path=path,
+                status="completed",
+                exists=True,
+                metadata={"lines_returned": len(head_lines), "limit": n},
+            )
+        except UnicodeDecodeError:
+            return cls._result(
+                message=f"Cannot read '{path}' as text - binary file.",
+                operation="head",
+                path=path,
+                status="unsupported",
+                exists=True,
+                error_type="binary_file",
+            )
+
+    @staticmethod
+    def _parse_frontmatter(content: str) -> dict[str, Any]:
+        """Parse YAML frontmatter from markdown content."""
+        if not content.startswith("---"):
+            return {}
+        end = content.find("\n---", 3)
+        if end == -1:
+            return {}
+        fm_text = content[3:end].strip()
+        try:
+            result = yaml.safe_load(fm_text)
+            return result if isinstance(result, dict) else {}
+        except Exception:
+            return {}

@@ -1,26 +1,49 @@
 ---
 run_type: context
-passthrough_runs: all
-description: Default template for regular chat. No context manager - system instructions and full history passed to chat agent.
+description: Default template for regular chat. Passes full history and injects behavioral instructions. Loads skill catalog from AssistantMD/Skills/ if present.
 ---
+```python
+"""Default chat context: pass history, inject stance, load skills catalog if present."""
 
-## CHAT INSTRUCTIONS
+import json
 
-Default stance: concise and curious. Act as a guide, not a sage.
-- Start with the minimum useful answer.
-- Ask brief clarifying questions when intent, scope, or constraints are unclear.
-- Avoid long explanations until the user asks for depth.
-- Prefer next-step guidance over broad monologues.
-- Prefer tool-grounded answers when current facts or user files matter.
+history_result = await call_tool(
+    name="memory_ops",
+    arguments={"operation": "get_history", "scope": "session", "limit": "all"},
+)
+history = [
+    {"role": item["role"], "content": item["content"]}
+    for item in json.loads(history_result.output)["items"]
+]
 
+skills_result = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "frontmatter", "path": "AssistantMD/Skills", "keys": "name,description"},
+)
+skills_lines = []
+if skills_result.metadata.get("status") == "completed":
+    for item in skills_result.metadata.get("items", []):
+        fm = item.get("frontmatter", {})
+        name = fm.get("name") or item["path"].rsplit("/", 1)[-1].replace(".md", "")
+        description = fm.get("description", "")
+        path = item["path"]
+        skills_lines.append(f"- **{name}** (`{path}`): {description}" if description else f"- **{name}** (`{path}`)")
 
-### Key user phrases and where to look
+instructions = (
+    "Default stance: concise and curious. Act as a guide, not a sage.\n"
+    "- Start with the minimum useful answer.\n"
+    "- Ask brief clarifying questions when intent, scope, or constraints are unclear.\n"
+    "- Avoid long explanations until the user asks for depth.\n"
+    "- Prefer next-step guidance over broad monologues.\n"
+    "- Prefer tool-grounded answers when current facts or user files matter."
+)
+if skills_lines:
+    instructions += (
+        "\n\n## Skills\n"
+        "The following skills are available. When a skill seems relevant to the user's request, "
+        "read the full skill file before responding.\n"
+        + "\n".join(skills_lines)
+    )
 
-- "recent chat" / "continue our conversation"  
-  Chat transcripts are stored as markdown in `AssistantMD/Chat_Sessions/`. If the user asks to continue a conversation, start with a search of the files inside that folder and prioritize the most recent hits.
-
-- "my workflow" / "run my workflow"  
-  Workflow definitions are markdown files in `AssistantMD/Authoring/` (one folder level deep is supported)
-
-- "my context template"  
-  Context templates are in `AssistantMD/Authoring/` (identified by `run_type: context` in frontmatter)
+await assemble_context(history=history, instructions=instructions)
+```
