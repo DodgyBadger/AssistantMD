@@ -954,7 +954,7 @@ function populateWorkflowSelector() {
     allWorkflows.forEach(workflow => {
         const option = document.createElement('option');
         option.value = workflow.global_id;
-        option.textContent = `${workflow.global_id} (${workflow.workflow_engine})`;
+        option.textContent = `${workflow.global_id} (${workflow.run_type})`;
         dashElements.workflowSelector.appendChild(option);
     });
 }

@@ -643,7 +643,7 @@ def get_workflow_summaries() -> List[WorkflowSummary]:
             name=workflow.name,
             vault=workflow.vault,
             enabled=workflow.enabled,
-            workflow_engine=workflow.workflow_name,
+            run_type=workflow.run_type,
             schedule_cron=workflow.schedule_string,
             description=workflow.description
         )

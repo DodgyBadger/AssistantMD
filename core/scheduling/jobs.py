@@ -127,7 +127,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
 
                     snapshot = _get_job_snapshot(scheduler, workflow.scheduler_job_id)
                     logger.add_sink("validation").info(
-                        "Workflow job replaced (schedule/engine changed)",
+                        "Workflow job replaced (schedule metadata changed)",
                         data={
                             "event": "job_synced",
                             "vault": workflow.vault,
@@ -137,7 +137,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                             "action": "replaced",
                             "trigger": str(workflow.trigger),
                             "next_run_time": snapshot.get("next_run_time"),
-                            "engine": workflow.workflow_name,
+                            "run_type": workflow.run_type,
                             "schedule": str(workflow.trigger),
                         },
                     )
@@ -163,7 +163,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                             "action": "updated",
                             "trigger": str(workflow.trigger),
                             "next_run_time": snapshot.get("next_run_time"),
-                            "engine": workflow.workflow_name,
+                            "run_type": workflow.run_type,
                             "schedule": str(workflow.trigger),
                         },
                     )
@@ -193,7 +193,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                         "action": "created",
                         "trigger": str(workflow.trigger),
                         "next_run_time": snapshot.get("next_run_time"),
-                        "engine": workflow.workflow_name,
+                        "run_type": workflow.run_type,
                         "schedule": str(workflow.trigger),
                     },
                 )

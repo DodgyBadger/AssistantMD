@@ -1,7 +1,6 @@
 ---
 enabled: false
 schedule: "cron: 0 8 * * *"
-workflow_engine: step
 description: Scans a folder for unprocessed files and appends descriptive tags to each
 ---
 

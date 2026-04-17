@@ -51,7 +51,7 @@ class WorkflowDefinition:
     trigger: Optional[BaseTrigger]      # APScheduler trigger; None for manual-only
     schedule_string: Optional[str]      # Original schedule string (for display)
     workflow_function: Callable
-    workflow_name: str                  # Engine name (e.g. "monty")
+    run_type: str
     week_start_day: str
     description: str
     enabled: bool = False
@@ -177,13 +177,14 @@ def _parse_workflow_file(file_path: str) -> Dict[str, Any]:
 
 def _validate_workflow_config(raw_config: Dict[str, Any], vault: str, name: str) -> Dict[str, Any]:
     """Validate and normalise workflow frontmatter configuration."""
-    engine_name = str(raw_config.get("workflow_engine") or "").strip().lower()
     run_type = str(raw_config.get("run_type") or "").strip().lower()
-    # Files with run_type: workflow in the unified Authoring dir are always Monty.
-    if not engine_name and run_type == "workflow":
-        engine_name = "monty"
-    if not engine_name:
-        raise ValueError(f"Missing required field 'workflow_engine' in {vault}/{name}")
+    if run_type != "workflow":
+        if not run_type:
+            raise ValueError(f"Missing required field 'run_type' in {vault}/{name}")
+        raise ValueError(
+            f"Invalid run_type '{run_type}' in {vault}/{name}. "
+            "Workflow loading only accepts run_type 'workflow'."
+        )
 
     schedule = raw_config.get("schedule")
     if schedule is not None:
@@ -205,7 +206,7 @@ def _validate_workflow_config(raw_config: Dict[str, Any], vault: str, name: str)
         )
 
     return {
-        "workflow_engine": engine_name,
+        "run_type": run_type,
         "schedule": schedule,
         "enabled": enabled,
         "week_start_day": week_start_day,
@@ -324,10 +325,6 @@ def load_workflow_from_file(
     if schedule_string is not None:
         trigger = create_schedule_trigger(parse_schedule_syntax(schedule_string))
 
-    engine_name = validated_config["workflow_engine"]
-    if engine_name != "monty":
-        raise ValueError(f"Unknown workflow engine '{engine_name}' in {vault}/{name}")
-
     workflow_id = f"{vault}/{name}"
     _engine.validate_workflow_definition(
         workflow_id=workflow_id,
@@ -343,7 +340,7 @@ def load_workflow_from_file(
         trigger=trigger,
         schedule_string=schedule_string,
         workflow_function=_engine.run_workflow,
-        workflow_name=engine_name,
+        run_type=validated_config["run_type"],
         week_start_day=validated_config["week_start_day"],
         description=validated_config["description"],
         enabled=validated_config["enabled"],
@@ -589,7 +586,7 @@ class WorkflowLoader:
                             "workflow_path": file_path,
                             "enabled": workflow.enabled,
                             "schedule": workflow.schedule_string,
-                            "engine": workflow.workflow_name,
+                            "run_type": workflow.run_type,
                         },
                     )
 

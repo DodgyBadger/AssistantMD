@@ -78,22 +78,16 @@ def compile_candidate_workflow(
 ) -> AuthoringCompileResult:
     """Compile candidate workflow markdown and return structured diagnostics."""
     frontmatter, _body = parse_simple_frontmatter(content, require_frontmatter=False)
-    engine_name = str(frontmatter.get("workflow_engine") or "").strip().lower()
     run_type = str(frontmatter.get("run_type") or "").strip().lower()
-
-    # A file with a recognised run_type is a unified Authoring template — always Monty.
-    if not engine_name and run_type in _VALID_RUN_TYPES:
-        engine_name = "monty"
-
-    if engine_name != "monty":
+    if run_type not in _VALID_RUN_TYPES:
         return AuthoringCompileResult(
             ok=False,
             diagnostics=[
                 AuthoringDiagnostic(
                     phase="parse",
                     message=(
-                        "Compile-only authoring currently supports workflow_engine: monty. "
-                        f"Got workflow_engine: {engine_name or '(missing)'}"
+                        "Compile-only authoring requires run_type 'workflow' or 'context'. "
+                        f"Got run_type: {run_type or '(missing)'}"
                     ),
                 )
             ],

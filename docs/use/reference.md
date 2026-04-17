@@ -380,27 +380,6 @@ Use explicit booleans (`true` / `false`) for boolean-like fields.
 Quotes are optional but recommended to avoid display issues in Obsidian. E.g. `schedule: "cron: 0 8 * * *"`
 
 <details>
-<summary>workflow_engine</summary>
-
-Applies to: Workflow  
-Description: Select the workflow engine.
-
-### Values:
-`step`  
-Currently only `step` is available.
-
-### Optional params:
-No optional parameters.
-
-### Notes:
-Required for workflows.
-
-### Examples:
-- `workflow_engine: step`
-
-</details>
-
-<details>
 <summary>schedule</summary>
 
 Applies to: Workflow  

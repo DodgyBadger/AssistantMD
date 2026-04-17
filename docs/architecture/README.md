@@ -30,9 +30,9 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | --- | --- | --- |
 | [Runtime](runtime.md) | Bootstrap, global context, path roots, config reload | `core/runtime/` |
 | [API + UI](api-ui.md) | Endpoints, static UI, exception and lifecycle wiring | `api/`, `main.py`, `static/` |
-| [Workflow Loader](workflow-loader.md) | Discover/parse workflow files and engine references | `core/workflow/` |
+| [Workflow Loader](workflow-loader.md) | Discover/parse workflow files | `core/workflow/` |
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
-| [Engines + Directives](engines-directives.md) | Execute workflow logic and parse `@directives` | `workflow_engines/`, `core/directives/` |
+| [Engines + Directives](engines-directives.md) | Execute workflow logic and parse `@directives` | `core/directives/` |
 | [LLM + Tools](llm-tools.md) | Agent creation, tool loading, routing, model resolution | `core/llm/`, `core/tools/`, `core/directives/tools.py` |
 | [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_ops_safe.py` |
 | [Context Manager](context-manager-subsystem.md) | Context-template execution | `core/context/` |
@@ -41,4 +41,4 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Validation](validation.md) | End-to-end test scenarios and artifacts | `validation/` |
 
 
-See [Extending AssistantMD](extending.md) for guidance on how to fork and add your own custom workflow engines, tools and directives.
+See [Extending AssistantMD](extending.md) for guidance on how to fork and add your own custom tools and directives.

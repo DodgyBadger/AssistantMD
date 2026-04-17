@@ -246,7 +246,7 @@ class AuthoringContractScenario(BaseScenario):
 
 
 AUTHORING_CONTRACT_SUCCESS_WORKFLOW_TEMPLATE = """---
-workflow_engine: monty
+run_type: workflow
 enabled: false
 description: Deterministic authoring contract success workflow
 ---
@@ -342,7 +342,7 @@ await finish(status="completed", reason="all-helpers-exercised")
 
 
 AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW = """---
-workflow_engine: monty
+run_type: workflow
 enabled: false
 description: Deterministic generate cache semantics workflow
 ---

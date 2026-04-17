@@ -1,7 +1,6 @@
 ---
 enabled: false
 schedule: "cron: 10 0 * * *"
-workflow_engine: step
 week_start_day: monday
 description: Summarize yesterday’s chat transcripts (by filename date stamp) into a running weekly memory log.
 ---

@@ -1,10 +1,10 @@
 # Workflow Guide
 
-A workflow is a markdown file stored under each vault's `AssistantMD/Workflows/` folder. Workflows can be organized in subfolders (one level deep). Subfolders beginning with an underscore are ignored.
+A workflow is a markdown file stored under each vault's `AssistantMD/Authoring/` folder. Workflows can be organized in subfolders (one level deep). Subfolders beginning with an underscore are ignored.
 
 ## Structure
 YAML frontmatter between `---` delimiters (required). These appear as properties if using Obsidian.
-Sets the run schedule and the workflow engine to run. Currently there is only one workflow engine called step.
+Sets the run schedule and workflow metadata.
 
 `## Instructions` section with a prompt that is included as a system instruction before every step prompt.
 
@@ -15,14 +15,14 @@ Sets the run schedule and the workflow engine to run. Currently there is only on
 
 > See [reference](reference.md) for details on all the control primitives available for workflow templates.
 
-Following is a complete, valid workflow template. Copy the text into `AssistantMD/Workflows/` inside any vault, change the model as needed, rescan your vaults and then run manually to test the results.
+Following is a complete, valid workflow template. Copy the text into `AssistantMD/Authoring/` inside any vault, change the model as needed, rescan your vaults and then run manually to test the results.
 
 **NOTE**: Workflow files must include only the text below, not embedded inside a markdown code block. If you are pasting into a new note in Obsidian, use `ctrl-shift-v` (or right-click `Paste as plain text`) to avoid pasting the code block. The top section should immediately render as Obsidian Properties.
 
 ```
 ---
+run_type: workflow
 schedule: "cron: 0 9 * * *"
-workflow_engine: step
 enabled: false
 description: Daily poet
 ---
@@ -50,5 +50,4 @@ Read the haiku above and provide your feedback.
 - Is the imagery compelling?
 - How could it be improved?
 ```
-
 

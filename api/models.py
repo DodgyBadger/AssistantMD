@@ -391,7 +391,7 @@ class WorkflowSummary(BaseModel):
     name: str
     vault: str
     enabled: bool
-    workflow_engine: str
+    run_type: str
     schedule_cron: Optional[str]
     description: str
 

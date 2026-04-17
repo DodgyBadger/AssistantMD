@@ -1,6 +1,6 @@
 # Workflow Loader Subsystem
 
-Workflow Loader discovers workflow files, parses/validates frontmatter, and resolves execution engines.
+Workflow Loader discovers workflow files and parses/validates frontmatter.
 
 ## Primary code
 
@@ -13,24 +13,7 @@ Workflow Loader discovers workflow files, parses/validates frontmatter, and reso
 - Discover vaults and workflow files (`AssistantMD/Workflows`, one folder level deep).
 - Parse workflow files and validate configuration.
 - Resolve schedule strings into trigger objects.
-- Dynamically load workflow engine entrypoints from `workflow_engines/<name>/workflow.py`.
 - Track configuration errors and loaded workflow metadata.
-
-## Engine resolution
-
-Workflow frontmatter includes:
-
-```yaml
-workflow_engine: step
-```
-
-Loader imports:
-
-- `workflow_engines.<engine>.workflow`
-
-And expects:
-
-- `async def run_workflow(job_args: dict, **kwargs)`
 
 ## Runtime interaction
 

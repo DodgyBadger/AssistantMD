@@ -14,13 +14,13 @@ Use this guide for workflow-specific structure:
 
 ## Workflow File Shape
 
-Workflow files live under `AssistantMD/Workflows/` inside a vault.
+Workflow files live under `AssistantMD/Authoring/` inside a vault.
 
 Every constrained-Python workflow should include YAML frontmatter at the top of the file:
 
 ```yaml
 ---
-workflow_engine: monty
+run_type: workflow
 schedule: "cron: 0 9 * * *"
 enabled: false
 description: Optional description
@@ -29,7 +29,7 @@ description: Optional description
 
 Frontmatter notes:
 
-- `workflow_engine: monty` selects the constrained-Python workflow path during transition
+- `run_type: workflow` marks the file as a scheduler-managed workflow
 - `schedule:` is optional; omit it for manual-only workflows
 - `enabled: true` or `enabled: false` controls whether scheduled runs are active
 - `description:` is optional but useful for workflow discovery
@@ -46,7 +46,7 @@ The executable workflow code belongs inside that block. Do not split execution a
 
 ## Workflow Authoring Rules
 
-- Treat `AssistantMD/Workflows/` as the canonical home for workflow templates.
+- Treat `AssistantMD/Authoring/` as the canonical home for workflow templates.
 - Use the constrained runtime doc to inspect helper signatures before guessing arguments or return shapes.
 - Use compile-only workflow testing before execution when validating a new or changed workflow.
 - Keep workflow changes small, testable, and easy to review.

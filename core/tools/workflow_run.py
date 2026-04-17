@@ -1,6 +1,4 @@
-"""
-Workflow run tool for vault-scoped workflow discovery and execution.
-"""
+"""Authoring run tool for vault-scoped discovery and execution."""
 
 from __future__ import annotations
 
@@ -8,10 +6,13 @@ import traceback
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai.tools import Tool
 
-from core.authoring import compile_candidate_workflow
+from core.authoring.contracts import AssembleContextResult, ContextMessage
+from core.authoring.service import run_authoring_template
+from core.authoring.template_discovery import discover_workflow_files
 from core.logger import UnifiedLogger
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.scheduling.jobs import create_job_args
@@ -24,7 +25,7 @@ logger = UnifiedLogger(tag="workflow-run-tool")
 
 
 class WorkflowRun(BaseTool):
-    """Run workflows in the current vault and list available workflow names."""
+    """Run authored automations in the current vault and list available names."""
 
     allow_routing = True
 
@@ -38,10 +39,10 @@ class WorkflowRun(BaseTool):
             workflow_name: str = "",
             step_name: str = "",
         ) -> str:
-            """Run or list workflows in the current vault.
+            """Run or list authored automations in the current vault.
 
-            :param operation: Operation name (list, test, run, enable_workflow, disable_workflow)
-            :param workflow_name: Workflow name relative to AssistantMD/Authoring (required for test/run/enable/disable)
+            :param operation: Operation name (list, run, enable_workflow, disable_workflow)
+            :param workflow_name: Workflow name relative to AssistantMD/Authoring (required for run/enable/disable)
             :param step_name: Optional step name to execute (run only)
             """
             try:
@@ -69,7 +70,12 @@ class WorkflowRun(BaseTool):
                     global_id = f"{vault_name}/{name}"
                     single_step = (step_name or "").strip() or None
                     try:
-                        result = await cls._execute_workflow(global_id, single_step)
+                        result = await cls._execute_authoring_artifact(
+                            vault_path=vault_path,
+                            vault_name=vault_name,
+                            workflow_name=name,
+                            step_name=single_step,
+                        )
                         return cls._format_run_result(result)
                     except Exception as exc:  # pylint: disable=broad-except
                         logger.error(
@@ -85,31 +91,18 @@ class WorkflowRun(BaseTool):
                         )
                         return cls._format_run_error(global_id, single_step, exc)
 
-                if op == "test":
-                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
-                    if error:
-                        return error
-                    try:
-                        result = cls._test_workflow_file(vault_path=vault_path, vault_name=vault_name, workflow_name=name)
-                        return cls._format_test_result(result)
-                    except Exception as exc:  # pylint: disable=broad-except
-                        logger.error(
-                            "workflow_run test failed",
-                            data={
-                                "operation": op,
-                                "workflow_name": name,
-                                "vault": vault_name,
-                                "error_type": type(exc).__name__,
-                                "error": str(exc),
-                                "traceback": traceback.format_exc(),
-                            },
-                        )
-                        return cls._format_test_error(vault_name=vault_name, workflow_name=name, exc=exc)
-
                 if op in {"enable_workflow", "disable_workflow"}:
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
                         return error
+                    file_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=name)
+                    if file_path.exists():
+                        run_type = cls._read_run_type(file_path)
+                        if run_type == "context":
+                            return (
+                                f"Lifecycle operation '{op}' is only supported for run_type='workflow'. "
+                                f"'{name}' is run_type='context'."
+                            )
                     result = await cls._set_workflow_enabled_state(
                         operation=op,
                         vault_name=vault_name,
@@ -117,7 +110,7 @@ class WorkflowRun(BaseTool):
                     )
                     return cls._format_lifecycle_result(result)
 
-                return "Unknown operation. Available: list, test, run, enable_workflow, disable_workflow"
+                return "Unknown operation. Available: list, run, enable_workflow, disable_workflow"
             except RuntimeStateError as exc:
                 return f"Runtime unavailable: {exc}"
             except Exception as exc:  # pylint: disable=broad-except
@@ -136,14 +129,14 @@ class WorkflowRun(BaseTool):
         return Tool(
             workflow_run,
             name="workflow_run",
-            description="List workflows in the current vault and run, test, enable, or disable them.",
+            description="List authored automations in the current vault and run, enable, or disable them.",
         )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for workflow execution."""
         return """
-List workflows in the current vault and run, test, enable, or disable them.
+List authored automations in the current vault and run, enable, or disable them.
 
 Full documentation:
 - `__virtual_docs__/tools/workflow_run.md`
@@ -232,55 +225,59 @@ Important notes:
     @staticmethod
     async def _list_workflows(vault_name: str) -> str:
         runtime = get_runtime_context()
-        workflows = await runtime.workflow_loader.load_workflows(force_reload=True)
-        current_vault = [wf for wf in workflows if wf.vault == vault_name]
+        vault_path = str(Path(runtime.config.data_root) / vault_name)
+        workflow_files = discover_workflow_files(vault_path)
 
-        if not current_vault:
-            return f"No workflows found for vault '{vault_name}'."
+        if not workflow_files:
+            return f"No authored automations found for vault '{vault_name}'."
 
-        lines = [f"Workflows in vault '{vault_name}':"]
-        for workflow in sorted(current_vault, key=lambda item: item.name.lower()):
-            description = (workflow.description or "").strip() or "(no description)"
-            enabled_display = WorkflowRun._resolve_enabled_state_from_frontmatter(
-                file_path=workflow.file_path,
-                fallback=bool(workflow.enabled),
-            )
+        lines = [f"Authored automations in vault '{vault_name}':"]
+        artifacts = []
+        for file_path in workflow_files:
+            artifact_name = WorkflowRun._workflow_name_from_file_path(vault_path=vault_path, file_path=file_path)
+            if not artifact_name:
+                continue
+            path_obj = Path(file_path)
+            try:
+                frontmatter, _ = parse_simple_frontmatter(path_obj.read_text(encoding="utf-8"), require_frontmatter=False)
+                run_type = WorkflowRun._normalize_run_type(frontmatter)
+                description = str(frontmatter.get("description") or "").strip() or "(no description)"
+                enabled_display = (
+                    WorkflowRun._resolve_enabled_state_from_frontmatter(file_path=file_path, fallback=False)
+                    if run_type == "workflow"
+                    else "n/a"
+                )
+                artifacts.append((artifact_name, run_type, description, enabled_display))
+            except Exception as exc:  # pylint: disable=broad-except
+                artifacts.append((artifact_name, "invalid", f"Failed to parse frontmatter: {exc}", "n/a"))
+
+        if not artifacts:
+            return f"No authored automations found for vault '{vault_name}'."
+
+        for artifact_name, run_type, description, enabled_display in sorted(artifacts, key=lambda item: item[0].lower()):
             lines.append(
-                f"- workflow_name: {workflow.name} | workflow_id: {workflow.global_id} | enabled: {enabled_display} | description: {description}"
+                f"- workflow_name: {artifact_name} | workflow_id: {vault_name}/{artifact_name} | run_type: {run_type} | enabled: {enabled_display} | description: {description}"
             )
         return "\n".join(lines)
 
     @staticmethod
     def _format_run_result(result: dict) -> str:
-        return "\n".join(
-            [
-                f"success: {result.get('success', False)}",
-                f"global_id: {result.get('global_id', '')}",
-                f"execution_time_seconds: {result.get('execution_time_seconds', 0)}",
-                f"message: {result.get('message', '')}",
-            ]
-        )
-
-    @staticmethod
-    def _format_test_result(result) -> str:
         lines = [
-            f"ok: {result.ok}",
+            f"success: {result.get('success', False)}",
+            f"global_id: {result.get('global_id', '')}",
+            f"run_type: {result.get('run_type', '')}",
+            f"execution_time_seconds: {result.get('execution_time_seconds', 0)}",
         ]
-        if result.summary is not None:
-            lines.extend(
-                [
-                    f"workflow_id: {result.summary.workflow_id}",
-                    f"block_count: {result.summary.block_count}",
-                    f"workflow_name: {result.summary.workflow_name}",
-                    f"instructions_present: {result.summary.instructions_present}",
-                ]
-            )
-        if result.diagnostics:
-            lines.append("diagnostics:")
-            for diagnostic in result.diagnostics:
-                lines.append(
-                    f"- phase={diagnostic.phase} section={diagnostic.section_name or ''} message={diagnostic.message}"
-                )
+        if result.get("status") is not None:
+            lines.append(f"status: {result.get('status', '')}")
+        if result.get("reason"):
+            lines.append(f"reason: {result.get('reason', '')}")
+        if result.get("message"):
+            lines.append(f"message: {result.get('message', '')}")
+        extra_lines = result.get("details", [])
+        if extra_lines:
+            lines.append("details:")
+            lines.extend([f"- {line}" for line in extra_lines])
         return "\n".join(lines)
 
     @staticmethod
@@ -319,17 +316,6 @@ Important notes:
         return "\n".join(lines)
 
     @staticmethod
-    def _format_test_error(vault_name: str, workflow_name: str, exc: Exception) -> str:
-        return "\n".join(
-            [
-                "ok: False",
-                f"workflow_id: {vault_name}/{workflow_name}",
-                f"error_type: {type(exc).__name__}",
-                f"message: {exc}",
-            ]
-        )
-
-    @staticmethod
     def _format_load_errors(loader, global_id: str) -> str:
         if "/" not in global_id:
             return ""
@@ -360,6 +346,34 @@ Important notes:
         if len(deduped) > 5:
             lines.append(f"- ... and {len(deduped) - 5} more")
         return "\n".join(lines)
+
+    @classmethod
+    async def _execute_authoring_artifact(
+        cls,
+        *,
+        vault_path: str,
+        vault_name: str,
+        workflow_name: str,
+        step_name: str | None,
+    ) -> dict[str, Any]:
+        file_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=workflow_name)
+        if not file_path.exists():
+            raise ValueError(f"Workflow file not found: {file_path}")
+        if not file_path.is_file():
+            raise ValueError(f"Workflow path is not a file: {file_path}")
+
+        run_type = cls._read_run_type(file_path)
+        if run_type == "context":
+            return await cls._execute_context_template(
+                vault_name=vault_name,
+                workflow_name=workflow_name,
+                file_path=file_path,
+            )
+
+        global_id = f"{vault_name}/{workflow_name}"
+        result = await cls._execute_workflow(global_id, step_name)
+        result["run_type"] = "workflow"
+        return result
 
     @staticmethod
     async def _execute_workflow(global_id: str, step_name: str | None) -> dict:
@@ -397,10 +411,12 @@ Important notes:
         return {
             "success": True,
             "global_id": target.global_id,
+            "run_type": "workflow",
             "status": terminal_status,
             "execution_time_seconds": elapsed,
             "output_files": [],
             "reason": terminal_reason or None,
+            "details": [],
             "message": (
                 f"Workflow '{target.global_id}' {terminal_status} in {elapsed:.2f} seconds"
                 + (f": {terminal_reason}" if terminal_reason else "")
@@ -408,24 +424,34 @@ Important notes:
         }
 
     @classmethod
-    def _test_workflow_file(
+    async def _execute_context_template(
         cls,
         *,
-        vault_path: str,
         vault_name: str,
         workflow_name: str,
-    ):
-        workflow_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=workflow_name)
-        if not workflow_path.exists():
-            raise ValueError(f"Workflow file not found: {workflow_path}")
-        if not workflow_path.is_file():
-            raise ValueError(f"Workflow path is not a file: {workflow_path}")
-
-        content = workflow_path.read_text(encoding="utf-8")
-        return compile_candidate_workflow(
-            workflow_id=f"{vault_name}/{workflow_name}",
-            content=content,
+        file_path: Path,
+    ) -> dict[str, Any]:
+        global_id = f"{vault_name}/{workflow_name}"
+        started = datetime.now()
+        execution_result = await run_authoring_template(
+            workflow_id=f"{vault_name}/context/{workflow_name}",
+            file_path=str(file_path),
         )
+        elapsed = (datetime.now() - started).total_seconds()
+        details = cls._summarize_context_execution(execution_result.value)
+        return {
+            "success": True,
+            "global_id": global_id,
+            "run_type": "context",
+            "status": execution_result.status,
+            "execution_time_seconds": elapsed,
+            "reason": execution_result.reason or None,
+            "details": details,
+            "message": (
+                f"Context template '{global_id}' dry-run {execution_result.status} in {elapsed:.2f} seconds"
+                + (f": {execution_result.reason}" if execution_result.reason else "")
+            ),
+        }
 
     @staticmethod
     def _resolve_workflow_file_path(*, vault_path: str, workflow_name: str) -> Path:
@@ -434,6 +460,71 @@ Important notes:
         if candidate.suffix.lower() != ".md":
             candidate = candidate.with_suffix(".md")
         return candidate
+
+    @staticmethod
+    def _workflow_name_from_file_path(*, vault_path: str, file_path: str) -> str:
+        authoring_root = Path(vault_path) / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR
+        return Path(file_path).relative_to(authoring_root).with_suffix("").as_posix()
+
+    @staticmethod
+    def _normalize_run_type(frontmatter: dict[str, Any]) -> str:
+        raw = str(frontmatter.get("run_type") or "").strip().lower()
+        return raw if raw in {"workflow", "context"} else "workflow"
+
+    @classmethod
+    def _read_run_type(cls, file_path: Path) -> str:
+        frontmatter, _ = parse_simple_frontmatter(file_path.read_text(encoding="utf-8"), require_frontmatter=False)
+        return cls._normalize_run_type(frontmatter)
+
+    @staticmethod
+    def _summarize_context_execution(value: Any) -> list[str]:
+        assembled = WorkflowRun._normalize_context_result(value)
+        messages = tuple(assembled.messages or ())
+        instructions = tuple(assembled.instructions or ())
+        roles = [message.role for message in messages if getattr(message, "role", None)]
+        details = [
+            f"assembled_context: True",
+            f"message_count: {len(messages)}",
+            f"instruction_count: {len(instructions)}",
+        ]
+        if roles:
+            details.append(f"message_roles: {', '.join(roles)}")
+        if instructions:
+            details.append(f"instructions_present: True")
+        return details
+
+    @staticmethod
+    def _normalize_context_result(value: Any) -> AssembleContextResult:
+        if isinstance(value, AssembleContextResult):
+            return value
+        if isinstance(value, dict):
+            messages = value.get("messages", ())
+            instructions = value.get("instructions", ())
+            if not isinstance(messages, (list, tuple)):
+                raise ValueError("Context template dry-run returned invalid 'messages' data")
+            if not isinstance(instructions, (list, tuple)):
+                raise ValueError("Context template dry-run returned invalid 'instructions' data")
+            normalized_messages: list[ContextMessage] = []
+            for item in messages:
+                if isinstance(item, ContextMessage):
+                    normalized_messages.append(item)
+                    continue
+                if isinstance(item, dict):
+                    normalized_messages.append(
+                        ContextMessage(
+                            role=str(item.get("role") or "system"),
+                            content=str(item.get("content") or ""),
+                            metadata=dict(item.get("metadata") or {}),
+                        )
+                    )
+                    continue
+                raise ValueError("Context template dry-run returned an unsupported message item")
+            normalized_instructions = tuple(str(item).strip() for item in instructions if str(item).strip())
+            return AssembleContextResult(
+                messages=tuple(normalized_messages),
+                instructions=normalized_instructions,
+            )
+        raise ValueError("Context template dry-run must return AssembleContextResult or equivalent dict")
 
     @classmethod
     async def _set_workflow_enabled_state(

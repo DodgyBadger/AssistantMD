@@ -1,7 +1,6 @@
 ---
 enabled: true
 schedule: "cron: 0 6 * * *"
-workflow_engine: step
 week_start_day: monday
 description: Weekly task planning. Run daily at 6am.
 ---

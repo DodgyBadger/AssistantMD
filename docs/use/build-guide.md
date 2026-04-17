@@ -114,7 +114,7 @@ If you want a skill to run automatically (or in the background while you do othe
 ```
 ---
 schedule: "cron: */10 * * * *"
-workflow_engine: step
+run_type: workflow
 enabled: false
 description: Run the textbook indexer skill every 10 minutes
 ---
@@ -153,7 +153,7 @@ When you hit these cases, AssistantMD's workflow directives let you break things
 ```
 ---
 schedule: "cron: 0 6 * * *"
-workflow_engine: step
+run_type: workflow
 enabled: false
 week_start_day: monday
 description: Weekly task planning
