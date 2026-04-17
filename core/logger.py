@@ -202,9 +202,9 @@ def _write_validation_record(record: Dict[str, Any]) -> None:
         tag = _sanitize_validation_name(record.get("tag", "event"))
         name = _sanitize_validation_name(record.get("name", "event"))
         if boot_id is not None:
-            filename = f"{boot_id:04d}_{event_id:02d}_{tag}_{name}.yaml"
+            filename = f"{boot_id:04d}_{event_id:05d}_{tag}_{name}.yaml"
         else:
-            filename = f"{event_id:02d}_{tag}_{name}.yaml"
+            filename = f"{event_id:05d}_{tag}_{name}.yaml"
         path = directory / filename
 
         payload = yaml.safe_dump(record, allow_unicode=False, sort_keys=False)

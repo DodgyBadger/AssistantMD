@@ -261,7 +261,7 @@ def _strip_read_output(value):
 async def _write_replace(path, content):
     existing = await call_tool(
         name="file_ops_safe",
-        arguments={"operation": "read", "target": path},
+        arguments={"operation": "read", "path": path},
     )
     if existing.metadata.get("status") == "completed":
         await call_tool(
@@ -270,23 +270,23 @@ async def _write_replace(path, content):
         )
         await call_tool(
             name="file_ops_safe",
-            arguments={"operation": "append", "target": path, "content": content},
+            arguments={"operation": "append", "path": path, "content": content},
         )
     else:
         await call_tool(
             name="file_ops_safe",
-            arguments={"operation": "write", "target": path, "content": content},
+            arguments={"operation": "write", "path": path, "content": content},
         )
 
 
 source = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "read", "target": "notes/seed.md"},
+    arguments={"operation": "read", "path": "notes/seed.md"},
 )
 source_text = _strip_read_output(source.output)
 listing = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "list", "target": "notes"},
+    arguments={"operation": "list", "path": "notes"},
 )
 assembled = await assemble_context(
     instructions="Keep the response concise.",
@@ -295,12 +295,12 @@ assembled = await assemble_context(
 )
 structured = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "read", "target": "notes/structured.md"},
+    arguments={"operation": "read", "path": "notes/structured.md"},
 )
 parsed = await parse_markdown(value=STRUCTURED_NOTE_PLACEHOLDER)
 task_listing = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "list", "target": "tasks"},
+    arguments={"operation": "list", "path": "tasks"},
 )
 pending = await pending_files(operation="get", items=task_listing)
 await pending_files(operation="complete", items=(pending.items[0],))
@@ -353,7 +353,7 @@ description: Deterministic generate cache semantics workflow
 async def _write_replace(path, content):
     existing = await call_tool(
         name="file_ops_safe",
-        arguments={"operation": "read", "target": path},
+        arguments={"operation": "read", "path": path},
     )
     if existing.metadata.get("status") == "completed":
         await call_tool(
@@ -362,12 +362,12 @@ async def _write_replace(path, content):
         )
         await call_tool(
             name="file_ops_safe",
-            arguments={"operation": "append", "target": path, "content": content},
+            arguments={"operation": "append", "path": path, "content": content},
         )
     else:
         await call_tool(
             name="file_ops_safe",
-            arguments={"operation": "write", "target": path, "content": content},
+            arguments={"operation": "write", "path": path, "content": content},
         )
 
 draft = await generate(

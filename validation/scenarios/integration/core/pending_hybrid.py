@@ -132,7 +132,7 @@ description: Pending hybrid validation
 ```python
 listed = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "list", "target": "tasks"},
+    arguments={"operation": "list", "path": "tasks"},
 )
 pending = await pending_files(operation="get", items=listed)
 if pending.items:

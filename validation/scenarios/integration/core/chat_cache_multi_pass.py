@@ -48,7 +48,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                         "code": (
                             'artifact = await call_tool(\n'
                             '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "read", "target": "notes/repeated.md"},\n'
+                            '    arguments={"operation": "read", "path": "notes/repeated.md"},\n'
                             ')\n'
                             'text = artifact.output.split("\\n\\n", 1)[1] if "\\n\\n" in artifact.output else artifact.output\n'
                             "text[:80]"
@@ -59,7 +59,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                         "code": (
                             'artifact = await call_tool(\n'
                             '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "read", "target": "notes/repeated.md"},\n'
+                            '    arguments={"operation": "read", "path": "notes/repeated.md"},\n'
                             ')\n'
                             'text = artifact.output.split("\\n\\n", 1)[1] if "\\n\\n" in artifact.output else artifact.output\n'
                             'str(text.count("OVERFLOW_SEGMENT"))'
@@ -90,10 +90,17 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 )
             raise AssertionError("Unexpected chat call count")
 
+        def _passthrough_history_processor(**kwargs):
+            async def processor(messages):
+                return messages
+            return processor
+
         original_prepare_agent_config = chat_executor._prepare_agent_config
         original_get_history = chat_executor._CHAT_STORE.get_history
+        original_build_history_processor = chat_executor.build_context_manager_history_processor
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         chat_executor._CHAT_STORE.get_history = lambda _sid, _vault: None
+        chat_executor.build_context_manager_history_processor = _passthrough_history_processor
         try:
             update_setting = self.call_api(
                 "/api/system/settings/general/auto_buffer_max_tokens",
@@ -169,5 +176,6 @@ class ChatCacheMultiPassScenario(BaseScenario):
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
             chat_executor._CHAT_STORE.get_history = original_get_history
+            chat_executor.build_context_manager_history_processor = original_build_history_processor
             await self.stop_system()
             self.teardown_scenario()
