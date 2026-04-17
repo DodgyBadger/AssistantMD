@@ -25,10 +25,10 @@ class SystemStartupScenario(BaseScenario):
     async def test_scenario(self):
         # Setup
         vault = self.create_vault("SystemTest")
-        self.create_file(vault, "AssistantMD/Workflows/quick_job.md", QUICK_JOB_WORKFLOW)
+        self.create_file(vault, "AssistantMD/Authoring/quick_job.md", QUICK_JOB_WORKFLOW)
 
-        # Test subfolder support - create workflow in AssistantMD/Workflows/planning/ subfolder
-        self.create_file(vault, "AssistantMD/Workflows/planning/quick_job_2.md", QUICK_JOB_2_WORKFLOW)
+        # Test subfolder support - create workflow in AssistantMD/Authoring/planning/ subfolder
+        self.create_file(vault, "AssistantMD/Authoring/planning/quick_job_2.md", QUICK_JOB_2_WORKFLOW)
 
         # Test 1: System Discovery and Job Creation
         checkpoint = self.event_checkpoint()
@@ -130,7 +130,7 @@ class SystemStartupScenario(BaseScenario):
 
         # Test 3: Schedule Change Detection
         # Overwrite the original file with updated schedule (every 1m → every 2m)
-        self.create_file(vault, "AssistantMD/Workflows/quick_job.md", QUICK_JOB_UPDATED_WORKFLOW)
+        self.create_file(vault, "AssistantMD/Authoring/quick_job.md", QUICK_JOB_UPDATED_WORKFLOW)
         await self.restart_system()
 
         new_events = self.events_since(checkpoint)
@@ -186,7 +186,7 @@ class SystemStartupScenario(BaseScenario):
 
         # Test 6: Malformed Workflow Resilience
         # Add a malformed workflow file with invalid schedule syntax
-        self.create_file(vault, "AssistantMD/Workflows/malformed_schedule.md", MALFORMED_SCHEDULE_WORKFLOW)
+        self.create_file(vault, "AssistantMD/Authoring/malformed_schedule.md", MALFORMED_SCHEDULE_WORKFLOW)
         await self.restart_system()
 
         new_events = self.events_since(checkpoint)
@@ -235,55 +235,68 @@ class SystemStartupScenario(BaseScenario):
 
 QUICK_JOB_WORKFLOW = """---
 schedule: cron: */1 * * * *
-workflow_engine: step
+run_type: workflow
 enabled: true
 description: Quick job for persistence testing
 ---
 
-## STEP1
-@output file: results/{today}
-@model test
+## Run
 
-Quick persistence test - creating file at scheduled intervals.
+```python
+await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "write", "target": f"results/{date.today()}.md", "content": "ok"},
+)
+await finish(status="completed", reason="quick-job-done")
+```
 """
 
 QUICK_JOB_2_WORKFLOW = """---
 schedule: cron: */2 * * * *
-workflow_engine: step
+run_type: workflow
 enabled: true
 description: Second quick job for subfolder testing
 ---
 
-## STEP1
-@output file: results/{today}
-@model test
+## Run
 
-Quick subfolder test - creating file from subfolder workflow.
+```python
+await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "write", "target": f"results/{date.today()}.md", "content": "ok"},
+)
+await finish(status="completed", reason="quick-job-2-done")
+```
 """
 
 QUICK_JOB_UPDATED_WORKFLOW = """---
 schedule: cron: */2 * * * *
-workflow_engine: step
+run_type: workflow
 enabled: true
 description: Updated schedule for persistence testing
 ---
 
-## STEP1
-@output file: results/{today}
-@model test
+## Run
 
-Updated persistence test - now running every 2 minutes.
+```python
+await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "write", "target": f"results/{date.today()}.md", "content": "ok"},
+)
+await finish(status="completed", reason="quick-job-updated-done")
+```
 """
 
 MALFORMED_SCHEDULE_WORKFLOW = """---
 schedule: every 1d at 9am
-workflow_engine: step
+run_type: workflow
 enabled: true
 description: Malformed workflow with invalid old schedule syntax
 ---
 
-## STEP1
-@output file: test.md
+## Run
 
-This workflow has invalid schedule syntax (old format) and should fail to load without crashing the system.
+```python
+await finish(status="completed", reason="should-not-reach")
+```
 """

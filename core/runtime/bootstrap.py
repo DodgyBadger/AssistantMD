@@ -118,9 +118,29 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             max_workers=config.max_scheduler_workers
         )
 
-        # Start scheduler in paused mode to allow job synchronization
-        scheduler.start(paused=True)
-        # Scheduler starts paused to sync jobs before first run.
+        # Start scheduler paused to allow job synchronization.
+        # If the job store has stale job references (e.g. from a module rename),
+        # wipe it and retry with a clean store so startup isn't blocked.
+        try:
+            scheduler.start(paused=True)
+        except Exception as start_err:
+            logger.warning(
+                "Scheduler failed to start — job store may contain stale references. "
+                "Wiping job store and retrying.",
+                data={"error": str(start_err)},
+            )
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:
+                pass
+            job_store = create_job_store(
+                system_root=str(config.system_root), wipe=True
+            )
+            scheduler = AsyncIOScheduler(
+                jobstores={"default": job_store},
+                max_workers=config.max_scheduler_workers,
+            )
+            scheduler.start(paused=True)
 
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
