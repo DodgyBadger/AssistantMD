@@ -10,7 +10,10 @@ Run constrained local Python against the current chat session and current Assist
 
 ## The Monty Runtime
 
-This tool does not run CPython. It runs **Monty** — a Python interpreter written in Rust with its own bytecode VM. Understanding what Monty is and is not will save you from writing code that looks valid but fails at runtime.
+This tool does not run CPython. It runs **Monty** — a Python interpreter written in Rust with its own bytecode VM. 
+Understanding what Monty is and is not will save you from writing code that looks valid but fails at runtime.
+
+Monty is a script executor, not an interactive REPL. Your final line should be an explicit expression that evaluates to the value you want to return. Do not rely on implicit printing.
 
 ### What Monty supports
 
@@ -66,7 +69,6 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 - `operation="get"` filters a `file_ops_safe` result down to the pending subset
 - `operation="complete"` marks only the items you actually finished processing
-- `pattern` is the stable tracking key, usually the watched glob such as `tasks/*.md`
 
 ### `generate`
 
@@ -154,7 +156,6 @@ listed = await call_tool(
 )
 pending = await pending_files(
     operation="get",
-    pattern="inbox/*.md",
     items=listed,
 )
 
@@ -177,7 +178,6 @@ for item in selected:
 
 await pending_files(
     operation="complete",
-    pattern="inbox/*.md",
     items=selected,
 )
 

@@ -56,10 +56,18 @@ Some reads may also return multimodal tool content:
 - image files can be attached directly
 - markdown files with embedded local images can return ordered multimodal content
 
+## Vault Exploration Pattern
+
+Orient before you synthesise:
+
+1. `list` the relevant directory to get filenames and structure
+2. Use `code_execution_local` with `parse_markdown` to extract frontmatter, headings, and sections without reading full content
+3. Filter and select structurally, then read only what you need
+
+Avoid broad recursive lists or searches unless the scope is already known.
+
 ## Notes
 
-- start discovery with `list`, then narrow scope
-- avoid broad recursive lists and searches unless needed
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
 - in scripted Monty flows, use `result.metadata["status"]` for branching
