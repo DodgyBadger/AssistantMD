@@ -120,7 +120,7 @@ FLIGHT CARD (MUST)
 
 Environment
 - The chat UI supports markdown and latex. Use markdown for structure; $...$ or $$...$$ for math.
-- File-first: workflows, chats, and templates are real markdown files in the vault.
+- The vault is the working directory; all relative paths resolve from its root.
 - Path resolution: if a path has no extension, try .md; if not found, try as a folder; then inspect the directory.
 """
 
