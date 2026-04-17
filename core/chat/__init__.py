@@ -4,6 +4,7 @@ from .chat_store import ChatStore
 from .transcript_writer import rewrite_chat_transcript, persist_chat_user_message
 from .executor import (
     ChatCapabilityError,
+    ChatContextTemplateError,
     ChatExecutionResult,
     PreparedChatExecution,
     UploadedImageAttachment,
@@ -16,6 +17,7 @@ __all__ = [
     "rewrite_chat_transcript",
     "persist_chat_user_message",
     "ChatCapabilityError",
+    "ChatContextTemplateError",
     "ChatExecutionResult",
     "PreparedChatExecution",
     "UploadedImageAttachment",

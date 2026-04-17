@@ -26,7 +26,7 @@ from core.authoring.template_discovery import load_template
 from core.authoring.template_loader import parse_authoring_template_text
 from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, run_authoring_monty
 from core.authoring.cache import add_context_summary, upsert_session
-from core.constants import CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION, VALID_WEEK_DAYS
+from core.constants import VALID_WEEK_DAYS
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.utils.hash import hash_file_content
@@ -54,6 +54,23 @@ class ContextTemplateError(ValueError):
         self.template_pointer = template_pointer
         self.section_name = section_name
         self.phase = phase
+
+
+class ContextTemplateExecutionError(RuntimeError):
+    """Raised when a selected context template cannot be used for chat execution."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        template_name: str,
+        phase: str,
+        template_pointer: str,
+    ):
+        super().__init__(message)
+        self.template_name = template_name
+        self.phase = phase
+        self.template_pointer = template_pointer
 
 
 # ---------------------------------------------------------------------------
@@ -229,24 +246,6 @@ def _model_request_has_user_prompt(message: ModelRequest) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
-# Context manager internals
-# ---------------------------------------------------------------------------
-
-def _build_template_error_processor(template_error: ContextTemplateError):
-    async def processor(_run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
-        warning = (
-            CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
-            +
-            f"phase={template_error.phase}; "
-            f"template_pointer={template_error.template_pointer}; "
-            f"message={template_error}"
-        )
-        return [ModelRequest(parts=[SystemPromptPart(content=warning)])] + list(messages)
-
-    return processor
-
-
 def _context_message_to_model_message(message: ContextMessage) -> ModelMessage:
     role = (message.role or "system").strip().lower()
     content = message.content or ""
@@ -381,24 +380,46 @@ async def _build_authoring_context_history(
     except AuthoringMontyExecutionError as exc:
         logger.warning(
             "Context authoring execution failed in history processor",
-            metadata={
+            data={
                 "error": str(exc),
+                "template_name": template.name,
                 "phase": "authoring_run",
                 "template_pointer": source.docstring_summary or "```python``` block",
             },
         )
-        warning = (
-            CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION
-            +
-            f"phase=authoring_run; "
-            f"template_pointer={source.docstring_summary or '```python``` block'}; "
-            f"message={exc}"
+        raise ContextTemplateExecutionError(
+            (
+                f"Context template '{template.name}' failed during execution. "
+                "Fix the template or select No template to continue without context management. "
+                f"Details: {exc}"
+            ),
+            template_name=template.name,
+            phase="authoring_run",
+            template_pointer=source.docstring_summary or "```python``` block",
         )
-        curated_history = [ModelRequest(parts=[SystemPromptPart(content=warning)])]
-        curated_history.extend(latest_turn_messages)
-        return curated_history
 
-    assembled = _normalize_authoring_context_result(result.value)
+    try:
+        assembled = _normalize_authoring_context_result(result.value)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Context template returned invalid result shape",
+            data={
+                "error": str(exc),
+                "template_name": template.name,
+                "phase": "result_shape",
+                "template_pointer": source.docstring_summary or "assemble_context(...) result",
+            },
+        )
+        raise ContextTemplateExecutionError(
+            (
+                f"Context template '{template.name}' returned invalid context data. "
+                "Fix the template or select No template to continue without context management. "
+                f"Details: {exc}"
+            ),
+            template_name=template.name,
+            phase="result_shape",
+            template_pointer=source.docstring_summary or "assemble_context(...) result",
+        ) from exc
     section_name = source.docstring_summary or "Context"
     summary_text = _combined_context_text(assembled.messages)
 
@@ -496,28 +517,31 @@ def build_context_manager_history_processor(
 ) -> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
     """
     Factory for a history processor that runs a Monty authoring template and
-    injects the assembled context ahead of the recent turns. If loading or
-    parsing fails, the original history is returned with an error annotation.
+    injects the assembled context ahead of the recent turns.
     """
     try:
         template = load_template(template_name, Path(vault_path))
         authoring_source = parse_authoring_template_text(template.content)
     except Exception as exc:
-        template_error = ContextTemplateError(
-            f"Failed to load/parse context template '{template_name}': {exc}",
-            template_pointer="Template frontmatter and python block",
-            section_name=None,
-            phase="template_load",
-        )
         logger.warning(
-            "Context template load failed; falling back to passthrough history",
+            "Context template load failed",
             data={
-                "error": str(template_error),
-                "phase": template_error.phase,
-                "template_pointer": template_error.template_pointer,
+                "error": str(exc),
+                "template_name": template_name,
+                "phase": "template_load",
+                "template_pointer": "Template frontmatter and python block",
             },
         )
-        return _build_template_error_processor(template_error)
+        raise ContextTemplateExecutionError(
+            (
+                f"Context template '{template_name}' could not be loaded. "
+                "Fix the template or select No template to continue without context management. "
+                f"Details: {exc}"
+            ),
+            template_name=template_name,
+            phase="template_load",
+            template_pointer="Template frontmatter and python block",
+        ) from exc
 
     logger.info(
         "Context template loaded",

@@ -33,14 +33,15 @@ from core.llm.model_utils import (
     model_supports_capability,
     resolve_model,
 )
-from core.authoring.context_manager import build_context_manager_history_processor
-from core.authoring.template_discovery import load_template
+from core.authoring.context_manager import (
+    ContextTemplateExecutionError,
+    build_context_manager_history_processor,
+)
 from core.settings import (
     get_auto_buffer_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
 )
-from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
@@ -67,6 +68,14 @@ class UploadedImageAttachment:
 
 class ChatCapabilityError(ValueError):
     """Raised when a chat request requires model capabilities that are unavailable."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class ChatContextTemplateError(ValueError):
+    """Raised when a selected chat context template cannot be used."""
 
     def __init__(self, message: str, *, details: dict[str, Any] | None = None):
         super().__init__(message)
@@ -332,50 +341,29 @@ def _build_model_capability_details(
     }
 
 
-def _get_default_context_template() -> Optional[str]:
-    """
-    Return the configured default context template name, if set.
-    """
-    try:
-        entry = get_general_settings().get("default_context_template")
-        if entry and entry.value:
-            return str(entry.value).strip() or None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Failed to read default_context_template setting",
-            data={"error": str(exc), "error_type": type(exc).__name__},
-        )
+def _normalize_context_template_selection(context_template: Optional[str]) -> Optional[str]:
+    """Return a selected template name or None for unmanaged chat."""
+    if context_template is None:
         return None
-    return None
+    normalized = str(context_template).strip()
+    return normalized or None
 
 
-def _resolve_context_template_name(vault_path: str, context_template: Optional[str]) -> str:
-    """
-    Resolve a context template name with vault overrides and fallback to unmanaged chat.
-    """
-    fallback = "default.md"
-    candidate = context_template or _get_default_context_template() or fallback
-    try:
-        load_template(candidate, Path(vault_path))
-        return candidate
-    except FileNotFoundError:
-        if candidate != fallback:
-            try:
-                load_template(fallback, Path(vault_path))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Fallback context template also missing",
-                    data={"fallback": fallback, "error": str(exc)},
-                )
-                return fallback
-            return fallback
-        return fallback
-    except Exception as exc:
-        logger.warning(
-            "Failed to load context template; falling back",
-            data={"candidate": candidate, "error": str(exc), "error_type": type(exc).__name__},
-        )
-        return fallback
+def _build_context_template_error_details(
+    *,
+    vault_name: str,
+    session_id: str,
+    template_name: str,
+    phase: str,
+    template_pointer: str,
+) -> dict[str, Any]:
+    return {
+        "vault_name": vault_name,
+        "session_id": session_id,
+        "template_name": template_name,
+        "phase": phase,
+        "template_pointer": template_pointer,
+    }
 
 
 def _build_chat_tool_overflow_capability(
@@ -712,16 +700,32 @@ async def _prepare_chat_execution(
         vault_name, vault_path, tools, model
     )
 
-    resolved_template = _resolve_context_template_name(vault_path, context_template)
-    history_processors = [
-        build_context_manager_history_processor(
-            session_id=session_id,
-            vault_name=vault_name,
-            vault_path=vault_path,
-            model_alias=model,
-            template_name=resolved_template,
-        )
-    ]
+    selected_template = _normalize_context_template_selection(context_template)
+    history_processors = []
+    if selected_template:
+        try:
+            history_processors.append(
+                build_context_manager_history_processor(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    vault_path=vault_path,
+                    model_alias=model,
+                    template_name=selected_template,
+                )
+            )
+        except ContextTemplateExecutionError as exc:
+            details = _build_context_template_error_details(
+                vault_name=vault_name,
+                session_id=session_id,
+                template_name=exc.template_name,
+                phase=exc.phase,
+                template_pointer=exc.template_pointer,
+            )
+            logger.warning(
+                "Selected context template rejected during chat preflight",
+                data=details | {"error": str(exc)},
+            )
+            raise ChatContextTemplateError(str(exc), details=details) from exc
     overflow_capability = _build_chat_tool_overflow_capability(
         vault_name=vault_name,
         session_id=session_id,
@@ -928,6 +932,19 @@ async def execute_chat_prompt(
             attached_image_count=attached_image_count,
             exc=exc,
         )
+        if isinstance(exc, ContextTemplateExecutionError):
+            details = _build_context_template_error_details(
+                vault_name=vault_name,
+                session_id=session_id,
+                template_name=exc.template_name,
+                phase=exc.phase,
+                template_pointer=exc.template_pointer,
+            )
+            logger.warning(
+                "Selected context template failed during chat execution",
+                data=details | {"error": str(exc)},
+            )
+            raise ChatContextTemplateError(str(exc), details=details) from exc
         raise
 
 
@@ -1109,6 +1126,39 @@ async def _stream_prepared_chat_prompt(
         }
         yield f"data: {json.dumps(error_chunk)}\n\n"
         return
+    except ContextTemplateExecutionError as exc:
+        details = _build_context_template_error_details(
+            vault_name=vault_name,
+            session_id=session_id,
+            template_name=exc.template_name,
+            phase=exc.phase,
+            template_pointer=exc.template_pointer,
+        )
+        logger.warning("Streaming context template execution failure", data=details | {"error": str(exc)})
+        error_chunk = {
+            "event": "error",
+            "choices": [{
+                "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                "index": 0,
+                "finish_reason": "error"
+            }],
+            "details": details,
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        return
+    except ChatContextTemplateError as exc:
+        logger.warning("Streaming context template failure", data=exc.details)
+        error_chunk = {
+            "event": "error",
+            "choices": [{
+                "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                "index": 0,
+                "finish_reason": "error"
+            }],
+            "details": exc.details,
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        return
     except Exception as e:
         _log_chat_failure(
             "Streaming chat execution failed",
@@ -1208,6 +1258,18 @@ async def execute_chat_prompt_stream(
             prompt_length=len(prompt),
             exc=exc,
         )
+        if isinstance(exc, ChatContextTemplateError):
+            error_chunk = {
+                "event": "error",
+                "choices": [{
+                    "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                    "index": 0,
+                    "finish_reason": "error"
+                }],
+                "details": exc.details,
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            return
         raise
     async for chunk in _stream_prepared_chat_prompt(
         prepared=prepared,

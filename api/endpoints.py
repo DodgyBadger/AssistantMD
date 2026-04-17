@@ -14,6 +14,7 @@ from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.chat import (
     ChatCapabilityError,
+    ChatContextTemplateError,
     UploadedImageAttachment,
     execute_chat_prompt,
     execute_chat_prompt_stream,
@@ -49,7 +50,7 @@ from .models import (
     ChatSessionsPurgeResponse,
     ChatSessionTitleRequest,
 )
-from .exceptions import APIException, ChatCapabilityMismatchError
+from .exceptions import APIException, ChatCapabilityMismatchError, ChatContextTemplateFailureError
 from .utils import create_error_response, generate_session_id, serialize_exception
 from .services import (
     rescan_vaults_and_update_scheduler,
@@ -256,6 +257,20 @@ async def _execute_chat_request(
             },
         )
         raise ChatCapabilityMismatchError(str(exc), details=exc.details) from exc
+    except ChatContextTemplateError as exc:
+        logger.warning(
+            "Chat request context template failure",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
+        raise ChatContextTemplateFailureError(str(exc), details=exc.details) from exc
     except Exception as exc:
         logger.error(
             "Chat request failed before response",

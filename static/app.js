@@ -1128,28 +1128,21 @@ function handleVaultChange() {
 
 function populateTemplates(templates, preferredTemplate = '') {
     if (!chatElements.templateSelector) return;
-    chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
-    if (!templates || templates.length === 0) {
-        chatElements.templateSelector.disabled = true;
-        return;
-    }
-    templates.forEach((tmpl) => {
+    const templateList = Array.isArray(templates) ? templates : [];
+    chatElements.templateSelector.innerHTML = '<option value="">No template</option>';
+    templateList.forEach((tmpl) => {
         const option = document.createElement('option');
         option.value = tmpl.name;
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
-    const templateToUse = preferredTemplate || state.metadata?.default_context_template || 'default.md';
+    const templateToUse = preferredTemplate || '';
     const selectedTemplate = Array.from(chatElements.templateSelector.options)
         .find((option) => option.value === templateToUse);
     if (selectedTemplate) {
         chatElements.templateSelector.value = selectedTemplate.value;
     } else {
-        const fallbackTemplate = Array.from(chatElements.templateSelector.options)
-            .find((option) => option.value === 'default.md');
-        if (fallbackTemplate) {
-            chatElements.templateSelector.value = fallbackTemplate.value;
-        }
+        chatElements.templateSelector.value = '';
     }
     chatElements.templateSelector.disabled = false;
 }
