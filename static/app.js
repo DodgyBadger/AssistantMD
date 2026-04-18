@@ -1256,6 +1256,7 @@ async function sendMessage() {
             state.sessionId = sessionId;
             syncChatControlLocks();
             renderSessionSelector();
+            updateSessionTitleRow();
         }
 
         // Fallback for environments that do not support streaming
@@ -1427,7 +1428,7 @@ function replaceLatexSegments(text, segments) {
     if (!text) return '';
 
     const pattern =
-        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|(?<!\\)\$[^$\n]+?(?<!\\)\$)/g;
+        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|(?<!\\)\$(?!\d)[^$\n]+?(?<!\\)\$)/g;
 
     return text.replace(pattern, (rawMath) => {
         const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
