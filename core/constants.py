@@ -17,6 +17,7 @@ VAULT_IGNORE_FILE = '.vaultignore'
 # Vault subdirectory structure
 ASSISTANTMD_ROOT_DIR = "AssistantMD"
 AUTHORING_DIR = "Authoring"        # Unified authoring directory (workflows + context templates)
+SKILLS_DIR = "Skills"              # User-defined skill files
 CHAT_SESSIONS_DIR = "Chat_Sessions"
 WORKFLOW_LOGS_DIR = "Logs"
 IMPORT_DIR = "Import"

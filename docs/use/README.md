@@ -4,10 +4,10 @@ If you have not set up the app yet, start with the [Installation Guide](../setup
 For a practical build path (chat -> skills -> workflows -> advanced templates), start with the [Build Guide](build-guide.md) before diving into detailed references.
 
 When you first run the app, a new `AssistantMD` folder is added to each vault:
-- `AssistantMD/Workflows` holds your workflow definitions
+- `AssistantMD/Authoring` holds your workflow and context template definitions
+- `AssistantMD/Skills` holds your skill files
 - `AssistantMD/Chat_Sessions` holds markdown files containing your chat history
 - `AssistantMD/Import` is where you place files you want to import as markdown into your vault
-- `AssistantMD/ContextTemplates` holds context manager templates
 
 Open the web app at `http://localhost:8000/` (or your configured host/port).
 
@@ -18,17 +18,12 @@ Open the web app at `http://localhost:8000/` (or your configured host/port).
 Chat works like other AI chats, but with access to your vault files and enabled tools. Open **Chat Settings**, pick a vault and model, then toggle the tools you need.
 Tool availability in the UI reflects current app configuration (`system/settings.yaml`).
 
-**A note about chat sessions**: The chat UI does not show a session list. Each session is saved as a markdown transcript in `AssistantMD/Chat_Sessions`, and the agent can read those files. To continue an older thread, ask the agent to load it (for example, "continue our conversation about quantum entanglement"). For longer-term memory workflows, see [this context-template example](../examples/ContextTemplates/weekly-memory.md).
+**A note about chat sessions**: The chat UI does not show a session list. Each session is saved as a markdown transcript in `AssistantMD/Chat_Sessions`, and the agent can read those files. To continue an older thread, ask the agent to load it (for example, "continue our conversation about quantum entanglement").
 
-### Context Manager
+### Workflows and Context Templates
 
-Context templates shape what the chat agent sees. Templates live under `AssistantMD/ContextTemplates/` (vault) or `system/ContextTemplates/` (global). Select one per chat session in the UI.
-See [Context Manager](context_manager.md).
-
-### Workflows
-
-Workflows let you schedule and structure prompts in markdown files under `AssistantMD/Workflows/`.
-See [Workflows](workflows.md).
+Workflows automate vault tasks on a schedule or on demand. Context templates shape what the chat agent knows at the start of a session. Both are Python files in `AssistantMD/Authoring/`.
+See [Authoring](authoring.md).
 
 ### Importer
 
@@ -42,4 +37,4 @@ Use the **Configuration** tab to manage providers, model aliases, secrets, and g
 
 ### Example Library
 
-[See here](../examples/README.md) for example workflows, context templates, and skills you can copy and adapt.
+[See here](../examples/README.md) for example workflows and skills you can copy and adapt.

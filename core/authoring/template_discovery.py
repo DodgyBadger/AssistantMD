@@ -19,6 +19,7 @@ from apscheduler.triggers.base import BaseTrigger
 from core.constants import (
     ASSISTANTMD_ROOT_DIR,
     AUTHORING_DIR,
+    SKILLS_DIR,
     VALID_WEEK_DAYS,
     VAULT_IGNORE_FILE,
 )
@@ -301,10 +302,18 @@ def discover_vaults(data_root: str = None) -> List[str]:
     return sorted(vaults)
 
 
+def ensure_vault_directories(vault_path: str) -> None:
+    """Ensure all canonical AssistantMD subdirectories exist for a vault."""
+    assistantmd_root = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR)
+    os.makedirs(os.path.join(assistantmd_root, AUTHORING_DIR), exist_ok=True)
+    os.makedirs(os.path.join(assistantmd_root, SKILLS_DIR), exist_ok=True)
+    _seed_vault_skills(vault_path)
+
+
 def discover_workflow_files(vault_path: str) -> List[str]:
     """Return sorted workflow file paths from AssistantMD/Authoring."""
+    ensure_vault_directories(vault_path)
     authoring_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, AUTHORING_DIR)
-    os.makedirs(authoring_dir, exist_ok=True)
     return sorted(_scan_md_files_one_level(authoring_dir))
 
 
@@ -441,10 +450,9 @@ def list_templates(
 
 def seed_system_templates(system_root: Optional[Path] = None) -> None:
     """
-    Ensure system templates directory exists with seeded defaults.
+    Seed system Authoring directory from seed_templates/context/ and seed_templates/workflows/.
 
-    Copies all files from core/context/template_seed into the system Authoring
-    directory if they are not already present. Does not overwrite existing templates.
+    Does not overwrite files that already exist.
     """
     try:
         sys_root = system_root or get_system_root()
@@ -452,24 +460,47 @@ def seed_system_templates(system_root: Optional[Path] = None) -> None:
         logger.warning(f"System root unavailable while seeding templates: {exc}")
         return
 
-    target_dir = Path(sys_root) / AUTHORING_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     if not SEED_TEMPLATE_DIR.exists():
         logger.warning(f"Seed template directory missing: {SEED_TEMPLATE_DIR}")
         return
 
-    for seed_path in SEED_TEMPLATE_DIR.iterdir():
+    target_dir = Path(sys_root) / AUTHORING_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for subfolder in ("context", "workflows"):
+        source_dir = SEED_TEMPLATE_DIR / subfolder
+        if not source_dir.exists():
+            continue
+        for seed_path in source_dir.iterdir():
+            if not seed_path.is_file():
+                continue
+            target_path = target_dir / seed_path.name
+            if target_path.exists():
+                continue
+            try:
+                shutil.copyfile(seed_path, target_path)
+                logger.info(f"Seeded template to {target_path}")
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error(f"Failed to seed template {target_path}: {exc}")
+
+
+def _seed_vault_skills(vault_path: str) -> None:
+    """Seed AssistantMD/Skills/ with example skill files if the directory is new."""
+    skills_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / SKILLS_DIR
+    source_dir = SEED_TEMPLATE_DIR / "skills"
+    if not source_dir.exists():
+        return
+    for seed_path in source_dir.iterdir():
         if not seed_path.is_file():
             continue
-        target_path = target_dir / seed_path.name
+        target_path = skills_dir / seed_path.name
         if target_path.exists():
-            continue  # Preserve existing templates
+            continue
         try:
             shutil.copyfile(seed_path, target_path)
-            logger.info(f"Seeded context template to {target_path}")
+            logger.info(f"Seeded skill to {target_path}")
         except Exception as exc:  # pragma: no cover - defensive
-            logger.error(f"Failed to seed system template {target_path}: {exc}")
+            logger.error(f"Failed to seed skill {target_path}: {exc}")
 
 
 # ---------------------------------------------------------------------------

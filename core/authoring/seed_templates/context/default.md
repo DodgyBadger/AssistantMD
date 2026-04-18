@@ -1,9 +1,9 @@
 ---
 run_type: context
-description: Default template for regular chat. Passes full history and injects behavioral instructions. Loads skill catalog from AssistantMD/Skills/ if present.
+description: Default template for regular chat. Passes full history. Loads soul.md instructions and skill catalog if present.
 ---
 ```python
-"""Default chat context: pass history, inject stance, load skills catalog if present."""
+"""Default chat context: pass history, inject soul.md instructions and skills catalog if present."""
 
 import json
 
@@ -15,6 +15,23 @@ history = [
     {"role": item["role"], "content": item["content"]}
     for item in json.loads(history_result.output)["items"]
 ]
+
+soul_result = await call_tool(
+    name="file_ops_safe",
+    arguments={"operation": "read", "target": "AssistantMD/soul.md"},
+)
+soul_instructions = (
+    soul_result.output.strip()
+    if soul_result.metadata.get("status") == "completed"
+    else (
+        "Default stance: concise and curious. Act as a guide, not a sage.\n"
+        "- Start with the minimum useful answer.\n"
+        "- Ask brief clarifying questions when intent, scope, or constraints are unclear.\n"
+        "- Avoid long explanations until the user asks for depth.\n"
+        "- Prefer next-step guidance over broad monologues.\n"
+        "- Prefer tool-grounded answers when current facts or user files matter."
+    )
+)
 
 skills_result = await call_tool(
     name="file_ops_safe",
@@ -29,14 +46,7 @@ if skills_result.metadata.get("status") == "completed":
         path = item["path"]
         skills_lines.append(f"- **{name}** (`{path}`): {description}" if description else f"- **{name}** (`{path}`)")
 
-instructions = (
-    "Default stance: concise and curious. Act as a guide, not a sage.\n"
-    "- Start with the minimum useful answer.\n"
-    "- Ask brief clarifying questions when intent, scope, or constraints are unclear.\n"
-    "- Avoid long explanations until the user asks for depth.\n"
-    "- Prefer next-step guidance over broad monologues.\n"
-    "- Prefer tool-grounded answers when current facts or user files matter."
-)
+instructions = soul_instructions
 if skills_lines:
     instructions += (
         "\n\n## Skills\n"
