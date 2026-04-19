@@ -1136,7 +1136,8 @@ function populateTemplates(templates, preferredTemplate = '') {
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
-    const templateToUse = preferredTemplate || '';
+    const defaultTemplate = state.metadata?.default_context_template || '';
+    const templateToUse = preferredTemplate || defaultTemplate;
     const selectedTemplate = Array.from(chatElements.templateSelector.options)
         .find((option) => option.value === templateToUse);
     if (selectedTemplate) {

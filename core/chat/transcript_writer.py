@@ -34,6 +34,8 @@ def rewrite_chat_transcript(
 
     lines = [f"Chat Session: {session_id}", ""]
     for message in messages:
+        if message.role not in ("user", "assistant"):
+            continue
         lines.extend(_render_message_block(message))
 
     history_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")

@@ -42,6 +42,7 @@ from core.settings import (
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
 )
+from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
@@ -347,6 +348,16 @@ def _normalize_context_template_selection(context_template: Optional[str]) -> Op
         return None
     normalized = str(context_template).strip()
     return normalized or None
+
+
+def _get_global_default_template() -> Optional[str]:
+    try:
+        entry = get_general_settings().get("default_context_template")
+        if entry and entry.value:
+            return str(entry.value).strip() or None
+    except Exception:
+        pass
+    return None
 
 
 def _build_context_template_error_details(
@@ -703,29 +714,41 @@ async def _prepare_chat_execution(
     selected_template = _normalize_context_template_selection(context_template)
     history_processors = []
     if selected_template:
-        try:
-            history_processors.append(
-                build_context_manager_history_processor(
-                    session_id=session_id,
-                    vault_name=vault_name,
-                    vault_path=vault_path,
-                    model_alias=model,
-                    template_name=selected_template,
+        global_default = _get_global_default_template()
+        template_candidates = [selected_template]
+        if global_default and global_default != selected_template:
+            template_candidates.append(global_default)
+
+        loaded = False
+        for candidate in template_candidates:
+            try:
+                history_processors.append(
+                    build_context_manager_history_processor(
+                        session_id=session_id,
+                        vault_name=vault_name,
+                        vault_path=vault_path,
+                        model_alias=model,
+                        template_name=candidate,
+                    )
                 )
-            )
-        except ContextTemplateExecutionError as exc:
-            details = _build_context_template_error_details(
-                vault_name=vault_name,
-                session_id=session_id,
-                template_name=exc.template_name,
-                phase=exc.phase,
-                template_pointer=exc.template_pointer,
-            )
+                loaded = True
+                break
+            except ContextTemplateExecutionError as exc:
+                logger.warning(
+                    "Context template failed, trying next in fallback chain",
+                    data=_build_context_template_error_details(
+                        vault_name=vault_name,
+                        session_id=session_id,
+                        template_name=exc.template_name,
+                        phase=exc.phase,
+                        template_pointer=exc.template_pointer,
+                    ) | {"error": str(exc), "candidate": candidate},
+                )
+        if not loaded:
             logger.warning(
-                "Selected context template rejected during chat preflight",
-                data=details | {"error": str(exc)},
+                "All context template candidates failed; proceeding without context template",
+                data={"vault_name": vault_name, "session_id": session_id, "tried": template_candidates},
             )
-            raise ChatContextTemplateError(str(exc), details=details) from exc
     overflow_capability = _build_chat_tool_overflow_capability(
         vault_name=vault_name,
         session_id=session_id,
