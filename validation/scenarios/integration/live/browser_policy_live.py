@@ -58,7 +58,7 @@ class BrowserPolicyScenario(BaseScenario):
         )
 
         update_setting = self.call_api(
-            "/api/system/settings/general/auto_buffer_max_tokens",
+            "/api/system/settings/general/auto_cache_max_tokens",
             method="PUT",
             data={"value": "100"},
         )

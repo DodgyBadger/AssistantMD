@@ -461,8 +461,6 @@ def route_tool_output(
     buffer_store_registry: dict[str, Any] | None = None,
 ) -> Any:
     """Route tool output to a resolved write target, returning a manifest string."""
-    if tool_name == "buffer_ops":
-        return result
     hard_output = params.get("output")
     output_target = hard_output or output_value
     scope_value = params.get("scope")

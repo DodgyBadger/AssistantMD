@@ -392,9 +392,9 @@ def get_default_model_thinking() -> ThinkingValue:
     return normalize_thinking_value(value, source_name="default_model_thinking")
 
 
-def get_auto_buffer_max_tokens() -> int:
-    """Return the configured auto-buffer token limit, falling back to 0 (disabled)."""
-    entry = get_general_settings().get("auto_buffer_max_tokens")
+def get_auto_cache_max_tokens() -> int:
+    """Return the configured auto-cache token limit, falling back to 0 (disabled)."""
+    entry = get_general_settings().get("auto_cache_max_tokens")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
         return int(value)

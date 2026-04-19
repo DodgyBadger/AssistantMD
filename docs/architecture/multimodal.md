@@ -45,7 +45,7 @@ This document describes how AssistantMD handles image inputs alongside markdown 
 Attachment requires all applicable gates to pass:
 
 1. Model capability gate (`vision` required for image attachment)
-2. Text token gate (`raw_text_tokens <= auto_buffer_max_tokens`)
+2. Text token gate (`raw_text_tokens <= auto_cache_max_tokens`)
 3. Image preflight gates (count, per-image bytes, total image bytes)
 
 Deterministic precedence:

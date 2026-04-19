@@ -39,7 +39,7 @@ from core.authoring.context_manager import (
     build_context_manager_history_processor,
 )
 from core.settings import (
-    get_auto_buffer_max_tokens,
+    get_auto_cache_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
     get_default_model_thinking,
@@ -405,7 +405,7 @@ def _build_chat_tool_overflow_capability(
     @hooks.on.after_tool_execute
     async def cache_oversized_tool_output(ctx, *, call, tool_def, args, result):
         del ctx, tool_def
-        token_limit = get_auto_buffer_max_tokens()
+        token_limit = get_auto_cache_max_tokens()
 
         if _tool_result_has_multimodal_payload(result):
             _CHAT_STORE.add_tool_event(

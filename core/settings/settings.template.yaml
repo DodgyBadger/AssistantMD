@@ -32,7 +32,7 @@ settings:
     value: 0
     description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
     restart_required: false
-  auto_buffer_max_tokens:
+  auto_cache_max_tokens:
     value: 10000
     description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
     restart_required: false

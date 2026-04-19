@@ -24,7 +24,7 @@ from core.chunking import (
 from core.constants import SUPPORTED_READ_FILE_TYPES
 from core.logger import UnifiedLogger
 from core.settings import (
-    get_auto_buffer_max_tokens,
+    get_auto_cache_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
     get_file_ops_safe_list_max_results,
@@ -354,7 +354,7 @@ Important notes:
                 markdown_chunks=markdown_chunks,
                 source_markdown_path=path,
                 vault_path=vault_path,
-                auto_buffer_max_tokens=get_auto_buffer_max_tokens(),
+                auto_cache_max_tokens=get_auto_cache_max_tokens(),
                 policy=default_chunking_policy(),
             )
             if not decision.attach_images:

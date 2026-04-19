@@ -29,8 +29,8 @@ class ChatToolOverflowCacheScenario(BaseScenario):
         async def overflow_probe() -> str:
             return "OVERFLOW_SEGMENT " * 1200
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model):
-            del vault_name, vault_path, tools, model
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            del vault_name, vault_path, tools, model, thinking
             return (
                 "You must call the overflow_probe tool before responding.",
                 "",
@@ -42,7 +42,7 @@ class ChatToolOverflowCacheScenario(BaseScenario):
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         try:
             update_setting = self.call_api(
-                "/api/system/settings/general/auto_buffer_max_tokens",
+                "/api/system/settings/general/auto_cache_max_tokens",
                 method="PUT",
                 data={"value": "50"},
             )

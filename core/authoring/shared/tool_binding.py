@@ -315,8 +315,6 @@ def _wrap_tool_function(
     tool_instructions: str | None = None,
     tool_class: Type | None = None,
 ):
-    if tool_name == "buffer_ops":
-        return tool
     original_func = tool.function
     original_takes_ctx = getattr(tool, "takes_ctx", False)
     allowed_tools = get_routing_allowed_tools()

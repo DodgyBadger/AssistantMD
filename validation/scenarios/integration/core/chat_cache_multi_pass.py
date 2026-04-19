@@ -67,8 +67,8 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     }
                 raise AssertionError("Unexpected code_execution_local phase")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model):
-            del vault_name, tools, model
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            del vault_name, tools, model, thinking
             call_index["value"] += 1
             binding = resolve_tool_binding(
                 ["code_execution_local"],
@@ -103,7 +103,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
         chat_executor.build_context_manager_history_processor = _passthrough_history_processor
         try:
             update_setting = self.call_api(
-                "/api/system/settings/general/auto_buffer_max_tokens",
+                "/api/system/settings/general/auto_cache_max_tokens",
                 method="PUT",
                 data={"value": "50"},
             )

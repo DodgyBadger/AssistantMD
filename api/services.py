@@ -1485,8 +1485,8 @@ async def get_metadata() -> MetadataResponse:
             "default_model_thinking": getattr(
                 get_general_settings().get("default_model_thinking"), "value", "default"
             ),
-            "auto_buffer_max_tokens": getattr(
-                get_general_settings().get("auto_buffer_max_tokens"), "value", 0
+            "auto_cache_max_tokens": getattr(
+                get_general_settings().get("auto_cache_max_tokens"), "value", 0
             )
         },
         default_context_template=default_context_template,

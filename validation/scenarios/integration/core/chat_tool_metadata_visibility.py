@@ -1,5 +1,5 @@
 """
-Integration scenario validating chat tool metadata hides compatibility-only tools.
+Integration scenario validating chat tool metadata exposes the expected tool surface.
 """
 
 import sys
@@ -11,7 +11,7 @@ from validation.core.base_scenario import BaseScenario
 
 
 class ChatToolMetadataVisibilityScenario(BaseScenario):
-    """Validate chat metadata exposes cache-era tools and hides buffer-era compatibility tools."""
+    """Validate chat metadata exposes expected current tools."""
 
     async def test_scenario(self):
         self.create_vault("ChatToolMetadataVisibilityVault")
@@ -30,10 +30,6 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
             self.soft_assert(
                 "memory_ops" in tool_names,
                 "Chat metadata should expose memory_ops",
-            )
-            self.soft_assert(
-                "buffer_ops" not in tool_names,
-                "Chat metadata should hide buffer_ops because it is compatibility-only for chat",
             )
         finally:
             await self.stop_system()
