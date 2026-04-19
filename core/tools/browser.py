@@ -132,8 +132,9 @@ Policy notes:
             browser,
             name="browser",
             description=(
-                "Open a web page in a headless browser and extract compact content "
-                "from the main page region."
+                "Open a web page in a headless browser and extract content from the main page region. "
+                "Prefer tavily_extract for cleaner results if enabled. "
+                "Use this tool if tavily_extract fails."
             ),
         )
 

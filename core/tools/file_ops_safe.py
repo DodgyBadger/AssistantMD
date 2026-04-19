@@ -156,7 +156,11 @@ class FileOpsSafe(BaseTool):
         return Tool(
             file_operations,
             name="file_ops_safe",
-            description="Read, write, append, list, search, frontmatter, and move files safely within the current vault or virtual mounts.",
+            description=(
+                "Read, write, append, list, search, frontmatter, "
+                "and move files safely within the current vault or virtual mounts. "
+                "Prefer this tool over file_ops_unsafe for most operations."
+            ),
         )
 
     @classmethod

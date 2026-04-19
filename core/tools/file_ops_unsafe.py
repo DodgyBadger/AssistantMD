@@ -102,7 +102,10 @@ class FileOpsUnsafe(BaseTool):
         return Tool(
             file_ops_unsafe,
             name="file_ops_unsafe",
-            description="Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed.",
+            description=(
+                "Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed. "
+                "Always confirm with the user before performing a destructive operation with this tool. "
+            ),
         )
 
     @classmethod

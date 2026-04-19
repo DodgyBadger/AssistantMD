@@ -86,7 +86,10 @@ class TavilyExtract(BaseTool):
         return Tool(
             tavily_extract,
             name='tavily_extract',
-            description='Extract full content from specific web pages, articles, and documentation URLs.',
+            description=(
+                "Extract full content from specific web pages. "
+                "Prefer this tool over browser for cleaner results."
+            )
         )
     
     @classmethod
