@@ -362,6 +362,26 @@ def _get_global_default_template() -> Optional[str]:
     return None
 
 
+def _build_context_template_candidates(
+    context_template: Optional[str],
+) -> list[str]:
+    """Resolve the chat context-template fallback chain."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _append(value: Optional[str]) -> None:
+        normalized = _normalize_context_template_selection(value)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(normalized)
+
+    _append(context_template)
+    _append(_get_global_default_template())
+    _append("default.md")
+    return candidates
+
+
 def _build_context_template_error_details(
     *,
     vault_name: str,
@@ -714,14 +734,9 @@ async def _prepare_chat_execution(
         vault_name, vault_path, tools, model, thinking
     )
 
-    selected_template = _normalize_context_template_selection(context_template)
+    template_candidates = _build_context_template_candidates(context_template)
     history_processors = []
-    if selected_template:
-        global_default = _get_global_default_template()
-        template_candidates = [selected_template]
-        if global_default and global_default != selected_template:
-            template_candidates.append(global_default)
-
+    if template_candidates:
         loaded = False
         for candidate in template_candidates:
             try:
