@@ -750,14 +750,8 @@ function populateSelectors() {
         if (!checkbox.disabled) {
             if (previousTools.size > 0) {
                 checkbox.checked = previousTools.has(tool.name);
-            } else if (
-                tool.name === 'browser' ||
-                tool.name === 'code_execution_local' ||
-                tool.name === 'memory_ops' ||
-                tool.name === 'file_ops_safe' ||
-                (preferredWebTool && tool.name === preferredWebTool)
-            ) {
-                checkbox.checked = true;
+            } else {
+                checkbox.checked = tool.name !== 'web_search_duckduckgo';
             }
         }
 
