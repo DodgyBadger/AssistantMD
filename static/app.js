@@ -23,6 +23,7 @@ const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
 // State management
 const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
 const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
+const CHAT_THINKING_STORAGE_KEY = 'assistantmd_chat_thinking';
 
 const state = {
     sessionId: null,
@@ -46,6 +47,7 @@ const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
+    thinkingSelector: document.getElementById('thinking-selector'),
     sessionSelector: document.getElementById('session-selector'),
     toolDropdown: document.getElementById('tool-dropdown'),
     toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
@@ -275,9 +277,30 @@ function syncChatControlLocks() {
     if (chatElements.toolDropdownTrigger) {
         chatElements.toolDropdownTrigger.disabled = state.isLoading;
     }
+    if (chatElements.thinkingSelector) {
+        chatElements.thinkingSelector.disabled = state.isLoading;
+    }
     if (chatElements.sessionSelector) {
         chatElements.sessionSelector.disabled = state.isLoading;
     }
+}
+
+function getStoredChatThinking() {
+    return themeManager.safeGet(CHAT_THINKING_STORAGE_KEY);
+}
+
+function setStoredChatThinking(value) {
+    if (!value) return;
+    themeManager.safeSet(CHAT_THINKING_STORAGE_KEY, value);
+}
+
+function populateThinkingSelector() {
+    if (!chatElements.thinkingSelector) return;
+    const savedThinking = getStoredChatThinking();
+    const defaultThinking = state.metadata?.settings?.default_model_thinking || 'default';
+    const allowed = new Set(Array.from(chatElements.thinkingSelector.options).map((option) => option.value));
+    const selected = allowed.has(savedThinking) ? savedThinking : (allowed.has(defaultThinking) ? defaultThinking : 'default');
+    chatElements.thinkingSelector.value = selected;
 }
 
 function getSelectedToolNames() {
@@ -680,6 +703,7 @@ function populateSelectors() {
         chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
         chatElements.templateSelector.disabled = true;
     }
+    populateThinkingSelector();
 
     state.metadata.vaults.forEach(vault => {
         const option = document.createElement('option');
@@ -1102,6 +1126,11 @@ function setupEventListeners() {
     if (chatElements.vaultSelector) {
         chatElements.vaultSelector.addEventListener('change', handleVaultChange);
     }
+    if (chatElements.thinkingSelector) {
+        chatElements.thinkingSelector.addEventListener('change', () => {
+            setStoredChatThinking(chatElements.thinkingSelector.value || 'default');
+        });
+    }
 
     syncChatControlLocks();
 }
@@ -1169,6 +1198,7 @@ async function sendMessage() {
 
     const vault = chatElements.vaultSelector.value;
     const model = chatElements.modelSelector.value;
+    const thinking = chatElements.thinkingSelector ? (chatElements.thinkingSelector.value || 'default') : 'default';
 
     if (!vault) {
         alert('Please select a vault');
@@ -1203,6 +1233,7 @@ async function sendMessage() {
             formData.append('vault_name', vault);
             formData.append('prompt', effectivePrompt);
             formData.append('model', model);
+            formData.append('thinking', thinking);
             formData.append('stream', 'true');
             if (contextTemplateValue) {
                 formData.append('context_template', contextTemplateValue);
@@ -1224,6 +1255,7 @@ async function sendMessage() {
                 prompt: effectivePrompt,
                 tools: selectedTools,
                 model: model,
+                thinking: thinking,
                 context_template: contextTemplateValue,
                 stream: true
             };

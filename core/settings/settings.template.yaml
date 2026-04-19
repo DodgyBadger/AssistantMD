@@ -6,7 +6,11 @@
 settings:
   default_model:
     value: sonnet
-    description: "Default model alias used in the chat UI and as fallback when @model is omitted in workflow and context templates."
+    description: "Default model alias used in the chat UI and as fallback when workflow and context templates omit an explicit model."
+    restart_required: false
+  default_model_thinking:
+    value: default
+    description: "Default thinking policy for model calls. Use default, on, off, minimal, low, medium, high, or xhigh."
     restart_required: false
   default_context_template:
     value: "default.md"

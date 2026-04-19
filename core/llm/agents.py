@@ -6,9 +6,12 @@ from pydantic_ai.agent import Agent
 from pydantic_ai.messages import UserContent
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.llm.model_factory import build_model_instance
+from core.llm.thinking import ThinkingValue
 from core.llm.model_selection import ModelExecutionSpec
+from core.settings import get_default_model_thinking
 from core.settings.store import get_general_settings
 
+_THINKING_UNSET = object()
 
 PromptInput = str | Sequence[UserContent]
 
@@ -19,6 +22,7 @@ async def create_agent(
     output_type: Optional[Any] = None,
     history_processors: Optional[List] = None,
     capabilities: Optional[List[Any]] = None,
+    thinking: ThinkingValue | object = _THINKING_UNSET,
 ) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
 
@@ -48,7 +52,12 @@ async def create_agent(
 
         default_model_name = str(default_model_value).lower().strip()
 
-        model = build_model_instance(default_model_name)
+        resolved_thinking = (
+            get_default_model_thinking()
+            if thinking is _THINKING_UNSET
+            else thinking
+        )
+        model = build_model_instance(default_model_name, thinking=resolved_thinking)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
             raise ValueError(
                 "default_model cannot use skip mode ('none'). "

@@ -44,6 +44,10 @@ class ChatExecuteRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")
+    thinking: Optional[str] = Field(
+        None,
+        description="Optional per-request thinking override: default, on, off, minimal, low, medium, high, xhigh",
+    )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 

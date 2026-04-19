@@ -20,11 +20,14 @@ from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.authoring.cache import parse_cache_mode_value
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec
+from core.llm.thinking import ThinkingValue, normalize_thinking_value, thinking_value_to_label
 from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts, upsert_cache_artifact
 from core.logger import UnifiedLogger
+from core.settings import get_default_model_thinking
 
 
 logger = UnifiedLogger(tag="authoring-host")
+_THINKING_UNSET = object()
 
 
 def build_definition() -> AuthoringCapabilityDefinition:
@@ -44,13 +47,18 @@ async def execute(
 
     host = context.host
     prompt, inputs, instructions, model_value, tool_names, cache_policy, options = _parse_call(call)
-    resolved_model_value = _apply_options_to_model(model_value, options)
+    requested_thinking = _parse_generate_thinking_option(options)
+    default_thinking = get_default_model_thinking()
+    resolved_thinking, thinking_source = _resolve_effective_thinking(
+        requested_thinking=requested_thinking,
+        default_thinking=default_thinking,
+    )
     prompt_input: Any = prompt
     attached_image_count = 0
     input_warnings: list[str] = []
 
     if inputs:
-        model_execution = resolve_step_model_execution(resolved_model_value)
+        model_execution = resolve_step_model_execution(model_value)
         prompt_input, _prompt_text, attached_image_count, input_warnings = build_step_prompt(
             base_prompt=prompt,
             input_file_data=_build_input_file_data(inputs),
@@ -67,10 +75,11 @@ async def execute(
             prompt=prompt,
             inputs=inputs,
             instructions=instructions,
-            model_value=resolved_model_value or "default",
+            model_value=model_value or "default",
             tool_names=tool_names,
             cache_mode=cache_mode,
             ttl_seconds=cache_ttl_seconds,
+            thinking_value=thinking_value_to_label(resolved_thinking),
         )
         purge_expired_cache_artifacts(now=host.reference_date)
         cached = get_cache_artifact(
@@ -85,7 +94,7 @@ async def execute(
                 "authoring_generate_cache_hit",
                 data={
                     "workflow_id": context.workflow_id,
-                    "model": resolved_model_value or "default",
+                    "model": model_value or "default",
                     "cache_mode": cache_mode,
                     "cache_ref": cache_ref,
                     "output_chars": len(cached["raw_content"]),
@@ -93,13 +102,26 @@ async def execute(
             )
             return GenerationResult(
                 status="cached",
-                model=resolved_model_value or "default",
+                model=model_value or "default",
                 output=cached["raw_content"],
             )
 
+    logger.add_sink("validation").info(
+        "authoring_thinking_resolved",
+        data={
+            "workflow_id": context.workflow_id,
+            "model": model_value or "default",
+            "requested_thinking": thinking_value_to_label(
+                None if requested_thinking is _THINKING_UNSET else requested_thinking
+            ),
+            "resolved_thinking": thinking_value_to_label(resolved_thinking),
+            "source": thinking_source,
+        },
+    )
+
     model = None
-    if resolved_model_value:
-        model = build_model_instance(resolved_model_value)
+    if model_value:
+        model = build_model_instance(model_value, thinking=resolved_thinking)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
             raise ValueError("generate does not support skip model mode")
 
@@ -107,13 +129,14 @@ async def execute(
         "authoring_generate_started",
         data={
             "workflow_id": context.workflow_id,
-            "model": resolved_model_value or "default",
+            "model": model_value or "default",
             "instructions_present": bool(instructions),
             "input_count": len(inputs),
             "attached_image_count": attached_image_count,
             "input_warnings": input_warnings,
             "tool_names": list(tool_names),
             "cache_mode": cache_mode,
+            "resolved_thinking": thinking_value_to_label(resolved_thinking),
         },
     )
 
@@ -126,7 +149,7 @@ async def execute(
         )
         bound_tools = binding.tool_functions
 
-    agent = await create_agent(model=model, tools=bound_tools)
+    agent = await create_agent(model=model, tools=bound_tools, thinking=resolved_thinking)
     if instructions:
         agent.instructions(lambda _ctx, text=instructions: text)
     output = await generate_response(agent, prompt_input)
@@ -142,10 +165,11 @@ async def execute(
             raw_content=text,
             metadata={
                 "kind": "generate",
-                "model": resolved_model_value or "default",
+                "model": model_value or "default",
                 "prompt_chars": len(prompt),
                 "instructions_present": bool(instructions),
                 "tool_names": list(tool_names),
+                "thinking": thinking_value_to_label(resolved_thinking),
             },
             origin="authoring_generate",
             now=host.reference_date,
@@ -155,7 +179,7 @@ async def execute(
             "authoring_generate_cache_stored",
             data={
                 "workflow_id": context.workflow_id,
-                "model": resolved_model_value or "default",
+                "model": model_value or "default",
                 "tool_names": list(tool_names),
                 "cache_mode": cache_mode,
                 "cache_ref": cache_ref,
@@ -167,14 +191,14 @@ async def execute(
         "authoring_generate_completed",
         data={
             "workflow_id": context.workflow_id,
-            "model": resolved_model_value or "default",
+            "model": model_value or "default",
             "tool_names": list(tool_names),
             "output_chars": len(text),
         },
     )
     return GenerationResult(
         status="generated",
-        model=resolved_model_value or "default",
+        model=model_value or "default",
         output=text,
     )
 
@@ -263,6 +287,7 @@ def _build_cache_ref(
     tool_names: tuple[str, ...],
     cache_mode: str,
     ttl_seconds: int | None,
+    thinking_value: str,
 ) -> str:
     cache_key_payload = {
         "kind": "generate",
@@ -281,6 +306,7 @@ def _build_cache_ref(
         "tools": list(tool_names),
         "cache_mode": cache_mode,
         "ttl_seconds": ttl_seconds,
+        "thinking": thinking_value,
     }
     digest = hashlib.sha256(
         json.dumps(cache_key_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -314,19 +340,24 @@ def _build_input_file_data(inputs: tuple[RetrievedItem, ...]) -> list[dict[str, 
     return records
 
 
-def _apply_options_to_model(model_value: str | None, options: dict[str, Any]) -> str | None:
+def _parse_generate_thinking_option(options: dict[str, Any]) -> object:
     supported_keys = {"thinking"}
     unknown = sorted(set(options) - supported_keys)
     if unknown:
         raise ValueError(f"Unsupported generate options: {', '.join(unknown)}")
     if "thinking" not in options:
-        return model_value
-    thinking_value = options["thinking"]
-    if not isinstance(thinking_value, bool):
-        raise ValueError("generate option 'thinking' must be true or false")
-    if model_value is None:
-        raise ValueError("generate option 'thinking' currently requires an explicit model")
-    return f"{model_value} (thinking={'true' if thinking_value else 'false'})"
+        return _THINKING_UNSET
+    return normalize_thinking_value(options["thinking"], source_name="generate option 'thinking'")
+
+
+def _resolve_effective_thinking(
+    *, requested_thinking: object, default_thinking: ThinkingValue
+) -> tuple[ThinkingValue, str]:
+    if requested_thinking is not _THINKING_UNSET:
+        return requested_thinking, "call_override"  # type: ignore[return-value]
+    if default_thinking is not None:
+        return default_thinking, "global_default"
+    return None, "provider_default"
 
 
 def _contract() -> dict[str, object]:
@@ -365,7 +396,7 @@ def _contract() -> dict[str, object]:
             "model": {
                 "type": "string",
                 "required": False,
-                "description": "Optional model alias resolved through the existing model directive.",
+                "description": "Optional model alias resolved through the shared model configuration.",
             },
             "tools": {
                 "type": "list|tuple",
@@ -401,8 +432,8 @@ def _contract() -> dict[str, object]:
                 "description": "Less common generation controls.",
                 "schema": {
                     "thinking": {
-                        "type": "bool",
-                        "description": "When model aliases support it, append thinking=true/false to the model directive.",
+                        "type": "bool|string",
+                        "description": "Optional thinking override. Use true/false or minimal, low, medium, high, xhigh.",
                     }
                 },
             },
@@ -441,7 +472,7 @@ def _contract() -> dict[str, object]:
             {
                 "code": (
                     'await generate(prompt="Draft a reply", instructions="Warm tone.", '
-                    'model="test", options={"thinking": False})'
+                    'model="test", options={"thinking": "high"})'
                 ),
                 "description": "Use an explicit model alias with a supported generation option.",
             },

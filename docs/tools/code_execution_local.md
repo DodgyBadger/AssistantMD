@@ -74,6 +74,9 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 - tool use is opt-in — omit `tools` for plain generation
 - prefer tool-first access patterns; keep `generate(...)` focused on the actual model call
+- `options={"thinking": ...}` accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`
+- thinking is a separate option, not part of the model alias string
+- when `options["thinking"]` is omitted, `generate(...)` uses the current global default thinking policy from settings
 
 ### `call_tool`
 

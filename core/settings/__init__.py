@@ -13,6 +13,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.settings.store import (
     ModelConfig,
     ProviderConfig,
@@ -382,6 +383,13 @@ def get_default_max_output_tokens() -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def get_default_model_thinking() -> ThinkingValue:
+    """Return the configured default thinking policy."""
+    entry = get_general_settings().get("default_model_thinking")
+    value = getattr(entry, "value", None) if entry is not None else None
+    return normalize_thinking_value(value, source_name="default_model_thinking")
 
 
 def get_auto_buffer_max_tokens() -> int:

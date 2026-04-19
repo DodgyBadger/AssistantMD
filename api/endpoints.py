@@ -19,6 +19,7 @@ from core.chat import (
     execute_chat_prompt,
     execute_chat_prompt_stream,
 )
+from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 
 from .models import (
     WorkflowLoadErrorsResponse,
@@ -152,6 +153,7 @@ async def _parse_chat_execute_payload(
                 "session_id": str(form.get("session_id") or "").strip() or None,
                 "tools": tools,
                 "model": str(form.get("model") or "").strip(),
+                "thinking": str(form.get("thinking") or "").strip() or None,
                 "context_template": str(form.get("context_template") or "").strip() or None,
                 "stream": _parse_form_bool(form.get("stream"), default=False),
             }
@@ -190,6 +192,7 @@ async def _execute_chat_request(
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
     session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
+    resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
     logger.info(
         "Chat request accepted",
         data={
@@ -197,6 +200,7 @@ async def _execute_chat_request(
             "session_id": session_id,
             "streaming": chat_request.stream,
             "model": chat_request.model,
+            "thinking": thinking_value_to_label(resolved_thinking),
             "tools": list(chat_request.tools),
             "tools_count": len(chat_request.tools),
             "prompt_length": len(chat_request.prompt),
@@ -217,6 +221,7 @@ async def _execute_chat_request(
                 session_id=session_id,
                 tools=chat_request.tools,
                 model=chat_request.model,
+                thinking=resolved_thinking,
                 context_template=chat_request.context_template,
             )
 
@@ -241,6 +246,7 @@ async def _execute_chat_request(
             session_id=session_id,
             tools=chat_request.tools,
             model=chat_request.model,
+            thinking=resolved_thinking,
             context_template=chat_request.context_template,
         )
     except ChatCapabilityError as exc:

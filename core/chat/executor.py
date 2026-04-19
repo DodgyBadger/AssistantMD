@@ -27,6 +27,7 @@ from core.chat.transcript_writer import rewrite_chat_transcript, persist_chat_us
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
+from core.llm.thinking import ThinkingValue, thinking_value_to_label
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.llm.model_utils import (
     get_model_capabilities,
@@ -41,6 +42,7 @@ from core.settings import (
     get_auto_buffer_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
+    get_default_model_thinking,
 )
 from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
@@ -703,12 +705,13 @@ async def _prepare_chat_execution(
     session_id: str,
     tools: List[str],
     model: str,
+    thinking: ThinkingValue | None = None,
     context_template: Optional[str] = None,
 ) -> PreparedChatExecution:
     """Perform chat preflight before either sync or streaming execution begins."""
     _validate_image_capability(model, image_paths, image_uploads)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model
+        vault_name, vault_path, tools, model, thinking
     )
 
     selected_template = _normalize_context_template_selection(context_template)
@@ -788,6 +791,7 @@ def _prepare_agent_config(
     vault_path: str,
     tools: List[str],
     model: str,
+    thinking: ThinkingValue | None = None,
 ) -> tuple:
     """
     Prepare agent configuration (shared between streaming and non-streaming).
@@ -807,7 +811,8 @@ def _prepare_agent_config(
         tool_functions = binding.tool_functions
         tool_instructions = binding.tool_instructions
 
-    model_instance = build_model_instance(model)
+    resolved_thinking = thinking if thinking is not None else get_default_model_thinking()
+    model_instance = build_model_instance(model, thinking=resolved_thinking)
     if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
         raise ValueError(
             "Chat execution does not support skip mode model alias 'none'. "
@@ -826,6 +831,7 @@ async def execute_chat_prompt(
     session_id: str,
     tools: List[str],
     model: str,
+    thinking: ThinkingValue | None = None,
     context_template: Optional[str] = None,
 ) -> ChatExecutionResult:
     """
@@ -848,6 +854,7 @@ async def execute_chat_prompt(
         vault_name=vault_name,
         session_id=session_id,
         model=model,
+        extra={"thinking": thinking_value_to_label(thinking)},
         tools=tools,
         streaming=False,
         phase=phase,
@@ -875,6 +882,7 @@ async def execute_chat_prompt(
             session_id=session_id,
             tools=tools,
             model=model,
+            thinking=thinking,
             context_template=context_template,
         )
         attached_image_count = prepared.attached_image_count
@@ -1242,6 +1250,7 @@ async def execute_chat_prompt_stream(
     session_id: str,
     tools: List[str],
     model: str,
+    thinking: ThinkingValue | None = None,
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Preflight streaming chat execution and yield SSE chunks."""
@@ -1255,7 +1264,7 @@ async def execute_chat_prompt_stream(
         streaming=True,
         phase="session_persist_start",
         prompt_length=len(prompt),
-        extra={"history_file": history_file},
+        extra={"history_file": history_file, "thinking": thinking_value_to_label(thinking)},
     )
     try:
         prepared = await _prepare_chat_execution(
@@ -1267,6 +1276,7 @@ async def execute_chat_prompt_stream(
             session_id=session_id,
             tools=tools,
             model=model,
+            thinking=thinking,
             context_template=context_template,
         )
     except Exception as exc:

@@ -166,6 +166,9 @@ class ApiEndpointsScenario(BaseScenario):
         chat_metadata = self.call_api("/api/metadata")
         assert chat_metadata.status_code == 200, "Metadata endpoint available"
         metadata_payload = chat_metadata.json()
+        assert "default_model_thinking" in metadata_payload.get("settings", {}), (
+            "Metadata exposes default thinking hint for chat UI"
+        )
         assert any(
             tool.get("name") == "workflow_run"
             for tool in metadata_payload.get("tools", [])
@@ -180,6 +183,7 @@ class ApiEndpointsScenario(BaseScenario):
             "prompt": "Say hello from integration test.",
             "tools": [],
             "model": "test",
+            "thinking": "off",
         }
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
         assert chat_first.status_code == 200, "Chat execution succeeds"

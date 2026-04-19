@@ -278,7 +278,7 @@
         }
         @media (min-width: 768px) {
             .chat-settings-secondary-row {
-                grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
+                grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem) minmax(0, 1fr);
             }
         }
         .session-selector-row {
@@ -927,18 +927,29 @@
                     </svg>
                 </summary>
                 <div class="p-4 pt-2 space-y-3">
-                    <!-- Vault & Model Selection -->
+                    <!-- Row 1: Vault | Context template -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select vault...</option>
                         </select>
+                        <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="">Select template...</option>
+                        </select>
+                    </div>
+                    <!-- Row 2: Model | Thinking | Tools -->
+                    <div class="chat-settings-secondary-row">
                         <select id="model-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select model...</option>
                         </select>
-                    </div>
-                    <div class="chat-settings-secondary-row">
-                        <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">Select template...</option>
+                        <select id="thinking-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="default">Thinking: Default</option>
+                            <option value="off">Thinking: Off</option>
+                            <option value="on">Thinking: On</option>
+                            <option value="minimal">Thinking: Minimal</option>
+                            <option value="low">Thinking: Low</option>
+                            <option value="medium">Thinking: Medium</option>
+                            <option value="high">Thinking: High</option>
+                            <option value="xhigh">Thinking: XHigh</option>
                         </select>
                         <div id="tool-dropdown" class="tool-dropdown">
                             <button
@@ -964,6 +975,7 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Row 3: Session -->
                     <div class="session-selector-row">
                         <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">New session</option>

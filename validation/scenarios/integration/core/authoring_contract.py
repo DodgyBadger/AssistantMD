@@ -79,6 +79,17 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="authoring_thinking_resolved",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "model": "test",
+                "requested_thinking": "off",
+                "resolved_thinking": "off",
+                "source": "call_override",
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="authoring_generate_completed",
             expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
         )
@@ -316,6 +327,7 @@ draft = await generate(
     ),
     instructions="Return one short deterministic line.",
     model="test",
+    options={"thinking": False},
 )
 
 await _write_replace(

@@ -1,7 +1,7 @@
 """Shared model execution mode resolution.
 
 Centralizes how model aliases map to execution behavior so workflow, chat,
-and context systems stay consistent (for example, @model none => skip mode).
+and context systems stay consistent (for example, `none` => skip mode).
 """
 
 from __future__ import annotations
@@ -57,4 +57,3 @@ def resolve_model_execution_spec(model_alias: str | None) -> ModelExecutionSpec:
         base_alias=normalized_base_alias,
         raw_alias=raw,
     )
-
