@@ -18,7 +18,7 @@ history = [
 
 soul_result = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "read", "target": "AssistantMD/soul.md"},
+    arguments={"operation": "read", "path": "AssistantMD/soul.md"},
 )
 soul_instructions = (
     soul_result.output.strip()

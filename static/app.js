@@ -1159,12 +1159,18 @@ function populateTemplates(templates, preferredTemplate = '') {
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
-    const defaultTemplate = state.metadata?.default_context_template || '';
-    const templateToUse = preferredTemplate || defaultTemplate;
-    const selectedTemplate = Array.from(chatElements.templateSelector.options)
-        .find((option) => option.value === templateToUse);
+    const configuredDefaultTemplate = state.metadata?.default_context_template || '';
+    const fallbackCandidates = [
+        preferredTemplate,
+        configuredDefaultTemplate,
+        'default.md'
+    ].filter((value, index, values) => value && values.indexOf(value) === index);
+
+    const selectedTemplate = fallbackCandidates.find((candidate) =>
+        Array.from(chatElements.templateSelector.options).some((option) => option.value === candidate)
+    );
     if (selectedTemplate) {
-        chatElements.templateSelector.value = selectedTemplate.value;
+        chatElements.templateSelector.value = selectedTemplate;
     } else {
         chatElements.templateSelector.value = '';
     }
