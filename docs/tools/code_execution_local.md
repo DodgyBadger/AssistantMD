@@ -87,7 +87,8 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `assemble_context`
 
 - for conversation history, fetch explicit messages through `memory_ops` and pass them as `history`
-- `latest_user_message` is an explicit optional argument; it is not injected automatically
+- `latest_user_message` is an explicit optional argument on `assemble_context(...)`
+- in chat context templates, the runtime appends the latest user turn afterward if your assembled context does not already include it
 
 ### `parse_markdown`
 
