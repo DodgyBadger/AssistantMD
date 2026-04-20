@@ -23,7 +23,6 @@ const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
 // State management
 const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
 const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
-const CHAT_THINKING_STORAGE_KEY = 'assistantmd_chat_thinking';
 
 const state = {
     sessionId: null,
@@ -298,21 +297,11 @@ function syncChatControlLocks() {
     }
 }
 
-function getStoredChatThinking() {
-    return themeManager.safeGet(CHAT_THINKING_STORAGE_KEY);
-}
-
-function setStoredChatThinking(value) {
-    if (!value) return;
-    themeManager.safeSet(CHAT_THINKING_STORAGE_KEY, value);
-}
-
 function populateThinkingSelector() {
     if (!chatElements.thinkingSelector) return;
-    const savedThinking = getStoredChatThinking();
     const defaultThinking = state.metadata?.settings?.default_model_thinking || 'default';
     const allowed = new Set(Array.from(chatElements.thinkingSelector.options).map((option) => option.value));
-    const selected = allowed.has(savedThinking) ? savedThinking : (allowed.has(defaultThinking) ? defaultThinking : 'default');
+    const selected = allowed.has(defaultThinking) ? defaultThinking : 'default';
     chatElements.thinkingSelector.value = selected;
 }
 
@@ -1143,12 +1132,6 @@ function setupEventListeners() {
     if (chatElements.vaultSelector) {
         chatElements.vaultSelector.addEventListener('change', handleVaultChange);
     }
-    if (chatElements.thinkingSelector) {
-        chatElements.thinkingSelector.addEventListener('change', () => {
-            setStoredChatThinking(chatElements.thinkingSelector.value || 'default');
-        });
-    }
-
     syncChatControlLocks();
 }
 
