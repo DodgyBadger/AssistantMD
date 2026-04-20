@@ -83,7 +83,7 @@ description: Haiku writing workflow
 
 source = await call_tool(
     name="file_ops_safe",
-    arguments={"operation": "read", "target": "notes/haiku_seed.md"},
+    arguments={"operation": "read", "path": "notes/haiku_seed.md"},
 )
 note_content = source.output.split("\\n\\n", 1)[1] if "\\n\\n" in source.output else source.output
 
@@ -100,7 +100,7 @@ await call_tool(
     name="file_ops_safe",
     arguments={
         "operation": "write",
-        "target": f"haiku-{date.today()}.md",
+        "path": f"haiku-{date.today()}.md",
         "content": draft.output,
     },
 )
