@@ -4,6 +4,7 @@ Handles business logic for status reporting, vault management, etc.
 """
 
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -78,7 +79,7 @@ from .models import (
     ChatSessionsPurgeResponse,
 )
 from .exceptions import SystemConfigurationError
-from core.constants import IMPORT_DIR
+from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry

@@ -130,8 +130,8 @@ class CodeExecutionLocalScenario(BaseScenario):
                     }
                 raise AssertionError(f"Unexpected scenario case: {case_name}")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model):
-            del vault_name, vault_path, tools, model
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            del vault_name, vault_path, tools, model, thinking
             from core.authoring.shared.tool_binding import resolve_tool_binding
 
             binding = resolve_tool_binding(
@@ -324,7 +324,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 name="authoring_assemble_context_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
-                    "message_count": 1,
+                    "message_count": 2,
                     "instruction_count": 1,
                 },
             )

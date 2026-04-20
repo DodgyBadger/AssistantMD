@@ -33,8 +33,8 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
         async def session_probe() -> str:
             return "SESSION_PROBE_RESULT"
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model):
-            del vault_name, vault_path, tools, model
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            del vault_name, vault_path, tools, model, thinking
             return (
                 "You must call the session_probe tool before responding.",
                 "",
