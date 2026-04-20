@@ -735,7 +735,7 @@ async def chat_session_detail(session_id: str, vault_name: str):
 
 @router.delete("/chat/sessions/{session_id}")
 async def delete_chat_session_endpoint(session_id: str, vault_name: str):
-    """Delete one chat session and its transcript file."""
+    """Delete one chat session from the canonical store."""
     try:
         runtime = get_runtime_context()
         vault_path = str(runtime.config.data_root / vault_name)

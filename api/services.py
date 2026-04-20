@@ -235,9 +235,9 @@ def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: s
 
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
-    """Delete one chat session and its transcript file."""
-    deleted = _chat_store.delete_sessions(vault_name, session_id=session_id)
-    remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted)
+    """Delete one chat session from the canonical store only."""
+    del vault_path
+    _chat_store.delete_sessions(vault_name, session_id=session_id)
 
 
 def purge_chat_sessions(

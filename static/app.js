@@ -2133,7 +2133,9 @@ async function deleteCurrentSession() {
     const btn = chatElements.sessionDeleteBtn;
     if (!sessionId || !vault || !btn) return;
 
-    if (!confirm(`Delete session "${sessionId}"? This cannot be undone.`)) return;
+    if (!confirm(
+        `Delete session "${sessionId}"? This removes it from the chat session list and database only. Exported transcripts are not deleted.`
+    )) return;
 
     btn.disabled = true;
     try {
@@ -2160,7 +2162,7 @@ async function deleteCurrentSession() {
 
 async function clearSession(confirmReset = true) {
     const confirmed = confirmReset
-        ? window.confirm('Do you want to start a new chat session? The current session is saved as a markdown file in your vault.')
+        ? window.confirm('Do you want to start a new chat session? The current session remains available in chat history unless you delete it.')
         : true;
     if (!confirmed) return;
 
