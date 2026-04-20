@@ -1,12 +1,12 @@
 # Chat Sessions Subsystem
 
-Chat session state is persisted in two places: a SQLite store (canonical) and a markdown transcript (derived, human-readable).
+Chat session state is persisted canonically in SQLite. Markdown transcripts are optional derived exports.
 
 ## Primary code
 
 - `core/chat/chat_store.py` — read/write sessions and messages
 - `core/chat/schema.py` — SQLite schema bootstrap
-- `core/chat/transcript_writer.py` — render markdown transcripts from stored session data
+- `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
 
 ## SQLite store
 
@@ -18,7 +18,7 @@ Chat session state is persisted in two places: a SQLite store (canonical) and a 
 
 ## Markdown transcripts
 
-`AssistantMD/Chat_Sessions/` still contains one markdown file per session, but these are now derived from the SQLite store rather than being the primary record. `transcript_writer.py` renders them by reading stored messages and formatting each turn. The user prompt is also appended immediately on receipt (before the LLM responds) so abrupt failures still leave a readable trail.
+`AssistantMD/Chat_Sessions/` contains optional markdown exports derived from the SQLite store rather than the primary record. `transcript_writer.py` renders them on demand by reading stored messages and formatting only user-visible user/assistant turns.
 
 ## History loading
 

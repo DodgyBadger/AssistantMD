@@ -77,12 +77,7 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             )
 
             transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_stream_failure_session.md"
-            assert transcript.exists(), "User prompt should be persisted even when streaming chat fails"
-            content_text = transcript.read_text(encoding="utf-8")
-            assert prompt in content_text, "Transcript should include the failed streaming prompt"
-            assert "**Assistant:**" not in content_text, (
-                "Failed streaming chat execution should not append an assistant response"
-            )
+            assert not transcript.exists(), "Failed streaming chat execution should not write a transcript by default"
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"

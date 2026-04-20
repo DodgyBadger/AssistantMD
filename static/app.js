@@ -64,6 +64,7 @@ const chatElements = {
     sessionTitleRow: document.getElementById('session-title-row'),
     sessionTitleInput: document.getElementById('session-title-input'),
     sessionTitleSave: document.getElementById('session-title-save'),
+    sessionExportBtn: document.getElementById('session-export-btn'),
     sessionDeleteBtn: document.getElementById('session-delete-btn'),
 };
 
@@ -282,6 +283,18 @@ function syncChatControlLocks() {
     }
     if (chatElements.sessionSelector) {
         chatElements.sessionSelector.disabled = state.isLoading;
+    }
+    if (chatElements.sessionTitleInput) {
+        chatElements.sessionTitleInput.disabled = state.isLoading;
+    }
+    if (chatElements.sessionTitleSave) {
+        chatElements.sessionTitleSave.disabled = state.isLoading;
+    }
+    if (chatElements.sessionExportBtn) {
+        chatElements.sessionExportBtn.disabled = state.isLoading || !state.sessionId;
+    }
+    if (chatElements.sessionDeleteBtn) {
+        chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
     }
 }
 
@@ -1015,6 +1028,10 @@ function setupEventListeners() {
 
     if (chatElements.sessionDeleteBtn) {
         chatElements.sessionDeleteBtn.addEventListener('click', deleteCurrentSession);
+    }
+
+    if (chatElements.sessionExportBtn) {
+        chatElements.sessionExportBtn.addEventListener('click', exportCurrentSession);
     }
 
     if (chatElements.toolDropdownTrigger) {
@@ -2096,6 +2113,34 @@ async function saveSessionTitle() {
         console.error('Failed to save session title:', error);
     } finally {
         btn.disabled = false;
+    }
+}
+
+async function exportCurrentSession() {
+    const sessionId = state.sessionId;
+    const vault = chatElements.vaultSelector?.value || '';
+    const btn = chatElements.sessionExportBtn;
+    if (!sessionId || !vault || !btn) return;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Exporting...';
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_name: vault }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const payload = await response.json();
+        alert(`Transcript exported to ${payload.filename}`);
+    } catch (error) {
+        console.error('Failed to export session transcript:', error);
+        alert('Failed to export transcript');
+    } finally {
+        btn.textContent = originalText;
+        syncChatControlLocks();
     }
 }
 

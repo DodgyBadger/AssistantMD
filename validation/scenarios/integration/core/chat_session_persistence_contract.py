@@ -134,21 +134,84 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 "Non-overflow tool results should not create an artifact ref",
             )
 
-            transcript = (
-                Path(vault)
-                / ASSISTANTMD_ROOT_DIR
-                / CHAT_SESSIONS_DIR
-                / f"{session_id}.md"
+            transcript_dir = Path(vault) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
+            transcript = transcript_dir / f"{session_id}.md"
+            self.soft_assert(
+                not transcript.exists(),
+                "Normal chat execution should not write a transcript by default",
             )
-            assert transcript.exists(), "Chat transcript should be written for the persisted session"
-            transcript_text = transcript.read_text(encoding="utf-8")
+
+            title_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/title",
+                method="PATCH",
+                data={"vault_name": vault.name, "title": "Session Probe Title"},
+            )
+            assert title_response.status_code == 200, "Setting the session title should succeed"
+
+            export_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/export",
+                method="POST",
+                data={"vault_name": vault.name},
+            )
+            assert export_response.status_code == 200, "Transcript export should succeed on demand"
+            export_payload = export_response.json()
+            self.soft_assert_equal(
+                export_payload["filename"],
+                f"{session_id} - Session_Probe_Title.md",
+                "Transcript filename should include the titled session label",
+            )
+
+            titled_transcript = transcript_dir / export_payload["filename"]
+            assert titled_transcript.exists(), "Export should create the transcript file"
+            transcript_text = titled_transcript.read_text(encoding="utf-8")
             self.soft_assert(
                 "**User:**" in transcript_text and "**Assistant:**" in transcript_text,
-                "Transcript should contain persisted user and assistant sections",
+                "Transcript should contain exported user and assistant sections",
             )
             self.soft_assert(
                 "Use the session_probe tool and then answer briefly." in transcript_text,
-                "Transcript should include the persisted user prompt",
+                "Transcript export should include the persisted user prompt",
+            )
+            self.soft_assert(
+                "[session_probe]" not in transcript_text,
+                "Transcript export should exclude tool-call and tool-return markers",
+            )
+
+            follow_up = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Call the session_probe tool again and answer with the result only.",
+                    "session_id": session_id,
+                    "tools": ["session_probe"],
+                    "model": "test",
+                },
+            )
+            assert follow_up.status_code == 200, "Follow-up chat execution should succeed"
+
+            second_export_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/export",
+                method="POST",
+                data={"vault_name": vault.name},
+            )
+            assert second_export_response.status_code == 200, "Repeated transcript export should succeed"
+            second_export_payload = second_export_response.json()
+            self.soft_assert_equal(
+                second_export_payload["filename"],
+                export_payload["filename"],
+                "Repeated export should overwrite the same titled transcript file",
+            )
+
+            transcript_text = titled_transcript.read_text(encoding="utf-8")
+            self.soft_assert(
+                "Call the session_probe tool again and answer with the result only." in transcript_text,
+                "Repeated export should overwrite the transcript with newly added session messages",
+            )
+            self.soft_assert_equal(
+                len(list(transcript_dir.glob(f"{session_id}*.md"))),
+                1,
+                "Export should keep a single transcript variant for the session",
             )
 
             await self.restart_system()

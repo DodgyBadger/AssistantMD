@@ -4,7 +4,6 @@ Handles business logic for status reporting, vault management, etc.
 """
 
 import json
-import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -46,7 +45,7 @@ from core.settings.secrets_store import (
 )
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
-from core.chat import ChatStore
+from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -75,11 +74,11 @@ from .models import (
     ChatSessionDetailResponse,
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
+    ChatSessionExportResponse,
     ChatSessionsPurgeResponse,
-    ChatSessionTitleRequest,
 )
 from .exceptions import SystemConfigurationError
-from core.constants import ASSISTANTMD_ROOT_DIR, CHAT_SESSIONS_DIR, IMPORT_DIR
+from core.constants import IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
@@ -215,26 +214,30 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
     )
 
 
-def _remove_session_transcripts(vault_path: str, session_ids: list[str]) -> None:
-    """Unlink transcript files for a list of deleted session IDs."""
-    sessions_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
-    for session_id in session_ids:
-        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", session_id).strip("._-") or "session"
-        try:
-            (sessions_dir / f"{safe}.md").unlink(missing_ok=True)
-        except OSError:
-            pass
-
-
 def set_chat_session_title(vault_name: str, session_id: str, title: str | None) -> None:
     """Set or clear the user-defined title for a chat session."""
     _chat_store.set_session_title(session_id, vault_name, title)
 
 
+def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: str) -> ChatSessionExportResponse:
+    """Export one chat session transcript to the vault on demand."""
+    exported = export_chat_transcript(
+        store=_chat_store,
+        vault_path=vault_path,
+        vault_name=vault_name,
+        session_id=session_id,
+    )
+    return ChatSessionExportResponse(
+        session_id=session_id,
+        filename=exported.filename,
+        path=exported.path,
+    )
+
+
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
     """Delete one chat session and its transcript file."""
     deleted = _chat_store.delete_sessions(vault_name, session_id=session_id)
-    _remove_session_transcripts(vault_path, deleted)
+    remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted)
 
 
 def purge_chat_sessions(
@@ -245,7 +248,7 @@ def purge_chat_sessions(
 ) -> ChatSessionsPurgeResponse:
     """Delete old chat sessions and their transcript files for a vault."""
     deleted_ids = _chat_store.delete_sessions(vault_name, older_than_days=older_than_days)
-    _remove_session_transcripts(vault_path, deleted_ids)
+    remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted_ids)
 
     n = len(deleted_ids)
     if n == 0:

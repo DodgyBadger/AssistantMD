@@ -2,7 +2,7 @@
 Chat execution logic for dynamic prompt execution.
 
 Handles stateful/stateless chat with user-selected tools and models.
-Persists chat history to markdown files for auditability and testing.
+Persists canonical chat history in the structured chat store.
 """
 
 import json
@@ -23,7 +23,6 @@ from pydantic_ai.messages import UserContent
 
 from core.llm.agents import create_agent
 from core.chat.chat_store import ChatStore
-from core.chat.transcript_writer import rewrite_chat_transcript, persist_chat_user_message
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
@@ -875,18 +874,6 @@ async def execute_chat_prompt(
         phase=phase,
         prompt_length=len(prompt),
     )
-    history_file = persist_chat_user_message(vault_path, session_id, prompt)
-    _log_chat_lifecycle(
-        "Chat user message persisted",
-        vault_name=vault_name,
-        session_id=session_id,
-        model=model,
-        tools=tools,
-        streaming=False,
-        phase="session_persist_start",
-        prompt_length=len(prompt),
-        extra={"history_file": history_file},
-    )
     try:
         prepared = await _prepare_chat_execution(
             vault_name=vault_name,
@@ -936,12 +923,6 @@ async def execute_chat_prompt(
 
         phase = "session_persist"
         _CHAT_STORE.add_messages(session_id, vault_name, result.new_messages())
-        history_file = rewrite_chat_transcript(
-            store=_CHAT_STORE,
-            vault_path=vault_path,
-            vault_name=vault_name,
-            session_id=session_id,
-        )
         _log_chat_lifecycle(
             "Chat execution completed",
             vault_name=vault_name,
@@ -953,7 +934,6 @@ async def execute_chat_prompt(
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
             extra={
-                "history_file": history_file,
                 "message_count": len(result.all_messages()),
                 "response_length": len(result.output or ""),
             },
@@ -1232,12 +1212,6 @@ async def _stream_prepared_chat_prompt(
 
     if final_result:
         _CHAT_STORE.add_messages(session_id, vault_name, final_result.new_messages())
-        history_file = rewrite_chat_transcript(
-            store=_CHAT_STORE,
-            vault_path=vault_path,
-            vault_name=vault_name,
-            session_id=session_id,
-        )
         _log_chat_lifecycle(
             "Streaming chat execution completed",
             vault_name=vault_name,
@@ -1249,7 +1223,6 @@ async def _stream_prepared_chat_prompt(
             prompt_length=len(prepared.prompt_for_history),
             attached_image_count=prepared.attached_image_count,
             extra={
-                "history_file": history_file,
                 "tool_activity": tool_activity,
                 "response_length": len(full_response),
             },
@@ -1269,18 +1242,6 @@ async def execute_chat_prompt_stream(
     context_template: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Preflight streaming chat execution and yield SSE chunks."""
-    history_file = persist_chat_user_message(vault_path, session_id, prompt)
-    _log_chat_lifecycle(
-        "Streaming chat user message persisted",
-        vault_name=vault_name,
-        session_id=session_id,
-        model=model,
-        tools=tools,
-        streaming=True,
-        phase="session_persist_start",
-        prompt_length=len(prompt),
-        extra={"history_file": history_file, "thinking": thinking_value_to_label(thinking)},
-    )
     try:
         prepared = await _prepare_chat_execution(
             vault_name=vault_name,

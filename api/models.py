@@ -230,6 +230,12 @@ class ChatSessionTitleRequest(BaseModel):
     title: Optional[str] = Field(None, description="New title; null or empty clears it")
 
 
+class ChatSessionExportRequest(BaseModel):
+    """Request to export one persisted chat session as markdown."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+
+
 class ChatSessionMessageInfo(BaseModel):
     """Persisted normalized chat message for session rehydration."""
 
@@ -275,6 +281,14 @@ class ChatSessionsPurgeResponse(BaseModel):
 
     deleted: int = Field(..., description="Number of sessions deleted")
     message: str = Field(..., description="Human-readable summary")
+
+
+class ChatSessionExportResponse(BaseModel):
+    """Result of exporting one chat session transcript."""
+
+    session_id: str = Field(..., description="Session identifier")
+    filename: str = Field(..., description="Transcript filename created for the export")
+    path: str = Field(..., description="Absolute transcript path in the vault")
 
 
 class ModelConfigRequest(BaseModel):

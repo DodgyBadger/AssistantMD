@@ -1,7 +1,7 @@
-"""Chat subsystem: storage, transcripts, and execution."""
+"""Chat subsystem: storage, transcript export, and execution."""
 
 from .chat_store import ChatStore
-from .transcript_writer import rewrite_chat_transcript, persist_chat_user_message
+from .transcript_writer import ExportedTranscript, export_chat_transcript, remove_chat_transcript_exports
 from .executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
@@ -14,8 +14,9 @@ from .executor import (
 
 __all__ = [
     "ChatStore",
-    "rewrite_chat_transcript",
-    "persist_chat_user_message",
+    "ExportedTranscript",
+    "export_chat_transcript",
+    "remove_chat_transcript_exports",
     "ChatCapabilityError",
     "ChatContextTemplateError",
     "ChatExecutionResult",

@@ -47,6 +47,8 @@ from .models import (
     TemplateInfo,
     ChatSessionInfo,
     ChatSessionDetailResponse,
+    ChatSessionExportRequest,
+    ChatSessionExportResponse,
     ChatSessionsPurgeRequest,
     ChatSessionsPurgeResponse,
     ChatSessionTitleRequest,
@@ -61,6 +63,7 @@ from .services import (
     list_context_templates,
     list_chat_sessions,
     get_chat_session_detail,
+    export_chat_session_markdown,
     purge_chat_sessions,
     set_chat_session_title,
     delete_chat_session,
@@ -749,6 +752,17 @@ async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
         title = (request.title or "").strip() or None
         set_chat_session_title(request.vault_name, session_id, title)
         return {"session_id": session_id, "title": title}
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/export", response_model=ChatSessionExportResponse)
+async def export_chat_session_endpoint(session_id: str, request: ChatSessionExportRequest):
+    """Export one persisted chat session transcript into the owning vault."""
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        return export_chat_session_markdown(request.vault_name, vault_path, session_id)
     except Exception as e:
         return create_error_response(e)
 

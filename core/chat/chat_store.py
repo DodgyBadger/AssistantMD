@@ -427,6 +427,32 @@ class ChatStore:
             for session_id, session_vault_name, created_at, last_activity_at, title, metadata_json in rows
         ]
 
+    def get_session(self, session_id: str, vault_name: str) -> StoredChatSession | None:
+        """Return one stored chat session summary, if present."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                FROM chat_sessions
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (session_id, vault_name),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        session_id_value, session_vault_name, created_at, last_activity_at, title, metadata_json = row
+        return StoredChatSession(
+            session_id=str(session_id_value),
+            vault_name=str(session_vault_name),
+            created_at=str(created_at or ""),
+            last_activity_at=str(last_activity_at or ""),
+            title=None if title is None else str(title),
+            metadata_json=None if metadata_json is None else str(metadata_json),
+        )
+
     def _fetch_messages(
         self,
         *,

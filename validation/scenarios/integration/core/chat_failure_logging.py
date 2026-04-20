@@ -42,12 +42,7 @@ class ChatFailureLoggingScenario(BaseScenario):
             assert response.status_code == 500, "Forced chat failure should return 500"
 
             transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_failure_session.md"
-            assert transcript.exists(), "User prompt should be persisted even when chat execution fails"
-            content_text = transcript.read_text(encoding="utf-8")
-            assert prompt in content_text, "Transcript should include the failed request prompt"
-            assert "**Assistant:**" not in content_text, (
-                "Failed chat execution should not append an assistant response"
-            )
+            assert not transcript.exists(), "Failed chat execution should not write a transcript by default"
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
