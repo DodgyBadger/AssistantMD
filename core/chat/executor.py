@@ -467,7 +467,7 @@ async def _prepare_chat_execution(
         now=_resolve_context_manager_now(),
         event_sink=_CHAT_STORE,
         tools=tool_functions,
-        tool_instructions=tool_instructions,
+        tool_instructions="",
         history_processor_factory=build_context_manager_history_processor,
     )
 
@@ -475,7 +475,7 @@ async def _prepare_chat_execution(
         model=model_instance,
         capabilities=capabilities,
     )
-    for inst in [base_instructions]:
+    for inst in [base_instructions, tool_instructions]:
         if inst:
             agent.instructions(lambda _ctx, text=inst: text)
 
