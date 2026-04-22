@@ -102,6 +102,8 @@ Wrapper responsibility target:
 
 - Pydantic AI capability APIs are evolving quickly. Prefer a thin local boundary so future API changes are localized.
 - Harness is versioned `0.x`; treat it as optional until an explicit compatibility and contract test pass is complete.
+- AssistantMD chat has an explicit instruction layering contract: base instructions from `core/constants.py`, then AssistantMD tool descriptions/guidance, then context-template injected history/messages. AssistantMD tool registration may use Pydantic AI tool capabilities, but AssistantMD's long tool guidance should remain an explicit ordered instruction layer.
+- Third-party capabilities that only register tools/hooks/processors can be attached directly after compatibility testing. Third-party capabilities that inject behavioral instructions should be wrapped or adapted so AssistantMD chooses where those instructions land relative to base instructions, AssistantMD tool guidance, and context-template output.
 
 ## Validation Target
 
