@@ -1,5 +1,68 @@
 # Release Notes
 
+## 2026-04-22 - v0.6.0
+
+### BREAKING: Markdown DSL replaced by Python authoring runtime
+
+⚠️WARNING: This release replaces the markdown step-based authoring surface entirely with a Python-based authoring environment built on the **Pydantic Monty sandbox**. This affects every workflow and context template in your vault — all existing `.md` templates written using ## Step headings and @directives are now obsolete and must be migrated to the new format.
+
+**Rationale**  
+The old authoring approach relied on a custom language which was becoming increasingly complex for both humans and LLMs to understand. Attempts to teach the chat agent to write automations for you were failing. Rather than invent a new language, this release leans into what LLMs already know how to do well - write code. Now you can just describe the research / knowledge automation you want and the chat agent will create it for you.
+
+**Safety**  
+This is not free-form Python. Authoring scripts run inside the Monty sandbox — a Python interpreter written in Rust with its own bytecode VM. Monty's default is zero access: no filesystem, no network, no environment variables, no arbitrary imports. The only way a script can interact with the outside world is through host helpers that AssistantMD explicitly registers — `generate()`, `call_tool()`, and so on. Each integration point is deliberate and auditable. The chat agent can write and run automation code on your behalf without any risk of it reaching outside the boundaries AssistantMD sets.
+
+- **Workflows and context templates are now Python blocks.** Both live in a single `AssistantMD/Authoring/` folder — no more separate `Workflows/` and `ContextTemplates/` directories. Once you've migrated, you can delete the old folders.
+- **Host helpers replace directives.** The Python sandbox exposes a concise set of host-owned functions — `generate()`, `assemble_context()`, `pending_files()`, `parse_markdown()`, `finish()`, `date`, and others — giving you real control flow, conditionals, and loops instead of declarative DSL syntax.
+- **`Skills/` is now a canonical vault folder.** Drop plain-text skill files there and the default context template picks them up automatically, making them available to the chat agent without any template changes.
+- **`soul.md` for simple customization.** Create `AssistantMD/soul.md` with plain instructions — agent personality, response style, ground rules — and the default template loads it as the system instruction. No template authoring needed for simple cases.
+- **The chat agent can author and iterate templates for you.** Describe what you want; the agent drafts the file, places it in `Authoring/`, and can compile and refine it with you. The documentation has been significantly simplified and reorganized so the agent can find what it needs without manual pointers.
+
+### Pydantic AI capabilities refactor
+
+AssistantMD's tools and hooks have been restructured to align with the architectural direction Pydantic AI is taking around **capabilities** as the primary extension point for reusable agent behaviour.
+
+- A new `core/llm/capabilities/` package owns AssistantMD-specific capability implementations.
+- Chat and authoring agent construction now assembles capabilities explicitly rather than threading tool lists and history processors through ad-hoc arguments.
+
+### Chat session persistence and management
+
+Chat sessions are now persisted in SQLite and survive app restarts.
+
+- A **session picker** in the chat settings panel lists all stored sessions for the active vault; selecting one rehydrates the full conversation view.
+- Session titles are editable inline in the picker and appear in exported transcript filenames.
+- **Transcript export is now on-demand**: click the export action in the session picker. Transcripts contain only user and assistant turns; tool calls and returns remain in the database.
+- Exported transcript files are preserved when a session is deleted.
+- **Bulk session purge** is available under Configuration > Misc with vault and age-threshold selectors.
+
+### Unified thinking controls
+
+- A single thinking control surface now covers both chat and the authoring runner.
+- Set per-run thinking level in the chat UI and default thinking level in Application Settings.
+
+
+### Tool changes
+
+- All tools are now enabled by default (except `web_search_duckduckgo).
+- `file_ops_safe` interface changes:
+  - `target` parameter renamed to `path`.
+  - `scope` renamed to `search_term` (search semantics flipped: `path` is now the directory boundary).
+  - New `frontmatter` operation (returns selected frontmatter keys).
+  - New `head` operation (returns the first N lines of a file).
+- Local db-backed cache is now used for oversized tool results that exceed context limits, replacing the former buffer.
+- Manual cache purge controls added to Configuration.
+
+
+### Other improvements and fixes
+
+- Scheduler startup hardened against stale job-store references: if serialized jobs point to modules that no longer exist (e.g. after a package rename), the store is wiped and the scheduler retries clean. Jobs are always re-added from current workflow files on the same boot.
+- Prerelease tags (e.g. `v0.6-beta`) no longer move the `latest` Docker image tag; `latest` is only updated by stable `vX.Y.Z` releases.
+- Fixed LaTeX false-positive on currency values: `$10` no longer triggers inline math detection.
+- Tweaked the chat context template fallback chain.
+- Validation event filenames padded to 5 digits for correct sort order past 99 events.
+- Integration test suite updated throughout to match the new authoring contracts.
+
+
 ## 2026-03-31 - v0.5.0.
 
 ### BREAKING CHANGE: new selector/filter structure for the `@input` directive 
