@@ -16,7 +16,6 @@ from .base import BaseTool
 class InternalApi(BaseTool):
     """Read-only access to a small allowlist of internal metadata endpoints."""
 
-    allow_routing = False
     _MAX_RESPONSE_CHARS = INTERNAL_API_MAX_RESPONSE_CHARS
     _ALLOWED_ENDPOINTS = INTERNAL_API_ALLOWED_ENDPOINTS
 

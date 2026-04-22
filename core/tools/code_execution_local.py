@@ -28,8 +28,6 @@ logger = UnifiedLogger(tag="code-execution-local-tool")
 class CodeExecutionLocal(BaseTool):
     """Execute one constrained local Python snippet in the current chat session."""
 
-    allow_routing = False
-
     @classmethod
     def get_tool(cls, vault_path: str | None = None):
         """Get the chat-scoped constrained local code execution tool."""

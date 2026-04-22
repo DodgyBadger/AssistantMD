@@ -21,8 +21,6 @@ logger = UnifiedLogger(tag="memory-ops-tool")
 class MemoryOps(BaseTool):
     """Read structured conversation history for the current chat session."""
 
-    allow_routing = True
-
     @classmethod
     def get_tool(cls, vault_path: str | None = None):
         """Get the conversation memory tool."""

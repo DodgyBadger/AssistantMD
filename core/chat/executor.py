@@ -6,14 +6,13 @@ Persists canonical chat history in the structured chat store.
 """
 
 import json
-import re
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, TextPart, ToolReturn, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, TextPart, UserPromptPart
 from pydantic_ai import (
     BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
@@ -37,17 +36,17 @@ from core.authoring.context_manager import (
     ContextTemplateExecutionError,
     build_context_manager_history_processor,
 )
+from core.llm.capabilities.chat_context import build_context_template_error_details
+from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
+from core.llm.capabilities.factory import build_chat_capabilities
 from core.settings import (
-    get_auto_cache_max_tokens,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
     get_default_model_thinking,
 )
-from core.settings.store import get_general_settings
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
-from core.authoring.cache import purge_expired_cache_artifacts, upsert_cache_artifact
 from core.tools.utils import estimate_token_count
 
 
@@ -246,71 +245,6 @@ def _normalize_tool_result(result: Any) -> Optional[str]:
         return _truncate_preview(str(result), limit=240)
 
 
-def _tool_result_has_multimodal_payload(result: Any) -> bool:
-    if not isinstance(result, ToolReturn):
-        return False
-    content = result.content
-    if content is None or isinstance(content, str):
-        return False
-    return True
-
-
-def _tool_result_as_text(result: Any) -> str:
-    if isinstance(result, ToolReturn):
-        return str(result.return_value or "")
-    if result is None:
-        return ""
-    if isinstance(result, str):
-        return result
-    try:
-        return json.dumps(result, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return str(result)
-
-
-def _chat_cache_owner_id(*, vault_name: str, session_id: str) -> str:
-    return f"{vault_name}/chat/{session_id}"
-
-
-def _chat_cache_ref(*, tool_name: str, tool_call_id: str) -> str:
-    safe_tool_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_name).strip("-") or "tool"
-    safe_call_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_call_id).strip("-") or "call"
-    return f"tool/{safe_tool_name}/{safe_call_id}"
-
-
-def _should_preserve_vault_backed_tool_result(tool_name: str, args: dict[str, Any]) -> bool:
-    if tool_name != "file_ops_safe":
-        return False
-    operation = str(args.get("operation") or "").strip().lower()
-    return operation == "read"
-
-
-def _build_large_vault_read_notice(*, tool_name: str, args: dict[str, Any], token_count: int, token_limit: int) -> str:
-    target = str(args.get("target") or "").strip() or "<unknown>"
-    return (
-        f"Tool '{tool_name}' produced a large vault-backed file read for '{target}' "
-        f"({token_count} estimated tokens > {token_limit}). The content was not inlined or cached. "
-        "Explore the underlying file incrementally with targeted reads or switch to constrained-Python "
-        "exploration against the file path."
-    )
-
-
-def _build_cached_tool_overflow_notice(
-    *,
-    tool_name: str,
-    cache_ref: str,
-    token_count: int,
-    token_limit: int,
-    preview: str,
-) -> str:
-    return (
-        f"Tool '{tool_name}' produced a large result ({token_count} estimated tokens > {token_limit}) "
-        f"and it was stored in cache ref '{cache_ref}'. Preview:\n\n{preview}\n\n"
-        "Do not request the full content inline. Switch to `code_execution_local` and use "
-        f"`await read_cache(ref={cache_ref!r})` to inspect the cached artifact by ref."
-    )
-
-
 def _build_model_capability_details(
     model_alias: str,
     requested_capability: str,
@@ -346,220 +280,6 @@ def _build_model_capability_details(
         "image_path_count": sum(1 for path in (image_paths or []) if (path or "").strip()),
         "image_upload_count": len(image_uploads or []),
     }
-
-
-def _normalize_context_template_selection(context_template: Optional[str]) -> Optional[str]:
-    """Return a selected template name or None for unmanaged chat."""
-    if context_template is None:
-        return None
-    normalized = str(context_template).strip()
-    return normalized or None
-
-
-def _get_global_default_template() -> Optional[str]:
-    try:
-        entry = get_general_settings().get("default_context_template")
-        if entry and entry.value:
-            return str(entry.value).strip() or None
-    except Exception:
-        pass
-    return None
-
-
-def _build_context_template_candidates(
-    context_template: Optional[str],
-) -> list[str]:
-    """Resolve the chat context-template fallback chain."""
-    candidates: list[str] = []
-    seen: set[str] = set()
-
-    def _append(value: Optional[str]) -> None:
-        normalized = _normalize_context_template_selection(value)
-        if not normalized or normalized in seen:
-            return
-        seen.add(normalized)
-        candidates.append(normalized)
-
-    _append(context_template)
-    _append(_get_global_default_template())
-    _append("default.md")
-    return candidates
-
-
-def _build_context_template_error_details(
-    *,
-    vault_name: str,
-    session_id: str,
-    template_name: str,
-    phase: str,
-    template_pointer: str,
-) -> dict[str, Any]:
-    return {
-        "vault_name": vault_name,
-        "session_id": session_id,
-        "template_name": template_name,
-        "phase": phase,
-        "template_pointer": template_pointer,
-    }
-
-
-def _build_chat_tool_overflow_capability(
-    *,
-    vault_name: str,
-    session_id: str,
-    now: datetime | None,
-) -> Any | None:
-    from pydantic_ai.capabilities import Hooks
-
-    hooks = Hooks()
-
-    @hooks.on.before_tool_execute
-    async def persist_tool_call(ctx, *, call, tool_def, args):
-        del ctx, tool_def
-        _CHAT_STORE.add_tool_event(
-            session_id=session_id,
-            vault_name=vault_name,
-            tool_call_id=call.tool_call_id,
-            tool_name=call.tool_name,
-            event_type="call",
-            args=args if isinstance(args, dict) else None,
-        )
-        return args
-
-    @hooks.on.after_tool_execute
-    async def cache_oversized_tool_output(ctx, *, call, tool_def, args, result):
-        del ctx, tool_def
-        token_limit = get_auto_cache_max_tokens()
-
-        if _tool_result_has_multimodal_payload(result):
-            _CHAT_STORE.add_tool_event(
-                session_id=session_id,
-                vault_name=vault_name,
-                tool_call_id=call.tool_call_id,
-                tool_name=call.tool_name,
-                event_type="result",
-                result_text="[multimodal tool result]",
-                result_metadata={"multimodal": True},
-            )
-            return result
-
-        text = _tool_result_as_text(result)
-        if not text:
-            _CHAT_STORE.add_tool_event(
-                session_id=session_id,
-                vault_name=vault_name,
-                tool_call_id=call.tool_call_id,
-                tool_name=call.tool_name,
-                event_type="result",
-            )
-            return result
-
-        token_count = estimate_token_count(text)
-        if token_limit <= 0 or token_count <= token_limit:
-            _CHAT_STORE.add_tool_event(
-                session_id=session_id,
-                vault_name=vault_name,
-                tool_call_id=call.tool_call_id,
-                tool_name=call.tool_name,
-                event_type="result",
-                result_text=text,
-                result_metadata={"token_count": token_count},
-            )
-            return result
-
-        if _should_preserve_vault_backed_tool_result(call.tool_name, args):
-            logger.info(
-                "Chat oversized vault-backed tool result left inline as file ref guidance",
-                data={
-                    "vault_name": vault_name,
-                    "session_id": session_id,
-                    "tool_name": call.tool_name,
-                    "tool_call_id": call.tool_call_id,
-                    "token_count": token_count,
-                    "token_limit": token_limit,
-                },
-            )
-            notice = _build_large_vault_read_notice(
-                tool_name=call.tool_name,
-                args=args,
-                token_count=token_count,
-                token_limit=token_limit,
-            )
-            _CHAT_STORE.add_tool_event(
-                session_id=session_id,
-                vault_name=vault_name,
-                tool_call_id=call.tool_call_id,
-                tool_name=call.tool_name,
-                event_type="result",
-                result_text=notice,
-                result_metadata={
-                    "token_count": token_count,
-                    "token_limit": token_limit,
-                    "vault_backed_file_ref": True,
-                },
-            )
-            return notice
-
-        reference_time = now or datetime.now()
-        cache_ref = _chat_cache_ref(tool_name=call.tool_name, tool_call_id=call.tool_call_id)
-        purge_expired_cache_artifacts(now=reference_time)
-        upsert_cache_artifact(
-            owner_id=_chat_cache_owner_id(vault_name=vault_name, session_id=session_id),
-            session_key=session_id,
-            artifact_ref=cache_ref,
-            cache_mode="session",
-            ttl_seconds=None,
-            raw_content=text,
-            metadata={
-                "origin": "chat_tool_overflow",
-                "tool_name": call.tool_name,
-                "tool_call_id": call.tool_call_id,
-                "token_count": token_count,
-            },
-            origin="chat_tool_overflow",
-            now=reference_time,
-            week_start_day=0,
-        )
-        preview_limit = 1200
-        preview = text[:preview_limit]
-        if len(text) > preview_limit:
-            preview += "\n… [truncated]"
-
-        logger.info(
-            "Chat oversized tool result stored in cache",
-            data={
-                "vault_name": vault_name,
-                "session_id": session_id,
-                "tool_name": call.tool_name,
-                "tool_call_id": call.tool_call_id,
-                "cache_ref": cache_ref,
-                "token_count": token_count,
-                "token_limit": token_limit,
-            },
-        )
-        _CHAT_STORE.add_tool_event(
-            session_id=session_id,
-            vault_name=vault_name,
-            tool_call_id=call.tool_call_id,
-            tool_name=call.tool_name,
-            event_type="overflow_cached",
-            args=args if isinstance(args, dict) else None,
-            result_text=preview,
-            result_metadata={
-                "token_count": token_count,
-                "token_limit": token_limit,
-            },
-            artifact_ref=cache_ref,
-        )
-        return _build_cached_tool_overflow_notice(
-            tool_name=call.tool_name,
-            cache_ref=cache_ref,
-            token_count=token_count,
-            token_limit=token_limit,
-            preview=preview,
-        )
-
-    return hooks
 
 
 @dataclass
@@ -738,52 +458,24 @@ async def _prepare_chat_execution(
         vault_name, vault_path, tools, model, thinking
     )
 
-    template_candidates = _build_context_template_candidates(context_template)
-    history_processors = []
-    if template_candidates:
-        loaded = False
-        for candidate in template_candidates:
-            try:
-                history_processors.append(
-                    build_context_manager_history_processor(
-                        session_id=session_id,
-                        vault_name=vault_name,
-                        vault_path=vault_path,
-                        model_alias=model,
-                        template_name=candidate,
-                    )
-                )
-                loaded = True
-                break
-            except ContextTemplateExecutionError as exc:
-                logger.warning(
-                    "Context template failed, trying next in fallback chain",
-                    data=_build_context_template_error_details(
-                        vault_name=vault_name,
-                        session_id=session_id,
-                        template_name=exc.template_name,
-                        phase=exc.phase,
-                        template_pointer=exc.template_pointer,
-                    ) | {"error": str(exc), "candidate": candidate},
-                )
-        if not loaded:
-            logger.warning(
-                "All context template candidates failed; proceeding without context template",
-                data={"vault_name": vault_name, "session_id": session_id, "tried": template_candidates},
-            )
-    overflow_capability = _build_chat_tool_overflow_capability(
+    capabilities = build_chat_capabilities(
         vault_name=vault_name,
+        vault_path=vault_path,
         session_id=session_id,
+        model_alias=model,
+        context_template=context_template,
         now=_resolve_context_manager_now(),
+        event_sink=_CHAT_STORE,
+        tools=tool_functions,
+        tool_instructions=tool_instructions,
+        history_processor_factory=build_context_manager_history_processor,
     )
 
     agent = await create_agent(
         model=model_instance,
-        tools=tool_functions if tool_functions else None,
-        history_processors=history_processors,
-        capabilities=[overflow_capability] if overflow_capability is not None else None,
+        capabilities=capabilities,
     )
-    for inst in [base_instructions, tool_instructions]:
+    for inst in [base_instructions]:
         if inst:
             agent.instructions(lambda _ctx, text=inst: text)
 
@@ -969,7 +661,7 @@ async def execute_chat_prompt(
             exc=exc,
         )
         if isinstance(exc, ContextTemplateExecutionError):
-            details = _build_context_template_error_details(
+            details = build_context_template_error_details(
                 vault_name=vault_name,
                 session_id=session_id,
                 template_name=exc.template_name,
@@ -1118,7 +810,7 @@ async def _stream_prepared_chat_prompt(
                     "tool_name": tool_name,
                     "result": _normalize_tool_result(result_content)
                 }
-                result_text = _tool_result_as_text(result_content)
+                result_text = tool_result_as_text(result_content)
                 logger.info(
                     "Streaming tool call finished",
                     data={
@@ -1163,7 +855,7 @@ async def _stream_prepared_chat_prompt(
         yield f"data: {json.dumps(error_chunk)}\n\n"
         return
     except ContextTemplateExecutionError as exc:
-        details = _build_context_template_error_details(
+        details = build_context_template_error_details(
             vault_name=vault_name,
             session_id=session_id,
             template_name=exc.template_name,

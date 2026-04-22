@@ -5,22 +5,19 @@ from __future__ import annotations
 import importlib
 import inspect
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Type
 
 from pydantic_ai import RunContext
 
 from core.logger import UnifiedLogger
-from core.settings import get_routing_allowed_tools
 from core.settings.secrets_store import secret_has_value
 from core.settings.store import ToolConfig, get_tools_config
 from core.tools.base import BaseTool
 from core.tools.utils import get_tool_instructions
-from core.authoring.shared.output_resolution import route_tool_output
 from core.utils.value_parser import DirectiveValueParser
 
 
 logger = UnifiedLogger(tag="workflow-tool-binding")
-TOOLS_ALLOWED_PARAMETERS = {"output", "write-mode", "write_mode", "scope"}
 
 
 @dataclass(frozen=True)
@@ -57,7 +54,7 @@ def validate_tool_binding_value(value: Any) -> bool:
     if lowered in ["true", "false", "yes", "no", "1", "0", "on", "off", "all", "none"]:
         return True
 
-    items = _parse_tools_with_params(normalized)
+    items = _parse_tools(normalized)
     if not items:
         return False
     available_tools = set(get_tools_config().keys())
@@ -76,20 +73,16 @@ def resolve_tool_binding(
         raise ValueError("Tools directive requires explicit value - tools disabled by default for security")
 
     normalized = DirectiveValueParser.normalize_string(normalized_value, to_lower=True)
-    tool_params_by_name: Dict[str, Dict[str, str]] = {}
-
     if normalized in ["true", "yes", "1", "on", "all"]:
         tool_names = list(get_tools_config().keys())
     elif normalized in ["false", "no", "0", "off", "none"]:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
     else:
-        parsed_tools = _parse_tools_with_params(normalized_value)
+        parsed_tools = _parse_tools(normalized_value)
         tool_names = []
-        for name, params in parsed_tools:
+        for name in parsed_tools:
             if name not in tool_names:
                 tool_names.append(name)
-            if params:
-                tool_params_by_name[name] = params
 
     configs = get_tools_config()
     tool_classes: list[Type] = []
@@ -119,17 +112,13 @@ def resolve_tool_binding(
             wrapped_tool = _wrap_tool_function(
                 tool_function,
                 tool_name=tool_name,
-                params=tool_params_by_name.get(tool_name, {}),
-                vault_path=vault_path,
-                week_start_day=week_start_day,
                 tool_instructions=tool_class.get_instructions(),
-                tool_class=tool_class,
             )
             tool_functions.append(wrapped_tool)
             tool_specs.append(
                 ToolSpec(
                     name=tool_name,
-                    params=dict(tool_params_by_name.get(tool_name, {})),
+                    params={},
                     tool_class=tool_class,
                     tool_function=wrapped_tool,
                     week_start_day=week_start_day,
@@ -177,7 +166,6 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
                     fallback_functions.append(fn)
 
     tool_specs = list(specs_by_name.values())
-    tool_classes = [spec.tool_class for spec in tool_specs]
     tool_functions = [spec.tool_function for spec in tool_specs] if tool_specs else fallback_functions
     tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
 
@@ -291,17 +279,16 @@ def _tokenize_tools(value: str) -> list[str]:
     return tokens
 
 
-def _parse_tools_with_params(value: str) -> list[tuple[str, Dict[str, str]]]:
+def _parse_tools(value: str) -> list[str]:
     tokens = _tokenize_tools(value)
-    parsed: list[tuple[str, Dict[str, str]]] = []
+    parsed: list[str] = []
     for token in tokens:
-        base, params = DirectiveValueParser.parse_value_with_parameters(
-            token,
-            allowed_parameters=TOOLS_ALLOWED_PARAMETERS,
-        )
+        base = token.strip()
         if not base:
             continue
-        parsed.append((base.strip().lower(), params))
+        if "(" in base or ")" in base:
+            raise ValueError("Tool parameters are no longer supported in tools declarations")
+        parsed.append(base.lower())
     return parsed
 
 
@@ -309,20 +296,12 @@ def _wrap_tool_function(
     tool,
     *,
     tool_name: str,
-    params: Dict[str, str],
-    vault_path: str,
-    week_start_day: int,
     tool_instructions: str | None = None,
-    tool_class: Type | None = None,
 ):
     original_func = tool.function
     original_takes_ctx = getattr(tool, "takes_ctx", False)
-    allowed_tools = get_routing_allowed_tools()
-    allow_output_params = tool_name in allowed_tools and getattr(tool_class, "allow_routing", True)
 
     async def _call_async(ctx: RunContext, **kwargs):
-        output_value = kwargs.pop("output", None) if allow_output_params else None
-        write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
         if not _has_meaningful_tool_args(kwargs):
             return tool_instructions or f"No usage instructions available for tool '{tool_name}'."
         try:
@@ -332,21 +311,9 @@ def _wrap_tool_function(
                 result = await original_func(**kwargs)
         except TypeError as exc:
             return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return route_tool_output(
-            result,
-            tool_name=tool_name,
-            output_value=output_value,
-            write_mode_value=write_mode_value,
-            params=params,
-            vault_path=vault_path,
-            week_start_day=week_start_day,
-            buffer_store=getattr(ctx, "deps", None) and ctx.deps.buffer_store,
-            buffer_store_registry=getattr(ctx, "deps", None) and ctx.deps.buffer_store_registry,
-        )
+        return result
 
     def _call_sync(ctx: RunContext, **kwargs):
-        output_value = kwargs.pop("output", None) if allow_output_params else None
-        write_mode_value = kwargs.pop("write_mode", None) if allow_output_params else None
         if not _has_meaningful_tool_args(kwargs):
             return tool_instructions or f"No usage instructions available for tool '{tool_name}'."
         try:
@@ -356,23 +323,12 @@ def _wrap_tool_function(
                 result = original_func(**kwargs)
         except TypeError as exc:
             return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return route_tool_output(
-            result,
-            tool_name=tool_name,
-            output_value=output_value,
-            write_mode_value=write_mode_value,
-            params=params,
-            vault_path=vault_path,
-            week_start_day=week_start_day,
-            buffer_store=getattr(ctx, "deps", None) and ctx.deps.buffer_store,
-            buffer_store_registry=getattr(ctx, "deps", None) and ctx.deps.buffer_store_registry,
-        )
+        return result
 
     wrapper = _call_async if inspect.iscoroutinefunction(original_func) else _call_sync
     try:
         sig = inspect.signature(original_func)
         params_list = list(sig.parameters.values())
-        existing = {p.name for p in params_list}
         if not original_takes_ctx:
             ctx_param = inspect.Parameter(
                 "ctx",
@@ -380,16 +336,6 @@ def _wrap_tool_function(
                 annotation=RunContext,
             )
             params_list = [ctx_param] + params_list
-        extra_params = []
-        if allow_output_params and "output" not in existing:
-            extra_params.append(inspect.Parameter("output", inspect.Parameter.KEYWORD_ONLY, default=None))
-        if allow_output_params and "write_mode" not in existing:
-            extra_params.append(inspect.Parameter("write_mode", inspect.Parameter.KEYWORD_ONLY, default=None))
-        if extra_params:
-            if params_list and params_list[-1].kind == inspect.Parameter.VAR_KEYWORD:
-                params_list = params_list[:-1] + extra_params + [params_list[-1]]
-            else:
-                params_list.extend(extra_params)
         wrapper.__signature__ = sig.replace(parameters=params_list)
     except (ValueError, TypeError):
         pass
@@ -399,10 +345,6 @@ def _wrap_tool_function(
     annotations = dict(getattr(original_func, "__annotations__", {}) or {})
     if not original_takes_ctx:
         annotations["ctx"] = RunContext
-    if allow_output_params and "output" not in annotations:
-        annotations["output"] = Optional[str]
-    if allow_output_params and "write_mode" not in annotations:
-        annotations["write_mode"] = Optional[str]
     wrapper.__annotations__ = annotations
 
     return type(tool)(

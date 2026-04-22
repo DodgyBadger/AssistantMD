@@ -15,10 +15,6 @@ from typing import Any, Dict, Optional
 from core.runtime.state import has_runtime_context, get_runtime_context
 
 
-BUFFER_SCOPE_RUN = "run"
-BUFFER_SCOPE_SESSION = "session"
-VALID_BUFFER_SCOPES = {BUFFER_SCOPE_RUN, BUFFER_SCOPE_SESSION}
-
 _fallback_session_buffers: Dict[str, "BufferStore"] = {}
 
 
@@ -87,26 +83,6 @@ class BufferStore:
 
     def clear_all(self) -> None:
         self._buffers.clear()
-
-
-def normalize_buffer_scope(scope: Optional[str], default_scope: str) -> str:
-    candidate = (scope or "").strip().lower() or default_scope
-    if candidate not in VALID_BUFFER_SCOPES:
-        return default_scope
-    return candidate
-
-
-def get_buffer_store_for_scope(
-    *,
-    scope: Optional[str],
-    default_scope: str,
-    buffer_store: Optional[BufferStore],
-    buffer_store_registry: Optional[Dict[str, BufferStore]],
-) -> Optional[BufferStore]:
-    resolved_scope = normalize_buffer_scope(scope, default_scope)
-    if buffer_store_registry:
-        return buffer_store_registry.get(resolved_scope) or buffer_store
-    return buffer_store
 
 
 def get_session_buffer_store(session_id: str) -> BufferStore:

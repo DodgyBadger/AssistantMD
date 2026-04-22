@@ -20,6 +20,7 @@ from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.authoring.cache import parse_cache_mode_value
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec
+from core.llm.capabilities.assistant_tools import build_assistant_tools_capabilities
 from core.llm.thinking import ThinkingValue, normalize_thinking_value, thinking_value_to_label
 from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts, upsert_cache_artifact
 from core.logger import UnifiedLogger
@@ -140,16 +141,23 @@ async def execute(
         },
     )
 
-    bound_tools = None
+    tool_capabilities = None
     if tool_names:
         binding = resolve_tool_binding(
             list(tool_names),
             vault_path=host.vault_path or "",
             week_start_day=host.week_start_day,
         )
-        bound_tools = binding.tool_functions
+        tool_capabilities = build_assistant_tools_capabilities(
+            tools=binding.tool_functions,
+            instructions="",
+        )
 
-    agent = await create_agent(model=model, tools=bound_tools, thinking=resolved_thinking)
+    agent = await create_agent(
+        model=model,
+        capabilities=tool_capabilities,
+        thinking=resolved_thinking,
+    )
     if instructions:
         agent.instructions(lambda _ctx, text=instructions: text)
     output = await generate_response(agent, prompt_input)

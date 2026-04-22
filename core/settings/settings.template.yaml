@@ -44,10 +44,6 @@ settings:
     value: 200
     description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
     restart_required: false
-  routing_allowed_tools:
-    value: []
-    description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"
-    restart_required: false
   chunking_max_images_per_prompt:
     value: 20
     description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt. 0 = disabled."

@@ -27,8 +27,6 @@ logger = UnifiedLogger(tag="workflow-run-tool")
 class WorkflowRun(BaseTool):
     """Run authored automations in the current vault and list available names."""
 
-    allow_routing = True
-
     @classmethod
     def get_tool(cls, vault_path: str | None = None):
         """Get the workflow run tool bound to the current vault path."""
@@ -483,14 +481,14 @@ Important notes:
         instructions = tuple(assembled.instructions or ())
         roles = [message.role for message in messages if getattr(message, "role", None)]
         details = [
-            f"assembled_context: True",
+            "assembled_context: True",
             f"message_count: {len(messages)}",
             f"instruction_count: {len(instructions)}",
         ]
         if roles:
             details.append(f"message_roles: {', '.join(roles)}")
         if instructions:
-            details.append(f"instructions_present: True")
+            details.append("instructions_present: True")
         return details
 
     @staticmethod

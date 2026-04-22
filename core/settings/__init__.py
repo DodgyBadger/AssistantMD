@@ -427,17 +427,6 @@ def get_file_ops_safe_list_max_results() -> int:
     return parsed if parsed >= 0 else template_default
 
 
-def get_routing_allowed_tools() -> list[str]:
-    """Return list of tool names allowed to accept routing in chat."""
-    entry = get_general_settings().get("routing_allowed_tools")
-    value = getattr(entry, "value", None) if entry is not None else None
-    if isinstance(value, list):
-        return [str(item).strip().lower() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [item.strip().lower() for item in value.split(",") if item.strip()]
-    return []
-
-
 def get_chunking_max_images_per_prompt() -> int:
     """Return max image attachments per chunked prompt."""
     entry = get_general_settings().get("chunking_max_images_per_prompt")

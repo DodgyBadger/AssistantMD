@@ -98,25 +98,6 @@ class ContextMessage:
 
 
 @dataclass(frozen=True)
-class OutputItem:
-    """One resolved output target written by output(...)."""
-
-    ref: str
-    resolved_ref: str
-    mode: str
-
-
-@dataclass(frozen=True)
-class OutputResult:
-    """Envelope for output(...) results."""
-
-    type: str
-    ref: str
-    status: str
-    item: OutputItem
-
-
-@dataclass(frozen=True)
 class PendingFilesResult:
     """Envelope for pending_files(...) results."""
 
@@ -231,5 +212,4 @@ class AuthoringCapabilityDefinition:
     doc: str
     handler: CapabilityHandler
     contract: dict[str, Any] = field(default_factory=dict)
-
 

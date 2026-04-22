@@ -7,8 +7,7 @@ Provides security validation and path resolution for all file operations.
 import os
 from pathlib import Path
 import tiktoken
-from core.constants import VIRTUAL_MOUNTS, TOOL_ROUTING_GUIDANCE
-from core.settings import get_routing_allowed_tools
+from core.constants import VIRTUAL_MOUNTS
 
 
 def _normalize_virtual_path(path: str) -> str:
@@ -129,8 +128,6 @@ def get_tool_instructions(tools):
         return ""
 
     instructions = ["You have access to the following capabilities:"]
-    if get_routing_allowed_tools():
-        instructions.extend(["", TOOL_ROUTING_GUIDANCE])
     for tool in tools:
         tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
         description = (getattr(tool, "description", None) or "").strip()

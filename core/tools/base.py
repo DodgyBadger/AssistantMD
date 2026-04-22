@@ -10,7 +10,6 @@ from pydantic_ai.tools import Tool
 
 class BaseTool(ABC):
     """Base class for all tools in the system."""
-    allow_routing: bool = True
     
     @classmethod
     @abstractmethod
