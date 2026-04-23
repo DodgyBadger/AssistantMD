@@ -1,7 +1,7 @@
 # AssistantMD
 
 > [!WARNING]
-> v0.6.0 introduces a major change that breaks all existing automations. See the [release notes](RELEASE_NOTES.md) for details. Pin your docker compose file to v0.5.0 (ghcr.io/dodgybadger/assistantmd:v0.5.0) if you are not ready to migrate.
+> **v0.6.0 introduces a major change that breaks all existing automations. See the [release notes](RELEASE_NOTES.md) for details. Pin your docker compose file to v0.5.0 (ghcr.io/dodgybadger/assistantmd:v0.5.0) if you are not ready to migrate.**
 
 AssistantMD is a **markdown-native chat UI** and **agent harness** for automating research and knowledge workflow scripts. It works alongside Obsidian (or any markdown editor) so you retain **full control of your data**: chats, skills, workflow scripts, and automation outputs are saved as plain markdown that you can inspect and version control.
 
