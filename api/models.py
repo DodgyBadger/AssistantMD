@@ -201,9 +201,9 @@ class MetadataResponse(BaseModel):
         default_factory=dict,
         description="Selected settings values for UI hints.",
     )
-    default_context_template: Optional[str] = Field(
+    default_context_script: Optional[str] = Field(
         None,
-        description="Default context template name for chat sessions.",
+        description="Default context script name for chat sessions.",
     )
 
 

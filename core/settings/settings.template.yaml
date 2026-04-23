@@ -12,9 +12,9 @@ settings:
     value: default
     description: "Default thinking policy for model calls. Use default, on, off, minimal, low, medium, high, or xhigh."
     restart_required: false
-  default_context_template:
+  default_context_script:
     value: "default.md"
-    description: "Default context template name for chat sessions (vault templates override system templates by name)."
+    description: "Default context script name for chat sessions (vault scripts override system scripts by name)."
     restart_required: false
   default_api_timeout:
     value: 120

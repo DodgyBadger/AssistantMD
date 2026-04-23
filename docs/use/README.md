@@ -1,10 +1,10 @@
 ## How to use AssistantMD
 
 If you have not set up the app yet, start with the [Installation Guide](../setup/installation.md).
-For a practical build path (chat -> skills -> workflows -> advanced templates), start with the [Build Guide](build-guide.md) before diving into detailed references.
+For a practical build path (chat -> skills -> workflow scripts -> advanced context scripts), start with the [Build Guide](build-guide.md) before diving into detailed references.
 
 When you first run the app, a new `AssistantMD` folder is added to each vault:
-- `AssistantMD/Authoring` holds your workflow and context template definitions
+- `AssistantMD/Authoring` holds your workflow script and context assembly script definitions
 - `AssistantMD/Skills` holds your skill files
 - `AssistantMD/Chat_Sessions` holds markdown files containing your chat history
 - `AssistantMD/Import` is where you place files you want to import as markdown into your vault
@@ -20,9 +20,9 @@ Tool availability in the UI reflects current app configuration (`system/settings
 
 **A note about chat sessions**: The chat UI does not show a session list. Each session is saved as a markdown transcript in `AssistantMD/Chat_Sessions`, and the agent can read those files. To continue an older thread, ask the agent to load it (for example, "continue our conversation about quantum entanglement").
 
-### Workflows and Context Templates
+### Workflow Scripts and Context Assembly Scripts
 
-Workflows automate vault tasks on a schedule or on demand. Context templates shape what the chat agent knows at the start of a session. Both are markdown authoring files in `AssistantMD/Authoring/`, each with YAML frontmatter and one fenced Python block.
+Workflow scripts automate vault tasks on a schedule or on demand. A Context Assembly Script shapes what the chat agent knows at the start of a session. Both are markdown authoring files in `AssistantMD/Authoring/`, each with YAML frontmatter and one fenced Python block.
 See [Authoring](authoring.md).
 
 ### Importer
@@ -37,4 +37,4 @@ Use the **Configuration** tab to manage providers, model aliases, secrets, and g
 
 ### Example Library
 
-[See here](../examples/README.md) for example workflows and skills you can copy and adapt.
+[See here](../examples/README.md) for example workflow scripts and skills you can copy and adapt.

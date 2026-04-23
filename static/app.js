@@ -1159,7 +1159,7 @@ function populateTemplates(templates, preferredTemplate = '') {
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
-    const configuredDefaultTemplate = state.metadata?.default_context_template || '';
+    const configuredDefaultTemplate = state.metadata?.default_context_script || '';
     const fallbackCandidates = [
         preferredTemplate,
         configuredDefaultTemplate,

@@ -129,7 +129,7 @@ def _normalize_context_template_selection(context_template: str | None) -> str |
 
 def _get_global_default_template() -> str | None:
     try:
-        entry = get_general_settings().get("default_context_template")
+        entry = get_general_settings().get("default_context_script")
         if entry and entry.value:
             return str(entry.value).strip() or None
     except Exception:

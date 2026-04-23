@@ -1473,13 +1473,13 @@ async def get_metadata() -> MetadataResponse:
             )
         )
 
-    default_context_template = None
+    default_context_script = None
     try:
-        default_entry = get_general_settings().get("default_context_template")
+        default_entry = get_general_settings().get("default_context_script")
         if default_entry and default_entry.value:
-            default_context_template = str(default_entry.value).strip() or None
+            default_context_script = str(default_entry.value).strip() or None
     except Exception:
-        default_context_template = None
+        default_context_script = None
 
     return MetadataResponse(
         vaults=vaults,
@@ -1493,5 +1493,5 @@ async def get_metadata() -> MetadataResponse:
                 get_general_settings().get("auto_cache_max_tokens"), "value", 0
             )
         },
-        default_context_template=default_context_template,
+        default_context_script=default_context_script,
     )

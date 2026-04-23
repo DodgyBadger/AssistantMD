@@ -1,6 +1,6 @@
-# Authoring: Workflows and Context Templates
+# Authoring: Workflow Scripts and Context Assembly Scripts
 
-AssistantMD has a unified authoring surface for two types of automation: **workflows** and **context assembly**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
+AssistantMD has a unified authoring surface for two types of automation: **workflow scripts** and **Context Assembly Scripts**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
 
 You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test authoring files. Use this document as orientation.
 
@@ -24,21 +24,21 @@ description: My automation
 Rules:
 - Exactly one ` ```python``` ` block. No more, no less.
 - Scripts execute in a limited Python sandbox using Pydantic Monty.
-- Details of the Monty execution environment, helper functions, and supported Python features can be found in [the runtime reference](../tools/code_execution_local.md). That document covers the shared helper surface used by chat-side `code_execution_local` and by authored workflows/context templates.
+- Details of the Monty execution environment, helper functions, and supported Python features can be found in [the runtime reference](../tools/code_execution_local.md). That document covers the shared helper surface used by chat-side `code_execution_local` and by authored workflow scripts and context scripts.
 
 Files can be organized in subfolders one level deep inside `Authoring/`. Subfolders starting with `_` are ignored.
 
 ---
 
-## Workflows
+## Workflow Scripts
 
-A workflow is an automation that runs Python code against your vault. Use a workflow when you want to:
+A workflow script is an automation that runs Python code against your vault. Use a workflow script when you want to:
 
 - Generate or transform files on a schedule (daily notes, weekly summaries, reports)
 - Process a batch of files (inbox triage, tagging, indexing)
 - Chain multiple LLM calls with conditional logic
 
-**Frontmatter for workflows:**
+**Frontmatter for workflow scripts:**
 
 ```yaml
 ---
@@ -56,15 +56,15 @@ week_start_day: monday          # optional, default monday
 
 ---
 
-## Context assembly
+## Context Assembly Script
 
-A context assembly script shapes what the chat agent knows at the start of a conversation. Use a context assembly script when you want to:
+A Context Assembly Script shapes what the chat agent knows at the start of a conversation. Use a context script when you want to:
 
 - Control which history the agent sees (curate, summarize, or filter prior turns)
 - Load relevant files or skill listings into the agent's context automatically
-- Build a specialized assistant mode for a particular project or workflow
+- Build a specialized assistant mode for a particular project or workflow script
 
-**Frontmatter for context assembly scripts:**
+**Frontmatter for context scripts:**
 
 ```yaml
 ---
@@ -81,7 +81,7 @@ Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authori
 
 ### Customizing the default script with soul.md
 
-For simple instruction customization — agent personality, response style, ground rules — you don't need to create a context assembly script at all. Create `AssistantMD/soul.md` in your vault with plain text instructions:
+For simple instruction customization — agent personality, response style, ground rules — you don't need to create a context script at all. Create `AssistantMD/soul.md` in your vault with plain text instructions:
 
 ```
 You are a focused research assistant. Keep responses brief and factual.
@@ -89,15 +89,15 @@ Always cite the source file when referencing vault content.
 Prefer bullet points over prose.
 ```
 
-The default context assembly script loads `soul.md` automatically if it exists and uses it as the system instruction. If no `soul.md` is present, a built-in default stance is used instead. The file is plain markdown — no frontmatter, no special syntax.
+The default context script loads `soul.md` automatically if it exists and uses it as the system instruction. If no `soul.md` is present, a built-in default stance is used instead. The file is plain markdown — no frontmatter, no special syntax.
 
 ---
 
 ## Authoring Loop
 
-1. **Describe** what you want to the chat agent — "create a workflow that reads my inbox folder, summarizes each new note, and appends the summary to a log file"
+1. **Describe** what you want to the chat agent — "create a workflow script that reads my inbox folder, summarizes each new note, and appends the summary to a log file"
 2. **The agent drafts** the file and places it in `AssistantMD/Authoring/`
-3. **Compile** using the workflow UI to catch syntax errors before running
+3. **Compile** using the authoring UI to catch syntax errors before running
 4. **Run manually** to test; check the output
 5. **Iterate** — ask the agent to adjust until it behaves correctly
 6. Add `schedule:` and set `enabled: true` when ready to automate

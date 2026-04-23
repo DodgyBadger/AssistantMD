@@ -71,17 +71,17 @@ When you ask *"summarize my notes from this week"*, the agent recognizes the mat
 
 ---
 
-## Level 3: Workflows
+## Level 3: Workflow Scripts
 
-Use a workflow when you need a task to run on a schedule, or when the task requires a higher degree of complexity or determinism than a single agent pass can reliably deliver — strict sequencing, conditional logic, multi-step file routing, cost control across steps.
+Use a workflow script when you need a task to run on a schedule, or when the task requires a higher degree of complexity or determinism than a single agent pass can reliably deliver — strict sequencing, conditional logic, multi-step file routing, cost control across steps.
 
-Skills and workflows can work together. A skill can instruct the agent to trigger a specific workflow as part of its procedure. A workflow can read a skill file and follow its instructions as one of its steps. Mix and match however makes sense for the task.
+Skills and workflow scripts can work together. A skill can instruct the agent to trigger a specific workflow script as part of its procedure. A workflow script can read a skill file and follow its instructions as one of its steps. Mix and match however makes sense for the task.
 
-A workflow is a Python script in a markdown file, stored in `AssistantMD/Authoring/`. You don't need to write the Python yourself: describe what you want to the chat agent and it will draft the file for you.
+A workflow script is a Python script in a markdown file, stored in `AssistantMD/Authoring/`. You don't need to write the Python yourself: describe what you want to the chat agent and it will draft the file for you.
 
-### Creating a workflow
+### Creating a Workflow Script
 
-Ask the agent: *"Create a workflow that runs every Monday morning, reads my task list, extracts anything due this week, and writes it to a planning file."*
+Ask the agent: *"Create a workflow script that runs every Monday morning, reads my task list, extracts anything due this week, and writes it to a planning file."*
 
 The agent will create a file in `AssistantMD/Authoring/` with the appropriate frontmatter and Python code. You can then run it manually to test, refine and enable scheduling when you're happy with it.
 
@@ -100,12 +100,12 @@ For the full authoring reference, see [Authoring](authoring.md).
 
 ---
 
-## Level 4: Context assembly cripts
+## Level 4: Context Assembly Script
 
-A context assembly script controls what the chat agent knows at the start of every conversation. AssisantMD ships with a default script that loads skills, passes full message history and allows simple persona customization in `AssistantMD/soul.md`.
+A Context Assembly Script controls what the chat agent knows at the start of every conversation. AssistantMD ships with a default script that loads skills, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`.
 ### Customizing the agent's personality: soul.md
 
-For simple customization — tone, response style, ground rules — you don't need to create a context assembly script. Create `AssistantMD/soul.md` with plain text instructions:
+For simple customization — tone, response style, ground rules — you don't need to create a context script. Create `AssistantMD/soul.md` with plain text instructions:
 
 ```
 You are a focused research assistant.
@@ -116,11 +116,11 @@ Ask one clarifying question before starting any multi-step task.
 
 The default script loads this file automatically and uses it as the agent's system instruction. Edit it whenever you want to adjust the agent's behavior.
 
-### Custom context assembly scripts
+### Custom Context Assembly Scripts
 
-For more control — curating message history, loading specific files, summarizing prior conversations — create a context assembly script in `AssistantMD/Authoring/` with `run_type: context`.
+For more control — curating message history, loading specific files, summarizing prior conversations — create a context script in `AssistantMD/Authoring/` with `run_type: context`.
 
-Like workflows, you don't need to write these by hand. Describe what you want to the agent and it will draft the file.
+Like workflow scripts, you don't need to write these by hand. Describe what you want to the agent and it will draft the file.
 
 **Example use cases:**
 - Summarize long conversation histories so the agent stays focused as chats grow
@@ -129,6 +129,6 @@ Like workflows, you don't need to write these by hand. Describe what you want to
 
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
-See [Authoring](authoring.md) for the full context template reference.
+See [Authoring](authoring.md) for the full context script reference.
 
 ---
