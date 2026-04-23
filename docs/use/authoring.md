@@ -1,6 +1,6 @@
 # Authoring: Workflows and Context Templates
 
-AssistantMD has a unified authoring surface for two types of automation: **workflows** and **context templates**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
+AssistantMD has a unified authoring surface for two types of automation: **workflows** and **context assembly**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
 
 You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test authoring files. Use this document as orientation.
 
@@ -56,15 +56,15 @@ week_start_day: monday          # optional, default monday
 
 ---
 
-## Context Templates
+## Context assembly
 
-A context template shapes what the chat agent knows at the start of a conversation. Use a context template when you want to:
+A context assembly script shapes what the chat agent knows at the start of a conversation. Use a context assembly script when you want to:
 
 - Control which history the agent sees (curate, summarize, or filter prior turns)
 - Load relevant files or skill listings into the agent's context automatically
 - Build a specialized assistant mode for a particular project or workflow
 
-**Frontmatter for context templates:**
+**Frontmatter for context assembly scripts:**
 
 ```yaml
 ---
@@ -75,13 +75,13 @@ description: Regular chat with full history
 
 The Python block retrieves session history and calls `assemble_context()` to hand the assembled context to the chat agent.
 
-Select which template to use in the Chat UI. Set a default in **Configuration → Application Settings**.
+Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
-Templates are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault templates take precedence.
+Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence.
 
-### Customizing the default template with soul.md
+### Customizing the default script with soul.md
 
-For simple instruction customization — agent personality, response style, ground rules — you don't need to create a context template at all. Create `AssistantMD/soul.md` in your vault with plain text instructions:
+For simple instruction customization — agent personality, response style, ground rules — you don't need to create a context assembly script at all. Create `AssistantMD/soul.md` in your vault with plain text instructions:
 
 ```
 You are a focused research assistant. Keep responses brief and factual.
@@ -89,7 +89,7 @@ Always cite the source file when referencing vault content.
 Prefer bullet points over prose.
 ```
 
-The default context template loads `soul.md` automatically if it exists and uses it as the system instruction. If no `soul.md` is present, a built-in default stance is used instead. The file is plain markdown — no frontmatter, no special syntax.
+The default context assembly script loads `soul.md` automatically if it exists and uses it as the system instruction. If no `soul.md` is present, a built-in default stance is used instead. The file is plain markdown — no frontmatter, no special syntax.
 
 ---
 

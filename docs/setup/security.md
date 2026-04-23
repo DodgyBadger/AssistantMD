@@ -48,7 +48,6 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 **4. External communication remains limited, not impossible**
 - The built-in web and browser tools are constrained to narrow retrieval-oriented behavior rather than arbitrary outbound actions.
 - The `browser` tool is restricted to public-network, read-oriented requests and cannot upload files or initiate downloads.
-- The `code_execution` tool uses Piston (public endpoint by default). The public instance is sandboxed for untrusted code, and you can self-host Piston for stricter network isolation if needed.
 - Residual risk still exists wherever the application is intentionally configured to communicate with external providers or websites.
 
 ### Best Practices

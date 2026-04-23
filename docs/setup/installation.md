@@ -54,13 +54,6 @@ Access the web interface at `http://localhost:8000/` (or whichever host IP/port 
 
 **Browser tool**: The built-in browser tool requires the Playwright Chromium runtime in addition to the Python package. The published container image includes this. If you build your own image from source, rebuild after pulling the latest Dockerfile changes so the image runs `python -m playwright install --no-shell chromium` during the build.
 
-**Code execution**: The default code execution tool uses the public Piston API (free, no setup). The base URL lives in the Configuration tab as `piston_base_url` (defaults to the public endpoint). Piston supports many languages with fast, single-shot execution.
-
-To self-host Piston:
-- Uncomment the `piston` service block in `docker-compose.yml`.
-- Set `piston_base_url` in the Configuration tab to `http://piston:2000/api/v2/piston`.
-- For more information, see: https://github.com/engineer-man/piston
-
 **Logfire**: AssistantMD uses the logfire library for rich console logging (what you see if you run `docker logs assistantmd`). You can add a [Logfire API key](https://pydantic.dev) to get even more data including full details of every LLM call. The free tier will be sufficient for many users and is worth grabbing. Be sure to also set logfire=true in the Configuration tab of the web interface.
 
 

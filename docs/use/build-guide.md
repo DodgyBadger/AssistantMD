@@ -20,9 +20,9 @@ Open the app, pick a model, and start talking. The chat agent can read, search, 
 
 When you find yourself giving the same instructions repeatedly, or when a task needs a precise procedure, write a **skill file**.
 
-A skill is a plain markdown file describing a task in clear English. Put skills in `AssistantMD/Skills/`. The default context template scans that folder and injects a summary of available skills before every chat session — so when your request matches a skill, the agent reads and follows it automatically without you needing to name it explicitly.
+A skill is a plain markdown file describing a task in clear English. Put skills in `AssistantMD/Skills/`. The default context assembly script scans that folder and injects a summary of available skills before every chat session — so when your request matches a skill, the agent reads and follows it automatically without you needing to name it explicitly.
 
-AssistantMD's skill convention is similar to Anthropic's [skills protocol](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/skills-protocol): both use `name` and `description` frontmatter fields as the discovery surface. The difference is flexibility — you don't need to name files `skill.md` or organize them into per-skill subfolders. A single markdown file per skill is fine, and you can name and organize them however suits your vault.
+AssistantMD's skill convention is similar to Anthropic's [skills protocol](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/skills-protocol): both use `name` and `description` frontmatter fields as the discovery surface. The difference is you don't need to name files `skill.md` or organize them into per-skill subfolders. A single markdown file per skill is fine, and you can name and organize them however suits your vault.
 
 ### What makes a good skill
 
@@ -100,13 +100,12 @@ For the full authoring reference, see [Authoring](authoring.md).
 
 ---
 
-## Level 4: Context templates
+## Level 4: Context assembly cripts
 
-A context template controls what the chat agent knows at the start of every conversation. The default template already handles the common cases — skills catalog, full history — but you can go further.
-
+A context assembly script controls what the chat agent knows at the start of every conversation. AssisantMD ships with a default script that loads skills, passes full message history and allows simple persona customization in `AssistantMD/soul.md`.
 ### Customizing the agent's personality: soul.md
 
-For simple customization — tone, response style, ground rules — you don't need to create a context template. Create `AssistantMD/soul.md` with plain text instructions:
+For simple customization — tone, response style, ground rules — you don't need to create a context assembly script. Create `AssistantMD/soul.md` with plain text instructions:
 
 ```
 You are a focused research assistant.
@@ -115,11 +114,11 @@ Prefer bullet points over prose.
 Ask one clarifying question before starting any multi-step task.
 ```
 
-The default template loads this file automatically and uses it as the agent's system instruction. Edit it whenever you want to adjust the agent's behavior.
+The default script loads this file automatically and uses it as the agent's system instruction. Edit it whenever you want to adjust the agent's behavior.
 
-### Custom context templates
+### Custom context assembly scripts
 
-For more control — curating history, loading specific files, summarizing prior conversations — create a context template in `AssistantMD/Authoring/` with `run_type: context`.
+For more control — curating message history, loading specific files, summarizing prior conversations — create a context assembly script in `AssistantMD/Authoring/` with `run_type: context`.
 
 Like workflows, you don't need to write these by hand. Describe what you want to the agent and it will draft the file.
 
@@ -128,18 +127,8 @@ Like workflows, you don't need to write these by hand. Describe what you want to
 - Load project-specific files into context automatically when starting a session
 - Build a specialized mode for a particular domain (coding assistant, research assistant, writing editor)
 
-Select which template to use in the Chat UI. Set a default in **Configuration → Application Settings**.
+Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
 See [Authoring](authoring.md) for the full context template reference.
 
 ---
-
-## Quick start checklist
-
-1. **Open the app** at `http://localhost:8000/`
-2. **Configure a provider** in the Configuration tab
-3. **Start chatting** — explore your vault, ask questions, create files
-4. **Write a skill** — pick something repetitive, describe the procedure in `AssistantMD/Skills/`
-5. **Test it in chat** — make a request that matches the skill and see if the agent picks it up
-6. **Automate it** — ask the agent to wrap it in a workflow when you want it scheduled
-7. **Customize the agent** — add `AssistantMD/soul.md` to set tone and ground rules
