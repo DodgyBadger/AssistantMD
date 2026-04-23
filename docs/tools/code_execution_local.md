@@ -2,7 +2,12 @@
 
 ## Purpose
 
-Run constrained local Python against the current chat session and current AssistantMD runtime.
+Run constrained local Python in AssistantMD's Monty runtime.
+
+This document serves two purposes:
+
+- it documents the chat tool `code_execution_local`, which runs a snippet against the current chat session
+- it is also the main helper reference for authored workflows and context templates, which run in the same Monty environment without the outer tool wrapper
 
 ## Tool Argument
 
@@ -18,7 +23,7 @@ Monty is a script executor, not an interactive REPL. Your final line should be a
 ### What Monty supports
 
 - Functions (sync and async), closures, comprehensions, f-strings, type hints
-- Standard library: `sys`, `typing`, `asyncio`, `pathlib`
+- Common standard-library imports used by AssistantMD examples, including `json`, `sys`, `typing`, `asyncio`, and `pathlib`
 - External function calls — the mechanism behind all host helpers
 - Dataclasses defined on the host (the helper result types are available as typed objects)
 - Type checking via `ty` bundled in the binary — wrong helper calls are caught before execution
@@ -28,7 +33,7 @@ Monty is a script executor, not an interactive REPL. Your final line should be a
 - **No class definitions** — you cannot define classes inside the script
 - **No match statements**
 - **No context managers** — `with` statements are not supported
-- **No third-party packages** — do not attempt to import anything that is not listed above
+- **No third-party packages** — stick to ordinary Python plus the supported standard library and AssistantMD helpers
 - **Not a REPL** — each execution starts with a clean slate; functions and values from previous runs are not available
 
 When you find yourself reaching for something outside this list, simplify the approach rather than adding imports or boilerplate.
@@ -39,10 +44,12 @@ The runtime runs `ty` on your code before execution using type stubs for all hel
 
 ## Runtime Surface
 
-Scope comes from the active chat session:
+The Monty helper surface is shared across chat-side execution, workflows, and context templates.
 
-- file and history access come from the enabled tool surface
-- tool access mirrors the enabled chat tools, excluding `code_execution_local` itself
+Scope comes from the current runtime context:
+
+- in chat, file and history access come from the active session and the tools enabled for that run
+- in authored workflows and context templates, access comes from the current workflow/template host and whatever tools/helpers that runtime exposes
 
 Available helpers and the reserved `date` input:
 
@@ -50,7 +57,7 @@ Available helpers and the reserved `date` input:
 - `pending_files(...)`: filter a file result set to the pending subset and explicitly complete the items you finished
 - `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
-- `read_cache(...)`: open one cached oversized tool result by cache ref inside the current chat session
+- `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs
 - `finish(...)`: end the script intentionally with a `completed` or `skipped` terminal status
 - `date`: resolve common date tokens — `date.today()`, `date.this_week()`, etc.; pass `fmt` for strftime formatting
@@ -62,7 +69,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `read_cache`
 
 - use this when chat reports that an oversized tool result was stored in a cache ref
-- reads cached content for the current chat session only
+- reads cached content for the current runtime context; in chat that means the current chat session
 - check `artifact.exists` before accessing `artifact.content`
 
 ### `pending_files`
@@ -80,7 +87,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### `call_tool`
 
-- can only call tools already enabled for the chat run
+- in chat, can only call tools already enabled for the current run
 - `code_execution_local` itself is excluded to prevent recursive self-invocation
 - prefer branching on `result.metadata` when the tool returns structured status
 
@@ -88,7 +95,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 - for conversation history, fetch explicit messages through `memory_ops` and pass them as `history`
 - `latest_user_message` is an explicit optional argument on `assemble_context(...)`
-- in chat context templates, the runtime appends the latest user turn afterward if your assembled context does not already include it
+- in context templates, the runtime appends the latest user turn afterward if your assembled context does not already include it
 
 ### `parse_markdown`
 
@@ -108,6 +115,43 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - week-based values honour the current workflow or runtime `week_start_day`
 
 ## Common Patterns
+
+### Chat tool invocation
+
+Use the outer `code_execution_local(...)` wrapper only when calling the chat tool directly.
+
+```python
+code_execution_local(
+    code="""
+{
+    "today": date.today("%Y-%m-%d"),
+    "tomorrow": date.tomorrow("%Y-%m-%d"),
+}
+""",
+)
+```
+
+### Raw Monty script for authored files
+
+Inside a workflow or context template, write only the Python script body. Do not wrap it in `code_execution_local(...)`.
+
+```python
+import json
+
+history_result = await call_tool(
+    name="memory_ops",
+    arguments={"operation": "get_history", "scope": "session", "limit": "all"},
+)
+history_payload = json.loads(history_result.output)
+
+await assemble_context(
+    history=[
+        {"role": item["role"], "content": item["content"]}
+        for item in history_payload["items"]
+    ],
+    instructions="Keep the answer concise.",
+)
+```
 
 ### Explore a large web extraction
 
@@ -193,6 +237,7 @@ results
 ## Notes
 
 - Helpers are injected for you - you do not need to import anything.
+- Standard-library imports such as `import json` are fine when needed.
 - file, memory, and web access should generally go through `call_tool(...)`
 - Always return a value or `await finish(...)` — do not rely on side effects alone
 - cached oversized tool results are available through `read_cache(ref=...)`

@@ -22,7 +22,7 @@ Tool availability in the UI reflects current app configuration (`system/settings
 
 ### Workflows and Context Templates
 
-Workflows automate vault tasks on a schedule or on demand. Context templates shape what the chat agent knows at the start of a session. Both are Python files in `AssistantMD/Authoring/`.
+Workflows automate vault tasks on a schedule or on demand. Context templates shape what the chat agent knows at the start of a session. Both are markdown authoring files in `AssistantMD/Authoring/`, each with YAML frontmatter and one fenced Python block.
 See [Authoring](authoring.md).
 
 ### Importer

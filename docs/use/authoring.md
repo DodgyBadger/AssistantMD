@@ -24,7 +24,7 @@ description: My automation
 Rules:
 - Exactly one ` ```python``` ` block. No more, no less.
 - Scripts execute in a limited Python sandbox using Pydantic Monty.
-- Details of the execution environment and what python elements are supported can be found in [the tool documentation](../tools/code_execution_local.md)
+- Details of the Monty execution environment, helper functions, and supported Python features can be found in [the runtime reference](../tools/code_execution_local.md). That document covers the shared helper surface used by chat-side `code_execution_local` and by authored workflows/context templates.
 
 Files can be organized in subfolders one level deep inside `Authoring/`. Subfolders starting with `_` are ignored.
 
@@ -102,4 +102,4 @@ The default context template loads `soul.md` automatically if it exists and uses
 5. **Iterate** — ask the agent to adjust until it behaves correctly
 6. Add `schedule:` and set `enabled: true` when ready to automate
 
-For capability signatures and return types, the agent can inspect the runtime contract directly — ask it to check `__virtual_docs__/tools/code_execution_local.md` when it needs the API details.
+For capability signatures and return types, the agent can inspect the runtime contract directly. Ask it to check `__virtual_docs__/tools/code_execution_local.md` when it needs the Monty helper API details.
