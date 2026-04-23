@@ -16,6 +16,19 @@ settings:
     value: "default.md"
     description: "Default context script name for chat sessions (vault scripts override system scripts by name)."
     restart_required: false
+  default_chat_tools:
+    value:
+      - web_search_tavily
+      - browser
+      - memory_ops
+      - file_ops_safe
+      - file_ops_unsafe
+      - documentation_access
+      - tavily_extract
+      - tavily_crawl
+      - code_execution_local
+    description: "List of tool names enabled by default in the chat UI."
+    restart_required: false
   default_api_timeout:
     value: 120
     description: "Default timeout in seconds for external API calls."

@@ -1481,11 +1481,25 @@ async def get_metadata() -> MetadataResponse:
     except Exception:
         default_context_script = None
 
+    default_chat_tools: list[str] = []
+    try:
+        default_tools_entry = get_general_settings().get("default_chat_tools")
+        raw_default_tools = getattr(default_tools_entry, "value", [])
+        if isinstance(raw_default_tools, list):
+            default_chat_tools = [
+                str(tool_name).strip()
+                for tool_name in raw_default_tools
+                if str(tool_name).strip()
+            ]
+    except Exception:
+        default_chat_tools = []
+
     return MetadataResponse(
         vaults=vaults,
         models=models,
         tools=tools,
         settings={
+            "default_chat_tools": default_chat_tools,
             "default_model_thinking": getattr(
                 get_general_settings().get("default_model_thinking"), "value", "default"
             ),

@@ -697,6 +697,11 @@ function populateSelectors() {
     const previousModel = chatElements.modelSelector?.value || '';
     const previousTemplate = chatElements.templateSelector?.value || '';
     const previousTools = new Set(getSelectedToolNames());
+    const configuredDefaultTools = new Set(
+        Array.isArray(state.metadata?.settings?.default_chat_tools)
+            ? state.metadata.settings.default_chat_tools
+            : []
+    );
 
     chatElements.vaultSelector.innerHTML = '<option value="">Select vault...</option>';
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
@@ -753,10 +758,6 @@ function populateSelectors() {
         fetchSessions(chatElements.vaultSelector.value, state.sessionId || '');
     }
 
-    const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
-        .map(name => state.metadata.tools.find(tool => tool.name === name && tool.available !== false))
-        .find(Boolean)?.name) || null;
-
     const toolMap = new Map(state.metadata.tools.map(tool => [tool.name, tool]));
     const handledTools = new Set();
 
@@ -777,7 +778,7 @@ function populateSelectors() {
             if (previousTools.size > 0) {
                 checkbox.checked = previousTools.has(tool.name);
             } else {
-                checkbox.checked = tool.name !== 'web_search_duckduckgo';
+                checkbox.checked = configuredDefaultTools.has(tool.name);
             }
         }
 
