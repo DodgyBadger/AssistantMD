@@ -31,7 +31,7 @@ Workflow scripts are Python scripts stored in markdown files in your vault. Use 
 
 ### Context Assembly Script
 
-A Context Assembly Script controls what the chat agent knows at the start of each session: which history it sees, what files are loaded, and what instructions it operates under. AssistantMD ships with a global default script that loads skills, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`.
+A context assembly script controls what the chat agent knows at the start of each session: which history it sees, what files are loaded, and what instructions it operates under. AssistantMD ships with a global default script that loads skills, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`.
 
 ### Memory
 
@@ -41,7 +41,7 @@ AssistantMD doesn't take an opinionated approach to memory. Rather than imposing
 
 **Deep research** — Give AssistantMD a research goal and let it run: search, open pages, extract details, and synthesize findings into a report in your vault.
 
-**Project-aware chat** — Skills and context assembly scripts give the agent knowledge of your vault structure, active projects, and preferred working style so you can jump into new chats without re-establishing context.
+**Project-aware chat** — Skills and context scripts give the agent knowledge of your vault structure, active projects, and preferred working style so you can jump into new chats without re-establishing context.
 
 **Scheduled automation** — Run workflow scripts on a schedule to keep notes and plans current (scan new notes, extract actions, update a task list, generate weekly summaries).
 
