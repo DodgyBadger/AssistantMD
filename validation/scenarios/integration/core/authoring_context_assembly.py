@@ -11,7 +11,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 
 from validation.core.base_scenario import BaseScenario
 
@@ -36,6 +43,26 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             ),
             ModelResponse(
                 parts=[TextPart(content="First answer")],
+                run_id="run-1",
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="file_ops_safe",
+                        args={"path": "notes/trig.md"},
+                        tool_call_id="call-read-trig",
+                    )
+                ],
+                run_id="run-1",
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="file_ops_safe",
+                        content="Trig notes file contents",
+                        tool_call_id="call-read-trig",
+                    )
+                ],
                 run_id="run-1",
             ),
             ModelRequest(
@@ -71,7 +98,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             name="authoring_retrieve_history_completed",
             expected={
                 "workflow_id": workflow_id,
-                "item_count": 4,
+                "item_count": 5,
             },
         )
         self.assert_event_contains(
@@ -79,24 +106,39 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             name="authoring_assemble_context_completed",
             expected={
                 "workflow_id": workflow_id,
-                "message_count": 6,
+                "message_count": 7,
                 "instruction_count": 1,
             },
         )
 
         output = result.value
-        self.soft_assert_equal(output["history_count"], 4, "Expected four retrieved history messages")
+        self.soft_assert_equal(
+            output["history_count"],
+            5,
+            "Expected retrieved history to group tool exchange atomically",
+        )
         self.soft_assert_equal(
             output["roles"],
-            ["system", "user", "assistant", "user", "assistant", "user"],
-            "Expected assembled context ordering to preserve instructions, history, then latest user",
+            ["system", "user", "assistant", "tool_exchange", "user", "assistant", "user"],
+            "Expected assembled context ordering to preserve instructions and history",
         )
         self.soft_assert_equal(
             output["last_message"],
             "What should happen next?",
             "Expected latest user message appended last",
         )
-        self.soft_assert(output["instruction_seen"], "Expected explicit instruction to be preserved")
+        self.soft_assert(
+            output["instruction_seen"],
+            "Expected explicit instruction to be preserved",
+        )
+        self.soft_assert(
+            output["clean_history_text"],
+            "Expected retrieved history string rendering to omit raw provider payload fields",
+        )
+        self.soft_assert(
+            output["tool_exchange_rendered"],
+            "Expected retrieved tool exchange string rendering to include useful prompt text",
+        )
 
         await self.stop_system()
         self.teardown_scenario()
@@ -111,10 +153,29 @@ assembled = await assemble_context(
     latest_user_message={"role": "user", "content": "What should happen next?"},
 )
 
+roles = []
+instruction_seen = False
+for message in assembled.messages:
+    try:
+        roles.append(message.role)
+        if "Use exact text." in message.content:
+            instruction_seen = True
+    except AttributeError:
+        roles.append("tool_exchange")
+
 {
     "history_count": history_payload.item_count,
-    "roles": [message.role for message in assembled.messages],
+    "roles": roles,
     "last_message": assembled.messages[-1].content,
-    "instruction_seen": any("Use exact text." in message.content for message in assembled.messages),
+    "instruction_seen": instruction_seen,
+    "clean_history_text": all(
+        "message={" not in item.text and "provider_response_id" not in item.text
+        for item in history_payload.items
+    ),
+    "tool_exchange_rendered": any(
+        "tool_exchange: file_ops_safe" in item.text
+        and "Trig notes file contents" in item.text
+        for item in history_payload.items
+    ),
 }
 """

@@ -36,6 +36,7 @@ Implemented:
 - `memory_ops` uses that broker.
 - `core/authoring/helpers/history/retrieve.py` now exposes broker-backed history directly to authored Python.
 - `core/authoring/helpers/history/assemble.py` accepts broker-derived history units without forcing a JSON/text flattening step.
+- `HistoryMessage`, `ToolExchange`, `ContextMessage`, and `RetrievedHistoryResult` expose clean prompt text through `text` while retaining provider-native fields for faithful assembly.
 - the default context templates now use `retrieve_history(...)` instead of `call_tool("memory_ops", ...)`.
 - the chat-visible `memory_ops` tool has been removed from settings while this helper path stabilizes.
 
@@ -92,6 +93,7 @@ Expected behavior:
 - preserved message order
 - explicit logical tool-exchange handling
 - flattening only via intentional helper operations
+- clean text projection for summarization prompts without losing the original structured objects
 
 ### 4. Context Assembly
 
@@ -166,6 +168,7 @@ Implemented:
 
 - `assemble_context(...)` accepts `HistoryMessage` and `ToolExchange` directly
 - `core/authoring/context_manager.py` restores those units back into provider-native `ModelMessage`s when compiling downstream history
+- authored Python can read `item.text` or `history.text` to build clean summarization prompts without dumping raw provider payloads
 - flattened dicts still work as an escape hatch, but they are no longer the default template path
 
 ## Invariants
@@ -175,6 +178,7 @@ Implemented:
 - `memory_ops` may serialize and flatten because it is an LLM-facing tool adapter.
 - Monty/context history access must default to safer semantics than `memory_ops`.
 - Tool-call / tool-return fidelity must not be easy to break accidentally in the context path.
+- Prompt-text rendering must be a projection of the structured object, not a replacement for the structured object.
 
 ## Validation Targets
 

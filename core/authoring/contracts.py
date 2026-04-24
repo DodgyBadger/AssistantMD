@@ -96,6 +96,18 @@ class ContextMessage:
     role: str
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.text:
+            object.__setattr__(self, "text", _role_content_to_text(self.role, self.content))
+
+    def to_text(self) -> str:
+        """Return a clean prompt-oriented representation."""
+        return self.text
+
+    def __str__(self) -> str:
+        return self.to_text()
 
 
 @dataclass(frozen=True)
@@ -106,6 +118,18 @@ class HistoryMessage:
     content: str
     message: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.text:
+            object.__setattr__(self, "text", _role_content_to_text(self.role, self.content))
+
+    def to_text(self) -> str:
+        """Return clean message text without provider-native payload internals."""
+        return self.text
+
+    def __str__(self) -> str:
+        return self.to_text()
 
 
 @dataclass(frozen=True)
@@ -119,6 +143,50 @@ class ToolExchange:
     call_arguments: dict[str, Any] | None = None
     result_text: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.text:
+            object.__setattr__(
+                self,
+                "text",
+                _tool_exchange_to_text(self.tool_name, self.call_arguments, self.result_text),
+            )
+
+    def to_text(self) -> str:
+        """Return clean prompt text while keeping raw tool parts available separately."""
+        return self.text
+
+    def __str__(self) -> str:
+        return self.to_text()
+
+
+def _role_content_to_text(role: str, content: str) -> str:
+    normalized_role = (role or "message").strip().lower() or "message"
+    text = content or ""
+    return f"{normalized_role}: {text}".rstrip()
+
+
+def _tool_exchange_to_text(
+    tool_name: str,
+    call_arguments: dict[str, Any] | None,
+    result_text: str | None,
+) -> str:
+    tool_label = tool_name.strip() or "unknown_tool"
+    lines = [f"tool_exchange: {tool_label}"]
+    if call_arguments:
+        lines.append(
+            "arguments: "
+            + json.dumps(
+                call_arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+        )
+    if result_text:
+        lines.append(f"result: {result_text}")
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -131,6 +199,15 @@ class RetrievedHistoryResult:
     item_count: int
     items: tuple[HistoryMessage | ToolExchange, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.text:
+            object.__setattr__(
+                self,
+                "text",
+                "\n\n".join(item.text for item in self.items if item.text.strip()),
+            )
 
 
 @dataclass(frozen=True)

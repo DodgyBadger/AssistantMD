@@ -95,6 +95,8 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `assemble_context`
 
 - for conversation history, fetch explicit messages through `retrieve_history(...)` and pass `history.items`
+- `retrieve_history(...)` items are structured objects; slice, remove, or reorder those objects when curating context, then pass the remaining objects back to `assemble_context(...)`
+- use `item.text` or `history.text` when you intentionally need clean prompt text for `generate(...)`; this omits provider-native payload fields while preserving the original object for assembly
 - `latest_user_message` is an explicit optional argument on `assemble_context(...)`
 - in context templates, the runtime appends the latest user turn afterward if your assembled context does not already include it
 

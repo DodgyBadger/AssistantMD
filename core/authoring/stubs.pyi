@@ -43,12 +43,18 @@ class ContextMessage:
     role: str
     content: str
     metadata: dict[str, Any]
+    text: str
+    def to_text(self) -> str: ...
+    def __str__(self) -> str: ...
 
 class HistoryMessage:
     role: str
     content: str
     message: dict[str, Any] | None
     metadata: dict[str, Any]
+    text: str
+    def to_text(self) -> str: ...
+    def __str__(self) -> str: ...
 
 class ToolExchange:
     tool_call_id: str
@@ -58,6 +64,9 @@ class ToolExchange:
     call_arguments: dict[str, Any] | None
     result_text: str | None
     metadata: dict[str, Any]
+    text: str
+    def to_text(self) -> str: ...
+    def __str__(self) -> str: ...
 
 class RetrievedHistoryResult:
     source: str
@@ -66,6 +75,7 @@ class RetrievedHistoryResult:
     item_count: int
     items: tuple[Any, ...]
     metadata: dict[str, Any]
+    text: str
 
 class AssembleContextResult:
     messages: tuple[Any, ...]
