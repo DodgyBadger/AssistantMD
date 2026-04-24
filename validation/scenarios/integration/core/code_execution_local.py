@@ -5,7 +5,6 @@ Validates deterministic chat-scoped execution through the real /api/chat/execute
 path using a patched TestModel argument generator.
 """
 
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -44,13 +43,8 @@ class CodeExecutionLocalScenario(BaseScenario):
                 if case_name == "allow_memory_read":
                     return {
                         "code": (
-                            'import json\n'
-                            'history = await call_tool(\n'
-                            '    name="memory_ops",\n'
-                            '    arguments={"operation": "get_history", "scope": "session", "limit": 1},\n'
-                            ')\n'
-                            'payload = json.loads(history.output)\n'
-                            'str(payload["item_count"])'
+                            'history = await retrieve_history(scope="session", limit=1)\n'
+                            'str(history.item_count)'
                         )
                     }
                 if case_name == "discovery":
@@ -85,7 +79,6 @@ class CodeExecutionLocalScenario(BaseScenario):
                 if case_name == "full_surface":
                     return {
                         "code": (
-                            'import json\n'
                             'cached = await read_cache(ref="tool/tavily_extract/call_seeded_full_surface")\n'
                             'await call_tool(\n'
                             '    name="file_ops_safe",\n'
@@ -101,13 +94,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                             '    items=listed,\n'
                             ')\n'
                             'await pending_files(operation="complete", items=(pending.items[0],))\n'
-                            'history = await call_tool(\n'
-                            '    name="memory_ops",\n'
-                            '    arguments={"operation": "get_history", "scope": "session", "limit": 1},\n'
-                            ')\n'
-                            'history_payload = json.loads(history.output)\n'
+                            'history = await retrieve_history(scope="session", limit=1)\n'
                             'assembled = await assemble_context(\n'
-                            '    history=[{"role": item["role"], "content": item["content"]} for item in history_payload["items"]],\n'
+                            '    history=history.items,\n'
                             '    instructions="Keep the output concise.",\n'
                             ')\n'
                             'draft = await generate(\n'
@@ -180,7 +169,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Read session history through code_execution_local.",
                     "session_id": "code_execution_local_allow_read",
-                    "tools": ["code_execution_local", "memory_ops"],
+                    "tools": ["code_execution_local"],
                     "model": "test",
                 },
             )
@@ -280,7 +269,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Exercise the full code_execution_local helper surface.",
                     "session_id": "code_execution_local_full_surface",
-                    "tools": ["code_execution_local", "file_ops_safe", "memory_ops"],
+                    "tools": ["code_execution_local", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -338,10 +327,10 @@ class CodeExecutionLocalScenario(BaseScenario):
             )
             self.assert_event_contains(
                 full_surface_events,
-                name="authoring_call_tool_completed",
+                name="authoring_retrieve_history_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
-                    "tool": "memory_ops",
+                    "item_count": 1,
                 },
             )
             self.assert_event_contains(

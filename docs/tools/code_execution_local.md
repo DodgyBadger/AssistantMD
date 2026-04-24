@@ -56,6 +56,7 @@ Available helpers and the reserved `date` input:
 - `call_tool(...)`: invoke one already-enabled chat tool from inside the script
 - `pending_files(...)`: filter a file result set to the pending subset and explicitly complete the items you finished
 - `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use
+- `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
 - `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs
@@ -93,7 +94,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### `assemble_context`
 
-- for conversation history, fetch explicit messages through `memory_ops` and pass them as `history`
+- for conversation history, fetch explicit messages through `retrieve_history(...)` and pass `history.items`
 - `latest_user_message` is an explicit optional argument on `assemble_context(...)`
 - in context templates, the runtime appends the latest user turn afterward if your assembled context does not already include it
 
@@ -136,19 +137,10 @@ code_execution_local(
 Inside a workflow or context template, write only the Python script body. Do not wrap it in `code_execution_local(...)`.
 
 ```python
-import json
-
-history_result = await call_tool(
-    name="memory_ops",
-    arguments={"operation": "get_history", "scope": "session", "limit": "all"},
-)
-history_payload = json.loads(history_result.output)
+history_result = await retrieve_history(scope="session", limit="all")
 
 await assemble_context(
-    history=[
-        {"role": item["role"], "content": item["content"]}
-        for item in history_payload["items"]
-    ],
+    history=history_result.items,
     instructions="Keep the answer concise.",
 )
 ```

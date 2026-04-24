@@ -44,8 +44,31 @@ class ContextMessage:
     content: str
     metadata: dict[str, Any]
 
+class HistoryMessage:
+    role: str
+    content: str
+    message: dict[str, Any] | None
+    metadata: dict[str, Any]
+
+class ToolExchange:
+    tool_call_id: str
+    tool_name: str
+    request_message: dict[str, Any]
+    response_message: dict[str, Any]
+    call_arguments: dict[str, Any] | None
+    result_text: str | None
+    metadata: dict[str, Any]
+
+class RetrievedHistoryResult:
+    source: str
+    scope: str
+    session_id: str | None
+    item_count: int
+    items: tuple[Any, ...]
+    metadata: dict[str, Any]
+
 class AssembleContextResult:
-    messages: tuple[ContextMessage, ...]
+    messages: tuple[Any, ...]
     instructions: tuple[str, ...]
 
 class MarkdownHeading:
@@ -135,10 +158,18 @@ async def call_tool(
     options: dict[str, Any] | None = None,
 ) -> CallToolResult: ...
 
+async def retrieve_history(
+    *,
+    scope: str = "session",
+    session_id: str | None = None,
+    limit: int | str = "all",
+    message_filter: str = "all",
+) -> RetrievedHistoryResult: ...
+
 async def assemble_context(
     *,
-    history: list[Any] | tuple[Any, ...] | None = None,
-    context_messages: list[Any] | tuple[Any, ...] | None = None,
+    history: list[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str] | tuple[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str, ...] | None = None,
+    context_messages: list[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str] | tuple[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str, ...] | None = None,
     instructions: str | None = None,
     latest_user_message: object | None = None,
 ) -> AssembleContextResult: ...

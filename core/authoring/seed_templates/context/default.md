@@ -5,16 +5,8 @@ description: Default template for regular chat. Passes full history. Loads soul.
 ```python
 """Default chat context: pass history, inject soul.md instructions and skills catalog if present."""
 
-import json
-
-history_result = await call_tool(
-    name="memory_ops",
-    arguments={"operation": "get_history", "scope": "session", "limit": "all"},
-)
-history = [
-    {"role": item["role"], "content": item["content"]}
-    for item in json.loads(history_result.output)["items"]
-]
+history_result = await retrieve_history(scope="session", limit="all")
+history = list(history_result.items)
 
 soul_result = await call_tool(
     name="file_ops_safe",

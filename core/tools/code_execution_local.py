@@ -100,8 +100,8 @@ Full documentation:
 Important notes:
 - pass code with `code="..."`
 - always use named arguments
-- use tools such as `file_ops_safe` and `memory_ops` through `call_tool(...)` for access work
-- this tool exposes constrained helpers such as `read_cache`, `pending_files`, `generate`, `call_tool`, `assemble_context`, `parse_markdown`, and `finish`
+- use tools such as `file_ops_safe` through `call_tool(...)` for access work
+- this tool exposes constrained helpers such as `read_cache`, `pending_files`, `generate`, `call_tool`, `retrieve_history`, `assemble_context`, `parse_markdown`, and `finish`
 """
 
     @staticmethod

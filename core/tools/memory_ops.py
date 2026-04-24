@@ -10,12 +10,13 @@ from pydantic_ai import RunContext
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
-from core.memory import resolve_conversation_history_provider
+from core.memory import MemoryContext, MemoryService
 
 from .base import BaseTool
 
 
 logger = UnifiedLogger(tag="memory-ops-tool")
+_MEMORY_SERVICE = MemoryService()
 
 
 class MemoryOps(BaseTool):
@@ -44,11 +45,9 @@ class MemoryOps(BaseTool):
             """
             try:
                 deps = getattr(ctx, "deps", None)
-                active_session_id = str(getattr(deps, "session_id", "") or "").strip() or None
-                active_vault_name = str(getattr(deps, "vault_name", "") or "").strip() or None
                 requested_session_id = str(session_id or "").strip() or None
-                message_history = list(getattr(deps, "message_history", []) or [])
                 op = (operation or "").strip().lower()
+                memory_context = MemoryContext.from_deps(deps)
 
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
@@ -59,21 +58,18 @@ class MemoryOps(BaseTool):
                     },
                 )
 
-                provider = resolve_conversation_history_provider(
-                    message_history=message_history,
-                    session_id=requested_session_id or active_session_id,
-                    vault_name=active_vault_name,
-                )
                 resolved_limit = cls._parse_limit(limit)
                 if op == "get_history":
-                    result = provider.get_history(
+                    result = _MEMORY_SERVICE.get_conversation_history(
+                        context=memory_context,
                         scope=scope,
                         session_id=requested_session_id,
                         limit=resolved_limit,
                         message_filter=message_filter,
                     )
                 elif op == "get_tool_events":
-                    result = provider.get_tool_events(
+                    result = _MEMORY_SERVICE.get_conversation_tool_events(
+                        context=memory_context,
                         scope=scope,
                         session_id=requested_session_id,
                         limit=resolved_limit,
@@ -105,9 +101,6 @@ class MemoryOps(BaseTool):
         """Get usage instructions for conversation memory access."""
         return """
 Read structured conversation history through a source-agnostic memory provider.
-
-Full documentation:
-- `__virtual_docs__/tools/memory_ops.md`
 
 Important notes:
 - use `operation="get_history"` to read conversation history

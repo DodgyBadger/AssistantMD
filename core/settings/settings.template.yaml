@@ -20,7 +20,6 @@ settings:
     value:
       - web_search_tavily
       - browser
-      - memory_ops
       - file_ops_safe
       - file_ops_unsafe
       - documentation_access
@@ -298,11 +297,6 @@ tools:
   browser:
     module: core.tools.browser
     description: "Browser-based page extraction using Playwright"
-    requires_secrets: []
-    user_editable: false
-  memory_ops:
-    module: core.tools.memory_ops
-    description: "Read structured conversation history through a source-agnostic memory provider"
     requires_secrets: []
     user_editable: false
   workflow_run:

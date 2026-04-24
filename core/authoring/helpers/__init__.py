@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from core.authoring.contracts import AuthoringCapabilityDefinition
-from core.authoring.helpers.assemble_context import build_definition as build_assemble_context_definition
 from core.authoring.helpers.call_tool import build_definition as build_call_tool_definition
 from core.authoring.helpers.finish import build_definition as build_finish_definition
 from core.authoring.helpers.generate import build_definition as build_generate_definition
+from core.authoring.helpers.history import (
+    build_assemble_context_definition,
+    build_retrieve_history_definition,
+)
 from core.authoring.helpers.import_content import build_definition as build_import_content_definition
 from core.authoring.helpers.pending_files import build_definition as build_pending_files_definition
 from core.authoring.helpers.parse_markdown import build_definition as build_parse_markdown_definition
@@ -20,6 +23,7 @@ def get_builtin_helper_definitions() -> tuple[AuthoringCapabilityDefinition, ...
         build_pending_files_definition(),
         build_generate_definition(),
         build_call_tool_definition(),
+        build_retrieve_history_definition(),
         build_assemble_context_definition(),
         build_parse_markdown_definition(),
         build_import_content_definition(),

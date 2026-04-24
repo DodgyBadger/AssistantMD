@@ -10,9 +10,12 @@ from core.authoring.contracts import (
     AuthoringHost,
     MarkdownCodeBlock,
     MarkdownHeading,
+    HistoryMessage,
     MarkdownImage,
     MarkdownSection,
     ParsedMarkdown,
+    RetrievedHistoryResult,
+    ToolExchange,
 )
 from core.runtime.buffers import BufferStore
 from core.runtime.paths import get_data_root
@@ -147,9 +150,12 @@ class WorkflowAuthoringHost(AuthoringHost):
         """Return dataclass types Monty should expose for reserved globals."""
         return (
             MontyDateTokens,
+            HistoryMessage,
             MarkdownHeading,
             MarkdownSection,
             MarkdownCodeBlock,
             MarkdownImage,
             ParsedMarkdown,
+            RetrievedHistoryResult,
+            ToolExchange,
         )

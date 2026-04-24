@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
+from pydantic import TypeAdapter
 from pydantic_ai import RunContext
 from pydantic_ai.messages import (
     ModelMessage,
@@ -21,7 +22,12 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from core.authoring.contracts import AssembleContextResult, ContextMessage
+from core.authoring.contracts import (
+    AssembleContextResult,
+    ContextMessage,
+    HistoryMessage,
+    ToolExchange,
+)
 from core.authoring.template_discovery import load_template
 from core.authoring.template_loader import parse_authoring_template_text
 from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, run_authoring_monty
@@ -33,6 +39,7 @@ from core.utils.hash import hash_file_content
 from core.utils.messages import extract_role_and_text
 
 logger = UnifiedLogger(tag="context-manager")
+_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
 
 
 # ---------------------------------------------------------------------------
@@ -256,20 +263,85 @@ def _context_message_to_model_message(message: ContextMessage) -> ModelMessage:
     return ModelRequest(parts=[SystemPromptPart(content=content)])
 
 
+def _deserialize_model_message(payload: dict[str, Any]) -> ModelMessage | None:
+    try:
+        message = _MODEL_MESSAGE_ADAPTER.validate_python(payload)
+    except Exception:
+        return None
+    return message if isinstance(message, (ModelRequest, ModelResponse)) else None
+
+
+def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
+    if isinstance(item, ContextMessage):
+        return [_context_message_to_model_message(item)]
+    if isinstance(item, HistoryMessage):
+        if isinstance(item.message, dict):
+            restored = _deserialize_model_message(item.message)
+            if restored is not None:
+                return [restored]
+        return [_context_message_to_model_message(ContextMessage(role=item.role, content=item.content, metadata=item.metadata))]
+    if isinstance(item, ToolExchange):
+        restored: list[ModelMessage] = []
+        for payload in (item.request_message, item.response_message):
+            message = _deserialize_model_message(payload)
+            if message is None:
+                return [_context_message_to_model_message(ContextMessage(role="system", content=item.result_text or "", metadata=item.metadata))]
+            restored.append(message)
+        return restored
+    raise ValueError("Unsupported assembled context item type")
+
+
+def _history_item_role_and_text(item: Any) -> tuple[str, str]:
+    if isinstance(item, ContextMessage):
+        return (item.role or "system").strip().lower(), item.content or ""
+    if isinstance(item, HistoryMessage):
+        return (item.role or "system").strip().lower(), item.content or ""
+    if isinstance(item, ToolExchange):
+        return "tool_exchange", item.result_text or ""
+    return extract_role_and_text(item)
+
+
 def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
     if isinstance(value, AssembleContextResult):
         return value
     if isinstance(value, dict):
         messages = value.get("messages", ())
         instructions = value.get("instructions", ())
-        normalized_messages: list[ContextMessage] = []
+        normalized_messages: list[Any] = []
         if not isinstance(messages, (list, tuple)):
             raise ValueError("assemble_context result must expose 'messages' as a list or tuple")
         for item in messages:
-            if isinstance(item, ContextMessage):
+            if isinstance(item, (ContextMessage, HistoryMessage, ToolExchange)):
                 normalized_messages.append(item)
                 continue
             if isinstance(item, dict):
+                if "request_message" in item and "response_message" in item:
+                    normalized_messages.append(
+                        ToolExchange(
+                            tool_call_id=str(item.get("tool_call_id") or ""),
+                            tool_name=str(item.get("tool_name") or ""),
+                            request_message=dict(item.get("request_message") or {}),
+                            response_message=dict(item.get("response_message") or {}),
+                            call_arguments=(
+                                dict(item.get("call_arguments"))
+                                if isinstance(item.get("call_arguments"), dict)
+                                else None
+                            ),
+                            result_text=None if item.get("result_text") is None else str(item.get("result_text")),
+                            metadata=dict(item.get("metadata") or {}),
+                        )
+                    )
+                    continue
+                if "message" in item:
+                    normalized_messages.append(
+                        HistoryMessage(
+                            role=str(item.get("role") or "system"),
+                            content=str(item.get("content") or ""),
+                            message=dict(item.get("message") or {}) if isinstance(item.get("message"), dict) else None,
+                            metadata=dict(item.get("metadata") or {}),
+                        )
+                    )
+                    continue
                 normalized_messages.append(
                     ContextMessage(
                         role=str(item.get("role") or "system"),
@@ -278,7 +350,7 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                     )
                 )
                 continue
-            raise ValueError("assemble_context result messages must contain ContextMessage or dict values")
+            raise ValueError("assemble_context result messages must contain context/history values or dictionaries")
         normalized_instructions: list[str] = []
         if isinstance(instructions, (list, tuple)):
             for item in instructions:
@@ -292,11 +364,11 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
     raise ValueError("Authoring context template must return AssembleContextResult or an equivalent dictionary")
 
 
-def _combined_context_text(messages: Sequence[ContextMessage]) -> str:
+def _combined_context_text(messages: Sequence[Any]) -> str:
     return "\n\n".join(
-        f"{(message.role or 'system').strip().lower()}: {message.content}"
-        for message in messages
-        if (message.content or "").strip()
+        f"{role}: {text}"
+        for role, text in (_history_item_role_and_text(message) for message in messages)
+        if text.strip()
     ).strip()
 
 
@@ -310,7 +382,7 @@ def _prompt_to_user_message(prompt: Any) -> ModelMessage | None:
 
 
 def _compiled_history_includes_latest_user(
-    messages: Sequence[ContextMessage],
+    messages: Sequence[Any],
     latest_user_message: ModelMessage | None,
 ) -> bool:
     if latest_user_message is None:
@@ -319,7 +391,8 @@ def _compiled_history_includes_latest_user(
     if latest_role != "user" or not latest_text:
         return False
     for message in reversed(messages):
-        if message.role == "user" and message.content == latest_text:
+        message_role, message_text = _history_item_role_and_text(message)
+        if message_role == "user" and message_text == latest_text:
             return True
     return False
 
@@ -514,7 +587,8 @@ async def _build_authoring_context_history(
             logger.warning("Failed to persist authoring context summary", data={"error": str(exc)})
 
     curated_history = []
-    curated_history.extend(_context_message_to_model_message(message) for message in assembled.messages)
+    for message in assembled.messages:
+        curated_history.extend(_history_item_to_model_messages(message))
     if latest_turn_messages:
         if _compiled_history_includes_latest_user(assembled.messages, latest_user_message):
             curated_history.extend(latest_turn_messages[1:])

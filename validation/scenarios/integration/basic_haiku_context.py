@@ -141,8 +141,6 @@ description: Basic haiku context-template happy path
 ```python
 \"\"\"Build haiku seed words into downstream chat context and persist the seed artifact.\"\"\"
 
-import json
-
 source = await call_tool(
     name="file_ops_safe",
     arguments={"operation": "read", "path": "notes/haiku_context_seed.md"},
@@ -189,19 +187,12 @@ else:
             "path": "outputs/haiku-seed-words.md",
             "content": seed_words.output,
         },
-    )
+)
 
+history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="You are a concise poet. When asked for a haiku, write exactly three lines and do not add commentary.",
-    history=[
-        {"role": item["role"], "content": item["content"]}
-        for item in json.loads(
-            (await call_tool(
-                name="memory_ops",
-                arguments={"operation": "get_history", "scope": "session", "limit": "all"},
-            )).output
-        )["items"]
-    ],
+    history=history.items,
     context_messages=[{"role": "system", "content": seed_words.output}],
 )
 

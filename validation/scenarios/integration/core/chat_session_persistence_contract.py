@@ -235,10 +235,10 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
             self.assert_event_contains(
                 events,
-                name="authoring_call_tool_completed",
+                name="authoring_retrieve_history_completed",
                 expected={
                     "workflow_id": workflow_id,
-                    "tool": "memory_ops",
+                    "source": "sqlite_chat_sessions",
                 },
             )
 
@@ -246,54 +246,25 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             self.soft_assert_equal(
                 output["source"],
                 "sqlite_chat_sessions",
-                "Expected memory_ops to rehydrate from the persisted SQLite chat store after restart",
+                "Expected retrieve_history to rehydrate from the persisted SQLite chat store after restart",
             )
             self.soft_assert_equal(
                 output["history_source"],
                 "chat_messages",
-                "Expected get_history metadata to identify canonical chat message storage",
+                "Expected retrieve_history metadata to identify canonical chat message storage",
             )
             self.soft_assert_equal(
                 output["history_message_filter"],
                 "all",
-                "Expected default get_history retrieval to preserve the full canonical message timeline",
-            )
-            self.soft_assert_equal(
-                output["tool_only_count"],
-                2,
-                "Expected get_history(message_filter='only_tools') to expose the canonical tool-call and tool-return messages",
-            )
-            self.soft_assert(
-                output["tool_only_message_types"] == ["ModelResponse", "ModelRequest"],
-                "Expected tool-only history filtering to retain ordered provider-native tool messages",
-            )
-            self.soft_assert_equal(
-                output["tool_event_source"],
-                "sqlite_chat_sessions",
-                "Expected explicit tool-event retrieval to use the persisted SQLite chat store after restart",
+                "Expected default history retrieval to preserve the full canonical message timeline",
             )
             self.soft_assert(
                 output["item_count"] >= 2,
-                "Expected restarted memory_ops history to contain persisted session messages",
+                "Expected restarted history retrieval to contain persisted session messages",
             )
             self.soft_assert(
                 output["last_content"],
-                "Expected restarted memory_ops history to include a final persisted message",
-            )
-            self.soft_assert_equal(
-                output["tool_event_count"],
-                2,
-                "Expected restarted memory_ops tool-event retrieval to return call and result rows",
-            )
-            self.soft_assert_equal(
-                output["tool_event_types"],
-                ["call", "result"],
-                "Expected restarted memory_ops tool-event retrieval ordering to remain stable",
-            )
-            self.soft_assert_equal(
-                output["tool_result_text"],
-                "SESSION_PROBE_RESULT",
-                "Expected restarted memory_ops tool-event retrieval to expose the persisted tool result",
+                "Expected restarted history retrieval to include a final persisted message",
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
@@ -303,42 +274,14 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
 
 CHAT_SESSION_PERSISTENCE_CONTRACT_CODE = """
-import json
-
-history = await call_tool(
-    name="memory_ops",
-    arguments={"operation": "get_history", "scope": "session", "limit": "all"},
-)
-payload = json.loads(history.output)
-tool_only_history = await call_tool(
-    name="memory_ops",
-    arguments={
-        "operation": "get_history",
-        "scope": "session",
-        "limit": "all",
-        "message_filter": "only_tools",
-    },
-)
-tool_only_payload = json.loads(tool_only_history.output)
-tool_events = await call_tool(
-    name="memory_ops",
-    arguments={"operation": "get_tool_events", "scope": "session", "limit": "all"},
-)
-tool_events_payload = json.loads(tool_events.output)
+history = await retrieve_history(scope="session", limit="all")
+last_content = history.items[-1].content if history.items else ""
 
 {
-    "source": payload["source"],
-    "item_count": payload["item_count"],
-    "last_content": payload["items"][-1]["content"] if payload["items"] else "",
-    "history_source": payload.get("metadata", {}).get("canonical_source", ""),
-    "history_message_filter": payload.get("metadata", {}).get("message_filter", ""),
-    "tool_only_count": tool_only_payload["item_count"],
-    "tool_only_message_types": [item["message_type"] for item in tool_only_payload["items"]],
-    "tool_event_source": tool_events_payload["source"],
-    "tool_event_count": tool_events_payload["item_count"],
-    "tool_event_types": [item["event_type"] for item in tool_events_payload["items"]],
-    "tool_result_text": (
-        [item["result_text"] for item in tool_events_payload["items"] if item["event_type"] == "result"] or [""]
-    )[0],
+    "source": history.source,
+    "item_count": history.item_count,
+    "last_content": last_content,
+    "history_source": history.metadata.get("canonical_source", ""),
+    "history_message_filter": history.metadata.get("message_filter", ""),
 }
 """

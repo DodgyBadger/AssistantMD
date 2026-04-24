@@ -33,7 +33,6 @@ Available tool docs:
 - `code_execution_local`
 - `file_ops_safe`
 - `file_ops_unsafe`
-- `memory_ops`
 - `tavily_crawl`
 - `tavily_extract`
 - `web_search_duckduckgo`

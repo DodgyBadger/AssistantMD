@@ -1,23 +1,27 @@
-"""Conversation memory access abstractions."""
+"""Shared memory services and conversation-history abstractions."""
 
-from core.memory.providers import (
+from core.memory.service import (
     ConversationHistoryItem,
-    ConversationHistoryResult,
     ConversationHistoryProvider,
+    ConversationHistoryResult,
     ConversationToolEventItem,
     ConversationToolEventResult,
     InMemoryConversationHistoryProvider,
+    MemoryContext,
+    MemoryService,
     SQLiteConversationHistoryProvider,
     resolve_conversation_history_provider,
 )
 
 __all__ = [
     "ConversationHistoryItem",
-    "ConversationHistoryResult",
     "ConversationHistoryProvider",
+    "ConversationHistoryResult",
     "ConversationToolEventItem",
     "ConversationToolEventResult",
     "InMemoryConversationHistoryProvider",
+    "MemoryContext",
+    "MemoryService",
     "SQLiteConversationHistoryProvider",
     "resolve_conversation_history_provider",
 ]

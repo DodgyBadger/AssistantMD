@@ -13,6 +13,7 @@ BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
         "pending_files",
         "generate",
         "call_tool",
+        "retrieve_history",
         "assemble_context",
         "parse_markdown",
         "import_content",
@@ -98,6 +99,41 @@ class ContextMessage:
 
 
 @dataclass(frozen=True)
+class HistoryMessage:
+    """One preserved conversation message returned by authoring history retrieval."""
+
+    role: str
+    content: str
+    message: dict[str, Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ToolExchange:
+    """One atomic tool call/return exchange returned by authoring history retrieval."""
+
+    tool_call_id: str
+    tool_name: str
+    request_message: dict[str, Any]
+    response_message: dict[str, Any]
+    call_arguments: dict[str, Any] | None = None
+    result_text: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RetrievedHistoryResult:
+    """Envelope for structured history retrieval into authored Python."""
+
+    source: str
+    scope: str
+    session_id: str | None
+    item_count: int
+    items: tuple[HistoryMessage | ToolExchange, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PendingFilesResult:
     """Envelope for pending_files(...) results."""
 
@@ -130,7 +166,7 @@ class CallToolResult:
 class AssembleContextResult:
     """Validated structured context ready for a downstream chat call."""
 
-    messages: tuple[ContextMessage, ...] = ()
+    messages: tuple[ContextMessage | HistoryMessage | ToolExchange, ...] = ()
     instructions: tuple[str, ...] = ()
 
 
@@ -212,4 +248,3 @@ class AuthoringCapabilityDefinition:
     doc: str
     handler: CapabilityHandler
     contract: dict[str, Any] = field(default_factory=dict)
-

@@ -95,6 +95,14 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="authoring_retrieve_history_completed",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "item_count": 0,
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="authoring_assemble_context_completed",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
@@ -159,6 +167,7 @@ class AuthoringContractScenario(BaseScenario):
             content = contract_output.read_text(encoding="utf-8")
             self.soft_assert("SEED_CONTENT" in content, "Expected retrieved file content in output")
             self.soft_assert("ASSEMBLED=3" in content, "Expected assembled context count in output")
+            self.soft_assert("HISTORY_ITEMS=0" in content, "Expected retrieve_history output in contract file")
 
         generated_output = vault / "outputs" / "generate-success.md"
         self.soft_assert(generated_output.exists(), "Expected generate output file")
@@ -299,8 +308,10 @@ listing = await call_tool(
     name="file_ops_safe",
     arguments={"operation": "list", "path": "notes"},
 )
+history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="Keep the response concise.",
+    history=history.items,
     context_messages=[{"role": "system", "content": "Validation context"}],
     latest_user_message={"role": "user", "content": "Summarize the retrieved material."},
 )
@@ -332,7 +343,7 @@ draft = await generate(
 
 await _write_replace(
     "outputs/contract-success.md",
-    source_text + f"\\nASSEMBLED={len(assembled.messages)}",
+    source_text + f"\\nASSEMBLED={len(assembled.messages)}\\nHISTORY_ITEMS={history.item_count}",
 )
 await _write_replace(
     "outputs/generate-success.md",
