@@ -12,7 +12,7 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.chat import (
+from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
     UploadedImageAttachment,

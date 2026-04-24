@@ -8,10 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.chat import (
-    PreparedChatExecution,
-    execute_chat_prompt_stream,
-)
+from core.chat.executor import PreparedChatExecution, execute_chat_prompt_stream
 from validation.core.base_scenario import BaseScenario
 
 
