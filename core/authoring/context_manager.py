@@ -332,6 +332,17 @@ def _latest_turn_messages(messages: Sequence[ModelMessage]) -> List[ModelMessage
     return list(messages[last_user_idx:])
 
 
+def _message_has_tool_parts(message: ModelMessage) -> bool:
+    for part in getattr(message, "parts", ()) or ():
+        if getattr(part, "part_kind", None) in {"tool-call", "tool-return"}:
+            return True
+    return False
+
+
+def _messages_have_tool_parts(messages: Sequence[ModelMessage]) -> bool:
+    return any(_message_has_tool_parts(message) for message in messages)
+
+
 async def _build_authoring_context_history(
     *,
     run_context: RunContext[Any],
@@ -346,6 +357,31 @@ async def _build_authoring_context_history(
         return []
 
     latest_turn_messages = _latest_turn_messages(messages)
+    if _messages_have_tool_parts(latest_turn_messages):
+        logger.info(
+            "Context history passthrough for active tool turn",
+            data={
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "template_name": template.name,
+                "message_count": len(messages),
+                "latest_turn_message_count": len(latest_turn_messages),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "Context history passthrough for active tool turn",
+            data={
+                "event": "context_history_passthrough",
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "template_name": template.name,
+                "reason": "latest_turn_contains_tool_parts",
+                "message_count": len(messages),
+                "latest_turn_message_count": len(latest_turn_messages),
+            },
+        )
+        return list(messages)
+
     latest_user_message = latest_turn_messages[0] if latest_turn_messages else None
 
     workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
