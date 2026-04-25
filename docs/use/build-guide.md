@@ -103,6 +103,8 @@ For the full authoring reference, see [Authoring](authoring.md).
 ## Level 4: Context Assembly Script
 
 A Context Assembly Script controls what the chat agent knows at the start of every conversation. AssistantMD ships with a default script that loads skills, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`.
+Packaged system scripts are refreshed on startup; copy a system script into `AssistantMD/Authoring/` under a new name before customizing it.
+
 ### Customizing the agent's personality: soul.md
 
 For simple customization — tone, response style, ground rules — you don't need to create a context script. Create `AssistantMD/soul.md` with plain text instructions:

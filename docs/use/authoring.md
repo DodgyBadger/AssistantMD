@@ -77,7 +77,7 @@ Most context scripts use three core pieces: `retrieve_history()` to read complet
 
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
-Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence.
+Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence. System seed scripts are refreshed on startup; copy one to a new vault script before customizing it.
 
 ### Customizing the default script with soul.md
 

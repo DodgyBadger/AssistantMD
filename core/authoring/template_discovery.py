@@ -452,7 +452,8 @@ def seed_system_templates(system_root: Optional[Path] = None) -> None:
     """
     Seed system Authoring directory from seed_templates/context/ and seed_templates/workflows/.
 
-    Does not overwrite files that already exist.
+    Packaged seed templates are owned by the application and are refreshed on
+    startup. Users should customize by copying a seed to a new authoring file.
     """
     try:
         sys_root = system_root or get_system_root()
@@ -471,12 +472,10 @@ def seed_system_templates(system_root: Optional[Path] = None) -> None:
         source_dir = SEED_TEMPLATE_DIR / subfolder
         if not source_dir.exists():
             continue
-        for seed_path in source_dir.iterdir():
+        for seed_path in sorted(source_dir.iterdir()):
             if not seed_path.is_file():
                 continue
             target_path = target_dir / seed_path.name
-            if target_path.exists():
-                continue
             try:
                 shutil.copyfile(seed_path, target_path)
                 logger.info(f"Seeded template to {target_path}")

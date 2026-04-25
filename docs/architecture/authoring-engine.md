@@ -46,7 +46,8 @@ This separation means the sandbox itself has no host imports — all side effect
 ## Discovery and precedence
 
 - `template_discovery.py` scans `AssistantMD/Authoring/` (one level deep) per vault.
-- System templates in `system/Authoring/` provide defaults; vault files take precedence when names match.
+- System templates in `system/Authoring/` provide defaults; packaged seed templates are refreshed on startup, so users should customize copies rather than editing seeded files in place.
+- Vault files take precedence when names match.
 - On first access, `ensure_vault_directories()` creates `AssistantMD/Authoring/` and `AssistantMD/Skills/` for each vault, seeding starter files from `core/authoring/seed_templates/`.
 
 ## Cache
