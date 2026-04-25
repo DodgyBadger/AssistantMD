@@ -1,6 +1,6 @@
 # Authoring: Workflow Scripts and Context Assembly Scripts
 
-AssistantMD has a unified authoring surface for two types of automation: **workflow scripts** and **Context Assembly Scripts**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
+AssistantMD has a unified authoring surface for two types of automation: **workflow scripts** and **context assembly scripts**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
 
 You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test authoring files. Use this document as orientation.
 
@@ -58,7 +58,7 @@ week_start_day: monday          # optional, default monday
 
 ## Context Assembly Script
 
-A Context Assembly Script shapes what the chat agent knows at the start of a conversation. Use a context script when you want to:
+A context assembly script shapes what the chat agent knows at the start of a conversation. Use a context script when you want to:
 
 - Control which history the agent sees (curate, summarize, or filter prior turns)
 - Load relevant files or skill listings into the agent's context automatically
@@ -73,7 +73,7 @@ description: Regular chat with full history
 ---
 ```
 
-The Python block retrieves session history and calls `assemble_context()` to hand the assembled context to the chat agent.
+Most context scripts use three core pieces: `retrieve_history()` to read completed prior session history, read-only `latest_message` to branch on the active message, and `assemble_context()` to hand the assembled context to the chat agent. `retrieve_history().items` counts safe units: user message = 1, assistant message = 1, matched tool call + return = 1. Do not append `latest_message` manually; the runtime adds it exactly once after the assembled context.
 
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
@@ -90,16 +90,3 @@ Prefer bullet points over prose.
 ```
 
 The default context script loads `soul.md` automatically if it exists and uses it as the system instruction. If no `soul.md` is present, a built-in default stance is used instead. The file is plain markdown — no frontmatter, no special syntax.
-
----
-
-## Authoring Loop
-
-1. **Describe** what you want to the chat agent — "create a workflow script that reads my inbox folder, summarizes each new note, and appends the summary to a log file"
-2. **The agent drafts** the file and places it in `AssistantMD/Authoring/`
-3. **Compile** using the authoring UI to catch syntax errors before running
-4. **Run manually** to test; check the output
-5. **Iterate** — ask the agent to adjust until it behaves correctly
-6. Add `schedule:` and set `enabled: true` when ready to automate
-
-For capability signatures and return types, the agent can inspect the runtime contract directly. Ask it to check `__virtual_docs__/tools/code_execution_local.md` when it needs the Monty helper API details.

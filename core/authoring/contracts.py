@@ -211,6 +211,23 @@ class RetrievedHistoryResult:
 
 
 @dataclass(frozen=True)
+class LatestMessage:
+    """Read-only latest message exposed to authored Python outside history."""
+
+    role: str = ""
+    content: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+    exists: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.text and self.role:
+            object.__setattr__(self, "text", _role_content_to_text(self.role, self.content))
+        if self.role and not self.exists:
+            object.__setattr__(self, "exists", True)
+
+
+@dataclass(frozen=True)
 class PendingFilesResult:
     """Envelope for pending_files(...) results."""
 

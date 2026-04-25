@@ -30,7 +30,7 @@ def build_definition() -> AuthoringCapabilityDefinition:
         name="assemble_context",
         doc=(
             "Assemble validated structured chat context from broker-derived history, "
-            "instructions, and explicit latest-user input."
+            "instructions, and explicit context messages."
         ),
         contract=_contract(),
         handler=execute,
@@ -41,7 +41,7 @@ async def execute(
     call: AuthoringCapabilityCall,
     context: AuthoringExecutionContext,
 ) -> AssembleContextResult:
-    history, context_messages, instructions, latest_user_message = _parse_call(call)
+    history, context_messages, instructions = _parse_call(call)
     assembled_messages: list[Any] = []
 
     if instructions:
@@ -50,8 +50,6 @@ async def execute(
         assembled_messages.append(_normalize_history_context_item(item, default_role="system"))
     for item in history:
         assembled_messages.append(_normalize_history_context_item(item))
-    if latest_user_message is not None:
-        assembled_messages.append(_normalize_history_context_item(latest_user_message, default_role="user"))
 
     logger.add_sink("validation").info(
         "authoring_assemble_context_completed",
@@ -76,9 +74,16 @@ def _normalize_history_context_item(value: Any, *, default_role: str | None = No
 
 def _parse_call(
     call: AuthoringCapabilityCall,
-) -> tuple[tuple[Any, ...], tuple[Any, ...], str | None, Any | None]:
+) -> tuple[tuple[Any, ...], tuple[Any, ...], str | None]:
     if call.args:
         raise ValueError("assemble_context only supports keyword arguments")
+    allowed_kwargs = {"history", "context_messages", "instructions"}
+    unknown_kwargs = sorted(set(call.kwargs) - allowed_kwargs)
+    if unknown_kwargs:
+        raise ValueError(
+            "assemble_context received unsupported keyword argument(s): "
+            + ", ".join(unknown_kwargs)
+        )
     history = normalize_object_sequence(
         call.kwargs.get("history"),
         field_name="assemble_context history",
@@ -91,8 +96,7 @@ def _parse_call(
         call.kwargs.get("instructions"),
         field_name="assemble_context instructions",
     )
-    latest_user_message = call.kwargs.get("latest_user_message")
-    return history, context_messages, instructions, latest_user_message
+    return history, context_messages, instructions
 
 
 def _contract() -> dict[str, object]:
@@ -100,8 +104,7 @@ def _contract() -> dict[str, object]:
         "signature": (
             "assemble_context(*, history: list | tuple | None = None, "
             "context_messages: list | tuple | None = None, "
-            "instructions: str | None = None, "
-            "latest_user_message: object | None = None)"
+            "instructions: str | None = None)"
         ),
         "summary": (
             "Build validated downstream chat context from safe history units and "
@@ -125,11 +128,6 @@ def _contract() -> dict[str, object]:
                 "type": "string",
                 "required": False,
                 "description": "Extra downstream chat instructions injected as one additional system message.",
-            },
-            "latest_user_message": {
-                "type": "object",
-                "required": False,
-                "description": "Optional explicit latest user message appended last.",
             },
         },
         "return_shape": {

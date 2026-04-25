@@ -77,6 +77,13 @@ class RetrievedHistoryResult:
     metadata: dict[str, Any]
     text: str
 
+class LatestMessage:
+    role: str
+    content: str
+    metadata: dict[str, Any]
+    text: str
+    exists: bool
+
 class AssembleContextResult:
     messages: tuple[Any, ...]
     instructions: tuple[str, ...]
@@ -133,6 +140,7 @@ class MontyDateTokens:
     def month_name(self, fmt: str | None = None) -> str: ...
 
 date: MontyDateTokens
+latest_message: LatestMessage
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +189,6 @@ async def assemble_context(
     history: list[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str] | tuple[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str, ...] | None = None,
     context_messages: list[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str] | tuple[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str, ...] | None = None,
     instructions: str | None = None,
-    latest_user_message: object | None = None,
 ) -> AssembleContextResult: ...
 
 async def parse_markdown(

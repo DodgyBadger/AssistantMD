@@ -203,7 +203,7 @@ def _contract() -> dict[str, object]:
         ),
         "summary": (
             "Retrieve conversation history directly from the shared memory broker. "
-            "Tool call/return pairs are returned as one atomic tool exchange."
+            "Items are safe units: user message, assistant message, or one atomic tool exchange."
         ),
         "arguments": {
             "scope": {
@@ -231,8 +231,8 @@ def _contract() -> dict[str, object]:
             "source": "Resolved history source.",
             "scope": "Resolved history scope.",
             "session_id": "Resolved session id.",
-            "item_count": "Number of returned history items.",
-            "items": "Ordered safe history units (messages and atomic tool exchanges).",
+            "item_count": "Number of returned safe history units.",
+            "items": "Ordered safe units: messages and atomic tool call/return exchanges.",
             "metadata": "Broker-owned retrieval metadata.",
         },
         "examples": [

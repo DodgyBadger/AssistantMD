@@ -26,6 +26,7 @@ from core.authoring.contracts import (
     AssembleContextResult,
     ContextMessage,
     HistoryMessage,
+    LatestMessage,
     ToolExchange,
 )
 from core.authoring.template_discovery import load_template
@@ -372,31 +373,6 @@ def _combined_context_text(messages: Sequence[Any]) -> str:
     ).strip()
 
 
-def _prompt_to_user_message(prompt: Any) -> ModelMessage | None:
-    if isinstance(prompt, str):
-        text = prompt.strip()
-        if not text:
-            return None
-        return ModelRequest(parts=[UserPromptPart(content=text)])
-    return None
-
-
-def _compiled_history_includes_latest_user(
-    messages: Sequence[Any],
-    latest_user_message: ModelMessage | None,
-) -> bool:
-    if latest_user_message is None:
-        return False
-    latest_role, latest_text = extract_role_and_text(latest_user_message)
-    if latest_role != "user" or not latest_text:
-        return False
-    for message in reversed(messages):
-        message_role, message_text = _history_item_role_and_text(message)
-        if message_role == "user" and message_text == latest_text:
-            return True
-    return False
-
-
 def _latest_turn_messages(messages: Sequence[ModelMessage]) -> List[ModelMessage]:
     """Return the active turn suffix starting at the latest real user prompt."""
     last_user_idx = find_last_user_idx(list(messages))
@@ -416,6 +392,32 @@ def _messages_have_tool_parts(messages: Sequence[ModelMessage]) -> bool:
     return any(_message_has_tool_parts(message) for message in messages)
 
 
+def _split_active_prompt(
+    messages: Sequence[ModelMessage],
+) -> tuple[list[ModelMessage], ModelMessage | None]:
+    """Separate completed prior history from Pydantic AI's active prompt request."""
+    if not messages:
+        return [], None
+    last_message = messages[-1]
+    if isinstance(last_message, ModelRequest) and _model_request_has_user_prompt(last_message):
+        return list(messages[:-1]), last_message
+    return list(messages), None
+
+
+def _latest_message_from_model_message(message: ModelMessage | None) -> LatestMessage:
+    if message is None:
+        return LatestMessage()
+    role, content = extract_role_and_text(message)
+    return LatestMessage(
+        role=role,
+        content=content,
+        metadata={
+            "message_type": type(message).__name__,
+            "run_id": getattr(message, "run_id", None),
+        },
+    )
+
+
 async def _build_authoring_context_history(
     *,
     run_context: RunContext[Any],
@@ -429,8 +431,8 @@ async def _build_authoring_context_history(
     if not messages:
         return []
 
-    latest_turn_messages = _latest_turn_messages(messages)
-    if _messages_have_tool_parts(latest_turn_messages):
+    active_turn_messages = _latest_turn_messages(messages)
+    if _messages_have_tool_parts(active_turn_messages):
         logger.info(
             "Context history passthrough for active tool turn",
             data={
@@ -438,7 +440,7 @@ async def _build_authoring_context_history(
                 "vault_name": vault_name,
                 "template_name": template.name,
                 "message_count": len(messages),
-                "latest_turn_message_count": len(latest_turn_messages),
+                "latest_turn_message_count": len(active_turn_messages),
             },
         )
         logger.set_sinks(["validation"]).info(
@@ -450,12 +452,12 @@ async def _build_authoring_context_history(
                 "template_name": template.name,
                 "reason": "latest_turn_contains_tool_parts",
                 "message_count": len(messages),
-                "latest_turn_message_count": len(latest_turn_messages),
+                "latest_turn_message_count": len(active_turn_messages),
             },
         )
         return list(messages)
 
-    latest_user_message = latest_turn_messages[0] if latest_turn_messages else None
+    prior_history, active_prompt_message = _split_active_prompt(messages)
 
     workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
     reference_date = resolve_cache_now(run_context)
@@ -466,7 +468,8 @@ async def _build_authoring_context_history(
         week_start_day=resolve_week_start_day(template.frontmatter),
         session_key=session_id,
         chat_session_id=session_id,
-        message_history=list(messages),
+        message_history=prior_history,
+        latest_message=_latest_message_from_model_message(active_prompt_message),
     )
 
     try:
@@ -580,11 +583,8 @@ async def _build_authoring_context_history(
     curated_history = []
     for message in assembled.messages:
         curated_history.extend(_history_item_to_model_messages(message))
-    if latest_turn_messages:
-        if _compiled_history_includes_latest_user(assembled.messages, latest_user_message):
-            curated_history.extend(latest_turn_messages[1:])
-        else:
-            curated_history.extend(latest_turn_messages)
+    if active_prompt_message is not None:
+        curated_history.append(active_prompt_message)
     logger.set_sinks(["validation"]).info(
         "Context history compiled",
         data={
@@ -595,10 +595,7 @@ async def _build_authoring_context_history(
             "total_messages": len(curated_history),
             "summary_section_count": 1 if summary_text else 0,
             "summary_sections": [section_name] if summary_text else [],
-            "latest_user_included": _compiled_history_includes_latest_user(
-                assembled.messages,
-                latest_user_message,
-            ),
+            "active_prompt_source": "history_processor_input" if active_prompt_message is not None else "absent",
         },
     )
     return curated_history

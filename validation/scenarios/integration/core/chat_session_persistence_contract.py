@@ -82,7 +82,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
                 message_rows = conn.execute(
                     """
-                    SELECT role, content_text
+                    SELECT role, content_text, message_json
                     FROM chat_messages
                     WHERE session_id = ? AND vault_name = ?
                     ORDER BY sequence_index ASC
@@ -94,8 +94,30 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "Expected persisted provider-native chat messages for the completed turn",
                 )
                 self.soft_assert(
-                    any("Use the session_probe tool and then answer briefly." in str(row[1] or "") for row in message_rows),
+                    any(
+                        "Use the session_probe tool and then answer briefly."
+                        in str(row[1] or "")
+                        for row in message_rows
+                    ),
                     "Persisted chat messages should include the original user prompt",
+                )
+                self.soft_assert_equal(
+                    _count_user_prompt_rows(
+                        message_rows,
+                        "Use the session_probe tool and then answer briefly.",
+                    ),
+                    1,
+                    "Canonical chat history should store the first active user prompt exactly once",
+                )
+                first_prompt_rows = [
+                    row for row in message_rows
+                    if row[0] == "user"
+                    and row[1] == "Use the session_probe tool and then answer briefly."
+                ]
+                first_prompt_json = str(first_prompt_rows[0][2] if first_prompt_rows else "")
+                self.soft_assert(
+                    '"run_id"' in first_prompt_json,
+                    "Persisted active user prompt should come from provider-native new_messages()",
                 )
                 self.soft_assert(
                     any("SESSION_PROBE_RESULT" in str(row[1] or "") for row in message_rows),
@@ -208,6 +230,32 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 "Call the session_probe tool again and answer with the result only." in transcript_text,
                 "Repeated export should overwrite the transcript with newly added session messages",
             )
+            with sqlite3.connect(chat_sessions_db) as conn:
+                message_rows_after_follow_up = conn.execute(
+                    """
+                    SELECT role, content_text, message_json
+                    FROM chat_messages
+                    WHERE session_id = ? AND vault_name = ?
+                    ORDER BY sequence_index ASC
+                    """,
+                    (session_id, vault.name),
+                ).fetchall()
+            self.soft_assert_equal(
+                _count_user_prompt_rows(
+                    message_rows_after_follow_up,
+                    "Use the session_probe tool and then answer briefly.",
+                ),
+                1,
+                "Canonical chat history should not duplicate the first user prompt after follow-up",
+            )
+            self.soft_assert_equal(
+                _count_user_prompt_rows(
+                    message_rows_after_follow_up,
+                    "Call the session_probe tool again and answer with the result only.",
+                ),
+                1,
+                "Canonical chat history should store the follow-up active user prompt exactly once",
+            )
             self.soft_assert_equal(
                 len(list(transcript_dir.glob(f"{session_id}*.md"))),
                 1,
@@ -266,6 +314,16 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 output["last_content"],
                 "Expected restarted history retrieval to include a final persisted message",
             )
+            self.soft_assert_equal(
+                output["first_prompt_count"],
+                1,
+                "retrieve_history should expose one canonical copy of the first user prompt",
+            )
+            self.soft_assert_equal(
+                output["follow_up_prompt_count"],
+                1,
+                "retrieve_history should expose one canonical copy of the follow-up user prompt",
+            )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
             await self.stop_system()
@@ -273,9 +331,25 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             self.assert_no_failures()
 
 
+def _count_user_prompt_rows(rows, prompt: str) -> int:
+    return sum(1 for role, content, _message_json in rows if role == "user" and content == prompt)
+
+
 CHAT_SESSION_PERSISTENCE_CONTRACT_CODE = """
 history = await retrieve_history(scope="session", limit="all")
 last_content = history.items[-1].content if history.items else ""
+first_prompt_count = 0
+follow_up_prompt_count = 0
+for item in history.items:
+    try:
+        role = item.role
+        content = item.content
+    except AttributeError:
+        continue
+    if role == "user" and content == "Use the session_probe tool and then answer briefly.":
+        first_prompt_count += 1
+    if role == "user" and content == "Call the session_probe tool again and answer with the result only.":
+        follow_up_prompt_count += 1
 
 {
     "source": history.source,
@@ -283,5 +357,7 @@ last_content = history.items[-1].content if history.items else ""
     "last_content": last_content,
     "history_source": history.metadata.get("canonical_source", ""),
     "history_message_filter": history.metadata.get("message_filter", ""),
+    "first_prompt_count": first_prompt_count,
+    "follow_up_prompt_count": follow_up_prompt_count,
 }
 """

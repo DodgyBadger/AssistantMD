@@ -313,7 +313,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 name="authoring_assemble_context_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
-                    "message_count": 2,
+                    "message_count": 1,
                     "instruction_count": 1,
                 },
             )
@@ -330,7 +330,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 name="authoring_retrieve_history_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
-                    "item_count": 1,
+                    "item_count": 0,
                 },
             )
             self.assert_event_contains(

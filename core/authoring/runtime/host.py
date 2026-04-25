@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from core.authoring.contracts import (
     AuthoringHost,
+    LatestMessage,
     MarkdownCodeBlock,
     MarkdownHeading,
     HistoryMessage,
@@ -120,6 +121,7 @@ class WorkflowAuthoringHost(AuthoringHost):
     session_key: str | None = None
     chat_session_id: str | None = None
     message_history: list | None = None
+    latest_message: LatestMessage = field(default_factory=LatestMessage)
 
     def __post_init__(self) -> None:
         if self.vault_path is None:
@@ -143,13 +145,15 @@ class WorkflowAuthoringHost(AuthoringHost):
             "date": MontyDateTokens(
                 reference_date=self.reference_date,
                 week_start_day=self.week_start_day,
-            )
+            ),
+            "latest_message": self.latest_message,
         }
 
     def get_monty_dataclasses(self) -> tuple[type, ...]:
         """Return dataclass types Monty should expose for reserved globals."""
         return (
             MontyDateTokens,
+            LatestMessage,
             HistoryMessage,
             MarkdownHeading,
             MarkdownSection,

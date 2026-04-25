@@ -100,6 +100,7 @@ class BasicHaikuContextTemplateScenario(BaseScenario):
             name="authoring_assemble_context_completed",
             expected={
                 "workflow_id": f"{vault.name}/context/basic_haiku_context.md/{session_id}",
+                "message_count": 3,
             },
         )
         self.assert_event_contains(
@@ -122,7 +123,7 @@ class BasicHaikuContextTemplateScenario(BaseScenario):
         self.assert_event_contains(
             events,
             name="context_history_compiled",
-            expected={"latest_user_included": True},
+            expected={"active_prompt_source": "history_processor_input"},
         )
 
         seeds_path = vault / "outputs" / "haiku-seed-words.md"
@@ -193,7 +194,18 @@ history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="You are a concise poet. When asked for a haiku, write exactly three lines and do not add commentary.",
     history=history.items,
-    context_messages=[{"role": "system", "content": seed_words.output}],
+    context_messages=[
+        {"role": "system", "content": seed_words.output},
+        {
+            "role": "system",
+            "content": (
+                "Latest message visible to context script: "
+                + latest_message.role
+                + " | "
+                + latest_message.content
+            ),
+        },
+    ],
 )
 
 assembled

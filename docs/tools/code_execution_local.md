@@ -7,7 +7,7 @@ Run constrained local Python in AssistantMD's Monty runtime.
 This document serves two purposes:
 
 - it documents the chat tool `code_execution_local`, which runs a snippet against the current chat session
-- it is also the main helper reference for authored workflows and context templates, which run in the same Monty environment without the outer tool wrapper
+- it is also the main helper reference for authored workflows and context assembly scripts, which run in the same Monty environment without the outer tool wrapper
 
 ## Tool Argument
 
@@ -15,26 +15,31 @@ This document serves two purposes:
 
 ## The Monty Runtime
 
-This tool does not run CPython. It runs **Monty** — a Python interpreter written in Rust with its own bytecode VM. 
-Understanding what Monty is and is not will save you from writing code that looks valid but fails at runtime.
+This tool does not run CPython. It runs **Monty** — a Python interpreter written in Rust with its own bytecode VM.
 
-Monty is a script executor, not an interactive REPL. Your final line should be an explicit expression that evaluates to the value you want to return. Do not rely on implicit printing.
+Monty is actively developed upstream, so AssistantMD documents the subset it intentionally supports for authoring rather than every Monty VM feature. Treat the type checker and compile step as the source of truth for the exact runtime available in the current installation.
 
-### What Monty supports
+Monty runs each AssistantMD script as a fresh script execution. Your final line should be an explicit expression that evaluates to the value you want to return. Do not rely on implicit printing.
 
-- Functions (sync and async), closures, comprehensions, f-strings, type hints
-- Common standard-library imports used by AssistantMD examples, including `json`, `sys`, `typing`, `asyncio`, and `pathlib`
-- External function calls — the mechanism behind all host helpers
-- Dataclasses defined on the host (the helper result types are available as typed objects)
-- Type checking via `ty` bundled in the binary — wrong helper calls are caught before execution
+### Supported Authoring Pattern
 
-### What Monty does not support
+AssistantMD examples and validation scenarios stay within this subset:
 
-- **No class definitions** — you cannot define classes inside the script
-- **No match statements**
-- **No context managers** — `with` statements are not supported
-- **No third-party packages** — stick to ordinary Python plus the supported standard library and AssistantMD helpers
-- **Not a REPL** — each execution starts with a clean slate; functions and values from previous runs are not available
+- ordinary expressions, assignments, loops, conditionals, comprehensions, and helper function definitions
+- async helper calls using `await`
+- f-strings and type hints where they help readability
+- common imports used by AssistantMD examples, including `json`, `sys`, `typing`, `asyncio`, and `pathlib`
+- host-provided dataclasses and helper result objects, such as `RetrievedHistoryResult`, `HistoryMessage`, `ToolExchange`, and `LatestMessage`
+- external function calls through AssistantMD helpers, such as `call_tool(...)`, `generate(...)`, and `assemble_context(...)`
+- pre-execution type checking with Monty's bundled `ty` integration
+
+### Authoring Guardrails
+
+- Do not define custom classes in authored scripts; use dictionaries, lists, helper result objects, and small functions.
+- Do not depend on arbitrary standard-library modules; stick to modules used in AssistantMD examples unless you have compiled the script successfully in this environment.
+- Do not import third-party packages; use AssistantMD helpers for file access, model calls, history, and tool calls.
+- Do not depend on state from previous script executions; pass state through files, caches, or explicit helper results.
+- If a Python construct matters to your script and is not shown in AssistantMD examples, compile the script before relying on it.
 
 When you find yourself reaching for something outside this list, simplify the approach rather than adding imports or boilerplate.
 
@@ -44,17 +49,17 @@ The runtime runs `ty` on your code before execution using type stubs for all hel
 
 ## Runtime Surface
 
-The Monty helper surface is shared across chat-side execution, workflows, and context templates.
+The Monty helper surface is shared across chat-side execution, workflows, and context scripts.
 
 Scope comes from the current runtime context:
 
 - in chat, file and history access come from the active session and the tools enabled for that run
-- in authored workflows and context templates, access comes from the current workflow/template host and whatever tools/helpers that runtime exposes
+- in authored workflows and context scripts, access comes from the current script host and whatever tools/helpers that runtime exposes
 
-Available helpers and the reserved `date` input:
+Available helpers and reserved inputs:
 
 - `call_tool(...)`: invoke one already-enabled chat tool from inside the script
-- `pending_files(...)`: filter a file result set to the pending subset and explicitly complete the items you finished
+- `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
 - `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
@@ -62,6 +67,7 @@ Available helpers and the reserved `date` input:
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs
 - `finish(...)`: end the script intentionally with a `completed` or `skipped` terminal status
 - `date`: resolve common date tokens — `date.today()`, `date.this_week()`, etc.; pass `fmt` for strftime formatting
+- `latest_message`: read-only latest message metadata for context script decision making
 
 Use ordinary Python for filtering, sorting, selection, and control flow around those helpers.
 
@@ -95,10 +101,12 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `assemble_context`
 
 - for conversation history, fetch explicit messages through `retrieve_history(...)` and pass `history.items`
+- `retrieve_history(...)` counts safe history units: user message = 1, assistant message = 1, matched tool call + return = 1 `ToolExchange`
 - `retrieve_history(...)` items are structured objects; slice, remove, or reorder those objects when curating context, then pass the remaining objects back to `assemble_context(...)`
 - use `item.text` or `history.text` when you intentionally need clean prompt text for `generate(...)`; this omits provider-native payload fields while preserving the original object for assembly
-- `latest_user_message` is an explicit optional argument on `assemble_context(...)`
-- in context templates, the runtime appends the latest user turn afterward if your assembled context does not already include it
+- in context assembly scripts, use read-only `latest_message` only to decide what prior history, files, or instructions to include
+- do not add `latest_message` to `history` or `context_messages`; the chat runtime appends it exactly once after your assembled context
+- use `latest_message.exists`, `latest_message.role`, `latest_message.content`, and `latest_message.text` when context selection should depend on the active request
 
 ### `parse_markdown`
 
@@ -136,7 +144,7 @@ code_execution_local(
 
 ### Raw Monty script for authored files
 
-Inside a workflow or context template, write only the Python script body. Do not wrap it in `code_execution_local(...)`.
+Inside a workflow or context script, write only the Python script body. Do not wrap it in `code_execution_local(...)`.
 
 ```python
 history_result = await retrieve_history(scope="session", limit="all")
@@ -144,6 +152,28 @@ history_result = await retrieve_history(scope="session", limit="all")
 await assemble_context(
     history=history_result.items,
     instructions="Keep the answer concise.",
+)
+```
+
+### Branch on the active chat message
+
+Use `latest_message` for context selection, not for manual message insertion.
+
+```python
+history_result = await retrieve_history(scope="session", limit="all")
+context_messages = []
+
+if latest_message.exists and "trigonometry" in latest_message.text.lower():
+    guide = await call_tool(
+        name="file_ops_safe",
+        arguments={"operation": "read", "path": "Projects/trig/study-guide.md"},
+    )
+    if guide.metadata.get("status") == "completed":
+        context_messages.append({"role": "system", "content": guide.output})
+
+await assemble_context(
+    history=history_result.items,
+    context_messages=context_messages,
 )
 ```
 

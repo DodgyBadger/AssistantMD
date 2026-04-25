@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, TextPart, UserPromptPart
+from pydantic_ai.messages import ModelMessage, TextPart
 from pydantic_ai import (
     BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
@@ -88,17 +88,14 @@ class PreparedChatExecution:
     """Preflighted chat execution state safe to reuse across sync and streaming paths."""
 
     agent: Any
+    # Completed prior turns only. The active prompt is passed separately to
+    # Pydantic AI and becomes canonical history through result.new_messages().
     message_history: Optional[List[ModelMessage]]
     prompt_for_history: str
     user_prompt: PromptInput
     attached_image_count: int
     model: str
     tools: List[str]
-
-
-def _build_user_prompt_message(prompt_text: str) -> ModelRequest:
-    """Return a canonical stored chat message for the current user prompt."""
-    return ModelRequest(parts=[UserPromptPart(content=prompt_text)])
 
 
 def _serialize_exception(exc: Exception) -> dict[str, Any]:
@@ -602,11 +599,6 @@ async def execute_chat_prompt(
         )
 
         phase = "agent_run"
-        _CHAT_STORE.add_messages(
-            session_id,
-            vault_name,
-            [_build_user_prompt_message(prepared.prompt_for_history)],
-        )
         session_buffer_store = get_session_buffer_store(session_id)
         run_deps = ChatRunDeps(
             context_manager_now=_resolve_context_manager_now(),
@@ -982,11 +974,6 @@ async def execute_chat_prompt_stream(
             yield f"data: {json.dumps(error_chunk)}\n\n"
             return
         raise
-    _CHAT_STORE.add_messages(
-        session_id,
-        vault_name,
-        [_build_user_prompt_message(prepared.prompt_for_history)],
-    )
     async for chunk in _stream_prepared_chat_prompt(
         prepared=prepared,
         vault_name=vault_name,

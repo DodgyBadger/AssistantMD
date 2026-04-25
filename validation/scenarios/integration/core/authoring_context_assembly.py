@@ -125,7 +125,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
         self.soft_assert_equal(
             output["last_message"],
             "What should happen next?",
-            "Expected latest user message appended last",
+            "Expected explicit context message appended last",
         )
         self.soft_assert(
             output["instruction_seen"],
@@ -148,9 +148,11 @@ class AuthoringContextAssemblyScenario(BaseScenario):
 AUTHORING_CONTEXT_ASSEMBLY_CODE = """
 history_payload = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
-    history=history_payload.items,
+    history=[
+        *history_payload.items,
+        {"role": "user", "content": "What should happen next?"},
+    ],
     instructions="Use exact text.",
-    latest_user_message={"role": "user", "content": "What should happen next?"},
 )
 
 roles = []

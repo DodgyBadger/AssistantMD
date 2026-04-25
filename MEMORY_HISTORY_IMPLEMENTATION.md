@@ -101,7 +101,7 @@ Owner: `assemble_context(...)`
 
 Responsibilities:
 
-- merge history, context messages, instructions, latest user message
+- merge history, context messages, and instructions
 - validate shape
 - compose downstream prompt structure
 

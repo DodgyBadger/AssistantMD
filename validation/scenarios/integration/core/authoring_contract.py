@@ -311,9 +311,11 @@ listing = await call_tool(
 history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="Keep the response concise.",
-    history=history.items,
+    history=[
+        *history.items,
+        {"role": "user", "content": "Summarize the retrieved material."},
+    ],
     context_messages=[{"role": "system", "content": "Validation context"}],
-    latest_user_message={"role": "user", "content": "Summarize the retrieved material."},
 )
 structured = await call_tool(
     name="file_ops_safe",
