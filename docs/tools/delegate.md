@@ -32,8 +32,6 @@ Use `delegate` when a sub-task needs a model to reason, make decisions, or use t
 Pass as a dictionary to the `options` parameter.
 
 - `thinking`: override thinking for this call. Accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`. When omitted, the current global default thinking policy applies.
-- `max_tool_calls`: positive integer limit on child tool calls.
-- `history`: reserved. Only `"none"` is accepted currently.
 
 ## Examples
 
@@ -89,5 +87,6 @@ model_used = result.metadata["model"]
 - `delegate` and `code_execution_local` are always removed from the child tool list — recursive delegation is not permitted
 - the child agent runs in isolation; its messages do not appear in the parent chat transcript
 - to work with files, include the file path in the prompt and add `file_ops_safe` to `tools` — the child agent reads them the same way the parent agent does
+- markdown files with embedded local images are handled by `file_ops_safe(read)` inside the child agent, preserving the same multimodal tool-return path used by chat
 - when `model` is omitted, the child agent uses the same default model as the runtime
 - `options["thinking"]` is separate from the model alias; do not encode thinking level in the model string

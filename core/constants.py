@@ -44,6 +44,10 @@ DEFAULT_MAX_SCHEDULER_WORKERS = 1
 # Helps smaller models like gemini-flash that frequently make tool validation errors
 DEFAULT_TOOL_RETRIES = 3
 
+# Delegate child-agent execution bounds
+DELEGATE_DEFAULT_MAX_TOOL_CALLS = 8
+DELEGATE_DEFAULT_TIMEOUT_SECONDS = 120.0
+
 # Buffer operations limits (characters and counts)
 BUFFER_PEEK_MAX_CHARS = 2000
 BUFFER_READ_MAX_CHARS = 8000

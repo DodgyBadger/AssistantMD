@@ -11,6 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.constants import (
+    DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+    DELEGATE_DEFAULT_TIMEOUT_SECONDS,
+)
 from validation.core.base_scenario import BaseScenario
 
 
@@ -20,6 +24,12 @@ class DelegateToolScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("DelegateToolVault")
         self.create_file(vault, "notes/content.md", "DELEGATE_CONTENT")
+        self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
+        self.create_file(
+            vault,
+            "notes/with-image.md",
+            "Review this embedded image.\n\n![Example](../images/test_image.jpg)\n",
+        )
 
         await self.start_system()
 
@@ -88,6 +98,8 @@ class DelegateToolScenario(BaseScenario):
                 expected={
                     "workflow_id": "delegate_basic",
                     "model": "test",
+                    "max_tool_calls": DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+                    "timeout_seconds": DELEGATE_DEFAULT_TIMEOUT_SECONDS,
                 },
             )
             self.assert_event_contains(
@@ -96,6 +108,8 @@ class DelegateToolScenario(BaseScenario):
                 expected={
                     "workflow_id": "delegate_basic",
                     "model": "test",
+                    "max_tool_calls": DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+                    "timeout_seconds": DELEGATE_DEFAULT_TIMEOUT_SECONDS,
                 },
             )
             self.soft_assert(
@@ -225,6 +239,34 @@ class DelegateToolScenario(BaseScenario):
                 "Delegate with tools output should be non-empty",
             )
 
+        # --- Monty direct tool: delegate a markdown-with-image source path ---
+        self.create_file(
+            vault,
+            "AssistantMD/Authoring/delegate_markdown_image.md",
+            DELEGATE_MARKDOWN_IMAGE_WORKFLOW,
+        )
+        checkpoint = self.event_checkpoint()
+        markdown_image_result = await self.run_workflow(vault, "delegate_markdown_image")
+        self.soft_assert_equal(
+            markdown_image_result.status,
+            "completed",
+            "Delegate markdown-with-image workflow should complete",
+        )
+        markdown_image_events = self.events_since(checkpoint)
+        self.assert_event_contains(
+            markdown_image_events,
+            name="delegate_tool_binding_resolved",
+            expected={
+                "workflow_id": "DelegateToolVault/delegate_markdown_image",
+                "requested": ["file_ops_safe"],
+            },
+        )
+        markdown_image_output = vault / "outputs" / "delegate-markdown-image-result.md"
+        self.soft_assert(
+            markdown_image_output.exists(),
+            "Delegate markdown-with-image workflow should write output file",
+        )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
@@ -250,5 +292,29 @@ await file_ops_safe(
     content=result.output,
 )
 await finish(status="completed", reason="delegate-with-tools-ok")
+```
+"""
+
+
+DELEGATE_MARKDOWN_IMAGE_WORKFLOW = """---
+run_type: workflow
+enabled: false
+description: Validate delegate with markdown containing an embedded image
+---
+
+## Run
+
+```python
+result = await delegate(
+    prompt="Read notes/with-image.md and describe what source was provided.",
+    tools=["file_ops_safe"],
+    model="test",
+)
+await file_ops_safe(
+    operation="write",
+    path="outputs/delegate-markdown-image-result.md",
+    content=result.output,
+)
+await finish(status="completed", reason="delegate-markdown-image-ok")
 ```
 """

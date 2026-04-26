@@ -58,9 +58,8 @@ Scope comes from the current runtime context:
 
 Available helpers and reserved inputs:
 
-- direct tool functions such as `file_ops_safe(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
+- direct tool functions such as `file_ops_safe(...)`, `delegate(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
-- `delegate(...)`: run a focused child agent over a prompt with optional tools
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
 - `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
@@ -83,16 +82,6 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 - `operation="get"` filters a `file_ops_safe` result down to the pending subset
 - `operation="complete"` marks only the items you actually finished processing
-
-### `delegate`
-
-- tool use is opt-in — omit `tools` for a plain model call
-- prefer tool-first access patterns; keep `delegate(...)` focused on the actual model reasoning step
-- `options={"thinking": ...}` accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`
-- thinking is a separate option, not part of the model alias string
-- when `options["thinking"]` is omitted, `delegate(...)` uses the current global default thinking policy from settings
-- `delegate` and `code_execution_local` are always excluded from the child tool list — recursive delegation is not permitted
-- see `delegate.md` for the full parameter and output shape reference
 
 ### Direct Tool Calls
 

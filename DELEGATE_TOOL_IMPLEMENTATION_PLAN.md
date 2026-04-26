@@ -6,7 +6,7 @@ Add a first-class `delegate` tool that lets the chat agent launch a bounded chil
 
 If validation shows this is stable, authored scripts should move from `generate(...)` to `delegate(...)` for model reasoning. `generate(...)` can then be removed from the preferred script surface, and eventually removed entirely before this branch merges.
 
-The child agent must have the same multimodal capabilities and payload semantics as normal chat. Chat and delegate must not assemble provider payloads through parallel, diverging implementations.
+The child agent should work like a normal delegated agent: the caller gives it a goal, relevant paths or URLs, and the tools it may use. `delegate` is not a payload-transport primitive and should not expose Python-only objects such as `RetrievedItem` in its LLM-facing schema.
 
 ## Problem Statement
 
@@ -30,11 +30,9 @@ Use delegate when a task needs a focused child agent to inspect files, images, U
 
 Monty script use:
 
-```python
-image = await file_ops_safe(operation="read", path="Math/page_images/page-1.png")
 result = await delegate(
-    prompt="Review this worksheet image and identify the main exercise.",
-    inputs=image.items,
+    prompt="Read Math/page_images/page-1.png and identify the main exercise.",
+    tools=["file_ops_safe"],
     model="gpt-mini",
 )
 ```
@@ -48,39 +46,16 @@ Tool result shape should be script-friendly and compatible with the existing dir
 
 ## Architecture
 
-Introduce a shared lower-level service, not a chat-executor call:
-
-```text
-core/agent_runs/
-  service.py
-  contracts.py
-```
-
-The service must use the same multimodal payload assembly contract as chat. If normal chat currently owns image path/upload handling separately from authored artifact handling, extract a shared assembly module first and make both chat and delegate call it.
-
-Shared assembly must cover:
-
-- direct uploaded images
-- vault image paths
-- `RetrievedItem` image artifacts
-- markdown text with embedded local images
-- ordered interleaving of text and image parts
-- size limits and vision-capability checks
-- warnings and attachment counts
-- history-safe text for persistence/logging
-
-The service should run one bounded Pydantic AI agent with:
+`core/tools/delegate.py` is a normal `BaseTool` wrapper that runs one bounded Pydantic AI child agent with:
 
 - prompt
-- optional `RetrievedItem` inputs
 - optional tool allowlist
 - model and thinking options
 - vault path/name
 - session/run buffer stores
-- optional inherited message history
 - max tool turns / timeout controls
 
-`core/tools/delegate.py` becomes a normal `BaseTool` wrapper over that service. Because Monty now exposes configured tools directly, scripts get `await delegate(...)` without a separate helper implementation.
+Because Monty now exposes configured tools directly, scripts get `await delegate(...)` without a separate helper implementation.
 
 ## Non-Goals
 
@@ -89,14 +64,16 @@ The service should run one bounded Pydantic AI agent with:
 - Do not run context templates inside child agents by default.
 - Do not allow unbounded recursive delegation.
 - Do not make `generate(inputs=...)` accept arbitrary dictionaries as a workaround.
+- Do not add Python-object parameters such as `RetrievedItem` to the LLM-facing tool schema.
 
 ## Key Design Decisions
 
 - Child agent runs are isolated by default, with explicit optional inheritance of curated history later.
 - `delegate` excludes `delegate` and `code_execution_local` from child tool access by default.
-- `delegate` accepts `inputs` using the same `RetrievedItem` contract currently used by `generate`.
-- Chat and `delegate` share one multimodal renderer for local files, uploaded images, image artifacts, and markdown-with-local-images.
-- URL/web multimodal rendering is out of scope for the first pass; web/browser results are plain text artifacts unless a later URL artifact renderer is added.
+- `delegate` accepts JSON-shaped arguments suitable for both chat tools and Monty direct calls.
+- Source access is agentic: pass paths, URLs, or inline text in the prompt and grant the child agent the tools it needs.
+- Local markdown/images use the same multimodal path as chat when the child calls `file_ops_safe(read)`.
+- Online image fetching is out of scope until a dedicated HTTP/image fetch tool exists.
 - `generate(...)` remains during the first implementation only as a compatibility baseline and comparison target.
 
 ## Proposed API
@@ -104,7 +81,6 @@ The service should run one bounded Pydantic AI agent with:
 ```python
 result = await delegate(
     prompt: str,
-    inputs: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...] | None = None,
     instructions: str | None = None,
     model: str | None = None,
     tools: list[str] | tuple[str, ...] | None = None,
@@ -115,61 +91,43 @@ result = await delegate(
 Initial `options` keys:
 
 - `thinking`: same semantics as `generate`
-- `max_tool_calls`: default small bounded value
-- `timeout_seconds`: conservative default
-- `history`: `"none"` initially; reserve `"session"` or `"provided"` for later
+
+Child tool-call and timeout limits are internal guardrails defined in `core.constants`, not LLM-facing options.
 
 ## Implementation Steps
 
-1. Add shared contracts.
-   - `AgentRunRequest`
-   - `AgentRunResult`
-   - input artifact normalization helper reused by chat/delegate/script surfaces
-
-2. Extract shared multimodal input assembly if needed.
-   - Move chat image path/upload assembly and artifact input assembly behind one module.
-   - Preserve current chat behavior exactly.
-   - Make normal chat execution use the extracted module before wiring delegate.
-   - Make delegate use the same module.
-   - Add tests that compare chat and delegate assembly metadata for equivalent image/path inputs.
-
-3. Add shared service.
-   - Build prompt payload through the shared multimodal input assembly module.
+1. Add `core/tools/delegate.py`.
+   - Implement as a `BaseTool`.
+   - Accept JSON-serializable tool arguments from chat.
+   - Return `ToolReturn` with metadata.
+   - Keep instructions explicit about bounded child-agent use.
    - Resolve model/thinking with existing model factory logic.
    - Resolve child tool allowlist with `resolve_tool_binding`.
    - Remove unsafe recursive tools from the child allowlist.
    - Run a Pydantic AI agent with AssistantMD tool capabilities.
-   - Return a structured result with output and metadata.
+   - Enforce internal `max_tool_calls` and `timeout_seconds` guardrails.
 
-4. Add `core/tools/delegate.py`.
-   - Implement as a `BaseTool`.
-   - Accept JSON-serializable tool arguments from chat.
-   - Convert chat arguments to `AgentRunRequest`.
-   - Return `ToolReturn` with metadata.
-   - Keep instructions explicit about bounded child-agent use.
-
-5. Add settings entry.
+2. Add settings entry.
    - Add `delegate` to `system/settings.yaml` seed/default tooling if appropriate.
    - Decide whether default chat-visible state is enabled or opt-in.
    - Ensure direct Monty exposure only happens when configured.
 
-6. Wire validation events.
+3. Wire validation events.
    - `delegate_started`
-   - `delegate_prompt_built`
    - `delegate_tool_binding_resolved`
    - `delegate_completed`
    - `delegate_failed`
-   - Include child tool names, input count, attached image count, output chars, and recursion guard metadata.
+   - Include child tool names, output chars, bounds, and recursion guard metadata.
 
-7. Update Monty docs and tool docs.
+4. Update Monty docs and tool docs.
    - Teach `delegate(...)` as the preferred model-reasoning primitive in scripts.
    - Keep `generate(...)` documented only as temporary compatibility during validation, or move it to an internal/deprecated section.
 
-8. Migrate authored scripts and seed templates.
+5. Migrate authored scripts and seed templates.
    - Replace `generate(...)` calls with `delegate(...)` where the script asks the model to reason over content.
    - Keep direct file/tool calls for deterministic retrieval and writes.
 
-9. Remove or de-register `generate(...)` if validation is strong.
+6. Remove or de-register `generate(...)` if validation is strong.
    - Remove from built-in helper registry.
    - Remove stubs and preferred docs.
    - Delete helper only after all scenarios and seed templates stop using it.
@@ -180,16 +138,14 @@ Initial `options` keys:
 
 - `delegate` rejects empty prompt.
 - `delegate` rejects unknown option keys.
-- `delegate` rejects invalid `inputs` types.
-- `delegate` normalizes `RetrievedItem`, `RetrieveResult`, and item sequences.
 - `delegate` strips `delegate` and `code_execution_local` from child tools.
-- `delegate` enforces `max_tool_calls` and timeout options.
-- `delegate` returns stable metadata for model, tools, inputs, and attached media.
+- `delegate` enforces internal max-tool-call and timeout guardrails.
+- `delegate` returns stable metadata for model, tools, bounds, and output size.
 
 ### Direct Tool Bridge Checks
 
 - Monty type checks `await delegate(prompt="...", model="test")`.
-- Monty type checks `await delegate(prompt="...", inputs=image.items, model="test")`.
+- Monty type checks `await delegate(prompt="...", tools=["file_ops_safe"], model="test")`.
 - Direct tool events include `authoring_direct_tool_started/completed` for `delegate`.
 - `ScriptToolResult.output` contains the child result.
 - `ScriptToolResult.metadata` includes child run metadata.
@@ -205,33 +161,26 @@ Initial `options` keys:
 
 ### Multimodal Checks
 
-- Shared assembly invariant:
-  - Normal chat with image path and delegate with equivalent `RetrievedItem` produce the same attachment count, size-limit behavior, and vision-capability behavior.
-  - Normal chat with uploaded image and delegate with equivalent artifact follow the same provider payload shape where representable.
-  - Markdown-with-local-images uses the same interleaving logic in chat/delegate/script flows.
+- Source-access invariant:
+  - A child agent granted `file_ops_safe` can read the same vault files as the parent.
+  - Markdown-with-local-images uses the existing `file_ops_safe(read)` multimodal tool-return path.
 
 - Direct image read:
-  - `image = await file_ops_safe(operation="read", path="images/test_image.jpg")`
-  - `await delegate(prompt="Describe this image.", inputs=image.items, model="test")`
-  - Assert one attached image in delegate prompt metadata.
+  - `await delegate(prompt="Read images/test_image.jpg and describe it.", tools=["file_ops_safe"], model="test")`
+  - Assert the child tool call path completes without provider tool-pairing errors.
 
 - Markdown with embedded local image:
-  - Read markdown containing local image ref.
-  - Pass `doc.items` to `delegate`.
-  - Assert image attachment count and no provider tool-call pairing errors.
+  - Ask delegate to read markdown containing a local image ref via `file_ops_safe`.
+  - Assert no provider tool-call pairing errors.
 
-- Multiple images:
-  - Pass a list of image-backed `RetrievedItem`s.
-  - Assert ordering is preserved and attachment count matches.
-
-- Vision-disabled model:
-  - Pass image input to a non-vision model alias.
-  - Assert a clear capability error or markdown/image marker fallback, whichever policy is chosen.
+- Script-created content:
+  - Inline small generated text in the prompt.
+  - Write large generated markdown/image artifacts to a vault path, then ask delegate to read that path.
 
 ### Tool-Using Child Agent Checks
 
 - Child agent with `tools=["file_ops_safe"]` reads a file and summarizes it.
-- Child agent with no tools cannot read files except through provided `inputs`.
+- Child agent with no tools cannot read files.
 - Child agent with web/search tool enabled can use it and return a result.
 - Missing secret tools are skipped with clear metadata.
 - Tool result caching still works for oversized child tool outputs if the existing cache capability is attached.
@@ -246,11 +195,9 @@ Initial `options` keys:
 
 ### Regression Checks For Original Issue
 
-- A Monty script reads several PNG/JPG files with `file_ops_safe`.
-- It passes them to `delegate(inputs=...)`.
+- A Monty script delegates review of several PNG/JPG paths with `file_ops_safe`.
 - The provider request preserves tool call/result pairs across all parent and child turns.
 - No `No tool call found for function call output` error occurs.
-- The fix is not achieved by a delegate-only multimodal path; normal chat and delegate continue sharing the same assembly module.
 
 ### Scenario Targets
 
@@ -290,7 +237,6 @@ python -m py_compile \
 - Recursive agent/tool loops if child tool allowlists are not constrained.
 - Confusing transcript persistence if child messages leak into parent chat history.
 - Context-template recursion if delegate accidentally uses normal chat execution.
-- Payload assembly drift if delegate implements its own multimodal renderer instead of sharing chat assembly.
 - Tool-result cache ownership may need a child run/session key.
 - `delegate` may be too powerful for default chat visibility; settings defaults need care.
 - Removing `generate(...)` too early could break templates before the replacement contract is fully validated.
@@ -299,8 +245,7 @@ python -m py_compile \
 
 Remove `generate(...)` from the authored script surface only after:
 
-- `delegate` passes text, image, markdown-with-images, and child-tool scenarios.
-- Chat and delegate multimodal assembly share one implementation and parity tests pass.
+- `delegate` passes text, image-path, markdown-with-images, child-tool, and bounds scenarios.
 - All seed templates and validation authoring snippets are migrated.
 - The authoring LLM docs clearly teach `delegate` for model reasoning.
 - There is no remaining preferred doc path that recommends `generate`.
@@ -310,7 +255,7 @@ Remove `generate(...)` from the authored script surface only after:
 
 Move to feature development:
 
-1. Implement `core/agent_runs` service and `core/tools/delegate.py`.
+1. Harden `core/tools/delegate.py`.
 2. Add `delegate` settings entry and docs.
 3. Add `integration/core/delegate_tool.py` before migrating existing scripts.
 
@@ -324,14 +269,16 @@ Move to feature development:
 - Shared helpers extracted to avoid divergent code paths: `build_input_file_data` in `runtime_common.py`, `_THINKING_UNSET` sentinel and `resolve_effective_thinking` in `execution_prep.py`. `generate.py` imports from these shared locations.
 - Validation events: `delegate_started`, `delegate_tool_binding_resolved`, `delegate_completed`, `delegate_failed`.
 - `integration/core/delegate_tool.py` — covers chat-path tool calling (basic, forbidden stripping, child tools) and Monty direct-tool path.
+- `delegate` now enforces centralized child-run bounds from `core.constants`: `max_tool_calls` through Pydantic AI `UsageLimits` and `timeout_seconds` through an async timeout.
+- `integration/core/delegate_tool.py` now covers bounded defaults and a markdown-with-embedded-image source path delegated through child `file_ops_safe`.
 - `integration/core/authoring_contract.py` — extended to exercise delegate via the Monty direct-tool bridge.
 - `docs/tools/delegate.md` and `docs/tools/index.md` added; `docs/tools/code_execution_local.md` updated.
 
-### Key design divergence from plan
+### Key design decision
 
-The `inputs` parameter and the `core/agent_runs/` shared-assembly service were **not implemented**. The original plan assumed delegate needed to embed file content into the child agent's prompt (matching the `generate` pattern). In practice, delegate creates an agent — so file access belongs to the child agent via `tools=["file_ops_safe"]`, exactly as the parent agent works. The `inputs` complexity was removed entirely. Monty scripts that have already retrieved content can pass it in the prompt string; a wrapper layer can handle `RetrievedItem` translation if that proves necessary.
+The `inputs` parameter and the `core/agent_runs/` shared-assembly service were intentionally not implemented. `delegate` is an agentic subtask primitive, not a payload-transport primitive. File and image access belongs to the child agent through tools such as `file_ops_safe`, exactly as the parent agent works. Monty scripts that have already created text can inline it in the prompt; large or binary generated artifacts should be written to the vault and passed by path.
 
-The multimodal parity checks in the Validation Plan are therefore moot for this implementation: there is no separate delegate assembly path to keep in sync.
+Multimodal behavior for local markdown/images is exercised through the child agent's tool calls. `file_ops_safe(read)` remains the shared multimodal path.
 
 ### Remaining
 

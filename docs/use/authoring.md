@@ -4,6 +4,8 @@ AssistantMD has a unified authoring surface for two types of automation: **workf
 
 You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test authoring files. Use this document as orientation.
 
+The common script pattern is: use tools and helpers for host-owned access to allowed capabilities like vault access, message history and web search; use ordinary Python to manipulate, filter, sort, and transform data; use the `delegate` tool when the script needs model inference.
+
 ---
 
 ## File Shape
