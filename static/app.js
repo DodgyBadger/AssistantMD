@@ -802,7 +802,7 @@ function populateSelectors() {
         'documentation_access',
         'tavily_extract',
         'tavily_crawl',
-        'code_execution_local'
+        'code_execution'
     ];
 
     toolOrder.forEach(name => {

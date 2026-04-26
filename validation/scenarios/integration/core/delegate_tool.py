@@ -54,7 +54,7 @@ class DelegateToolScenario(BaseScenario):
                     return {
                         "prompt": "Use your tools.",
                         "model": "test",
-                        "tools": ["file_ops_safe", "delegate", "code_execution_local"],
+                        "tools": ["file_ops_safe", "delegate", "code_execution"],
                     }
                 if case == "child_tools":
                     return {
@@ -143,7 +143,7 @@ class DelegateToolScenario(BaseScenario):
                 "Basic delegate call should not produce a Monty failure response",
             )
 
-            # --- Forbidden tool stripping: delegate and code_execution_local removed ---
+            # --- Forbidden tool stripping: delegate and code_execution removed ---
             current_case["name"] = "forbidden_stripping"
             checkpoint = self.event_checkpoint()
             stripping = self.call_api(
@@ -166,7 +166,7 @@ class DelegateToolScenario(BaseScenario):
                 expected={
                     "workflow_id": "delegate_forbidden_stripping",
                     "tool_names": ["file_ops_safe"],
-                    "stripped_tools": ["code_execution_local", "delegate"],
+                    "stripped_tools": ["code_execution", "delegate"],
                 },
             )
             self.assert_event_contains(

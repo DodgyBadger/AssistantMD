@@ -28,7 +28,7 @@ from core.tools.base import BaseTool
 
 logger = UnifiedLogger(tag="delegate-tool")
 
-_FORBIDDEN_CHILD_TOOLS = frozenset({"delegate", "code_execution_local"})
+_FORBIDDEN_CHILD_TOOLS = frozenset({"delegate", "code_execution"})
 _SUPPORTED_OPTION_KEYS = frozenset({"thinking"})
 
 
@@ -140,9 +140,10 @@ class DelegateTool(BaseTool):
                     error_type=type(exc).__name__,
                     message=(
                         f"Delegate stopped because the child agent exceeded its tool-call limit "
-                        f"of {max_tool_calls}. Ask again with a narrower sub-task, fewer files, "
-                        "or instructions to write intermediate results to the vault instead of "
-                        "exploring everything interactively."
+                        f"of {max_tool_calls}. Do not retry the same broad delegation. Split the work into "
+                        "smaller delegate calls scoped by path, query, source group, or hypothesis; use direct "
+                        "deterministic tools for simple retrieval; and have each child return a compact summary "
+                        "or saved artifact path."
                     ),
                 )
             except asyncio.TimeoutError as exc:
@@ -157,8 +158,9 @@ class DelegateTool(BaseTool):
                     error_type=type(exc).__name__,
                     message=(
                         f"Delegate stopped because the child agent exceeded its timeout of "
-                        f"{timeout_seconds:g} seconds. Ask again with a narrower sub-task or "
-                        "instructions that reduce exploration."
+                        f"{timeout_seconds:g} seconds. Do not retry the same broad delegation. Split the work "
+                        "into smaller delegate calls, narrow the file/web scope, or ask the child to save an "
+                        "intermediate artifact and return only a compact summary/path."
                     ),
                 )
             except Exception as exc:

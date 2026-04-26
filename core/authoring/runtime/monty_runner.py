@@ -27,7 +27,7 @@ logger = UnifiedLogger(tag="authoring-monty")
 
 _STUBS_PATH = Path(__file__).parent.parent / "stubs.pyi"
 _INVALID_IDENTIFIER_CHARS = re.compile(r"[^a-zA-Z0-9_]")
-_EXCLUDED_DIRECT_TOOL_NAMES = frozenset({"code_execution_local"})
+_EXCLUDED_DIRECT_TOOL_NAMES = frozenset({"code_execution"})
 
 
 class AuthoringMontyExecutionError(RuntimeError):

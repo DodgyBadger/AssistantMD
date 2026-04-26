@@ -69,7 +69,7 @@ Because Monty now exposes configured tools directly, scripts get `await delegate
 ## Key Design Decisions
 
 - Child agent runs are isolated by default, with explicit optional inheritance of curated history later.
-- `delegate` excludes `delegate` and `code_execution_local` from child tool access by default.
+- `delegate` excludes `delegate` and `code_execution` from child tool access by default.
 - `delegate` accepts JSON-shaped arguments suitable for both chat tools and Monty direct calls.
 - Source access is agentic: pass paths, URLs, or inline text in the prompt and grant the child agent the tools it needs.
 - Local markdown/images use the same multimodal path as chat when the child calls `file_ops_safe(read)`.
@@ -137,7 +137,7 @@ Child tool-call and timeout limits are internal guardrails defined in `core.cons
 
 - `delegate` rejects empty prompt.
 - `delegate` rejects unknown option keys.
-- `delegate` strips `delegate` and `code_execution_local` from child tools.
+- `delegate` strips `delegate` and `code_execution` from child tools.
 - `delegate` enforces internal max-tool-call and timeout guardrails.
 - `delegate` returns stable metadata for model, tools, bounds, and output size.
 
@@ -156,7 +156,7 @@ Child tool-call and timeout limits are internal guardrails defined in `core.cons
 - Child tool calls do not corrupt parent tool-call history.
 - Child agent can use an allowed tool such as `file_ops_safe`.
 - Child agent cannot recursively call `delegate` by default.
-- Child agent cannot call `code_execution_local` by default.
+- Child agent cannot call `code_execution` by default.
 
 ### Multimodal Checks
 
@@ -203,7 +203,7 @@ Child tool-call and timeout limits are internal guardrails defined in `core.cons
 Extend or add scenarios:
 
 - `integration/core/delegate_tool.py`
-- `integration/core/code_execution_local.py`
+- `integration/core/code_execution.py`
 - `integration/core/authoring_contract.py`
 - `integration/basic_haiku_context.py`
 - `integration/basic_haiku_workflow.py`
@@ -214,7 +214,7 @@ Run targeted validations:
 ```bash
 python validation/run_validation.py run \
   integration/core/delegate_tool \
-  integration/core/code_execution_local \
+  integration/core/code_execution \
   integration/core/authoring_contract \
   integration/basic_haiku_context \
   integration/basic_haiku_workflow \
@@ -269,7 +269,7 @@ Move to feature development:
 - `delegate` now enforces centralized child-run bounds from `core.constants`: `max_tool_calls` through Pydantic AI `UsageLimits` and `timeout_seconds` through an async timeout.
 - `integration/core/delegate_tool.py` now covers bounded defaults and a markdown-with-embedded-image source path delegated through child `file_ops_safe`.
 - `integration/core/authoring_contract.py` — extended to exercise delegate via the Monty direct-tool bridge.
-- `docs/tools/delegate.md` and `docs/tools/index.md` added; `docs/tools/code_execution_local.md` updated.
+- `docs/tools/delegate.md` and `docs/tools/index.md` added; `docs/tools/code_execution.md` updated.
 - `generate(...)` removed from helper registration, stubs, contracts, and validation snippets.
 
 ### Key design decision

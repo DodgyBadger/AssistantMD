@@ -88,7 +88,7 @@ Helpers that already return specialized types can keep doing so. The stable auth
 
 ## Implementation Status
 
-- Direct tool callables are now registered into the Monty runtime from the configured tool set, excluding recursive `code_execution_local`.
+- Direct tool callables are now registered into the Monty runtime from the configured tool set, excluding recursive `code_execution`.
 - Script-facing tool results now expose `output`, `metadata`, `content`, and `items`.
 - `file_ops_safe` projections cover read/list/search/frontmatter/head; web/browser-style tools project aggregate text items.
 - Seed templates, validation scenarios, and local vault authoring scripts use direct tool calls instead of `call_tool(...)`.

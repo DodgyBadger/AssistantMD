@@ -41,7 +41,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
 
             def gen_tool_args(self, tool_def):
                 name = getattr(tool_def, "name", "")
-                if name != "code_execution_local":
+                if name != "code_execution":
                     return super().gen_tool_args(tool_def)
                 if call_index["value"] == 2:
                     return {
@@ -59,13 +59,13 @@ class ChatCacheMultiPassScenario(BaseScenario):
                             'str(text.count("OVERFLOW_SEGMENT"))'
                         )
                     }
-                raise AssertionError("Unexpected code_execution_local phase")
+                raise AssertionError("Unexpected code_execution phase")
 
         def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
             del vault_name, tools, model, thinking
             call_index["value"] += 1
             binding = resolve_tool_binding(
-                ["code_execution_local"],
+                ["code_execution"],
                 vault_path=vault_path,
             )
             if call_index["value"] == 1:
@@ -77,9 +77,9 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 )
             if call_index["value"] in {2, 3}:
                 return (
-                    "You must call code_execution_local before responding.",
+                    "You must call code_execution before responding.",
                     binding.tool_instructions,
-                    _DeterministicToolModel(["code_execution_local"]),
+                    _DeterministicToolModel(["code_execution"]),
                     binding.tool_functions,
                 )
             raise AssertionError("Unexpected chat call count")
@@ -125,7 +125,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Inspect the repeated note and show the beginning.",
                     "session_id": session_id,
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -143,7 +143,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Inspect the same repeated note again and count the repeated token.",
                     "session_id": session_id,
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -156,7 +156,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
 
             events = self.events_since(checkpoint)
             overflow_events = self.find_events(events, name="tool_invoked", tool="overflow_probe")
-            local_events = self.find_events(events, name="tool_invoked", tool="code_execution_local")
+            local_events = self.find_events(events, name="tool_invoked", tool="code_execution")
             self.soft_assert_equal(
                 len(overflow_events),
                 1,
@@ -165,7 +165,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
             self.soft_assert_equal(
                 len(local_events),
                 2,
-                "code_execution_local should handle the two later exploration passes",
+                "code_execution should handle the two later exploration passes",
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config

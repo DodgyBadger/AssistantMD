@@ -25,7 +25,8 @@ settings:
       - documentation_access
       - tavily_extract
       - tavily_crawl
-      - code_execution_local
+      - code_execution
+      - delegate
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   default_api_timeout:
@@ -304,8 +305,8 @@ tools:
     description: "List, run, enable, and disable workflows in the current vault"
     requires_secrets: []
     user_editable: false
-  code_execution_local:
-    module: core.tools.code_execution_local
+  code_execution:
+    module: core.tools.code_execution
     description: "Run constrained local Python against the current chat cache namespace"
     requires_secrets: []
     user_editable: false

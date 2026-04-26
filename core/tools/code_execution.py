@@ -22,17 +22,17 @@ from core.logger import UnifiedLogger
 from .base import BaseTool
 
 
-logger = UnifiedLogger(tag="code-execution-local-tool")
+logger = UnifiedLogger(tag="code-execution-tool")
 
 
-class CodeExecutionLocal(BaseTool):
+class CodeExecution(BaseTool):
     """Execute one constrained local Python snippet in the current chat session."""
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None):
         """Get the chat-scoped constrained local code execution tool."""
 
-        async def code_execution_local(
+        async def code_execution(
             ctx: RunContext,
             *,
             code: str = "",
@@ -44,7 +44,7 @@ class CodeExecutionLocal(BaseTool):
             try:
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
-                    data={"tool": "code_execution_local"},
+                    data={"tool": "code_execution"},
                 )
 
                 deps = getattr(ctx, "deps", None)
@@ -53,7 +53,7 @@ class CodeExecutionLocal(BaseTool):
                 reference_date = getattr(deps, "context_manager_now", None) or datetime.today()
                 if not session_id or not vault_name:
                     return (
-                        "code_execution_local requires chat session context with both "
+                        "code_execution requires chat session context with both "
                         "vault_name and session_id available."
                     )
                 if not code.strip():
@@ -81,8 +81,8 @@ class CodeExecutionLocal(BaseTool):
                 return cls._format_execution_error(str(exc))
 
         return Tool(
-            code_execution_local,
-            name="code_execution_local",
+            code_execution,
+            name="code_execution",
             description="Run constrained local Python against the current chat session and current AssistantMD runtime.",
         )
 
@@ -91,7 +91,7 @@ class CodeExecutionLocal(BaseTool):
         """Get usage instructions for constrained local code execution."""
         return """
 Full documentation:
-- `__virtual_docs__/tools/code_execution_local.md`
+- `__virtual_docs__/tools/code_execution.md`
 """
 
     @staticmethod
@@ -113,14 +113,14 @@ Full documentation:
         if prints:
             return "\n".join(prints)
 
-        return "code_execution_local completed with no return value."
+        return "code_execution completed with no return value."
 
     @classmethod
     def _format_execution_error(cls, message: str) -> str:
         hint = cls._hint_for_execution_error(message)
         if hint:
-            return f"code_execution_local failed: {message}\n\nHint: {hint}"
-        return f"code_execution_local failed: {message}"
+            return f"code_execution failed: {message}\n\nHint: {hint}"
+        return f"code_execution failed: {message}"
 
     @staticmethod
     def _hint_for_execution_error(message: str) -> str | None:
@@ -142,7 +142,7 @@ Full documentation:
             )
         if "unable to find 'parse_markdown' in external functions dict" in lowered:
             return (
-                "Use the current `code_execution_local` surface and helper docs at "
-                "`__virtual_docs__/tools/code_execution_local.md`; this should now be available."
+                "Use the current `code_execution` surface and helper docs at "
+                "`__virtual_docs__/tools/code_execution.md`; this should now be available."
             )
         return None

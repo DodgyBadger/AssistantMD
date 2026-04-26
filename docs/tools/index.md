@@ -22,15 +22,15 @@ General guidance:
 - use search tools when you do not know the URL yet
 - prefer `tavily_extract` over `browser` when you already know the URL and only need page content
 - use `browser` when extract fails, returns thin content, or the page is clearly JavaScript-heavy
-- prefer `code_execution_local` for small Python tasks tied to the current chat session
-- `code_execution_local.md` is also the main reference for constrained runtime helpers and direct Monty tool calls
+- prefer `code_execution` for small Python tasks tied to the current chat session
+- `code_execution.md` is also the main reference for constrained runtime helpers and direct Monty tool calls
 - use `file_ops_safe` for exploration and non-destructive file work
 - use `file_ops_unsafe` only when a destructive edit is explicitly needed
 
 Available tool docs:
 
 - `browser`
-- `code_execution_local`
+- `code_execution`
 - `code_execution_piston`
 - `delegate`
 - `file_ops_safe`

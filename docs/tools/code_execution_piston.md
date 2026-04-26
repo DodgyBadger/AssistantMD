@@ -14,5 +14,5 @@ This tool is currently disabled by default.
 
 ## Notes
 
-- Prefer `code_execution_local` for ordinary AssistantMD Python tasks.
+- Prefer `code_execution` for ordinary AssistantMD Python tasks.
 - Remote runtime availability depends on the configured Piston service.

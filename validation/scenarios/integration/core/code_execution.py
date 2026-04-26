@@ -1,5 +1,5 @@
 """
-Integration scenario for the chat-facing code_execution_local tool.
+Integration scenario for the chat-facing code_execution tool.
 
 Validates deterministic chat-scoped execution through the real /api/chat/execute
 path using a patched TestModel argument generator.
@@ -14,11 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from validation.core.base_scenario import BaseScenario
 
 
-class CodeExecutionLocalScenario(BaseScenario):
-    """Validate code_execution_local helper parity and simplified runtime access."""
+class CodeExecutionScenario(BaseScenario):
+    """Validate code_execution helper parity and simplified runtime access."""
 
     async def test_scenario(self):
-        vault = self.create_vault("CodeExecutionLocalVault")
+        vault = self.create_vault("CodeExecutionVault")
         self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
         self.create_file(vault, "notes/blocked.md", "BLOCKED_CONTENT")
         self.create_file(vault, "tasks/pending-one.md", "PENDING_ONE")
@@ -34,10 +34,10 @@ class CodeExecutionLocalScenario(BaseScenario):
 
         class _DeterministicToolModel(TestModel):
             def __init__(self):
-                super().__init__(call_tools=["code_execution_local"])
+                super().__init__(call_tools=["code_execution"])
 
             def gen_tool_args(self, tool_def):
-                if getattr(tool_def, "name", "") != "code_execution_local":
+                if getattr(tool_def, "name", "") != "code_execution":
                     return super().gen_tool_args(tool_def)
 
                 case_name = current_case["name"]
@@ -121,11 +121,11 @@ class CodeExecutionLocalScenario(BaseScenario):
             from core.authoring.shared.tool_binding import resolve_tool_binding
 
             binding = resolve_tool_binding(
-                ["code_execution_local"],
+                ["code_execution"],
                 vault_path=str(vault),
             )
             return (
-                "You must call code_execution_local before responding.",
+                "You must call code_execution before responding.",
                 binding.tool_instructions,
                 _DeterministicToolModel(),
                 binding.tool_functions,
@@ -135,8 +135,8 @@ class CodeExecutionLocalScenario(BaseScenario):
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         try:
             upsert_cache_artifact(
-                owner_id=f"{vault.name}/chat/code_execution_local_allow_cache_read",
-                session_key="code_execution_local_allow_cache_read",
+                owner_id=f"{vault.name}/chat/code_execution_allow_cache_read",
+                session_key="code_execution_allow_cache_read",
                 artifact_ref="tool/tavily_extract/call_seeded",
                 cache_mode="session",
                 ttl_seconds=None,
@@ -147,8 +147,8 @@ class CodeExecutionLocalScenario(BaseScenario):
                 week_start_day=0,
             )
             upsert_cache_artifact(
-                owner_id=f"{vault.name}/chat/code_execution_local_full_surface",
-                session_key="code_execution_local_full_surface",
+                owner_id=f"{vault.name}/chat/code_execution_full_surface",
+                session_key="code_execution_full_surface",
                 artifact_ref="tool/tavily_extract/call_seeded_full_surface",
                 cache_mode="session",
                 ttl_seconds=None,
@@ -164,9 +164,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Read session history through code_execution_local.",
-                    "session_id": "code_execution_local_allow_read",
-                    "tools": ["code_execution_local"],
+                    "prompt": "Read session history through code_execution.",
+                    "session_id": "code_execution_allow_read",
+                    "tools": ["code_execution"],
                     "model": "test",
                 },
             )
@@ -187,9 +187,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Read a cached oversized tool artifact through code_execution_local.",
-                    "session_id": "code_execution_local_allow_cache_read",
-                    "tools": ["code_execution_local"],
+                    "prompt": "Read a cached oversized tool artifact through code_execution.",
+                    "session_id": "code_execution_allow_cache_read",
+                    "tools": ["code_execution"],
                     "model": "test",
                 },
             )
@@ -206,17 +206,17 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Inspect code_execution_local with no arguments first.",
-                    "session_id": "code_execution_local_discovery",
-                    "tools": ["code_execution_local"],
+                    "prompt": "Inspect code_execution with no arguments first.",
+                    "session_id": "code_execution_discovery",
+                    "tools": ["code_execution"],
                     "model": "test",
                 },
             )
-            assert discovery.status_code == 200, "No-arg code_execution_local discovery should succeed"
+            assert discovery.status_code == 200, "No-arg code_execution discovery should succeed"
             discovery_text = discovery.json()["response"]
             self.soft_assert(
                 bool(discovery_text.strip()),
-                "No-arg code_execution_local should return a non-empty discovery response",
+                "No-arg code_execution should return a non-empty discovery response",
             )
 
             current_case["name"] = "allow_file_read"
@@ -225,9 +225,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Read a vault file through code_execution_local.",
-                    "session_id": "code_execution_local_allow_file_read",
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "prompt": "Read a vault file through code_execution.",
+                    "session_id": "code_execution_allow_file_read",
+                    "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -244,9 +244,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Write a derived cache artifact through code_execution_local.",
-                    "session_id": "code_execution_local_allow_write",
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "prompt": "Write a derived cache artifact through code_execution.",
+                    "session_id": "code_execution_allow_write",
+                    "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -264,9 +264,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Read an image through code_execution_local using delegate.",
-                    "session_id": "code_execution_local_allow_image_input",
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "prompt": "Read an image through code_execution using delegate.",
+                    "session_id": "code_execution_allow_image_input",
+                    "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -281,7 +281,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 image_events,
                 name="authoring_direct_tool_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_allow_image_input",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_allow_image_input",
                     "tool": "delegate",
                 },
             )
@@ -293,9 +293,9 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Exercise the full code_execution_local helper surface.",
-                    "session_id": "code_execution_local_full_surface",
-                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "prompt": "Exercise the full code_execution helper surface.",
+                    "session_id": "code_execution_full_surface",
+                    "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
@@ -310,7 +310,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_parse_markdown_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "heading_count": 2,
                     "section_count": 2,
                     "code_block_count": 1,
@@ -321,7 +321,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_read_cache_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "ref": "tool/tavily_extract/call_seeded_full_surface",
                     "exists": True,
                 },
@@ -330,7 +330,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_pending_files_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "completed_count": 1,
                 },
             )
@@ -338,7 +338,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_assemble_context_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "message_count": 1,
                     "instruction_count": 1,
                 },
@@ -347,7 +347,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_direct_tool_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "tool": "file_ops_safe",
                 },
             )
@@ -355,7 +355,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_retrieve_history_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "item_count": 0,
                 },
             )
@@ -363,7 +363,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_direct_tool_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "tool": "delegate",
                 },
             )
@@ -371,7 +371,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_finish_requested",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "status": "completed",
                     "reason": "full-surface-ok",
                 },
@@ -380,7 +380,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 full_surface_events,
                 name="authoring_monty_execution_completed",
                 expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
                     "status": "completed",
                     "reason": "full-surface-ok",
                 },

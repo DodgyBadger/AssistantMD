@@ -26,7 +26,7 @@ description: My automation
 Rules:
 - Exactly one ` ```python``` ` block. No more, no less.
 - Scripts execute in a limited Python sandbox using Pydantic Monty.
-- Details of the Monty execution environment, helper functions, and supported Python features can be found in [the runtime reference](../tools/code_execution_local.md). That document covers the shared helper surface used by chat-side `code_execution_local` and by authored workflow scripts and context scripts.
+- Details of the Monty execution environment, helper functions, and supported Python features can be found in [the runtime reference](../tools/code_execution.md). That document covers the shared helper surface used by chat-side `code_execution` and by authored workflow scripts and context scripts.
 
 Files can be organized in subfolders one level deep inside `Authoring/`. Subfolders starting with `_` are ignored.
 

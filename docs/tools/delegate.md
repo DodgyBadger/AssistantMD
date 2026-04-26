@@ -11,14 +11,14 @@ Run a focused child agent over a prompt with optional tools, and return its text
 - the chat agent has a clearly separable sub-task that benefits from an isolated prompt and tool set
 - the chat agent needs to explore a large set of vault files or run many web searches / extractions where cumulative tool output could crowd the parent context
 
-Use `delegate` for efficient delegation. For large vault or web exploration, break the work into bounded subtasks and make multiple delegate calls if needed. Each child should inspect a scoped path, query, source group, or hypothesis and return a compact summary, decision, or saved artifact path. Do not move the same oversized transcript into one child run. Prefer instructions such as "inspect these likely paths first", "sample this directory and report whether deeper inventory is needed", or "write the full report to `Reports/...` and return only counts and the saved path" over instructions that require one child to enumerate and reason over an entire vault in one pass.
+Use `delegate` for efficient delegation, not as a larger context bucket. Before using `delegate` in chat, briefly tell the user the delegation strategy and wait for confirmation. If one deterministic tool call can answer, use that directly. For large vault or web exploration, split work into bounded subtasks and make multiple delegate calls if needed. Each child should inspect a scoped path, query, source group, or hypothesis and return a compact summary, decision, or saved artifact path. Prefer instructions such as "inspect these likely paths first", "sample this directory and report whether deeper inventory is needed", or "write the full report to `Reports/...` and return only counts and the saved path" over instructions that require one child to enumerate and reason over an entire vault in one pass.
 
 ## Arguments
 
 - `prompt`: required. Primary prompt passed to the child agent. Include file paths here when the child agent should read files.
 - `instructions`: optional. System-style instructions layered onto the child agent.
 - `model`: optional. Model alias resolved through the shared model configuration. Defaults to the runtime default model when omitted.
-- `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution_local` are always excluded regardless of what is passed. Include `file_ops_safe` when the child agent needs to read files.
+- `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution` are always excluded regardless of what is passed. Include `file_ops_safe` when the child agent needs to read files.
 - `options`: optional dictionary. Supported key: `thinking`, which accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`.
 
 ## Examples
@@ -74,7 +74,7 @@ model_used = result.metadata["model"]
 
 ## Notes
 
-- `delegate` and `code_execution_local` are always removed from the child tool list — recursive delegation is not permitted
+- `delegate` and `code_execution` are always removed from the child tool list — recursive delegation is not permitted
 - the child agent runs in isolation; its messages do not appear in the parent chat transcript
 - child runs are bounded; if the child exceeds its tool-call or timeout guardrail, `delegate` returns a failed tool result with guidance instead of crashing the parent run
 - to work with files, include the file path in the prompt and add `file_ops_safe` to `tools` — the child agent reads them the same way the parent agent does

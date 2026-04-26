@@ -1,4 +1,4 @@
-# `code_execution_local`
+# `code_execution`
 
 ## Purpose
 
@@ -6,7 +6,7 @@ Run constrained local Python in AssistantMD's Monty runtime.
 
 This document serves two purposes:
 
-- it documents the chat tool `code_execution_local`, which runs a snippet against the current chat session
+- it documents the chat tool `code_execution`, which runs a snippet against the current chat session
 - it is also the main helper reference for authored workflows and context assembly scripts, which run in the same Monty environment without the outer tool wrapper
 
 ## Tool Argument
@@ -86,7 +86,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### Direct Tool Calls
 
 - call tools by their configured names, for example `await file_ops_safe(operation="read", path="notes/example.md")`
-- `code_execution_local` itself is excluded to prevent recursive self-invocation
+- `code_execution` itself is excluded to prevent recursive self-invocation
 - direct tool results expose `output`, `metadata`, `content`, and `items`
 - prefer branching on `result.metadata` when the tool returns structured status
 
@@ -121,10 +121,10 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### Chat tool invocation
 
-Use the outer `code_execution_local(...)` wrapper only when calling the chat tool directly.
+Use the outer `code_execution(...)` wrapper only when calling the chat tool directly.
 
 ```python
-code_execution_local(
+code_execution(
     code="""
 {
     "today": date.today("%Y-%m-%d"),
@@ -136,7 +136,7 @@ code_execution_local(
 
 ### Raw Monty script for authored files
 
-Inside a workflow or context script, write only the Python script body. Do not wrap it in `code_execution_local(...)`.
+Inside a workflow or context script, write only the Python script body. Do not wrap it in `code_execution(...)`.
 
 ```python
 history_result = await retrieve_history(scope="session", limit="all")
@@ -172,7 +172,7 @@ Extracts a page, parses the structure, pulls a target section, and returns a com
 Uses `read_cache` first so re-running the script does not repeat the extraction call.
 
 ```python
-code_execution_local(
+code_execution(
     code="""
 # Read from cache if the extraction was already stored
 artifact = await read_cache(ref="tool/tavily_extract/call_abc123")
@@ -206,7 +206,7 @@ Lists a directory, filters to the pending subset, reads and parses each file, th
 processed items complete. Batches to a small slice to stay within a single execution.
 
 ```python
-code_execution_local(
+code_execution(
     code="""
 listed = await file_ops_safe(operation="list", path="inbox")
 pending = await pending_files(

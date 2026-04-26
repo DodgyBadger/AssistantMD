@@ -24,8 +24,8 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
             tool_names = {tool.get("name") for tool in payload.get("tools", [])}
 
             self.soft_assert(
-                "code_execution_local" in tool_names,
-                "Chat metadata should expose code_execution_local",
+                "code_execution" in tool_names,
+                "Chat metadata should expose code_execution",
             )
             self.soft_assert(
                 "memory_ops" not in tool_names,

@@ -7,7 +7,7 @@ description: Guidelines for creating and modifying AssistantMD workflows, contex
 
 Read `__virtual_docs__/use/authoring.md` for file shape and frontmatter field reference before starting.
 
-Inspect `__virtual_docs__/tools/code_execution_local.md` for current capability signatures and return shapes. Do not guess — check the contract.
+Inspect `__virtual_docs__/tools/code_execution.md` for current capability signatures and return shapes. Do not guess — check the contract.
 
 - `AssistantMD/Authoring/` is the canonical location for all workflows and context templates.
 - Every file needs `run_type: workflow` or `run_type: context` in frontmatter plus exactly one fenced `python` block.
