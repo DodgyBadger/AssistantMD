@@ -11,6 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from pydantic_ai.exceptions import UsageLimitExceeded
+
 from core.constants import (
     DELEGATE_DEFAULT_MAX_TOOL_CALLS,
     DELEGATE_DEFAULT_TIMEOUT_SECONDS,
@@ -60,6 +62,8 @@ class DelegateToolScenario(BaseScenario):
                         "model": "test",
                         "tools": ["file_ops_safe"],
                     }
+                if case == "limit_failure":
+                    return {"prompt": "Exceed child usage limits.", "model": "test"}
                 raise AssertionError(f"Unexpected delegate case: {case}")
 
         def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
@@ -75,6 +79,28 @@ class DelegateToolScenario(BaseScenario):
 
         original_prepare = chat_executor._prepare_agent_config
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
+        import core.tools.delegate as delegate_module
+
+        original_create_agent = delegate_module.create_agent
+
+        class _FailingChildAgent:
+            def __init__(self, error: Exception):
+                self.error = error
+
+            def instructions(self, *_args, **_kwargs):
+                return None
+
+            async def run(self, *_args, **_kwargs):
+                raise self.error
+
+        async def _patched_create_agent(*args, **kwargs):
+            if current_case["name"] == "limit_failure":
+                return _FailingChildAgent(
+                    UsageLimitExceeded("The next tool call(s) would exceed the tool_calls_limit")
+                )
+            return await original_create_agent(*args, **kwargs)
+
+        delegate_module.create_agent = _patched_create_agent
         try:
             # --- Basic: delegate fires and completes ---
             checkpoint = self.event_checkpoint()
@@ -180,8 +206,84 @@ class DelegateToolScenario(BaseScenario):
                 expected={"workflow_id": "delegate_child_tools"},
             )
 
+            # --- Bounded child failures return tool output instead of aborting parent chat ---
+            current_case["name"] = "limit_failure"
+            checkpoint = self.event_checkpoint()
+            limit_failure = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Test delegate tool-call limit handling.",
+                    "session_id": "delegate_limit_failure",
+                    "tools": ["delegate"],
+                    "model": "test",
+                },
+            )
+            assert limit_failure.status_code == 200, "Delegate limit failure should not abort chat"
+            limit_events = self.events_since(checkpoint)
+            self.assert_event_contains(
+                limit_events,
+                name="delegate_failed",
+                expected={
+                    "workflow_id": "delegate_limit_failure",
+                    "error_type": "UsageLimitExceeded",
+                },
+            )
+            self.soft_assert(
+                "tool-call limit" in limit_failure.json()["response"],
+                "Delegate limit failure should return actionable text to the parent agent",
+            )
+
+            from core.authoring.helpers.runtime_common import (
+                invoke_bound_tool,
+                normalize_tool_result,
+            )
+            from core.authoring.shared.tool_binding import resolve_tool_binding
+
+            checkpoint = self.event_checkpoint()
+            timeout_binding = resolve_tool_binding(["delegate"], vault_path=str(vault))
+
+            async def _timeout_create_agent(*_args, **_kwargs):
+                return _FailingChildAgent(TimeoutError())
+
+            delegate_module.create_agent = _timeout_create_agent
+            try:
+                timeout_result = await invoke_bound_tool(
+                    timeout_binding.tool_functions[0],
+                    tool_name="delegate",
+                    arguments={"prompt": "Exceed child timeout.", "model": "test"},
+                    run_buffers={},
+                    session_buffers={},
+                    session_id="delegate_timeout_failure",
+                    vault_name=vault.name,
+                )
+            finally:
+                delegate_module.create_agent = _patched_create_agent
+            timeout_tool_result = normalize_tool_result(
+                "delegate",
+                timeout_result,
+                vault_path=str(vault),
+            )
+            self.soft_assert_equal(
+                timeout_tool_result.status,
+                "failed",
+                "Delegate timeout should return a failed tool result",
+            )
+            timeout_events = self.events_since(checkpoint)
+            self.assert_event_contains(
+                timeout_events,
+                name="delegate_started",
+                expected={"workflow_id": "delegate_timeout_failure"},
+            )
+            self.soft_assert(
+                "timeout" in timeout_tool_result.output,
+                "Delegate timeout should return actionable text",
+            )
+
         finally:
             chat_executor._prepare_agent_config = original_prepare
+            delegate_module.create_agent = original_create_agent
 
         # --- Monty direct tool: delegate with tools ---
         self.create_file(

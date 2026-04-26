@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from pydantic_ai import RunContext
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 from pydantic_ai.usage import UsageLimits
@@ -127,6 +128,39 @@ class DelegateTool(BaseTool):
                 result = await asyncio.wait_for(run_coro, timeout=timeout_seconds)
                 output = result.output
                 text = coerce_output_data(output)
+            except UsageLimitExceeded as exc:
+                return _failed_delegate_return(
+                    session_id=session_id,
+                    model=model_value or "default",
+                    tool_names=safe_tool_names,
+                    stripped_tools=stripped,
+                    thinking=thinking_value_to_label(resolved_thinking),
+                    max_tool_calls=max_tool_calls,
+                    timeout_seconds=timeout_seconds,
+                    error_type=type(exc).__name__,
+                    message=(
+                        f"Delegate stopped because the child agent exceeded its tool-call limit "
+                        f"of {max_tool_calls}. Ask again with a narrower sub-task, fewer files, "
+                        "or instructions to write intermediate results to the vault instead of "
+                        "exploring everything interactively."
+                    ),
+                )
+            except asyncio.TimeoutError as exc:
+                return _failed_delegate_return(
+                    session_id=session_id,
+                    model=model_value or "default",
+                    tool_names=safe_tool_names,
+                    stripped_tools=stripped,
+                    thinking=thinking_value_to_label(resolved_thinking),
+                    max_tool_calls=max_tool_calls,
+                    timeout_seconds=timeout_seconds,
+                    error_type=type(exc).__name__,
+                    message=(
+                        f"Delegate stopped because the child agent exceeded its timeout of "
+                        f"{timeout_seconds:g} seconds. Ask again with a narrower sub-task or "
+                        "instructions that reduce exploration."
+                    ),
+                )
             except Exception as exc:
                 logger.add_sink("validation").error(
                     "delegate_failed",
@@ -178,6 +212,46 @@ class DelegateTool(BaseTool):
 Full documentation:
 - `__virtual_docs__/tools/delegate.md`
 """
+
+
+def _failed_delegate_return(
+    *,
+    session_id: str,
+    model: str,
+    tool_names: tuple[str, ...],
+    stripped_tools: tuple[str, ...],
+    thinking: str,
+    max_tool_calls: int,
+    timeout_seconds: float,
+    error_type: str,
+    message: str,
+) -> ToolReturn:
+    metadata: dict[str, Any] = {
+        "status": "failed",
+        "model": model,
+        "tool_names": list(tool_names),
+        "thinking": thinking,
+        "output_chars": len(message),
+        "max_tool_calls": max_tool_calls,
+        "timeout_seconds": timeout_seconds,
+        "error_type": error_type,
+    }
+    if stripped_tools:
+        metadata["stripped_tools"] = list(stripped_tools)
+
+    logger.add_sink("validation").warning(
+        "delegate_failed",
+        data={
+            "workflow_id": session_id,
+            "model": model,
+            "tool_names": list(tool_names),
+            "error_type": error_type,
+            "error_message": message,
+            "max_tool_calls": max_tool_calls,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+    return ToolReturn(return_value=message, content=None, metadata=metadata)
 
 
 def _parse_tool_names(tools: Any) -> tuple[str, ...]:
