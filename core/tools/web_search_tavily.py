@@ -6,7 +6,6 @@ Provides web search capability through Tavily API (premium).
 
 import httpx
 from pydantic_ai.tools import Tool
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from .base import BaseTool
 from core.settings.secrets_store import get_secret_value
@@ -79,8 +78,6 @@ class WebSearchTavily(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily web search."""
         return """
-Search the web with Tavily when you want higher-quality research-oriented results.
-
 Full documentation:
 - `__virtual_docs__/tools/web_search_tavily.md`
-""" + WEB_TOOL_SECURITY_NOTICE
+"""

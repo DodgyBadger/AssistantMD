@@ -74,13 +74,12 @@ class CodeExecutionLocalScenario(BaseScenario):
                 if case_name == "allow_image_input":
                     return {
                         "code": (
-                            'image = await file_ops_safe(operation="read", path="images/test_image.jpg")\n'
-                            'draft = await generate(\n'
-                            '    prompt="Reply with IMAGE_OK.",\n'
-                            '    inputs=image.items,\n'
+                            'draft = await delegate(\n'
+                            '    prompt="Read images/test_image.jpg and reply with IMAGE_OK.",\n'
+                            '    tools=["file_ops_safe"],\n'
                             '    model="test",\n'
                             ')\n'
-                            'f"items={len(image.items)}; has_content={image.content is not None}; {draft.output}"'
+                            'draft.output'
                         )
                     }
                 if case_name == "full_surface":
@@ -100,7 +99,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                             '    history=history.items,\n'
                             '    instructions="Keep the output concise.",\n'
                             ')\n'
-                            'draft = await generate(\n'
+                            'draft = await delegate(\n'
                             '    prompt=(\n'
                             '        f"heading={parsed.sections[1].heading}; "\n'
                             '        f"cached={cached.content}; "\n'
@@ -265,7 +264,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Read an image through code_execution_local and pass it to generate.",
+                    "prompt": "Read an image through code_execution_local using delegate.",
                     "session_id": "code_execution_local_allow_image_input",
                     "tools": ["code_execution_local", "file_ops_safe"],
                     "model": "test",
@@ -283,18 +282,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                 name="authoring_direct_tool_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_allow_image_input",
-                    "tool": "file_ops_safe",
-                    "item_count": 1,
-                    "has_content": True,
-                },
-            )
-            self.assert_event_contains(
-                image_events,
-                name="authoring_generate_started",
-                expected={
-                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_allow_image_input",
-                    "input_count": 1,
-                    "attached_image_count": 1,
+                    "tool": "delegate",
                 },
             )
 
@@ -373,8 +361,11 @@ class CodeExecutionLocalScenario(BaseScenario):
             )
             self.assert_event_contains(
                 full_surface_events,
-                name="authoring_generate_completed",
-                expected={"workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface"},
+                name="authoring_direct_tool_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
+                    "tool": "delegate",
+                },
             )
             self.assert_event_contains(
                 full_surface_events,
@@ -406,7 +397,7 @@ class CodeExecutionLocalScenario(BaseScenario):
             assert full_surface_path.exists(), "Full helper-surface run should write a file"
             self.soft_assert(
                 bool(full_surface_path.read_text(encoding="utf-8").strip()),
-                "Full helper-surface run should write non-empty generated output",
+                "Full helper-surface run should write non-empty delegated output",
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config

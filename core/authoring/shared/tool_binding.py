@@ -14,6 +14,7 @@ from core.settings.secrets_store import secret_has_value
 from core.settings.store import ToolConfig, get_tools_config
 from core.tools.base import BaseTool
 from core.tools.utils import get_tool_instructions
+from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
 
 
@@ -311,7 +312,7 @@ def _wrap_tool_function(
                 result = await original_func(**kwargs)
         except TypeError as exc:
             return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return result
+        return wrap_web_tool_result(tool_name, result)
 
     def _call_sync(ctx: RunContext, **kwargs):
         if not _has_meaningful_tool_args(kwargs):
@@ -323,7 +324,7 @@ def _wrap_tool_function(
                 result = original_func(**kwargs)
         except TypeError as exc:
             return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return result
+        return wrap_web_tool_result(tool_name, result)
 
     wrapper = _call_async if inspect.iscoroutinefunction(original_func) else _call_sync
     try:

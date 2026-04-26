@@ -29,12 +29,6 @@ class AuthoringContractScenario(BaseScenario):
             "AssistantMD/Authoring/authoring_contract_success.md",
             AUTHORING_CONTRACT_SUCCESS_WORKFLOW,
         )
-        self.create_file(
-            vault,
-            "AssistantMD/Authoring/authoring_generate_cache_daily.md",
-            AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW,
-        )
-
         checkpoint = self.event_checkpoint()
         await self.start_system()
         startup_events = self.events_since(checkpoint)
@@ -71,27 +65,6 @@ class AuthoringContractScenario(BaseScenario):
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
                 "tool": "file_ops_safe",
             },
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_generate_started",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_thinking_resolved",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "model": "test",
-                "requested_thinking": "off",
-                "resolved_thinking": "off",
-                "source": "call_override",
-            },
-        )
-        self.assert_event_contains(
-            events,
-            name="authoring_generate_completed",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
         )
         self.assert_event_contains(
             events,
@@ -185,13 +158,6 @@ class AuthoringContractScenario(BaseScenario):
             self.soft_assert("ASSEMBLED=3" in content, "Expected assembled context count in output")
             self.soft_assert("HISTORY_ITEMS=0" in content, "Expected retrieve_history output in contract file")
 
-        generated_output = vault / "outputs" / "generate-success.md"
-        self.soft_assert(generated_output.exists(), "Expected generate output file")
-        if generated_output.exists():
-            self.soft_assert(
-                generated_output.stat().st_size > 0,
-                "Expected generate output file to be non-empty",
-            )
         delegate_output = vault / "outputs" / "delegate-success.md"
         self.soft_assert(delegate_output.exists(), "Expected delegate output file")
         if delegate_output.exists():
@@ -207,81 +173,6 @@ class AuthoringContractScenario(BaseScenario):
             self.soft_assert("AI In Fiction" in parsed_content, "Expected parsed section heading in output")
             self.soft_assert("python" in parsed_content, "Expected parsed code block language in output")
             self.soft_assert("../images/test_image.jpg" in parsed_content, "Expected parsed image ref in output")
-
-        # Generate-level cache semantics should skip repeated LLM work within the TTL window.
-        self.set_date("2026-04-06")
-        checkpoint = self.event_checkpoint()
-        first_generate_cache = await self.run_workflow(vault, "authoring_generate_cache_daily")
-        self.soft_assert_equal(
-            first_generate_cache.status,
-            "completed",
-            "First generate cache workflow run should succeed",
-        )
-        generate_cache_status = vault / "outputs" / "generate-cache-status.md"
-        self.soft_assert(
-            generate_cache_status.read_text(encoding="utf-8").strip() == "status=generated",
-            "First generate cache run should produce a fresh generation",
-        )
-        generate_cache_events = self.events_since(checkpoint)
-        self.assert_event_contains(
-            generate_cache_events,
-            name="authoring_generate_started",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
-                "cache_mode": "daily",
-            },
-        )
-        self.assert_event_contains(
-            generate_cache_events,
-            name="authoring_generate_cache_stored",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
-                "cache_mode": "daily",
-            },
-        )
-
-        checkpoint = self.event_checkpoint()
-        second_generate_cache = await self.run_workflow(vault, "authoring_generate_cache_daily")
-        self.soft_assert_equal(
-            second_generate_cache.status,
-            "completed",
-            "Second same-day generate cache workflow run should succeed",
-        )
-        self.soft_assert(
-            generate_cache_status.read_text(encoding="utf-8").strip() == "status=cached",
-            "Second same-day generate cache run should hit cache",
-        )
-        generate_cache_events = self.events_since(checkpoint)
-        self.assert_event_contains(
-            generate_cache_events,
-            name="authoring_generate_cache_hit",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
-                "cache_mode": "daily",
-            },
-        )
-
-        self.set_date("2026-04-07")
-        checkpoint = self.event_checkpoint()
-        third_generate_cache = await self.run_workflow(vault, "authoring_generate_cache_daily")
-        self.soft_assert_equal(
-            third_generate_cache.status,
-            "completed",
-            "Next-day generate cache workflow run should succeed",
-        )
-        self.soft_assert(
-            generate_cache_status.read_text(encoding="utf-8").strip() == "status=generated",
-            "Next-day generate cache run should treat daily generation cache as expired",
-        )
-        generate_cache_events = self.events_since(checkpoint)
-        self.assert_event_contains(
-            generate_cache_events,
-            name="authoring_generate_started",
-            expected={
-                "workflow_id": "AuthoringContractVault/authoring_generate_cache_daily",
-                "cache_mode": "daily",
-            },
-        )
 
         await self.stop_system()
         self.teardown_scenario()
@@ -328,7 +219,7 @@ task_listing = await file_ops_safe(operation="list", path="tasks")
 pending = await pending_files(operation="get", items=task_listing)
 await pending_files(operation="complete", items=(pending.items[0],))
 
-draft = await generate(
+draft = await delegate(
     prompt=(
         "Seed:\\n"
         + source_text
@@ -352,7 +243,7 @@ await _write_replace(
     source_text + f"\\nASSEMBLED={len(assembled.messages)}\\nHISTORY_ITEMS={history.item_count}",
 )
 await _write_replace(
-    "outputs/generate-success.md",
+    "outputs/delegate-draft-success.md",
     draft.output,
 )
 await _write_replace(
@@ -370,35 +261,6 @@ await _write_replace(
 )
 
 await finish(status="completed", reason="all-helpers-exercised")
-```
-"""
-
-
-AUTHORING_GENERATE_CACHE_DAILY_WORKFLOW = """---
-run_type: workflow
-enabled: false
-description: Deterministic generate cache semantics workflow
----
-
-## Run
-
-```python
-async def _write_replace(path, content):
-    existing = await file_ops_safe(operation="read", path=path)
-    if existing.metadata.get("status") == "completed":
-        await file_ops_unsafe(operation="truncate", path=path, confirm_path=path)
-        await file_ops_safe(operation="append", path=path, content=content)
-    else:
-        await file_ops_safe(operation="write", path=path, content=content)
-
-draft = await generate(
-    prompt="Deterministic prompt",
-    instructions="Return a short stable line.",
-    model="test",
-    cache="daily",
-)
-
-await _write_replace("outputs/generate-cache-status.md", f"status={draft.status}")
 ```
 """
 

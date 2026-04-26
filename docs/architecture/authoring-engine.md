@@ -25,7 +25,6 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 
 | Function | Purpose |
 | --- | --- |
-| `generate` | Call the LLM |
 | direct tool functions | Invoke configured tools by name, e.g. `file_ops_safe(...)` |
 | `assemble_context` | Build chat context for a session |
 | `read_cache` | Read a cached value |

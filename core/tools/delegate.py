@@ -165,19 +165,19 @@ class DelegateTool(BaseTool):
 
             return ToolReturn(return_value=text, content=None, metadata=metadata)
 
-        return Tool(delegate, takes_ctx=True, name="delegate", description=cls.get_instructions())
+        return Tool(
+            delegate,
+            takes_ctx=True,
+            name="delegate",
+            description="Run a focused child agent over a prompt with optional tools.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
-        return (
-            "Use delegate to run a focused child agent over a prompt with optional tools. "
-            "The child agent returns a single text response. "
-            "Provide prompt (required), instructions (optional system guidance), "
-            "model (optional alias), tools (optional list of tool names), "
-            "and options (optional: thinking). "
-            "To work with files, include file paths in the prompt and provide relevant tools "
-            "such as file_ops_safe so the child agent can read them directly."
-        )
+        return """
+Full documentation:
+- `__virtual_docs__/tools/delegate.md`
+"""
 
 
 def _parse_tool_names(tools: Any) -> tuple[str, ...]:

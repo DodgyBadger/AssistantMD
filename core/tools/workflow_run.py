@@ -134,14 +134,8 @@ class WorkflowRun(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for workflow execution."""
         return """
-List authored automations in the current vault and run, enable, or disable them.
-
 Full documentation:
 - `__virtual_docs__/tools/workflow_run.md`
-
-Important notes:
-- start with `operation="list"` when you do not know the workflow name
-- use names relative to `AssistantMD/Authoring`
 """
 
     @staticmethod

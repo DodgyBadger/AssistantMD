@@ -31,9 +31,12 @@ Available tool docs:
 
 - `browser`
 - `code_execution_local`
+- `code_execution_piston`
 - `delegate`
 - `file_ops_safe`
 - `file_ops_unsafe`
+- `internal_api`
+- `memory_ops`
 - `tavily_crawl`
 - `tavily_extract`
 - `web_search_duckduckgo`

@@ -78,13 +78,8 @@ class InternalApi(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for read-only internal API access."""
         return """
-Fetch structured metadata from a small allowlist of internal read-only API endpoints.
-
-This tool is not part of the normal default tool surface.
-
-Important notes:
-- read-only allowlisted endpoints only
-- do not use for arbitrary URLs or mutation operations
+Full documentation:
+- `__virtual_docs__/tools/internal_api.md`
 """
 
     @staticmethod

@@ -9,7 +9,6 @@ from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
 from core.logger import UnifiedLogger
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
 
@@ -96,12 +95,6 @@ class TavilyExtract(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Extract."""
         return """
-Extract full content from specific web pages, articles, and documentation URLs.
-
 Full documentation:
 - `__virtual_docs__/tools/tavily_extract.md`
-
-Important notes:
-- prefer this before `browser` when the URL is known
-- start with one URL and `extract_depth="basic"`
-""" + WEB_TOOL_SECURITY_NOTICE
+"""

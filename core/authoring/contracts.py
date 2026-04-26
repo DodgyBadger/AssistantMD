@@ -11,7 +11,6 @@ BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
         "read_cache",
         "pending_files",
-        "generate",
         "retrieve_history",
         "assemble_context",
         "parse_markdown",
@@ -234,15 +233,6 @@ class PendingFilesResult:
     status: str
     items: tuple[RetrievedItem, ...] = ()
     completed_count: int = 0
-
-
-@dataclass(frozen=True)
-class GenerationResult:
-    """Envelope for generate(...) results."""
-
-    status: str
-    model: str
-    output: str
 
 
 @dataclass(frozen=True)

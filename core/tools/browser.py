@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 from markdownify import markdownify as html_to_markdown
 from pydantic_ai.tools import Tool
 
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.logger import UnifiedLogger
 from core.settings import (
     get_browser_navigation_timeout_seconds,
@@ -142,16 +141,9 @@ Policy notes:
     def get_instructions(cls) -> str:
         """Get usage instructions for the browser tool."""
         return """
-Open a web page in a headless browser and extract content from it, especially when simpler web tools are not enough.
-
 Full documentation:
 - `__virtual_docs__/tools/browser.md`
-
-Important notes:
-- prefer `tavily_extract` first when the URL is already known
-- use one exact URL per call
-- avoid broad exploratory browsing unless explicitly needed
-""" + WEB_TOOL_SECURITY_NOTICE
+"""
 
     @classmethod
     async def _browse(

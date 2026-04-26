@@ -48,7 +48,7 @@ agent behavior toward Pydantic AI's composable capability model.
 
 - Tool registry source is settings (`tools` section in settings store).
 - `@tools` processing imports configured modules and finds `BaseTool` subclasses.
-- Chat and `generate(..., tools=[...])` attach tools through `core/llm/capabilities/assistant_tools.py`.
+- Chat, delegate child agents, and authored direct-tool calls attach tools through `core/llm/capabilities/assistant_tools.py`.
 - Tool result caching is handled by chat capabilities rather than tool-call routing parameters.
 - Oversized chat tool output is stored through the authoring cache layer, not the legacy in-memory buffer store.
 - `BufferStore` remains available on `RunContext.deps` for tool compatibility; the deprecated typed output-routing modules that wrote variable-style buffers have been removed.

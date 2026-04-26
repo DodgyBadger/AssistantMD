@@ -84,7 +84,7 @@ description: Haiku writing workflow
 source = await file_ops_safe(operation="read", path="notes/haiku_seed.md")
 note_content = source.output.split("\\n\\n", 1)[1] if "\\n\\n" in source.output else source.output
 
-draft = await generate(
+draft = await delegate(
     prompt=(
         "Write a three-line haiku inspired by this note. Preserve the imagery.\\n\\n"
         + note_content

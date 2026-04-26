@@ -10,13 +10,13 @@
 The old authoring approach relied on a custom language which was becoming increasingly complex for both humans and LLMs to understand. Attempts to teach the chat agent to write automations for you were failing. Rather than invent a new language, this release leans into what LLMs already know how to do well - write code. Now you can describe the research / knowledge automation you want and the chat agent will create it for you.
 
 **Safety**  
-This is not free-form Python. Authoring scripts run inside the Monty sandbox — a Python interpreter written in Rust with its own bytecode VM. Monty's default is zero access: no filesystem, no network, no environment variables, no arbitrary imports. The only way a script can interact with the outside world is through host helpers that AssistantMD explicitly registers — `generate()`, `call_tool()`, and so on. Each integration point is deliberate and auditable. The chat agent can write and run automation code on your behalf without any risk of it reaching outside the boundaries AssistantMD sets.
+This is not free-form Python. Authoring scripts run inside the Monty sandbox — a Python interpreter written in Rust with its own bytecode VM. Monty's default is zero access: no filesystem, no network, no environment variables, no arbitrary imports. The only way a script can interact with the outside world is through tools (e.g. `file_ops_safe`, `tavily_extract`) and host-owned helper functions (e.g. `retrieve_history`, `parse_markdown`). Each integration point is deliberate and auditable. The chat agent can write and run automation code on your behalf without any risk of it reaching outside the boundaries AssistantMD sets.
 
-- **Workflows and context templates are now Python blocks.** Both live in a single `AssistantMD/Authoring/` folder — no more separate `Workflows/` and `ContextTemplates/` directories. Once you've migrated, you can delete the old folders.
-- **Host helpers replace directives.** The Python sandbox exposes a concise set of host-owned functions — `generate()`, `assemble_context()`, `pending_files()`, `parse_markdown()`, `finish()`, `date`, and others — giving you real control flow, conditionals, and loops instead of declarative DSL syntax.
-- **`Skills/` is now a canonical vault folder.** Drop plain-text skill files there and the default context template picks them up automatically, making them available to the chat agent without any template changes.
+- **Workflows and context assembly scripts are now Python blocks.** Both live in a single `AssistantMD/Authoring/` folder — no more separate `Workflows/` and `ContextTemplates/` directories. Once you've migrated, you can delete the old folders.
+- **Tools and helpers replace directives.** Authoring scripts use configured tools for host-owned access such as reading vault files or delegating model work, and focused helpers for authoring-specific operations such as `retrieve_history()`, `assemble_context()`, `pending_files()`, and `parse_markdown()`. Scripts still get normal Python control flow, conditionals, and loops instead of declarative DSL syntax.
+- **`Skills/` is now a canonical vault folder.** Drop plain-text skill files there and the default context scripts picks them up automatically.
 - **`soul.md` for simple customization.** Create `AssistantMD/soul.md` with plain instructions — agent personality, response style, ground rules — and the default template loads it as the system instruction. No template authoring needed for simple cases.
-- **The chat agent can author and iterate templates for you.** Describe what you want; the agent drafts the file, places it in `Authoring/`, and can compile and refine it with you. The documentation has been significantly simplified and reorganized so the agent can find what it needs without manual pointers.
+- **The chat agent can author and iterate scripts for you.** Describe what you want; the agent drafts the file, places it in `Authoring/`, and can compile and refine it with you. The documentation has been significantly simplified and reorganized so the agent can find what it needs without manual pointers.
 
 ### Pydantic AI capabilities refactor
 
@@ -44,6 +44,7 @@ Chat sessions are now persisted in SQLite and survive app restarts.
 ### Tool changes
 
 - All tools are now enabled by default (except `web_search_duckduckgo).
+- New `delegate` tool lets chat and authoring scripts hand bounded sub-tasks to a child agent, using the same configured tools and multimodal file-reading paths as normal chat.
 - `file_ops_safe` interface changes:
   - `target` parameter renamed to `path`.
   - `scope` renamed to `search_term` (search semantics flipped: `path` is now the directory boundary).

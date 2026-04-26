@@ -167,16 +167,8 @@ class FileOpsSafe(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for file operations."""
         return """
-Read, write, append, list, search, frontmatter, and move files safely within the current vault or virtual mounts.
-
 Full documentation:
 - `__virtual_docs__/tools/file_ops_safe.md`
-
-Important notes:
-- start narrow with `operation="list"` or targeted `operation="search"`
-- virtual docs are available under `__virtual_docs__/...`
-- use `list`, `search`, and `read` on `__virtual_docs__/tools` to inspect tool docs
-- writes are non-destructive: no overwrite, delete, or truncate
 """
 
     @classmethod

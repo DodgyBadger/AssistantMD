@@ -4,34 +4,20 @@
 
 Run a focused child agent over a prompt with optional tools, and return its text response.
 
-Use `delegate` when a sub-task needs a model to reason, make decisions, or use tools in a bounded context. The child agent runs in isolation and returns a single response.
-
 ## When To Use
 
-- a sub-task needs its own focused prompt and instruction set
-- you need bounded tool use that should not share state with the parent agent
-- a workflow step produces content that should be summarised, classified, or transformed by a model call
-- you want a child agent to read and reason over files using `file_ops_safe`
+- an authoring script needs model inference for summarising, classifying, drafting, or deciding from prepared inputs
+- the user explicitly asks the chat agent to delegate a focused sub-task
+- the chat agent has a clearly separable sub-task that benefits from an isolated prompt and tool set
+- the chat agent needs to explore a large set of vault files or run many web searches / extractions where cumulative tool output could crowd the parent context
 
-## When Not To Use
-
-- you only need deterministic file reads, writes, or searches — use `file_ops_safe` directly
-- you need to compose structured message history for a follow-up chat turn — use `assemble_context`
-- the task is a simple format or transform that plain Python handles without a model call
-
-## Parameters
+## Arguments
 
 - `prompt`: required. Primary prompt passed to the child agent. Include file paths here when the child agent should read files.
 - `instructions`: optional. System-style instructions layered onto the child agent.
 - `model`: optional. Model alias resolved through the shared model configuration. Defaults to the runtime default model when omitted.
 - `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution_local` are always excluded regardless of what is passed. Include `file_ops_safe` when the child agent needs to read files.
-- `options`: optional. Less common controls — see Options below.
-
-## Options
-
-Pass as a dictionary to the `options` parameter.
-
-- `thinking`: override thinking for this call. Accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`. When omitted, the current global default thinking policy applies.
+- `options`: optional dictionary. Supported key: `thinking`, which accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`.
 
 ## Examples
 
@@ -69,12 +55,14 @@ result = await delegate(
 
 ## Output Shape
 
-In scripted Monty flows, `delegate` is a direct tool call that returns a `ScriptToolResult`:
+Returns the child agent's final text response.
 
-- `output`: the child agent's final text response
+In scripted Monty flows, direct calls return an object with `output`, `metadata`, `content`, and `items`:
+
+- `output`: child agent final text response
 - `metadata`: run metadata including `model`, `tool_names`, `thinking`, and `output_chars`
-- `items`: empty — delegate does not project source artifacts
 - `content`: `None`
+- `items`: empty; `delegate` does not project source artifacts
 
 ```python
 result = await delegate(prompt="...", tools=["file_ops_safe"])

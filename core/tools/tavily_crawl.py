@@ -9,7 +9,6 @@ from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
 from core.logger import UnifiedLogger
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
 
@@ -110,12 +109,6 @@ class TavilyCrawl(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Crawl."""
         return """
-Explore a website across multiple related pages when you need broader coverage than a single-page extract.
-
 Full documentation:
 - `__virtual_docs__/tools/tavily_crawl.md`
-
-Important notes:
-- start small on depth, breadth, and limit
-- use `tavily_extract` instead when you already know the exact pages you need
-""" + WEB_TOOL_SECURITY_NOTICE
+"""

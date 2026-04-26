@@ -6,7 +6,6 @@ Provides web search capability through DuckDuckGo (free).
 
 from ddgs import DDGS
 from pydantic_ai.tools import Tool
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from .base import BaseTool
 from core.logger import UnifiedLogger
@@ -65,8 +64,6 @@ class WebSearchDuckDuckGo(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for DuckDuckGo web search."""
         return """
-Search the web with DuckDuckGo for lightweight general-purpose results.
-
 Full documentation:
 - `__virtual_docs__/tools/web_search_duckduckgo.md`
-""" + WEB_TOOL_SECURITY_NOTICE
+"""

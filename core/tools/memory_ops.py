@@ -100,14 +100,8 @@ class MemoryOps(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for conversation memory access."""
         return """
-Read structured conversation history through a source-agnostic memory provider.
-
-Important notes:
-- use `operation="get_history"` to read conversation history
-- `get_history` is the primary agent-facing operation over canonical ordered message history
-- `get_history` supports `message_filter="all" | "exclude_tools" | "only_tools"`
-- use `operation="get_tool_events"` only for explicit inspection/debug retrieval of structured tool activity
-- default `scope="session"` reads the active chat session when available
+Full documentation:
+- `__virtual_docs__/tools/memory_ops.md`
 """
 
     @staticmethod

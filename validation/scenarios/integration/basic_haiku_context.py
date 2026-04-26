@@ -83,16 +83,18 @@ class BasicHaikuContextTemplateScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="authoring_generate_started",
+            name="authoring_direct_tool_started",
             expected={
                 "workflow_id": f"{vault.name}/context/basic_haiku_context.md/{session_id}",
+                "tool": "delegate",
             },
         )
         self.assert_event_contains(
             events,
-            name="authoring_generate_completed",
+            name="authoring_direct_tool_completed",
             expected={
                 "workflow_id": f"{vault.name}/context/basic_haiku_context.md/{session_id}",
+                "tool": "delegate",
             },
         )
         self.assert_event_contains(
@@ -144,7 +146,7 @@ description: Basic haiku context-template happy path
 
 source = await file_ops_safe(operation="read", path="notes/haiku_context_seed.md")
 source_text = source.output.split("\\n\\n", 1)[1] if "\\n\\n" in source.output else source.output
-seed_words = await generate(
+seed_words = await delegate(
     prompt=(
         "Choose exactly three vivid seed words inspired by this note.\\n\\n"
         + source_text

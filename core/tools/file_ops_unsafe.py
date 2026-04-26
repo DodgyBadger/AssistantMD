@@ -112,15 +112,8 @@ class FileOpsUnsafe(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for unsafe file operations."""
         return """
-Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed.
-
 Full documentation:
 - `__virtual_docs__/tools/file_ops_unsafe.md`
-
-Important notes:
-- read and verify with `file_ops_safe` first
-- use only for explicit destructive changes
-- all arguments must be named
 """
 
     @classmethod

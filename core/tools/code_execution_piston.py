@@ -206,12 +206,6 @@ class CodeExecutionPiston(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for Piston code execution."""
         return """
-Run code in a remote Piston sandbox when you need broader language support than the local constrained Python tool provides.
-
-This tool is not part of the normal default tool surface.
-
-Important notes:
-- use named arguments
-- pass `language` or `language@version`
-- optional `stdin` is supported
+Full documentation:
+- `__virtual_docs__/tools/code_execution_piston.md`
 """

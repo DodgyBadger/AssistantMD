@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from core.authoring.contracts import (
     AssembleContextResult,
     AuthoringHost,
-    GenerationResult,
     LatestMessage,
     MarkdownCodeBlock,
     MarkdownHeading,
@@ -163,7 +162,6 @@ class WorkflowAuthoringHost(AuthoringHost):
             RetrieveResult,
             ScriptToolResult,
             PendingFilesResult,
-            GenerationResult,
             AssembleContextResult,
             LatestMessage,
             HistoryMessage,

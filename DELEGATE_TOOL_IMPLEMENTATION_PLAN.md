@@ -4,7 +4,7 @@
 
 Add a first-class `delegate` tool that lets the chat agent launch a bounded child agent for multi-step work, and expose the same callable directly to Monty scripts through the direct-tool bridge.
 
-If validation shows this is stable, authored scripts should move from `generate(...)` to `delegate(...)` for model reasoning. `generate(...)` can then be removed from the preferred script surface, and eventually removed entirely before this branch merges.
+Authored scripts now use `delegate(...)` for model reasoning. The old `generate(...)` helper has been removed from the authored script surface; the underlying authoring cache system remains for non-model cache use and for a future delegate caching contract.
 
 The child agent should work like a normal delegated agent: the caller gives it a goal, relevant paths or URLs, and the tools it may use. `delegate` is not a payload-transport primitive and should not expose Python-only objects such as `RetrievedItem` in its LLM-facing schema.
 
@@ -74,7 +74,7 @@ Because Monty now exposes configured tools directly, scripts get `await delegate
 - Source access is agentic: pass paths, URLs, or inline text in the prompt and grant the child agent the tools it needs.
 - Local markdown/images use the same multimodal path as chat when the child calls `file_ops_safe(read)`.
 - Online image fetching is out of scope until a dedicated HTTP/image fetch tool exists.
-- `generate(...)` remains during the first implementation only as a compatibility baseline and comparison target.
+- `generate(...)` is removed from the authored script surface.
 
 ## Proposed API
 
@@ -90,7 +90,7 @@ result = await delegate(
 
 Initial `options` keys:
 
-- `thinking`: same semantics as `generate`
+- `thinking`: override child-agent thinking for this call
 
 Child tool-call and timeout limits are internal guardrails defined in `core.constants`, not LLM-facing options.
 
@@ -121,13 +121,12 @@ Child tool-call and timeout limits are internal guardrails defined in `core.cons
 
 4. Update Monty docs and tool docs.
    - Teach `delegate(...)` as the preferred model-reasoning primitive in scripts.
-   - Keep `generate(...)` documented only as temporary compatibility during validation, or move it to an internal/deprecated section.
 
 5. Migrate authored scripts and seed templates.
    - Replace `generate(...)` calls with `delegate(...)` where the script asks the model to reason over content.
    - Keep direct file/tool calls for deterministic retrieval and writes.
 
-6. Remove or de-register `generate(...)` if validation is strong.
+6. Remove `generate(...)`.
    - Remove from built-in helper registry.
    - Remove stubs and preferred docs.
    - Delete helper only after all scenarios and seed templates stop using it.
@@ -238,18 +237,16 @@ python -m py_compile \
 - Confusing transcript persistence if child messages leak into parent chat history.
 - Context-template recursion if delegate accidentally uses normal chat execution.
 - Tool-result cache ownership may need a child run/session key.
+- Removing `generate(...)` removed the previous script-level model-call cache interface; the underlying cache system remains.
 - `delegate` may be too powerful for default chat visibility; settings defaults need care.
-- Removing `generate(...)` too early could break templates before the replacement contract is fully validated.
+- Delegate-level caching still needs a contract if scripted model-call memoization is required.
 
-## Decision Gate For Removing `generate`
+## Follow-Up For Delegate Caching
 
-Remove `generate(...)` from the authored script surface only after:
+`generate(...)` has been removed from the authored script surface. Before adding model-call memoization back, choose a delegate caching contract:
 
-- `delegate` passes text, image-path, markdown-with-images, child-tool, and bounds scenarios.
-- All seed templates and validation authoring snippets are migrated.
-- The authoring LLM docs clearly teach `delegate` for model reasoning.
-- There is no remaining preferred doc path that recommends `generate`.
-- Maintainers agree that a single-agent-run primitive is acceptable for script model calls.
+- A replacement caching contract is chosen for scripted model inference. Current leaning: add cache support to `delegate` so the same mechanism is available in authored scripts and chat, but this still needs design discussion.
+- The cache system itself remains in place (`core/authoring/cache.py`) and is still used for tool overflow/cache artifacts.
 
 ## Next Phase
 
@@ -266,13 +263,14 @@ Move to feature development:
 ### What was built
 
 - `core/tools/delegate.py` — `DelegateTool(BaseTool)` registered in `system/settings.yaml` and `core/settings/settings.template.yaml`.
-- Shared helpers extracted to avoid divergent code paths: `build_input_file_data` in `runtime_common.py`, `_THINKING_UNSET` sentinel and `resolve_effective_thinking` in `execution_prep.py`. `generate.py` imports from these shared locations.
+- Shared helpers extracted to avoid divergent code paths: `build_input_file_data` in `runtime_common.py`, `_THINKING_UNSET` sentinel and `resolve_effective_thinking` in `execution_prep.py`.
 - Validation events: `delegate_started`, `delegate_tool_binding_resolved`, `delegate_completed`, `delegate_failed`.
 - `integration/core/delegate_tool.py` — covers chat-path tool calling (basic, forbidden stripping, child tools) and Monty direct-tool path.
 - `delegate` now enforces centralized child-run bounds from `core.constants`: `max_tool_calls` through Pydantic AI `UsageLimits` and `timeout_seconds` through an async timeout.
 - `integration/core/delegate_tool.py` now covers bounded defaults and a markdown-with-embedded-image source path delegated through child `file_ops_safe`.
 - `integration/core/authoring_contract.py` — extended to exercise delegate via the Monty direct-tool bridge.
 - `docs/tools/delegate.md` and `docs/tools/index.md` added; `docs/tools/code_execution_local.md` updated.
+- `generate(...)` removed from helper registration, stubs, contracts, and validation snippets.
 
 ### Key design decision
 
@@ -282,5 +280,4 @@ Multimodal behavior for local markdown/images is exercised through the child age
 
 ### Remaining
 
-- Step 8: migrate authored scripts and seed templates from `generate(...)` to `delegate(...)`.
-- Step 9: remove or de-register `generate(...)` once migration is validated.
+- Decide and implement the replacement caching contract for scripted model inference, likely as part of `delegate`.

@@ -22,11 +22,6 @@ class RetrieveResult:
     ref: str
     items: tuple[RetrievedItem, ...]
 
-class GenerationResult:
-    status: str
-    model: str
-    output: str
-
 class ScriptToolResult:
     name: str
     status: str
@@ -159,17 +154,6 @@ async def pending_files(
     operation: str,
     items: ScriptToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
 ) -> PendingFilesResult: ...
-
-async def generate(
-    *,
-    prompt: str,
-    inputs: RetrieveResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...] | None = None,
-    instructions: str | None = None,
-    model: str | None = None,
-    tools: list[str] | tuple[str, ...] | None = None,
-    cache: str | dict[str, Any] | None = None,
-    options: dict[str, Any] | None = None,
-) -> GenerationResult: ...
 
 async def retrieve_history(
     *,

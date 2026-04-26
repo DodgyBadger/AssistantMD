@@ -90,18 +90,8 @@ class CodeExecutionLocal(BaseTool):
     def get_instructions(cls) -> str:
         """Get usage instructions for constrained local code execution."""
         return """
-Run constrained local Python against the current chat session and current AssistantMD runtime.
-
-Use this for small Python tasks tied to chat history, cached tool artifacts, or vault files.
-
 Full documentation:
 - `__virtual_docs__/tools/code_execution_local.md`
-
-Important notes:
-- pass code with `code="..."`
-- always use named arguments
-- call enabled tools directly by name, for example `await file_ops_safe(operation="read", path="notes/example.md")`
-- this tool exposes constrained helpers such as `read_cache`, `pending_files`, `generate`, `retrieve_history`, `assemble_context`, `parse_markdown`, and `finish`
 """
 
     @staticmethod
