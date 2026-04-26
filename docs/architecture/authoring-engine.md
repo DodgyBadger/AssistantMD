@@ -26,7 +26,7 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 | Function | Purpose |
 | --- | --- |
 | `generate` | Call the LLM |
-| `call_tool` | Invoke a registered tool |
+| direct tool functions | Invoke configured tools by name, e.g. `file_ops_safe(...)` |
 | `assemble_context` | Build chat context for a session |
 | `read_cache` | Read a cached value |
 | `pending_files` | List files awaiting processing |
@@ -54,7 +54,7 @@ This separation means the sandbox itself has no host imports — all side effect
 
 The authoring subsystem has two SQLite-backed cache stores (`system/cache.db`), both managed by `core/authoring/cache.py`.
 
-**Artifact cache** — general-purpose key-value store for authoring code. Authoring files write values with `call_tool` and read them back with `read_cache`. Keyed by `owner_id` + `artifact_ref`.
+**Artifact cache** — general-purpose key-value store for authoring code. Authoring files can read cached values with `read_cache`. Keyed by `owner_id` + `artifact_ref`.
 
 **Context cache** — stores the output of individual context template sections so expensive LLM calls aren't repeated across sessions when the result hasn't changed.
 

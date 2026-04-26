@@ -22,6 +22,7 @@ class CodeExecutionLocalScenario(BaseScenario):
         self.create_file(vault, "notes/structured.md", STRUCTURED_NOTE)
         self.create_file(vault, "notes/blocked.md", "BLOCKED_CONTENT")
         self.create_file(vault, "tasks/pending-one.md", "PENDING_ONE")
+        self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
 
         await self.start_system()
 
@@ -59,36 +60,36 @@ class CodeExecutionLocalScenario(BaseScenario):
                 if case_name == "allow_file_read":
                     return {
                         "code": (
-                            'doc = await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "read", "path": "notes/blocked.md"},\n'
-                            ')\n'
+                            'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
                             'doc.output.split("\\n\\n", 1)[1] if "\\n\\n" in doc.output else doc.output'
                         )
                     }
                 if case_name == "allow_write":
                     return {
                         "code": (
-                            'await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "write", "path": "notes/derived.md", "content": "DERIVED_RESULT"},\n'
-                            ')\n'
+                            'await file_ops_safe(operation="write", path="notes/derived.md", content="DERIVED_RESULT")\n'
                             '"WRITE_OK"'
+                        )
+                    }
+                if case_name == "allow_image_input":
+                    return {
+                        "code": (
+                            'image = await file_ops_safe(operation="read", path="images/test_image.jpg")\n'
+                            'draft = await generate(\n'
+                            '    prompt="Reply with IMAGE_OK.",\n'
+                            '    inputs=image.items,\n'
+                            '    model="test",\n'
+                            ')\n'
+                            'f"items={len(image.items)}; has_content={image.content is not None}; {draft.output}"'
                         )
                     }
                 if case_name == "full_surface":
                     return {
                         "code": (
                             'cached = await read_cache(ref="tool/tavily_extract/call_seeded_full_surface")\n'
-                            'await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "read", "path": "notes/structured.md"},\n'
-                            ')\n'
+                            'await file_ops_safe(operation="read", path="notes/structured.md")\n'
                             f'parsed = await parse_markdown(value={STRUCTURED_NOTE!r})\n'
-                            'listed = await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "list", "path": "tasks"},\n'
-                            ')\n'
+                            'listed = await file_ops_safe(operation="list", path="tasks")\n'
                             'pending = await pending_files(\n'
                             '    operation="get",\n'
                             '    items=listed,\n'
@@ -109,10 +110,7 @@ class CodeExecutionLocalScenario(BaseScenario):
                             '    instructions="Return one short deterministic line.",\n'
                             '    model="test",\n'
                             ')\n'
-                            'await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "write", "path": "notes/full-surface.md", "content": draft.output},\n'
-                            ')\n'
+                            'await file_ops_safe(operation="write", path="notes/full-surface.md", content=draft.output)\n'
                             'await finish(status="completed", reason="full-surface-ok")\n'
                             '"UNREACHABLE"'
                         )
@@ -260,6 +258,46 @@ class CodeExecutionLocalScenario(BaseScenario):
                 "Allowed cache write should return the snippet result",
             )
 
+            current_case["name"] = "allow_image_input"
+            checkpoint = self.event_checkpoint()
+            allow_image_input = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Read an image through code_execution_local and pass it to generate.",
+                    "session_id": "code_execution_local_allow_image_input",
+                    "tools": ["code_execution_local", "file_ops_safe"],
+                    "model": "test",
+                },
+            )
+            assert allow_image_input.status_code == 200, "Image input composition should succeed"
+            allow_image_input_text = allow_image_input.json()["response"]
+            self.soft_assert(
+                "failed:" not in allow_image_input_text.lower(),
+                "Image input composition should not return a Monty failure",
+            )
+            image_events = self.events_since(checkpoint)
+            self.assert_event_contains(
+                image_events,
+                name="authoring_direct_tool_completed",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_allow_image_input",
+                    "tool": "file_ops_safe",
+                    "item_count": 1,
+                    "has_content": True,
+                },
+            )
+            self.assert_event_contains(
+                image_events,
+                name="authoring_generate_started",
+                expected={
+                    "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_allow_image_input",
+                    "input_count": 1,
+                    "attached_image_count": 1,
+                },
+            )
+
             current_case["name"] = "full_surface"
             checkpoint = self.event_checkpoint()
             full_surface = self.call_api(
@@ -319,7 +357,7 @@ class CodeExecutionLocalScenario(BaseScenario):
             )
             self.assert_event_contains(
                 full_surface_events,
-                name="authoring_call_tool_completed",
+                name="authoring_direct_tool_completed",
                 expected={
                     "workflow_id": "CodeExecutionLocalVault/chat/code_execution_local_full_surface",
                     "tool": "file_ops_safe",

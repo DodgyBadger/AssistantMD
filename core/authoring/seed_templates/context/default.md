@@ -8,10 +8,7 @@ description: Default template for regular chat. Passes full history. Loads soul.
 history_result = await retrieve_history(scope="session", limit="all")
 history = list(history_result.items)
 
-soul_result = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "read", "path": "AssistantMD/soul.md"},
-)
+soul_result = await file_ops_safe(operation="read", path="AssistantMD/soul.md")
 soul_instructions = (
     soul_result.output.strip()
     if soul_result.metadata.get("status") == "completed"
@@ -25,9 +22,10 @@ soul_instructions = (
     )
 )
 
-skills_result = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "frontmatter", "path": "AssistantMD/Skills", "keys": "name,description"},
+skills_result = await file_ops_safe(
+    operation="frontmatter",
+    path="AssistantMD/Skills",
+    keys="name,description",
 )
 skills_lines = []
 if skills_result.metadata.get("status") == "completed":

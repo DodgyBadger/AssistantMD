@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,7 +14,7 @@ from pydantic_ai.messages import ModelMessage, ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
-from core.authoring.contracts import ContextMessage, RetrieveResult, RetrievedItem
+from core.authoring.contracts import ScriptToolResult, ContextMessage, RetrieveResult, RetrievedItem
 from core.utils.messages import extract_role_and_text, run_slice
 from core.logger import UnifiedLogger
 from core.runtime.buffers import BufferStore
@@ -236,18 +237,243 @@ async def invoke_bound_tool(
     return result
 
 
-def normalize_tool_result(result: Any) -> tuple[str, dict[str, Any]]:
+def normalize_tool_result(
+    tool_name: str,
+    result: Any,
+    *,
+    vault_path: str = "",
+) -> ScriptToolResult:
     if isinstance(result, ToolReturn):
         metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
         metadata["return_type"] = "tool_return"
         metadata["has_content"] = result.content is not None
-        return coerce_output_data(result.return_value), metadata
+        output = coerce_output_data(result.return_value)
+        content = result.content
+        return ScriptToolResult(
+            name=tool_name,
+            status=str(metadata.get("status") or "completed"),
+            output=output,
+            metadata=metadata,
+            content=content,
+            items=_project_tool_items(
+                tool_name=tool_name,
+                output=output,
+                metadata=metadata,
+                content=content,
+                vault_path=vault_path,
+            ),
+        )
     if isinstance(result, (dict, list, tuple)):
         try:
-            return json.dumps(result, ensure_ascii=False, indent=2), {"return_type": "json"}
+            output = json.dumps(result, ensure_ascii=False, indent=2)
+            metadata = {"return_type": "json"}
+            return ScriptToolResult(
+                name=tool_name,
+                status="completed",
+                output=output,
+                metadata=metadata,
+                items=_project_tool_items(
+                    tool_name=tool_name,
+                    output=output,
+                    metadata=metadata,
+                    content=None,
+                    vault_path=vault_path,
+                ),
+            )
         except (TypeError, ValueError):
             pass
-    return coerce_output_data(result), {"return_type": "text"}
+    output = coerce_output_data(result)
+    metadata = {"return_type": "text"}
+    return ScriptToolResult(
+        name=tool_name,
+        status="completed",
+        output=output,
+        metadata=metadata,
+        items=_project_tool_items(
+            tool_name=tool_name,
+            output=output,
+            metadata=metadata,
+            content=None,
+            vault_path=vault_path,
+        ),
+    )
+
+
+def _project_tool_items(
+    *,
+    tool_name: str,
+    output: str,
+    metadata: dict[str, Any],
+    content: Any | None,
+    vault_path: str,
+) -> tuple[RetrievedItem, ...]:
+    if tool_name == "file_ops_safe":
+        return _project_file_ops_safe_items(
+            output=output,
+            metadata=metadata,
+            content=content,
+            vault_path=vault_path,
+        )
+    if tool_name in {
+        "browser",
+        "web_search_duckduckgo",
+        "web_search_tavily",
+        "tavily_extract",
+        "tavily_crawl",
+        "internal_api",
+    } and output.strip():
+        return (
+            RetrievedItem(
+                ref=str(metadata.get("url") or metadata.get("endpoint") or tool_name),
+                content=output,
+                exists=True,
+                metadata={"source_tool": tool_name, **metadata},
+            ),
+        )
+    return ()
+
+
+def _project_file_ops_safe_items(
+    *,
+    output: str,
+    metadata: dict[str, Any],
+    content: Any | None,
+    vault_path: str,
+) -> tuple[RetrievedItem, ...]:
+    status = str(metadata.get("status") or "").strip().lower()
+    operation = str(metadata.get("operation") or "").strip().lower()
+    if status != "completed":
+        return ()
+
+    if operation == "read":
+        path = _file_ops_path(metadata)
+        if not path:
+            return ()
+        media_type = str(metadata.get("media_type") or "").strip()
+        media_mode = str(metadata.get("media_mode") or "").strip()
+        item_metadata = {
+            **metadata,
+            "source_tool": "file_ops_safe",
+            "source_path": path,
+            "filepath": str(metadata.get("filepath") or path),
+        }
+        if media_type.startswith("image/") or media_mode == "image":
+            return (
+                RetrievedItem(
+                    ref=path,
+                    content="",
+                    exists=True,
+                    metadata=item_metadata,
+                ),
+            )
+        return (
+            RetrievedItem(
+                ref=path,
+                content=_file_ops_read_content(
+                    path=path,
+                    output=output,
+                    content=content,
+                    vault_path=vault_path,
+                ),
+                exists=True,
+                metadata=item_metadata,
+            ),
+        )
+
+    if operation in {"list", "search", "frontmatter", "head"}:
+        return tuple(
+            RetrievedItem(
+                ref=path,
+                content="",
+                exists=True,
+                metadata={
+                    "source_tool": "file_ops_safe",
+                    "source_path": path,
+                    "filepath": path,
+                    **metadata,
+                },
+            )
+            for path in _file_ops_paths(metadata=metadata, output=output)
+        )
+
+    return ()
+
+
+def _file_ops_path(metadata: dict[str, Any]) -> str:
+    for key in ("source_path", "filepath", "path"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _file_ops_paths(*, metadata: dict[str, Any], output: str) -> tuple[str, ...]:
+    files = metadata.get("files")
+    if isinstance(files, list):
+        values = tuple(str(item).strip() for item in files if str(item).strip())
+        if values:
+            return values
+
+    items = metadata.get("items")
+    if isinstance(items, list):
+        paths: list[str] = []
+        for item in items:
+            if isinstance(item, dict):
+                candidate = str(item.get("path") or item.get("filepath") or "").strip()
+                if candidate:
+                    paths.append(candidate)
+        if paths:
+            return tuple(paths)
+
+    matches = metadata.get("matches")
+    if isinstance(matches, list):
+        paths = []
+        for item in matches:
+            candidate = str(item).split(":", 1)[0].strip()
+            if candidate:
+                paths.append(candidate)
+        if paths:
+            return tuple(dict.fromkeys(paths))
+
+    parsed: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line.startswith("📄 "):
+            candidate = line.partition(" ")[2].strip()
+        elif ":" in line and not line.startswith(("Found ", "No matches", "Search error")):
+            candidate = line.split(":", 1)[0].strip()
+        else:
+            continue
+        if candidate:
+            parsed.append(candidate)
+    return tuple(dict.fromkeys(parsed))
+
+
+def _file_ops_read_content(
+    *,
+    path: str,
+    output: str,
+    content: Any | None,
+    vault_path: str,
+) -> str:
+    if isinstance(content, str):
+        return content
+    if vault_path:
+        try:
+            candidate = Path(path)
+            full_path = candidate if candidate.is_absolute() else Path(vault_path) / candidate
+            resolved_vault = Path(vault_path).resolve()
+            resolved_path = full_path.resolve()
+            if (
+                resolved_path == resolved_vault
+                or resolved_vault in resolved_path.parents
+            ) and resolved_path.is_file():
+                return resolved_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, ValueError):
+            pass
+    if "\n\n" in output:
+        return output.split("\n\n", 1)[1]
+    return output
 
 
 def normalize_retrieved_items_input(

@@ -9,9 +9,9 @@ from core.authoring.contracts import (
     AuthoringCapabilityCall,
     AuthoringCapabilityDefinition,
     AuthoringExecutionContext,
-    CallToolResult,
     PendingFilesResult,
     RetrievedItem,
+    ScriptToolResult,
 )
 from core.authoring.helpers.common import build_capability
 from core.logger import UnifiedLogger
@@ -93,7 +93,7 @@ def _parse_call(
 
 
 def _normalize_pending_items_input(value: Any) -> tuple[RetrievedItem, ...]:
-    if isinstance(value, CallToolResult):
+    if isinstance(value, ScriptToolResult):
         return _items_from_tool_result(value)
     if isinstance(value, RetrievedItem):
         return (value,)
@@ -113,9 +113,9 @@ def _normalize_pending_items_input(value: Any) -> tuple[RetrievedItem, ...]:
     )
 
 
-def _items_from_tool_result(result: CallToolResult) -> tuple[RetrievedItem, ...]:
+def _items_from_tool_result(result: ScriptToolResult) -> tuple[RetrievedItem, ...]:
     if result.name != "file_ops_safe":
-        raise ValueError("pending_files only accepts CallToolResult values from file_ops_safe")
+        raise ValueError("pending_files only accepts ScriptToolResult values from file_ops_safe")
     paths = _extract_paths_from_file_ops_result(result)
     return tuple(
         RetrievedItem(
@@ -128,7 +128,7 @@ def _items_from_tool_result(result: CallToolResult) -> tuple[RetrievedItem, ...]
     )
 
 
-def _extract_paths_from_file_ops_result(result: CallToolResult) -> tuple[str, ...]:
+def _extract_paths_from_file_ops_result(result: ScriptToolResult) -> tuple[str, ...]:
     metadata = dict(result.metadata or {})
     files = metadata.get("files")
     if isinstance(files, list):
@@ -242,7 +242,7 @@ def _source_path_from_item(item: RetrievedItem) -> str:
 def _contract() -> dict[str, object]:
     return {
         "signature": (
-            "pending_files(*, operation: str, items: CallToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...])"
+            "pending_files(*, operation: str, items: ScriptToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...])"
         ),
         "summary": (
             "Filter or complete workflow pending files. "
@@ -256,7 +256,7 @@ def _contract() -> dict[str, object]:
                 "description": "Operation name. Supported values: get, complete.",
             },
             "items": {
-                "type": "CallToolResult | RetrievedItem | list | tuple",
+                "type": "ScriptToolResult | RetrievedItem | list | tuple",
                 "required": True,
                 "description": "A file_ops_safe result set or explicit pending file items to filter or complete.",
             },
@@ -270,10 +270,7 @@ def _contract() -> dict[str, object]:
         "examples": [
             {
                 "code": (
-                    'listed = await call_tool(\n'
-                    '    name="file_ops_safe",\n'
-                    '    arguments={"operation": "list", "target": "tasks"},\n'
-                    ')\n'
+                    'listed = await file_ops_safe(operation="list", path="tasks")\n'
                     'pending = await pending_files(operation="get", items=listed)\n'
                     "selected = pending.items[:3]\n"
                     "# ...process selected...\n"

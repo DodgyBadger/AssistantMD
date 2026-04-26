@@ -7,15 +7,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from core.authoring.contracts import (
+    AssembleContextResult,
     AuthoringHost,
+    GenerationResult,
     LatestMessage,
     MarkdownCodeBlock,
     MarkdownHeading,
     HistoryMessage,
     MarkdownImage,
     MarkdownSection,
+    PendingFilesResult,
     ParsedMarkdown,
+    RetrievedItem,
     RetrievedHistoryResult,
+    RetrieveResult,
+    ScriptToolResult,
     ToolExchange,
 )
 from core.runtime.buffers import BufferStore
@@ -153,6 +159,12 @@ class WorkflowAuthoringHost(AuthoringHost):
         """Return dataclass types Monty should expose for reserved globals."""
         return (
             MontyDateTokens,
+            RetrievedItem,
+            RetrieveResult,
+            ScriptToolResult,
+            PendingFilesResult,
+            GenerationResult,
+            AssembleContextResult,
             LatestMessage,
             HistoryMessage,
             MarkdownHeading,

@@ -243,10 +243,7 @@ description: Quick job for persistence testing
 ## Run
 
 ```python
-await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "write", "path": f"results/{date.today()}.md", "content": "ok"},
-)
+await file_ops_safe(operation="write", path=f"results/{date.today()}.md", content="ok")
 await finish(status="completed", reason="quick-job-done")
 ```
 """
@@ -261,10 +258,7 @@ description: Second quick job for subfolder testing
 ## Run
 
 ```python
-await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "write", "path": f"results/{date.today()}.md", "content": "ok"},
-)
+await file_ops_safe(operation="write", path=f"results/{date.today()}.md", content="ok")
 await finish(status="completed", reason="quick-job-2-done")
 ```
 """
@@ -279,10 +273,7 @@ description: Updated schedule for persistence testing
 ## Run
 
 ```python
-await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "write", "path": f"results/{date.today()}.md", "content": "ok"},
-)
+await file_ops_safe(operation="write", path=f"results/{date.today()}.md", content="ok")
 await finish(status="completed", reason="quick-job-updated-done")
 ```
 """

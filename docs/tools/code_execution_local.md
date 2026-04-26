@@ -30,7 +30,7 @@ AssistantMD examples and validation scenarios stay within this subset:
 - f-strings and type hints where they help readability
 - common imports used by AssistantMD examples, including `json`, `sys`, `typing`, `asyncio`, and `pathlib`
 - host-provided dataclasses and helper result objects, such as `RetrievedHistoryResult`, `HistoryMessage`, `ToolExchange`, and `LatestMessage`
-- external function calls through AssistantMD helpers, such as `call_tool(...)`, `generate(...)`, and `assemble_context(...)`
+- external function calls through AssistantMD helpers and direct tools, such as `file_ops_safe(...)`, `generate(...)`, and `assemble_context(...)`
 - pre-execution type checking with Monty's bundled `ty` integration
 
 ### Authoring Guardrails
@@ -58,7 +58,7 @@ Scope comes from the current runtime context:
 
 Available helpers and reserved inputs:
 
-- `call_tool(...)`: invoke one already-enabled chat tool from inside the script
+- direct tool functions such as `file_ops_safe(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
 - `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
@@ -92,10 +92,12 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - thinking is a separate option, not part of the model alias string
 - when `options["thinking"]` is omitted, `generate(...)` uses the current global default thinking policy from settings
 
-### `call_tool`
+### Direct Tool Calls
 
-- in chat, can only call tools already enabled for the current run
+- call tools by their configured names, for example `await file_ops_safe(operation="read", path="notes/example.md")`
 - `code_execution_local` itself is excluded to prevent recursive self-invocation
+- direct tool results expose `output`, `metadata`, `content`, and `items`
+- pass `result.items` to `generate(inputs=...)` when composing file or retrieval results into a model call
 - prefer branching on `result.metadata` when the tool returns structured status
 
 ### `assemble_context`
@@ -164,10 +166,7 @@ history_result = await retrieve_history(scope="session", limit="all")
 context_messages = []
 
 if latest_message.exists and "trigonometry" in latest_message.text.lower():
-    guide = await call_tool(
-        name="file_ops_safe",
-        arguments={"operation": "read", "path": "Projects/trig/study-guide.md"},
-    )
+    guide = await file_ops_safe(operation="read", path="Projects/trig/study-guide.md")
     if guide.metadata.get("status") == "completed":
         context_messages.append({"role": "system", "content": guide.output})
 
@@ -188,10 +187,7 @@ code_execution_local(
 # Read from cache if the extraction was already stored
 artifact = await read_cache(ref="tool/tavily_extract/call_abc123")
 if not artifact.exists:
-    result = await call_tool(
-        name="tavily_extract",
-        arguments={"urls": ["https://example.com/article"]},
-    )
+    result = await tavily_extract(urls=["https://example.com/article"])
     parsed = await parse_markdown(value=result.output)
 else:
     parsed = await parse_markdown(value=artifact.content)
@@ -222,10 +218,7 @@ processed items complete. Batches to a small slice to stay within a single execu
 ```python
 code_execution_local(
     code="""
-listed = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "list", "target": "inbox"},
-)
+listed = await file_ops_safe(operation="list", path="inbox")
 pending = await pending_files(
     operation="get",
     items=listed,
@@ -237,10 +230,7 @@ if not pending.items:
 results = []
 selected = pending.items[:5]
 for item in selected:
-    doc = await call_tool(
-        name="file_ops_safe",
-        arguments={"operation": "read", "target": item.ref},
-    )
+    doc = await file_ops_safe(operation="read", path=item.ref)
     parsed = await parse_markdown(value=doc.output)
     results.append({
         "ref": item.ref,
@@ -262,7 +252,7 @@ results
 
 - Helpers are injected for you - you do not need to import anything.
 - Standard-library imports such as `import json` are fine when needed.
-- file, memory, and web access should generally go through `call_tool(...)`
+- file, memory, and web access should generally go through direct tool calls or dedicated helpers
 - Always return a value or `await finish(...)` — do not rely on side effects alone
 - cached oversized tool results are available through `read_cache(ref=...)`
 - If a cached tool result already exists, use `await read_cache(ref="...")` instead of re-running the source tool

@@ -69,7 +69,7 @@ file_ops_safe(operation="head", path="notes/long-file.md", limit=30)
 
 Returns human-readable output plus structured metadata.
 
-When used through `call_tool(...)`, use `result.metadata` for control flow:
+In scripted Monty flows, direct calls return an object with `output`, `metadata`, `content`, and `items`. Use `result.metadata` for control flow:
 
 - `status`: `completed`, `not_found`, `already_exists`, `invalid_target`, `unsupported`, or `error`
 - `operation`: resolved operation name

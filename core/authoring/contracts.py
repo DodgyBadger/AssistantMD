@@ -12,7 +12,6 @@ BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
         "read_cache",
         "pending_files",
         "generate",
-        "call_tool",
         "retrieve_history",
         "assemble_context",
         "parse_markdown",
@@ -247,13 +246,15 @@ class GenerationResult:
 
 
 @dataclass(frozen=True)
-class CallToolResult:
-    """Envelope for call_tool(...) results."""
+class ScriptToolResult:
+    """Envelope for script-facing direct tool results."""
 
     name: str
     status: str
     output: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    content: Any | None = None
+    items: tuple[RetrievedItem, ...] = ()
 
 
 @dataclass(frozen=True)

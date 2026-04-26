@@ -46,10 +46,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 if call_index["value"] == 2:
                     return {
                         "code": (
-                            'artifact = await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "read", "path": "notes/repeated.md"},\n'
-                            ')\n'
+                            'artifact = await file_ops_safe(operation="read", path="notes/repeated.md")\n'
                             'text = artifact.output.split("\\n\\n", 1)[1] if "\\n\\n" in artifact.output else artifact.output\n'
                             "text[:80]"
                         )
@@ -57,10 +54,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 if call_index["value"] == 3:
                     return {
                         "code": (
-                            'artifact = await call_tool(\n'
-                            '    name="file_ops_safe",\n'
-                            '    arguments={"operation": "read", "path": "notes/repeated.md"},\n'
-                            ')\n'
+                            'artifact = await file_ops_safe(operation="read", path="notes/repeated.md")\n'
                             'text = artifact.output.split("\\n\\n", 1)[1] if "\\n\\n" in artifact.output else artifact.output\n'
                             'str(text.count("OVERFLOW_SEGMENT"))'
                         )

@@ -58,7 +58,7 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="authoring_call_tool_started",
+            name="authoring_direct_tool_started",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
                 "tool": "file_ops_safe",
@@ -66,7 +66,7 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="authoring_call_tool_completed",
+            name="authoring_direct_tool_completed",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
                 "tool": "file_ops_safe",
@@ -279,35 +279,17 @@ def _strip_read_output(value):
 
 
 async def _write_replace(path, content):
-    existing = await call_tool(
-        name="file_ops_safe",
-        arguments={"operation": "read", "path": path},
-    )
+    existing = await file_ops_safe(operation="read", path=path)
     if existing.metadata.get("status") == "completed":
-        await call_tool(
-            name="file_ops_unsafe",
-            arguments={"operation": "truncate", "path": path, "confirm_path": path},
-        )
-        await call_tool(
-            name="file_ops_safe",
-            arguments={"operation": "append", "path": path, "content": content},
-        )
+        await file_ops_unsafe(operation="truncate", path=path, confirm_path=path)
+        await file_ops_safe(operation="append", path=path, content=content)
     else:
-        await call_tool(
-            name="file_ops_safe",
-            arguments={"operation": "write", "path": path, "content": content},
-        )
+        await file_ops_safe(operation="write", path=path, content=content)
 
 
-source = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "read", "path": "notes/seed.md"},
-)
+source = await file_ops_safe(operation="read", path="notes/seed.md")
 source_text = _strip_read_output(source.output)
-listing = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "list", "path": "notes"},
-)
+listing = await file_ops_safe(operation="list", path="notes")
 history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="Keep the response concise.",
@@ -317,15 +299,9 @@ assembled = await assemble_context(
     ],
     context_messages=[{"role": "system", "content": "Validation context"}],
 )
-structured = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "read", "path": "notes/structured.md"},
-)
+structured = await file_ops_safe(operation="read", path="notes/structured.md")
 parsed = await parse_markdown(value=STRUCTURED_NOTE_PLACEHOLDER)
-task_listing = await call_tool(
-    name="file_ops_safe",
-    arguments={"operation": "list", "path": "tasks"},
-)
+task_listing = await file_ops_safe(operation="list", path="tasks")
 pending = await pending_files(operation="get", items=task_listing)
 await pending_files(operation="complete", items=(pending.items[0],))
 
@@ -376,24 +352,12 @@ description: Deterministic generate cache semantics workflow
 
 ```python
 async def _write_replace(path, content):
-    existing = await call_tool(
-        name="file_ops_safe",
-        arguments={"operation": "read", "path": path},
-    )
+    existing = await file_ops_safe(operation="read", path=path)
     if existing.metadata.get("status") == "completed":
-        await call_tool(
-            name="file_ops_unsafe",
-            arguments={"operation": "truncate", "path": path, "confirm_path": path},
-        )
-        await call_tool(
-            name="file_ops_safe",
-            arguments={"operation": "append", "path": path, "content": content},
-        )
+        await file_ops_unsafe(operation="truncate", path=path, confirm_path=path)
+        await file_ops_safe(operation="append", path=path, content=content)
     else:
-        await call_tool(
-            name="file_ops_safe",
-            arguments={"operation": "write", "path": path, "content": content},
-        )
+        await file_ops_safe(operation="write", path=path, content=content)
 
 draft = await generate(
     prompt="Deterministic prompt",

@@ -27,11 +27,13 @@ class GenerationResult:
     model: str
     output: str
 
-class CallToolResult:
+class ScriptToolResult:
     name: str
     status: str
     output: str
     metadata: dict[str, Any]
+    content: Any | None
+    items: tuple[RetrievedItem, ...]
 
 class PendingFilesResult:
     operation: str
@@ -155,7 +157,7 @@ async def read_cache(
 async def pending_files(
     *,
     operation: str,
-    items: CallToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
+    items: ScriptToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
 ) -> PendingFilesResult: ...
 
 async def generate(
@@ -168,13 +170,6 @@ async def generate(
     cache: str | dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
 ) -> GenerationResult: ...
-
-async def call_tool(
-    *,
-    name: str,
-    arguments: dict[str, Any] | None = None,
-    options: dict[str, Any] | None = None,
-) -> CallToolResult: ...
 
 async def retrieve_history(
     *,
