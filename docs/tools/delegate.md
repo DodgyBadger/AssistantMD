@@ -62,7 +62,7 @@ Returns the child agent's final text response.
 In scripted Monty flows, direct calls return an object with `output`, `metadata`, `content`, and `items`:
 
 - `output`: child agent final text response
-- `metadata`: run metadata including `model`, `tool_names`, `thinking`, and `output_chars`
+- `metadata`: run metadata including `model`, `tool_names`, `thinking`, `output_chars`, and `audit`
 - `content`: `None`
 - `items`: empty; `delegate` does not project source artifacts
 
@@ -70,7 +70,10 @@ In scripted Monty flows, direct calls return an object with `output`, `metadata`
 result = await delegate(prompt="...", tools=["file_ops_safe"])
 summary = result.output
 model_used = result.metadata["model"]
+tool_calls = result.metadata["audit"]["tool_calls"]
 ```
+
+The `audit` metadata is a compact child-run summary for debugging and validation. It includes message counts, child tool-call counts, child tool-error counts, and truncated child tool-call entries with tool name, arguments, outcome, and return preview. It does not include raw multimodal payloads.
 
 ## Notes
 

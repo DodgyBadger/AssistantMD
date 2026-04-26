@@ -1,11 +1,20 @@
 """Delegate tool - run a bounded child agent and return its output."""
 
 import asyncio
+import json
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import ToolReturn
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturn,
+    ToolReturnPart,
+)
 from pydantic_ai.tools import Tool
 from pydantic_ai.usage import UsageLimits
 
@@ -15,7 +24,13 @@ from core.authoring.shared.execution_prep import (
     resolve_effective_thinking,
 )
 from core.authoring.shared.tool_binding import resolve_tool_binding
-from core.constants import DELEGATE_DEFAULT_MAX_TOOL_CALLS, DELEGATE_DEFAULT_TIMEOUT_SECONDS
+from core.constants import (
+    DELEGATE_AUDIT_MAX_ARGUMENT_CHARS,
+    DELEGATE_AUDIT_MAX_RESULT_CHARS,
+    DELEGATE_AUDIT_MAX_TOOL_CALLS,
+    DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+    DELEGATE_DEFAULT_TIMEOUT_SECONDS,
+)
 from core.llm.agents import create_agent
 from core.llm.capabilities.assistant_tools import build_assistant_tools_capabilities
 from core.llm.model_factory import build_model_instance
@@ -128,6 +143,7 @@ class DelegateTool(BaseTool):
                 result = await asyncio.wait_for(run_coro, timeout=timeout_seconds)
                 output = result.output
                 text = coerce_output_data(output)
+                audit = _build_child_run_audit(result.all_messages())
             except UsageLimitExceeded as exc:
                 return _failed_delegate_return(
                     session_id=session_id,
@@ -183,6 +199,7 @@ class DelegateTool(BaseTool):
                 "output_chars": len(text),
                 "max_tool_calls": max_tool_calls,
                 "timeout_seconds": timeout_seconds,
+                "audit": audit,
             }
             if stripped:
                 metadata["stripped_tools"] = list(stripped)
@@ -194,6 +211,8 @@ class DelegateTool(BaseTool):
                     "model": model_value or "default",
                     "tool_names": list(safe_tool_names),
                     "output_chars": len(text),
+                    "child_tool_call_count": audit["tool_call_count"],
+                    "child_tool_error_count": audit["tool_error_count"],
                     "max_tool_calls": max_tool_calls,
                     "timeout_seconds": timeout_seconds,
                 },
@@ -237,6 +256,7 @@ def _failed_delegate_return(
         "max_tool_calls": max_tool_calls,
         "timeout_seconds": timeout_seconds,
         "error_type": error_type,
+        "audit": _empty_child_run_audit(),
     }
     if stripped_tools:
         metadata["stripped_tools"] = list(stripped_tools)
@@ -254,6 +274,119 @@ def _failed_delegate_return(
         },
     )
     return ToolReturn(return_value=message, content=None, metadata=metadata)
+
+
+def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:
+    tool_calls_by_id: dict[str, dict[str, Any]] = {}
+    total_tool_call_count = 0
+    tool_calls: list[dict[str, Any]] = []
+    response_count = 0
+    request_count = 0
+
+    for message in messages:
+        if isinstance(message, ModelRequest):
+            request_count += 1
+        elif isinstance(message, ModelResponse):
+            response_count += 1
+
+        for part in getattr(message, "parts", ()) or ():
+            if isinstance(part, ToolCallPart):
+                total_tool_call_count += 1
+                call = {
+                    "tool": part.tool_name,
+                    "call_id": part.tool_call_id,
+                    "arguments": _compact_value(
+                        part.args,
+                        max_chars=DELEGATE_AUDIT_MAX_ARGUMENT_CHARS,
+                    ),
+                }
+                if len(tool_calls) < DELEGATE_AUDIT_MAX_TOOL_CALLS:
+                    tool_calls.append(call)
+                    tool_calls_by_id[part.tool_call_id] = call
+            elif isinstance(part, ToolReturnPart):
+                call = tool_calls_by_id.get(part.tool_call_id)
+                if call is None:
+                    continue
+                call["outcome"] = part.outcome
+                call["result"] = _compact_value(
+                    part.content,
+                    max_chars=DELEGATE_AUDIT_MAX_RESULT_CHARS,
+                )
+                if isinstance(part.metadata, dict):
+                    call["metadata"] = _compact_mapping(part.metadata)
+
+    tool_error_count = sum(
+        1
+        for call in tool_calls
+        if call.get("outcome") in {"failed", "denied"}
+        or _looks_like_tool_error(str(call.get("result") or ""))
+    )
+    return {
+        "message_count": len(messages),
+        "request_count": request_count,
+        "response_count": response_count,
+        "tool_call_count": total_tool_call_count,
+        "tool_error_count": tool_error_count,
+        "tool_calls_truncated": total_tool_call_count > len(tool_calls),
+        "tool_calls": tool_calls,
+    }
+
+
+def _empty_child_run_audit() -> dict[str, Any]:
+    return {
+        "message_count": 0,
+        "request_count": 0,
+        "response_count": 0,
+        "tool_call_count": 0,
+        "tool_error_count": 0,
+        "tool_calls_truncated": False,
+        "tool_calls": [],
+    }
+
+
+def _compact_mapping(value: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in (
+        "status",
+        "operation",
+        "path",
+        "media_type",
+        "media_mode",
+        "size_bytes",
+        "error_type",
+    ):
+        if key in value:
+            compact[key] = _compact_value(value[key], max_chars=200)
+    return compact
+
+
+def _compact_value(value: Any, *, max_chars: int) -> str:
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...[truncated {len(text) - max_chars} chars]"
+
+
+def _looks_like_tool_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "error",
+            "cannot ",
+            "not found",
+            "unsupported",
+            "permission denied",
+            "exceeded",
+            "timeout",
+        )
+    )
 
 
 def _parse_tool_names(tools: Any) -> tuple[str, ...]:

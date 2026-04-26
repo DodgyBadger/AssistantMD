@@ -341,6 +341,58 @@ class DelegateToolScenario(BaseScenario):
                 "Delegate with tools output should be non-empty",
             )
 
+        # --- Direct tool result exposes child-run audit metadata for debugging ---
+        from core.authoring.helpers.runtime_common import (
+            invoke_bound_tool,
+            normalize_tool_result,
+        )
+        from core.authoring.shared.tool_binding import resolve_tool_binding
+
+        audit_binding = resolve_tool_binding(["delegate"], vault_path=str(vault))
+        audit_raw_result = await invoke_bound_tool(
+            audit_binding.tool_functions[0],
+            tool_name="delegate",
+            arguments={
+                "prompt": "Read notes/content.md and return its text.",
+                "tools": ["file_ops_safe"],
+                "model": "test",
+            },
+            run_buffers={},
+            session_buffers={},
+            session_id="delegate_audit_metadata",
+            vault_name=vault.name,
+        )
+        audit_result = normalize_tool_result(
+            "delegate",
+            audit_raw_result,
+            vault_path=str(vault),
+        )
+        audit = audit_result.metadata.get("audit")
+        self.soft_assert(
+            isinstance(audit, dict),
+            "Delegate direct tool metadata should include child-run audit details",
+        )
+        if isinstance(audit, dict):
+            self.soft_assert(
+                audit.get("tool_call_count", 0) >= 1,
+                "Delegate audit should count child tool calls",
+            )
+            tool_calls = audit.get("tool_calls")
+            self.soft_assert(
+                isinstance(tool_calls, list) and bool(tool_calls),
+                "Delegate audit should include compact child tool call entries",
+            )
+            if isinstance(tool_calls, list) and tool_calls:
+                self.soft_assert_equal(
+                    tool_calls[0].get("tool"),
+                    "file_ops_safe",
+                    "Delegate audit should record child tool names",
+                )
+                self.soft_assert(
+                    "result" in tool_calls[0],
+                    "Delegate audit should include compact child tool return values",
+                )
+
         # --- Monty direct tool: delegate a markdown-with-image source path ---
         self.create_file(
             vault,

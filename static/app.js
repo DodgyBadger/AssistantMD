@@ -799,7 +799,6 @@ function populateSelectors() {
         'memory_ops',
         'file_ops_safe',
         'file_ops_unsafe',
-        'documentation_access',
         'tavily_extract',
         'tavily_crawl',
         'code_execution'

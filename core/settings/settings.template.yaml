@@ -22,7 +22,6 @@ settings:
       - browser
       - file_ops_safe
       - file_ops_unsafe
-      - documentation_access
       - tavily_extract
       - tavily_crawl
       - code_execution
