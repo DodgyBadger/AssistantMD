@@ -14,8 +14,8 @@ from core.authoring.contracts import (
     RetrievedItem,
 )
 from core.authoring.helpers.common import build_capability
-from core.authoring.helpers.runtime_common import coerce_output_data, normalize_retrieved_items_input
-from core.authoring.shared.execution_prep import build_step_prompt, resolve_step_model_execution
+from core.authoring.helpers.runtime_common import coerce_output_data, normalize_retrieved_items_input, build_input_file_data
+from core.authoring.shared.execution_prep import build_step_prompt, resolve_step_model_execution, resolve_effective_thinking, _THINKING_UNSET as _STEP_THINKING_UNSET
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.authoring.cache import parse_cache_mode_value
 from core.llm.model_factory import build_model_instance
@@ -28,7 +28,7 @@ from core.settings import get_default_model_thinking
 
 
 logger = UnifiedLogger(tag="authoring-host")
-_THINKING_UNSET = object()
+_THINKING_UNSET = _STEP_THINKING_UNSET
 
 
 def build_definition() -> AuthoringCapabilityDefinition:
@@ -50,7 +50,7 @@ async def execute(
     prompt, inputs, instructions, model_value, tool_names, cache_policy, options = _parse_call(call)
     requested_thinking = _parse_generate_thinking_option(options)
     default_thinking = get_default_model_thinking()
-    resolved_thinking, thinking_source = _resolve_effective_thinking(
+    resolved_thinking, thinking_source = resolve_effective_thinking(
         requested_thinking=requested_thinking,
         default_thinking=default_thinking,
     )
@@ -62,7 +62,7 @@ async def execute(
         model_execution = resolve_step_model_execution(model_value)
         prompt_input, _prompt_text, attached_image_count, input_warnings = build_step_prompt(
             base_prompt=prompt,
-            input_file_data=_build_input_file_data(inputs),
+            input_file_data=build_input_file_data(inputs),
             vault_path=host.vault_path or "",
             model_execution=model_execution,
         )
@@ -322,32 +322,6 @@ def _build_cache_ref(
     return f"generate/{digest}"
 
 
-def _build_input_file_data(inputs: tuple[RetrievedItem, ...]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for item in inputs:
-        metadata = dict(item.metadata or {})
-        source_path = str(metadata.get("source_path") or item.ref or "").strip()
-        filepath = str(metadata.get("filepath") or "").strip()
-        if not filepath and source_path:
-            filepath = source_path[:-3] if source_path.endswith(".md") else source_path
-        if not source_path and item.ref:
-            source_path = str(item.ref)
-        if not source_path:
-            raise ValueError("generate inputs must come from retrieve(file) results with source paths")
-        records.append(
-            {
-                "filepath": filepath or source_path,
-                "source_path": source_path,
-                "filename": metadata.get("filename"),
-                "content": item.content,
-                "found": item.exists,
-                "error": metadata.get("error"),
-                "refs_only": bool(metadata.get("refs_only")),
-            }
-        )
-    return records
-
-
 def _parse_generate_thinking_option(options: dict[str, Any]) -> object:
     supported_keys = {"thinking"}
     unknown = sorted(set(options) - supported_keys)
@@ -356,16 +330,6 @@ def _parse_generate_thinking_option(options: dict[str, Any]) -> object:
     if "thinking" not in options:
         return _THINKING_UNSET
     return normalize_thinking_value(options["thinking"], source_name="generate option 'thinking'")
-
-
-def _resolve_effective_thinking(
-    *, requested_thinking: object, default_thinking: ThinkingValue
-) -> tuple[ThinkingValue, str]:
-    if requested_thinking is not _THINKING_UNSET:
-        return requested_thinking, "call_override"  # type: ignore[return-value]
-    if default_thinking is not None:
-        return default_thinking, "global_default"
-    return None, "provider_default"
 
 
 def _contract() -> dict[str, object]:

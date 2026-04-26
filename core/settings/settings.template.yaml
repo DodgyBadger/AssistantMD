@@ -310,3 +310,9 @@ tools:
     requires_secrets: []
     user_editable: false
     chat_visible: true
+  delegate:
+    module: core.tools.delegate
+    description: "Run a bounded child agent over a prompt with optional file inputs and tools"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true

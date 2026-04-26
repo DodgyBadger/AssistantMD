@@ -313,3 +313,27 @@ Move to feature development:
 1. Implement `core/agent_runs` service and `core/tools/delegate.py`.
 2. Add `delegate` settings entry and docs.
 3. Add `integration/core/delegate_tool.py` before migrating existing scripts.
+
+## Status
+
+**Implemented (steps 1–7 complete).**
+
+### What was built
+
+- `core/tools/delegate.py` — `DelegateTool(BaseTool)` registered in `system/settings.yaml` and `core/settings/settings.template.yaml`.
+- Shared helpers extracted to avoid divergent code paths: `build_input_file_data` in `runtime_common.py`, `_THINKING_UNSET` sentinel and `resolve_effective_thinking` in `execution_prep.py`. `generate.py` imports from these shared locations.
+- Validation events: `delegate_started`, `delegate_tool_binding_resolved`, `delegate_completed`, `delegate_failed`.
+- `integration/core/delegate_tool.py` — covers chat-path tool calling (basic, forbidden stripping, child tools) and Monty direct-tool path.
+- `integration/core/authoring_contract.py` — extended to exercise delegate via the Monty direct-tool bridge.
+- `docs/tools/delegate.md` and `docs/tools/index.md` added; `docs/tools/code_execution_local.md` updated.
+
+### Key design divergence from plan
+
+The `inputs` parameter and the `core/agent_runs/` shared-assembly service were **not implemented**. The original plan assumed delegate needed to embed file content into the child agent's prompt (matching the `generate` pattern). In practice, delegate creates an agent — so file access belongs to the child agent via `tools=["file_ops_safe"]`, exactly as the parent agent works. The `inputs` complexity was removed entirely. Monty scripts that have already retrieved content can pass it in the prompt string; a wrapper layer can handle `RetrievedItem` translation if that proves necessary.
+
+The multimodal parity checks in the Validation Plan are therefore moot for this implementation: there is no separate delegate assembly path to keep in sync.
+
+### Remaining
+
+- Step 8: migrate authored scripts and seed templates from `generate(...)` to `delegate(...)`.
+- Step 9: remove or de-register `generate(...)` once migration is validated.

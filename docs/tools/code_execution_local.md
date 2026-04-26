@@ -30,7 +30,7 @@ AssistantMD examples and validation scenarios stay within this subset:
 - f-strings and type hints where they help readability
 - common imports used by AssistantMD examples, including `json`, `sys`, `typing`, `asyncio`, and `pathlib`
 - host-provided dataclasses and helper result objects, such as `RetrievedHistoryResult`, `HistoryMessage`, `ToolExchange`, and `LatestMessage`
-- external function calls through AssistantMD helpers and direct tools, such as `file_ops_safe(...)`, `generate(...)`, and `assemble_context(...)`
+- external function calls through AssistantMD helpers and direct tools, such as `file_ops_safe(...)`, `delegate(...)`, and `assemble_context(...)`
 - pre-execution type checking with Monty's bundled `ty` integration
 
 ### Authoring Guardrails
@@ -60,7 +60,7 @@ Available helpers and reserved inputs:
 
 - direct tool functions such as `file_ops_safe(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
-- `generate(...)`: run one explicit model call, optionally with file-backed inputs or bounded tool use
+- `delegate(...)`: run a focused child agent over a prompt with optional tools
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
 - `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
@@ -84,20 +84,21 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - `operation="get"` filters a `file_ops_safe` result down to the pending subset
 - `operation="complete"` marks only the items you actually finished processing
 
-### `generate`
+### `delegate`
 
-- tool use is opt-in — omit `tools` for plain generation
-- prefer tool-first access patterns; keep `generate(...)` focused on the actual model call
+- tool use is opt-in — omit `tools` for a plain model call
+- prefer tool-first access patterns; keep `delegate(...)` focused on the actual model reasoning step
 - `options={"thinking": ...}` accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`
 - thinking is a separate option, not part of the model alias string
-- when `options["thinking"]` is omitted, `generate(...)` uses the current global default thinking policy from settings
+- when `options["thinking"]` is omitted, `delegate(...)` uses the current global default thinking policy from settings
+- `delegate` and `code_execution_local` are always excluded from the child tool list — recursive delegation is not permitted
+- see `delegate.md` for the full parameter and output shape reference
 
 ### Direct Tool Calls
 
 - call tools by their configured names, for example `await file_ops_safe(operation="read", path="notes/example.md")`
 - `code_execution_local` itself is excluded to prevent recursive self-invocation
 - direct tool results expose `output`, `metadata`, `content`, and `items`
-- pass `result.items` to `generate(inputs=...)` when composing file or retrieval results into a model call
 - prefer branching on `result.metadata` when the tool returns structured status
 
 ### `assemble_context`
@@ -105,7 +106,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - for conversation history, fetch explicit messages through `retrieve_history(...)` and pass `history.items`
 - `retrieve_history(...)` counts safe history units: user message = 1, assistant message = 1, matched tool call + return = 1 `ToolExchange`
 - `retrieve_history(...)` items are structured objects; slice, remove, or reorder those objects when curating context, then pass the remaining objects back to `assemble_context(...)`
-- use `item.text` or `history.text` when you intentionally need clean prompt text for `generate(...)`; this omits provider-native payload fields while preserving the original object for assembly
+- use `item.text` or `history.text` when you intentionally need clean prompt text for `delegate(...)`; this omits provider-native payload fields while preserving the original object for assembly
 - in context assembly scripts, use read-only `latest_message` only to decide what prior history, files, or instructions to include
 - do not add `latest_message` to `history` or `context_messages`; the chat runtime appends it exactly once after your assembled context
 - use `latest_message.exists`, `latest_message.role`, `latest_message.content`, and `latest_message.text` when context selection should depend on the active request

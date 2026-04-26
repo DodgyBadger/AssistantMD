@@ -497,3 +497,30 @@ def normalize_retrieved_items_input(
     raise ValueError(
         f"{field_name} must be a RetrieveResult, RetrievedItem, list, or tuple"
     )
+
+
+def build_input_file_data(inputs: tuple[RetrievedItem, ...]) -> list[dict[str, Any]]:
+    """Convert RetrievedItem inputs to file records for build_step_prompt."""
+    records: list[dict[str, Any]] = []
+    for item in inputs:
+        metadata = dict(item.metadata or {})
+        source_path = str(metadata.get("source_path") or item.ref or "").strip()
+        filepath = str(metadata.get("filepath") or "").strip()
+        if not filepath and source_path:
+            filepath = source_path[:-3] if source_path.endswith(".md") else source_path
+        if not source_path and item.ref:
+            source_path = str(item.ref)
+        if not source_path:
+            raise ValueError("inputs must come from retrieve(file) results with source paths")
+        records.append(
+            {
+                "filepath": filepath or source_path,
+                "source_path": source_path,
+                "filename": metadata.get("filename"),
+                "content": item.content,
+                "found": item.exists,
+                "error": metadata.get("error"),
+                "refs_only": bool(metadata.get("refs_only")),
+            }
+        )
+    return records

@@ -9,6 +9,9 @@ from core.chunking.prompt_builder import PromptInput, build_input_files_prompt
 from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.llm.model_utils import model_supports_capability
+from core.llm.thinking import ThinkingValue
+
+_THINKING_UNSET = object()
 
 
 def resolve_step_model_execution(model_value: Any) -> ModelExecutionSpec:
@@ -88,6 +91,19 @@ def build_step_prompt(
         supports_vision=supports_vision,
     )
     return built.prompt, built.prompt_text, built.attached_image_count, built.warnings
+
+
+def resolve_effective_thinking(
+    *,
+    requested_thinking: object,
+    default_thinking: ThinkingValue,
+) -> tuple[ThinkingValue, str]:
+    """Resolve the effective thinking value from an explicit request and the global default."""
+    if requested_thinking is not _THINKING_UNSET:
+        return requested_thinking, "call_override"  # type: ignore[return-value]
+    if default_thinking is not None:
+        return default_thinking, "global_default"
+    return None, "provider_default"
 
 
 def compose_instruction_layers(

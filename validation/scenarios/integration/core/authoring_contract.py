@@ -95,6 +95,22 @@ class AuthoringContractScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
+            name="authoring_direct_tool_started",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "tool": "delegate",
+            },
+        )
+        self.assert_event_contains(
+            events,
+            name="authoring_direct_tool_completed",
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success",
+                "tool": "delegate",
+            },
+        )
+        self.assert_event_contains(
+            events,
             name="authoring_retrieve_history_completed",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
@@ -175,6 +191,13 @@ class AuthoringContractScenario(BaseScenario):
             self.soft_assert(
                 generated_output.stat().st_size > 0,
                 "Expected generate output file to be non-empty",
+            )
+        delegate_output = vault / "outputs" / "delegate-success.md"
+        self.soft_assert(delegate_output.exists(), "Expected delegate output file")
+        if delegate_output.exists():
+            self.soft_assert(
+                delegate_output.stat().st_size > 0,
+                "Expected delegate output file to be non-empty",
             )
         parsed_output = vault / "outputs" / "parse-markdown.md"
         self.soft_assert(parsed_output.exists(), "Expected markdown parse output file")
@@ -319,6 +342,11 @@ draft = await generate(
     options={"thinking": False},
 )
 
+delegated = await delegate(
+    prompt="Reply with a single word.",
+    model="test",
+)
+
 await _write_replace(
     "outputs/contract-success.md",
     source_text + f"\\nASSEMBLED={len(assembled.messages)}\\nHISTORY_ITEMS={history.item_count}",
@@ -326,6 +354,10 @@ await _write_replace(
 await _write_replace(
     "outputs/generate-success.md",
     draft.output,
+)
+await _write_replace(
+    "outputs/delegate-success.md",
+    delegated.output,
 )
 await _write_replace(
     "outputs/parse-markdown.md",
