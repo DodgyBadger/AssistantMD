@@ -16,7 +16,7 @@ Every authoring file follows the same structure: YAML frontmatter followed by ex
 
 ````markdown
 ---
-run_type: workflow
+run_type: workflow | context
 description: My automation
 ---
 
@@ -29,6 +29,8 @@ Rules:
 - Exactly one ` ```python``` ` block. No more, no less.
 - Scripts execute in a limited Python sandbox using Pydantic Monty.
 - Details of the Monty execution environment, helper functions, and supported Python features can be found in [the runtime reference](../tools/code_execution.md). That document covers the shared helper surface used by chat-side `code_execution` and by authored workflow scripts and context scripts.
+- Always include comments to help the user understand the script
+- Always define variables that the user might want to edit at the top of the script: file paths, titles, prompts, model, thinking, etc.
 
 Files can be organized in subfolders one level deep inside `Authoring/`. Subfolders starting with `_` are ignored.
 
@@ -82,15 +84,3 @@ Most context scripts use three core pieces: `retrieve_history()` to read complet
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
 Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence. System seed scripts are refreshed on startup; copy one to a new vault script before customizing it.
-
-### Customizing the default script with soul.md
-
-For simple instruction customization — agent personality, response style, ground rules — you don't need to create a context script at all. Create `AssistantMD/soul.md` in your vault with plain text instructions:
-
-```
-You are a focused research assistant. Keep responses brief and factual.
-Always cite the source file when referencing vault content.
-Prefer bullet points over prose.
-```
-
-The default context script loads `soul.md` automatically if it exists and uses it as the system instruction. If no `soul.md` is present, a built-in default stance is used instead. The file is plain markdown — no frontmatter, no special syntax.
