@@ -23,7 +23,7 @@ Sections:
 - `settings`: general app settings (timeouts, defaults, routing controls, ingestion settings)
 - `models`: alias -> provider/model-string mapping
 - `providers`: provider wiring (secret pointer names, optional base-url pointers)
-- `tools`: tool registry used by chat/workflows (`@tools` resolution)
+- `tools`: tool registry used by chat, delegate child agents, and authored direct-tool calls
 
 ## Secrets Store
 

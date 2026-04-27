@@ -25,3 +25,5 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 `ChatStore.get_history()` returns the full `list[ModelMessage]` for a session, which the chat executor passes directly to the model as prior context. This replaces the old approach of re-parsing the markdown transcript.
 
 Canonical history contains completed prior turns only while a chat run is in flight. The active user input is passed separately to Pydantic AI and is persisted only after completion through the provider-native `new_messages()` for that run. Do not pre-store the active prompt in `chat_messages`; doing so creates duplicate user turns and makes memory/context assembly ambiguous.
+
+`core/memory/` is the shared broker over this store for tools and authoring helpers. Context scripts should access session history through `retrieve_history(...)`, which preserves tool call/return pairs as atomic units before `assemble_context(...)` hands curated history back to chat.
