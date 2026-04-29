@@ -239,9 +239,7 @@ class PendingFilesResult:
 class ScriptToolResult:
     """Envelope for script-facing direct tool results."""
 
-    name: str
-    status: str
-    output: str
+    return_value: Any
     metadata: dict[str, Any] = field(default_factory=dict)
     content: Any | None = None
     items: tuple[RetrievedItem, ...] = ()

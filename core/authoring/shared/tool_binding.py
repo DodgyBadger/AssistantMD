@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Type
 
 from pydantic_ai import RunContext
+from pydantic_ai.messages import ToolReturn
 
 from core.logger import UnifiedLogger
 from core.settings.secrets_store import secret_has_value
@@ -304,27 +305,43 @@ def _wrap_tool_function(
 
     async def _call_async(ctx: RunContext, **kwargs):
         if not _has_meaningful_tool_args(kwargs):
-            return tool_instructions or f"No usage instructions available for tool '{tool_name}'."
+            return _to_tool_return(
+                tool_name,
+                tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
+            )
         try:
             if original_takes_ctx:
                 result = await original_func(ctx, **kwargs)
             else:
                 result = await original_func(**kwargs)
         except TypeError as exc:
-            return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return wrap_web_tool_result(tool_name, result)
+            return _to_tool_return(
+                tool_name,
+                _format_tool_type_error(tool_name, exc, tool_instructions),
+                status="error",
+                error_type="invalid_parameters",
+            )
+        return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
     def _call_sync(ctx: RunContext, **kwargs):
         if not _has_meaningful_tool_args(kwargs):
-            return tool_instructions or f"No usage instructions available for tool '{tool_name}'."
+            return _to_tool_return(
+                tool_name,
+                tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
+            )
         try:
             if original_takes_ctx:
                 result = original_func(ctx, **kwargs)
             else:
                 result = original_func(**kwargs)
         except TypeError as exc:
-            return _format_tool_type_error(tool_name, exc, tool_instructions)
-        return wrap_web_tool_result(tool_name, result)
+            return _to_tool_return(
+                tool_name,
+                _format_tool_type_error(tool_name, exc, tool_instructions),
+                status="error",
+                error_type="invalid_parameters",
+            )
+        return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
     wrapper = _call_async if inspect.iscoroutinefunction(original_func) else _call_sync
     try:
@@ -376,3 +393,44 @@ def _format_tool_type_error(tool_name: str, exc: Exception, instructions: str | 
     if instructions:
         return f"{prefix}\n\n{instructions}"
     return prefix
+
+
+def _to_tool_return(
+    tool_name: str,
+    result: Any,
+    *,
+    status: str = "completed",
+    error_type: str | None = None,
+) -> ToolReturn:
+    """Normalize bound tool calls to a Pydantic ToolReturn envelope."""
+    if isinstance(result, ToolReturn):
+        metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
+        metadata.setdefault("status", status)
+        metadata.setdefault("tool_name", tool_name)
+        metadata.setdefault("return_type", _return_value_type(result.return_value))
+        if error_type:
+            metadata.setdefault("error_type", error_type)
+        return ToolReturn(
+            return_value=result.return_value,
+            content=result.content,
+            metadata=metadata,
+        )
+
+    metadata: dict[str, Any] = {
+        "status": status,
+        "tool_name": tool_name,
+        "return_type": _return_value_type(result),
+    }
+    if error_type:
+        metadata["error_type"] = error_type
+    return ToolReturn(return_value=result, content=None, metadata=metadata)
+
+
+def _return_value_type(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, (dict, list, tuple)):
+        return "json"
+    return type(value).__name__

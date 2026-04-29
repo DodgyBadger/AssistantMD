@@ -22,6 +22,7 @@ List authored automations in the current vault and run, enable, or disable them.
 workflow_run(operation="list")
 ```
 
+```python
 workflow_run(operation="run", workflow_name="weekly-planner")
 ```
 

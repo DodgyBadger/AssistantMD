@@ -13,6 +13,10 @@ This document serves two purposes:
 
 - `code`: constrained Python snippet to execute
 
+## Tool Output Shape
+
+Returns the script's final expression, explicit `finish(...)` result, printed output, or a structured execution error as plain text. Inside the script, direct tool calls return objects with `return_value`, `metadata`, `content`, and `items`.
+
 ## The Monty Runtime
 
 This tool does not run CPython. It runs **Monty** — a Python interpreter written in Rust with its own bytecode VM.
@@ -87,8 +91,9 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 - call tools by their configured names, for example `await file_ops_safe(operation="read", path="notes/example.md")`
 - `code_execution` itself is excluded to prevent recursive self-invocation
-- direct tool results expose `output`, `metadata`, `content`, and `items`
-- prefer branching on `result.metadata` when the tool returns structured status
+- direct tool results expose `return_value`, `metadata`, `content`, and `items`
+- use `result.return_value` for the canonical tool result; `content` is reserved for Pydantic AI side-loaded content
+- every bound direct tool includes `result.metadata["tool_name"]`; prefer branching on `result.metadata["status"]` when the tool reports structured status
 
 ### `assemble_context`
 
@@ -158,7 +163,7 @@ context_messages = []
 if latest_message.exists and "trigonometry" in latest_message.text.lower():
     guide = await file_ops_safe(operation="read", path="Projects/trig/study-guide.md")
     if guide.metadata.get("status") == "completed":
-        context_messages.append({"role": "system", "content": guide.output})
+        context_messages.append({"role": "system", "content": guide.return_value})
 
 await assemble_context(
     history=history_result.items,
@@ -178,7 +183,7 @@ code_execution(
 artifact = await read_cache(ref="tool/tavily_extract/call_abc123")
 if not artifact.exists:
     result = await tavily_extract(urls=["https://example.com/article"])
-    parsed = await parse_markdown(value=result.output)
+    parsed = await parse_markdown(value=result.return_value)
 else:
     parsed = await parse_markdown(value=artifact.content)
 
@@ -221,7 +226,7 @@ results = []
 selected = pending.items[:5]
 for item in selected:
     doc = await file_ops_safe(operation="read", path=item.ref)
-    parsed = await parse_markdown(value=doc.output)
+    parsed = await parse_markdown(value=doc.return_value)
     results.append({
         "ref": item.ref,
         "title": parsed.frontmatter.get("title", item.ref),

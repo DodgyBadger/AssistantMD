@@ -61,7 +61,7 @@ class CodeExecutionScenario(BaseScenario):
                     return {
                         "code": (
                             'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
-                            'doc.output.split("\\n\\n", 1)[1] if "\\n\\n" in doc.output else doc.output'
+                            'doc.return_value'
                         )
                     }
                 if case_name == "allow_write":
@@ -79,7 +79,7 @@ class CodeExecutionScenario(BaseScenario):
                             '    tools=["file_ops_safe"],\n'
                             '    model="test",\n'
                             ')\n'
-                            'draft.output'
+                            'draft.return_value'
                         )
                     }
                 if case_name == "full_surface":
@@ -109,7 +109,7 @@ class CodeExecutionScenario(BaseScenario):
                             '    instructions="Return one short deterministic line.",\n'
                             '    model="test",\n'
                             ')\n'
-                            'await file_ops_safe(operation="write", path="notes/full-surface.md", content=draft.output)\n'
+                            'await file_ops_safe(operation="write", path="notes/full-surface.md", content=draft.return_value)\n'
                             'await finish(status="completed", reason="full-surface-ok")\n'
                             '"UNREACHABLE"'
                         )

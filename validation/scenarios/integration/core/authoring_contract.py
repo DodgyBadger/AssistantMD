@@ -155,6 +155,13 @@ class AuthoringContractScenario(BaseScenario):
         if contract_output.exists():
             content = contract_output.read_text(encoding="utf-8")
             self.soft_assert("SEED_CONTENT" in content, "Expected retrieved file content in output")
+            self.soft_assert("RETURN_VALUE_CLEAN=True" in content, "Expected clean file return_value contract")
+            self.soft_assert("CONTENT_NONE=True" in content, "Expected file read content side-channel to be empty")
+            self.soft_assert("ITEMS=1" in content, "Expected file read item projection")
+            self.soft_assert("IMAGE_RETURN_LIST=True" in content, "Expected image read multimodal return_value")
+            self.soft_assert("IMAGE_CONTENT_NONE=True" in content, "Expected image read content side-channel to be empty")
+            self.soft_assert("MARKDOWN_IMAGE_RETURN_LIST=True" in content, "Expected markdown image interleaved return_value")
+            self.soft_assert("MARKDOWN_IMAGE_CONTENT_NONE=True" in content, "Expected markdown image content side-channel to be empty")
             self.soft_assert("ASSEMBLED=3" in content, "Expected assembled context count in output")
             self.soft_assert("HISTORY_ITEMS=0" in content, "Expected retrieve_history output in contract file")
 
@@ -188,10 +195,6 @@ description: Deterministic authoring contract success workflow
 ## Run
 
 ```python
-def _strip_read_output(value):
-    return value.split("\\n\\n", 1)[1] if "\\n\\n" in value else value
-
-
 async def _write_replace(path, content):
     existing = await file_ops_safe(operation="read", path=path)
     if existing.metadata.get("status") == "completed":
@@ -202,7 +205,9 @@ async def _write_replace(path, content):
 
 
 source = await file_ops_safe(operation="read", path="notes/seed.md")
-source_text = _strip_read_output(source.output)
+source_text = source.return_value
+image_read = await file_ops_safe(operation="read", path="images/test_image.jpg")
+markdown_image_read = await file_ops_safe(operation="read", path="notes/structured.md")
 listing = await file_ops_safe(operation="list", path="notes")
 history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
@@ -224,7 +229,7 @@ draft = await delegate(
         "Seed:\\n"
         + source_text
         + "\\n\\nListing:\\n"
-        + listing.output
+        + listing.return_value
         + "\\n\\nAssembled messages:\\n"
         + str(len(assembled.messages))
     ),
@@ -240,15 +245,26 @@ delegated = await delegate(
 
 await _write_replace(
     "outputs/contract-success.md",
-    source_text + f"\\nASSEMBLED={len(assembled.messages)}\\nHISTORY_ITEMS={history.item_count}",
+    (
+        source_text
+        + f"\\nRETURN_VALUE_CLEAN={source_text == 'SEED_CONTENT'}"
+        + f"\\nCONTENT_NONE={source.content is None}"
+        + f"\\nITEMS={len(source.items)}"
+        + f"\\nIMAGE_RETURN_LIST={isinstance(image_read.return_value, list)}"
+        + f"\\nIMAGE_CONTENT_NONE={image_read.content is None}"
+        + f"\\nMARKDOWN_IMAGE_RETURN_LIST={isinstance(markdown_image_read.return_value, list)}"
+        + f"\\nMARKDOWN_IMAGE_CONTENT_NONE={markdown_image_read.content is None}"
+        + f"\\nASSEMBLED={len(assembled.messages)}"
+        + f"\\nHISTORY_ITEMS={history.item_count}"
+    ),
 )
 await _write_replace(
     "outputs/delegate-draft-success.md",
-    draft.output,
+    draft.return_value,
 )
 await _write_replace(
     "outputs/delegate-success.md",
-    delegated.output,
+    delegated.return_value,
 )
 await _write_replace(
     "outputs/parse-markdown.md",

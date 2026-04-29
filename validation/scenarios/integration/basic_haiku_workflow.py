@@ -82,7 +82,7 @@ description: Haiku writing workflow
 \"\"\"Write one haiku from the seed note and save it to today's output file.\"\"\"
 
 source = await file_ops_safe(operation="read", path="notes/haiku_seed.md")
-note_content = source.output.split("\\n\\n", 1)[1] if "\\n\\n" in source.output else source.output
+note_content = source.return_value
 
 draft = await delegate(
     prompt=(
@@ -96,7 +96,7 @@ draft = await delegate(
 await file_ops_safe(
     operation="write",
     path=f"haiku-{date.today()}.md",
-    content=draft.output,
+    content=draft.return_value,
 )
 ```
 """

@@ -16,7 +16,11 @@ from core.authoring.contracts import (
     AuthoringExecutionContext,
     AuthoringHost,
 )
-from core.authoring.helpers.runtime_common import invoke_bound_tool, normalize_tool_result
+from core.authoring.helpers.runtime_common import (
+    coerce_tool_return_value_text,
+    invoke_bound_tool,
+    normalize_tool_result,
+)
 from core.authoring.registry import AuthoringCapabilityRegistry
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.logger import UnifiedLogger
@@ -224,7 +228,10 @@ def _build_direct_tool_functions(
                 data={
                     "workflow_id": context.workflow_id,
                     "tool": _spec.name,
-                    "output_chars": len(tool_result.output),
+                    "return_value_chars": len(
+                        coerce_tool_return_value_text(tool_result.return_value)
+                    ),
+                    "status": tool_result.metadata.get("status"),
                     "item_count": len(tool_result.items),
                     "has_content": tool_result.content is not None,
                 },

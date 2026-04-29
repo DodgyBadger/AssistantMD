@@ -14,6 +14,7 @@ from core.authoring.contracts import (
     ScriptToolResult,
 )
 from core.authoring.helpers.common import build_capability
+from core.authoring.helpers.runtime_common import coerce_tool_return_value_text
 from core.logger import UnifiedLogger
 from core.utils.hash import hash_file_bytes, hash_file_content
 
@@ -114,7 +115,7 @@ def _normalize_pending_items_input(value: Any) -> tuple[RetrievedItem, ...]:
 
 
 def _items_from_tool_result(result: ScriptToolResult) -> tuple[RetrievedItem, ...]:
-    if result.name != "file_ops_safe":
+    if result.metadata.get("tool_name") != "file_ops_safe":
         raise ValueError("pending_files only accepts ScriptToolResult values from file_ops_safe")
     paths = _extract_paths_from_file_ops_result(result)
     return tuple(
@@ -155,13 +156,15 @@ def _extract_paths_from_file_ops_result(result: ScriptToolResult) -> tuple[str, 
         if extracted:
             return tuple(extracted)
 
-    return _extract_paths_from_file_ops_output(result.output)
+    return _extract_paths_from_file_ops_text(
+        coerce_tool_return_value_text(result.return_value)
+    )
 
 
-def _extract_paths_from_file_ops_output(output: str) -> tuple[str, ...]:
+def _extract_paths_from_file_ops_text(result_text: str) -> tuple[str, ...]:
     paths: list[str] = []
     seen: set[str] = set()
-    for raw_line in str(output or "").splitlines():
+    for raw_line in str(result_text or "").splitlines():
         line = raw_line.strip()
         if line.startswith("📄 "):
             _icon, _space, candidate = line.partition(" ")

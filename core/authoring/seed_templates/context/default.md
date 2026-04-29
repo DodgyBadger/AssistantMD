@@ -10,7 +10,7 @@ history = list(history_result.items)
 
 soul_result = await file_ops_safe(operation="read", path="AssistantMD/soul.md")
 soul_instructions = (
-    soul_result.output.strip()
+    soul_result.return_value.strip()
     if soul_result.metadata.get("status") == "completed"
     else (
         "Default stance: concise and curious. Act as a guide, not a sage.\n"

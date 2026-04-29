@@ -266,7 +266,7 @@ class DelegateToolScenario(BaseScenario):
                 vault_path=str(vault),
             )
             self.soft_assert_equal(
-                timeout_tool_result.status,
+                timeout_tool_result.metadata.get("status"),
                 "failed",
                 "Delegate timeout should return a failed tool result",
             )
@@ -277,7 +277,7 @@ class DelegateToolScenario(BaseScenario):
                 expected={"workflow_id": "delegate_timeout_failure"},
             )
             self.soft_assert(
-                "timeout" in timeout_tool_result.output,
+                "timeout" in timeout_tool_result.return_value,
                 "Delegate timeout should return actionable text",
             )
 
@@ -443,7 +443,7 @@ result = await delegate(
 await file_ops_safe(
     operation="write",
     path="outputs/delegate-with-tools-result.md",
-    content=result.output,
+    content=result.return_value,
 )
 await finish(status="completed", reason="delegate-with-tools-ok")
 ```
@@ -467,7 +467,7 @@ result = await delegate(
 await file_ops_safe(
     operation="write",
     path="outputs/delegate-markdown-image-result.md",
-    content=result.output,
+    content=result.return_value,
 )
 await finish(status="completed", reason="delegate-markdown-image-ok")
 ```

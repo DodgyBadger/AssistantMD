@@ -29,6 +29,17 @@ def coerce_output_data(value: Any) -> str:
     return str(value)
 
 
+def coerce_tool_return_value_text(value: Any) -> str:
+    """Render a tool return value as text for logs and text-only projections."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        text_parts = [part for part in value if isinstance(part, str)]
+        if text_parts:
+            return "\n".join(text_parts)
+    return coerce_output_data(value)
+
+
 def normalize_output_ref(path: str, *, vault_path: str) -> str:
     if not path or not vault_path:
         return path
@@ -245,19 +256,19 @@ def normalize_tool_result(
 ) -> ScriptToolResult:
     if isinstance(result, ToolReturn):
         metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
-        metadata["return_type"] = "tool_return"
+        metadata.setdefault("tool_name", tool_name)
+        metadata.setdefault("return_type", _tool_return_value_type(result.return_value))
+        metadata["envelope_type"] = "tool_return"
         metadata["has_content"] = result.content is not None
-        output = coerce_output_data(result.return_value)
+        return_value = result.return_value
         content = result.content
         return ScriptToolResult(
-            name=tool_name,
-            status=str(metadata.get("status") or "completed"),
-            output=output,
+            return_value=return_value,
             metadata=metadata,
             content=content,
             items=_project_tool_items(
                 tool_name=tool_name,
-                output=output,
+                return_value=return_value,
                 metadata=metadata,
                 content=content,
                 vault_path=vault_path,
@@ -265,16 +276,14 @@ def normalize_tool_result(
         )
     if isinstance(result, (dict, list, tuple)):
         try:
-            output = json.dumps(result, ensure_ascii=False, indent=2)
-            metadata = {"return_type": "json"}
+            return_value = json.dumps(result, ensure_ascii=False, indent=2)
+            metadata = {"tool_name": tool_name, "return_type": "json"}
             return ScriptToolResult(
-                name=tool_name,
-                status="completed",
-                output=output,
+                return_value=return_value,
                 metadata=metadata,
                 items=_project_tool_items(
                     tool_name=tool_name,
-                    output=output,
+                    return_value=return_value,
                     metadata=metadata,
                     content=None,
                     vault_path=vault_path,
@@ -282,16 +291,14 @@ def normalize_tool_result(
             )
         except (TypeError, ValueError):
             pass
-    output = coerce_output_data(result)
-    metadata = {"return_type": "text"}
+    return_value = coerce_output_data(result)
+    metadata = {"tool_name": tool_name, "return_type": "text"}
     return ScriptToolResult(
-        name=tool_name,
-        status="completed",
-        output=output,
+        return_value=return_value,
         metadata=metadata,
         items=_project_tool_items(
             tool_name=tool_name,
-            output=output,
+            return_value=return_value,
             metadata=metadata,
             content=None,
             vault_path=vault_path,
@@ -302,14 +309,16 @@ def normalize_tool_result(
 def _project_tool_items(
     *,
     tool_name: str,
-    output: str,
+    return_value: Any,
     metadata: dict[str, Any],
     content: Any | None,
     vault_path: str,
 ) -> tuple[RetrievedItem, ...]:
+    return_value_text = coerce_tool_return_value_text(return_value)
     if tool_name == "file_ops_safe":
         return _project_file_ops_safe_items(
-            output=output,
+            return_value=return_value,
+            return_value_text=return_value_text,
             metadata=metadata,
             content=content,
             vault_path=vault_path,
@@ -321,11 +330,11 @@ def _project_tool_items(
         "tavily_extract",
         "tavily_crawl",
         "internal_api",
-    } and output.strip():
+    } and return_value_text.strip():
         return (
             RetrievedItem(
                 ref=str(metadata.get("url") or metadata.get("endpoint") or tool_name),
-                content=output,
+                content=return_value_text,
                 exists=True,
                 metadata={"source_tool": tool_name, **metadata},
             ),
@@ -333,9 +342,20 @@ def _project_tool_items(
     return ()
 
 
+def _tool_return_value_type(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, (dict, list, tuple)):
+        return "json"
+    return type(value).__name__
+
+
 def _project_file_ops_safe_items(
     *,
-    output: str,
+    return_value: Any,
+    return_value_text: str,
     metadata: dict[str, Any],
     content: Any | None,
     vault_path: str,
@@ -371,7 +391,8 @@ def _project_file_ops_safe_items(
                 ref=path,
                 content=_file_ops_read_content(
                     path=path,
-                    output=output,
+                    return_value=return_value,
+                    return_value_text=return_value_text,
                     content=content,
                     vault_path=vault_path,
                 ),
@@ -393,7 +414,7 @@ def _project_file_ops_safe_items(
                     **metadata,
                 },
             )
-            for path in _file_ops_paths(metadata=metadata, output=output)
+            for path in _file_ops_paths(metadata=metadata, result_text=return_value_text)
         )
 
     return ()
@@ -407,7 +428,7 @@ def _file_ops_path(metadata: dict[str, Any]) -> str:
     return ""
 
 
-def _file_ops_paths(*, metadata: dict[str, Any], output: str) -> tuple[str, ...]:
+def _file_ops_paths(*, metadata: dict[str, Any], result_text: str) -> tuple[str, ...]:
     files = metadata.get("files")
     if isinstance(files, list):
         values = tuple(str(item).strip() for item in files if str(item).strip())
@@ -436,7 +457,7 @@ def _file_ops_paths(*, metadata: dict[str, Any], output: str) -> tuple[str, ...]
             return tuple(dict.fromkeys(paths))
 
     parsed: list[str] = []
-    for raw_line in output.splitlines():
+    for raw_line in result_text.splitlines():
         line = raw_line.strip()
         if line.startswith("📄 "):
             candidate = line.partition(" ")[2].strip()
@@ -452,10 +473,17 @@ def _file_ops_paths(*, metadata: dict[str, Any], output: str) -> tuple[str, ...]
 def _file_ops_read_content(
     *,
     path: str,
-    output: str,
+    return_value: Any,
+    return_value_text: str,
     content: Any | None,
     vault_path: str,
 ) -> str:
+    if isinstance(return_value, str):
+        return return_value
+    if isinstance(return_value, (list, tuple)):
+        text_parts = [part for part in return_value if isinstance(part, str)]
+        if text_parts:
+            return "\n".join(text_parts)
     if isinstance(content, str):
         return content
     if vault_path:
@@ -471,9 +499,9 @@ def _file_ops_read_content(
                 return resolved_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, ValueError):
             pass
-    if "\n\n" in output:
-        return output.split("\n\n", 1)[1]
-    return output
+    if "\n\n" in return_value_text:
+        return return_value_text.split("\n\n", 1)[1]
+    return return_value_text
 
 
 def normalize_retrieved_items_input(

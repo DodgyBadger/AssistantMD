@@ -23,9 +23,7 @@ class RetrieveResult:
     items: tuple[RetrievedItem, ...]
 
 class ScriptToolResult:
-    name: str
-    status: str
-    output: str
+    return_value: Any
     metadata: dict[str, Any]
     content: Any | None
     items: tuple[RetrievedItem, ...]

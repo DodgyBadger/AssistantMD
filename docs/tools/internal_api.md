@@ -12,6 +12,10 @@ This tool is currently disabled by default. If enabled, use it only for the supp
 - `vault_name`: optional. Used by `context_templates` when the active vault cannot be inferred.
 - `workflow_name`: reserved for future allowlisted endpoints.
 
+## Output Shape
+
+Returns pretty-printed JSON text for the allowlisted endpoint. Oversized responses are rejected instead of returned inline.
+
 ## Notes
 
 - This is not a general HTTP client.

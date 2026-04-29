@@ -145,7 +145,7 @@ description: Basic haiku context-template happy path
 \"\"\"Build haiku seed words into downstream chat context and persist the seed artifact.\"\"\"
 
 source = await file_ops_safe(operation="read", path="notes/haiku_context_seed.md")
-source_text = source.output.split("\\n\\n", 1)[1] if "\\n\\n" in source.output else source.output
+source_text = source.return_value
 seed_words = await delegate(
     prompt=(
         "Choose exactly three vivid seed words inspired by this note.\\n\\n"
@@ -168,13 +168,13 @@ if existing.metadata.get("status") == "completed":
     await file_ops_safe(
         operation="append",
         path="outputs/haiku-seed-words.md",
-        content=seed_words.output,
+        content=seed_words.return_value,
     )
 else:
     await file_ops_safe(
         operation="write",
         path="outputs/haiku-seed-words.md",
-        content=seed_words.output,
+        content=seed_words.return_value,
     )
 
 history = await retrieve_history(scope="session", limit="all")
@@ -182,7 +182,7 @@ assembled = await assemble_context(
     instructions="You are a concise poet. When asked for a haiku, write exactly three lines and do not add commentary.",
     history=history.items,
     context_messages=[
-        {"role": "system", "content": seed_words.output},
+        {"role": "system", "content": seed_words.return_value},
         {
             "role": "system",
             "content": (

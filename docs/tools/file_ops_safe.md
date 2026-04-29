@@ -67,9 +67,9 @@ file_ops_safe(operation="head", path="notes/long-file.md", limit=30)
 
 ## Output Shape
 
-Returns human-readable output plus structured metadata.
+Returns the requested file result plus structured metadata.
 
-In scripted Monty flows, direct calls return an object with `output`, `metadata`, `content`, and `items`. Use `result.metadata` for control flow:
+In scripted Monty flows, direct calls return an object with `return_value`, `metadata`, `content`, and `items`. Use `result.return_value` for the tool result and `result.metadata` for control flow:
 
 - `status`: `completed`, `not_found`, `already_exists`, `invalid_target`, `unsupported`, or `error`
 - `operation`: resolved operation name
@@ -81,6 +81,8 @@ In scripted Monty flows, direct calls return an object with `output`, `metadata`
   - `content_chars`, `media_mode` for `read`
   - `file_count`, `items` (list of `{path, frontmatter}`) for `frontmatter`
   - `lines_returned`, `limit` for `head`
+
+For `read` and `head`, `return_value` is the clean file payload. Markdown files with embedded local images and direct image reads may return an interleaved multimodal payload instead of plain text. `content` is reserved for Pydantic AI side-loaded content and is usually `None`.
 
 ## Vault Exploration Pattern
 

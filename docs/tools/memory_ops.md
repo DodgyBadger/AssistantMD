@@ -14,6 +14,10 @@ This tool is currently disabled by default. Prefer the authoring `retrieve_histo
 - `limit`: optional positive integer or `all`.
 - `message_filter`: optional for `get_history`. One of `all`, `exclude_tools`, or `only_tools`.
 
+## Output Shape
+
+Returns pretty-printed JSON text from the core memory service.
+
 ## Notes
 
 - `get_history` returns canonical ordered message history from the memory service.

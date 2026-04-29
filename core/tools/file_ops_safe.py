@@ -183,7 +183,7 @@ Full documentation:
         status: str = "completed",
         exists: bool | None = None,
         error_type: str | None = None,
-        content: list[Any] | None = None,
+        content: Any | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ToolReturn:
         payload: dict[str, Any] = {
@@ -295,16 +295,14 @@ Full documentation:
                 vault_path=vault_path,
             )
             return ToolReturn(
-                return_value=(
-                    f"Attached image '{payload.metadata['filepath']}' "
-                    f"({payload.metadata['media_type']}, {payload.metadata['size_bytes']} bytes)."
-                ),
-                content=[payload.note, payload.image_blob],
+                return_value=[payload.note, payload.image_blob],
+                content=None,
                 metadata={
                     "status": "completed",
                     "operation": "read",
                     "path": path,
                     "exists": True,
+                    "media_mode": "image",
                     **payload.metadata,
                 },
             )
@@ -351,11 +349,7 @@ Full documentation:
             )
             if not decision.attach_images:
                 return cls._result(
-                    message=(
-                        f"Successfully read file '{path}' ({len(file_content)} characters) "
-                        f"(image attachments skipped: {decision.reason})\n\n"
-                        f"{decision.normalized_text or file_content}"
-                    ),
+                    message=decision.normalized_text or file_content,
                     operation="read",
                     path=path,
                     status="completed",
@@ -386,12 +380,8 @@ Full documentation:
             )
             if isinstance(built.prompt, list):
                 return ToolReturn(
-                    return_value=(
-                        f"Successfully read markdown file '{path}' with embedded images "
-                        f"({built.attached_image_count} image attachment(s), "
-                        f"{built.attached_image_bytes} bytes)."
-                    ),
-                    content=built.prompt,
+                    return_value=built.prompt,
+                    content=None,
                     metadata={
                         "status": "completed",
                         "operation": "read",
@@ -405,10 +395,7 @@ Full documentation:
                     },
                 )
             return cls._result(
-                message=(
-                    f"Successfully read file '{path}' ({len(file_content)} characters)\n\n"
-                    f"{built.prompt_text}"
-                ),
+                message=built.prompt_text,
                 operation="read",
                 path=path,
                 status="completed",
@@ -421,7 +408,7 @@ Full documentation:
                 },
             )
         return cls._result(
-            message=f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}",
+            message=file_content,
             operation="read",
             path=path,
             status="completed",
@@ -499,7 +486,7 @@ Full documentation:
         with open(full_path, 'r', encoding='utf-8') as file:
             file_content = file.read()
         return cls._result(
-            message=f"Successfully read file '{path}' ({len(file_content)} characters)\n\n{file_content}",
+            message=file_content,
             operation="read",
             path=path,
             status="completed",
@@ -1167,7 +1154,7 @@ Full documentation:
                     head_lines.append(line)
             text = "".join(head_lines)
             return cls._result(
-                message=f"First {len(head_lines)} lines of '{path}':\n\n{text}",
+                message=text,
                 operation="head",
                 path=path,
                 status="completed",

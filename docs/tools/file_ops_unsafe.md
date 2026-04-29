@@ -36,7 +36,7 @@ file_ops_unsafe(
 
 Returns human-readable output plus structured metadata.
 
-In scripted Monty flows, direct calls return an object with `output`, `metadata`, `content`, and `items`. Use `result.metadata` for control flow:
+In scripted Monty flows, direct calls return an object with `return_value`, `metadata`, `content`, and `items`. Use `result.return_value` for the tool result and `result.metadata` for control flow:
 
 - `status`: `completed`, `not_found`, `invalid_target`, or `error`
 - `operation`

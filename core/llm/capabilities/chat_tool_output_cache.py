@@ -8,7 +8,16 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from pydantic_ai.capabilities import Hooks
-from pydantic_ai.messages import ToolReturn
+from pydantic_ai.messages import (
+    AudioUrl,
+    BinaryContent,
+    DocumentUrl,
+    FileUrl,
+    ImageUrl,
+    ToolReturn,
+    UploadedFile,
+    VideoUrl,
+)
 
 from core.authoring.cache import purge_expired_cache_artifacts, upsert_cache_artifact
 from core.logger import UnifiedLogger
@@ -210,15 +219,34 @@ def build_chat_tool_output_cache_capability(
 def _tool_result_has_multimodal_payload(result: Any) -> bool:
     if not isinstance(result, ToolReturn):
         return False
-    content = result.content
-    if content is None or isinstance(content, str):
+    return (
+        _value_has_multimodal_payload(result.return_value)
+        or _value_has_multimodal_payload(result.content)
+    )
+
+
+def _value_has_multimodal_payload(value: Any) -> bool:
+    if value is None or isinstance(value, str):
         return False
-    return True
+    multimodal_types = (
+        AudioUrl,
+        BinaryContent,
+        DocumentUrl,
+        FileUrl,
+        ImageUrl,
+        UploadedFile,
+        VideoUrl,
+    )
+    if isinstance(value, multimodal_types):
+        return True
+    if isinstance(value, (list, tuple)):
+        return any(_value_has_multimodal_payload(part) for part in value)
+    return False
 
 
 def tool_result_as_text(result: Any) -> str:
     if isinstance(result, ToolReturn):
-        return str(result.return_value or "")
+        return _tool_return_value_as_text(result.return_value)
     if result is None:
         return ""
     if isinstance(result, str):
@@ -227,6 +255,23 @@ def tool_result_as_text(result: Any) -> str:
         return json.dumps(result, ensure_ascii=False)
     except (TypeError, ValueError):
         return str(result)
+
+
+def _tool_return_value_as_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        text_parts = [part for part in value if isinstance(part, str)]
+        if text_parts:
+            return "\n".join(text_parts)
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            pass
+    return str(value)
 
 
 def _chat_cache_owner_id(*, vault_name: str, session_id: str) -> str:

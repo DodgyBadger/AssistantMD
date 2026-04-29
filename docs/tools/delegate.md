@@ -59,16 +59,16 @@ result = await delegate(
 
 Returns the child agent's final text response.
 
-In scripted Monty flows, direct calls return an object with `output`, `metadata`, `content`, and `items`:
+In scripted Monty flows, direct calls return an object with `return_value`, `metadata`, `content`, and `items`:
 
-- `output`: child agent final text response
+- `return_value`: child agent final text response
 - `metadata`: run metadata including `model`, `tool_names`, `thinking`, `output_chars`, and `audit`
 - `content`: `None`
 - `items`: empty; `delegate` does not project source artifacts
 
 ```python
 result = await delegate(prompt="...", tools=["file_ops_safe"])
-summary = result.output
+summary = result.return_value
 model_used = result.metadata["model"]
 tool_calls = result.metadata["audit"]["tool_calls"]
 ```
