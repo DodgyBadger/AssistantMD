@@ -9,7 +9,6 @@ from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
 from core.logger import UnifiedLogger
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
 
@@ -86,26 +85,16 @@ class TavilyExtract(BaseTool):
         return Tool(
             tavily_extract,
             name='tavily_extract',
-            description='Extract content from specific URLs using Tavily for documentation, articles, or web pages.'
+            description=(
+                "Extract full content from specific web pages. "
+                "Prefer this tool over browser for cleaner results."
+            )
         )
     
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Extract."""
         return """
-## tavily_extract usage instructions
-
-Use when you need to extract full content from specific web pages, documentation, articles, or blog posts.
-- Extracting documentation from specific pages
-- Getting full article content for analysis
-- Pulling content from multiple related URLs
-- Converting web pages to clean markdown for processing
-
-OPERATE CONSERVATIVELY:
-- Start with a single URL and the 'basic' extract depth; review the output before requesting more.
-- If you need additional sections, run a second extract on the next specific URL or switch to 'advanced' only after confirming scope.
-- Avoid batching many URLs at once—break large jobs into multiple extract calls to prevent oversized responses.
-
-Always specify the exact URL(s) you want to extract content from.
-Example: tavily_extract(urls="https://example.com/docs", extract_depth="basic").
-""" + WEB_TOOL_SECURITY_NOTICE
+Full documentation:
+- `__virtual_docs__/tools/tavily_extract.md`
+"""

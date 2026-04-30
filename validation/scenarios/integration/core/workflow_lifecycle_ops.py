@@ -21,12 +21,12 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
 
         self.create_file(
             vault,
-            "AssistantMD/Workflows/daily.md",
+            "AssistantMD/Authoring/daily.md",
             DISABLED_WORKFLOW,
         )
         self.create_file(
             vault,
-            "AssistantMD/Workflows/ops/daily.md",
+            "AssistantMD/Authoring/ops/daily.md",
             DISABLED_SUBFOLDER_WORKFLOW,
         )
 
@@ -99,11 +99,11 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
             },
         )
 
-        # Enable subfolder workflow using AssistantMD/Workflows path form.
+        # Enable subfolder workflow using AssistantMD/Authoring path form.
         checkpoint = self.event_checkpoint()
         enable_subfolder_out = await tool.function(
             operation="enable_workflow",
-            workflow_name="AssistantMD/Workflows/ops/daily.md",
+            workflow_name="AssistantMD/Authoring/ops/daily.md",
         )
         enable_subfolder_data = self._parse_kv_response(enable_subfolder_out)
         self.soft_assert_equal(
@@ -172,7 +172,7 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
         # Security boundary: runtime-root paths are rejected.
         invalid_path_out = await tool.function(
             operation="enable_workflow",
-            workflow_name="/app/data/WorkflowLifecycleVault/AssistantMD/Workflows/daily.md",
+            workflow_name="/app/data/WorkflowLifecycleVault/AssistantMD/Authoring/daily.md",
         )
         self.soft_assert(
             "Runtime filesystem roots are not allowed" in invalid_path_out,
@@ -194,29 +194,29 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
 
 DISABLED_WORKFLOW = """---
 schedule: cron: 0 9 * * *
-workflow_engine: step
+run_type: workflow
 enabled: false
 description: Daily lifecycle test
 ---
 
-## STEP1
-@model test
-@output variable: lifecycle_daily
+## Run
 
-Lifecycle test step.
+```python
+await finish(status="completed", reason="lifecycle-test")
+```
 """
 
 
 DISABLED_SUBFOLDER_WORKFLOW = """---
 schedule: cron: 0 10 * * *
-workflow_engine: step
+run_type: workflow
 enabled: false
 description: Subfolder daily lifecycle test
 ---
 
-## STEP1
-@model test
-@output variable: lifecycle_subfolder
+## Run
 
-Lifecycle test step.
+```python
+await finish(status="completed", reason="lifecycle-test")
+```
 """

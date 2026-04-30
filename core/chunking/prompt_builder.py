@@ -11,7 +11,7 @@ from typing import Any, List, Optional, Sequence
 from pydantic_ai.messages import UserContent
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
-from core.settings import get_auto_buffer_max_tokens
+from core.settings import get_auto_cache_max_tokens
 from core.utils.image_inputs import (
     evaluate_image_attachment,
     format_missing_image_marker,
@@ -111,16 +111,16 @@ def build_input_files_prompt(
     default_images_policy: str = "auto",
     policy: Optional[ChunkingPolicy] = None,
     include_file_framing: bool = True,
-    auto_buffer_max_tokens: Optional[int] = None,
+    auto_cache_max_tokens: Optional[int] = None,
 ) -> InputFilesPromptBuildResult:
     """
     Build prompt payload from @input directive data while preserving markdown image order.
     """
     effective_policy = policy or default_chunking_policy()
-    effective_auto_buffer_limit = (
-        get_auto_buffer_max_tokens()
-        if auto_buffer_max_tokens is None
-        else auto_buffer_max_tokens
+    effective_auto_cache_limit = (
+        get_auto_cache_max_tokens()
+        if auto_cache_max_tokens is None
+        else auto_cache_max_tokens
     )
     file_lists = _normalize_input_file_lists(input_file_data)
     parts: List[UserContent] = []
@@ -240,7 +240,7 @@ def build_input_files_prompt(
                 markdown_chunks=markdown_chunks,
                 source_markdown_path=source_markdown_path,
                 vault_path=vault_path,
-                auto_buffer_max_tokens=effective_auto_buffer_limit,
+                auto_cache_max_tokens=effective_auto_cache_limit,
                 policy=effective_policy,
             )
             if not decision.attach_images:

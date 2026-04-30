@@ -12,9 +12,9 @@ RUN apt-get update && \
     npm config set fund false && \
     npm config set update-notifier false && \
     npm install -g \
-        @anthropic-ai/claude-code@2.0.55 \
-        @openai/codex@0.63.0 \
-        @google/gemini-cli@0.18.4 && \
+        @anthropic-ai/claude-code \
+        @openai/codex \
+        @google/gemini-cli && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \

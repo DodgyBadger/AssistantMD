@@ -45,6 +45,8 @@ from core.settings.secrets_store import (
     secret_has_value,
 )
 from core.runtime.paths import get_system_root
+from core.authoring.cache import purge_expired_cache_artifacts
+from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -60,6 +62,7 @@ from .models import (
     ProviderInfo,
     ModelConfigRequest,
     ProviderConfigRequest,
+    CachePurgeResponse,
     OperationResult,
     SecretInfo,
     SecretUpdateRequest,
@@ -68,6 +71,12 @@ from .models import (
     SystemLogResponse,
     SystemSettingsResponse,
     TemplateInfo,
+    ChatSessionInfo,
+    ChatSessionDetailResponse,
+    ChatSessionMessageInfo,
+    ChatSessionToolEventInfo,
+    ChatSessionExportResponse,
+    ChatSessionsPurgeResponse,
 )
 from .exceptions import SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
@@ -75,13 +84,46 @@ from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
-from core.context.templates import list_templates
+from core.authoring.template_discovery import list_templates
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
+_chat_store = ChatStore()
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
+
+
+def purge_expired_cache() -> CachePurgeResponse:
+    """Delete expired cache artifacts on demand."""
+    now = datetime.now()
+    purged_count = purge_expired_cache_artifacts(now=now)
+    logger.info(
+        "Manual cache purge completed",
+        data={
+            "purged_count": purged_count,
+            "now": now.isoformat(),
+        },
+    )
+    return CachePurgeResponse(
+        success=True,
+        message=f"Purged {purged_count} expired cache artifact(s).",
+        purged_count=purged_count,
+    )
+
+
+def get_workflow_load_errors(
+    *,
+    vault_name: str | None = None,
+    workflow_name: str | None = None,
+) -> List[APIConfigurationError]:
+    """Return workflow configuration errors, optionally filtered by vault/workflow."""
+    errors = get_configuration_errors()
+    if vault_name:
+        errors = [error for error in errors if error.vault == vault_name]
+    if workflow_name:
+        errors = [error for error in errors if error.workflow_name == workflow_name]
+    return errors
 
 
 def _get_workflow_loader():
@@ -123,6 +165,117 @@ def list_context_templates(vault_name: str) -> List[TemplateInfo]:
             )
         )
     return results
+
+
+def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
+    """List persisted chat sessions for a vault ordered by latest activity."""
+    sessions = _chat_store.list_sessions(vault_name)
+    return [
+        ChatSessionInfo(
+            session_id=session.session_id,
+            created_at=session.created_at,
+            last_activity_at=session.last_activity_at,
+            title=session.title or None,
+        )
+        for session in sessions
+    ]
+
+
+def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDetailResponse:
+    """Return persisted chat messages for one session."""
+    messages = _chat_store.get_stored_messages(session_id, vault_name)
+    tool_events = _chat_store.get_tool_events(session_id, vault_name)
+    return ChatSessionDetailResponse(
+        session_id=session_id,
+        vault_name=vault_name,
+        messages=[
+            ChatSessionMessageInfo(
+                sequence_index=message.sequence_index,
+                role=message.role,
+                content=message.content_text,
+                message_type=message.message_type,
+                direction=message.direction,
+                is_tool_message=_is_tool_message_text(message.content_text),
+            )
+            for message in messages
+        ],
+        tool_events=[
+            ChatSessionToolEventInfo(
+                tool_call_id=event.tool_call_id,
+                tool_name=event.tool_name,
+                event_type=event.event_type,
+                created_at=event.created_at,
+                args=_load_json_object(event.args_json),
+                result_text=event.result_text,
+                result_metadata=_load_json_object(event.result_metadata_json) or {},
+                artifact_ref=event.artifact_ref,
+            )
+            for event in tool_events
+        ],
+    )
+
+
+def set_chat_session_title(vault_name: str, session_id: str, title: str | None) -> None:
+    """Set or clear the user-defined title for a chat session."""
+    _chat_store.set_session_title(session_id, vault_name, title)
+
+
+def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: str) -> ChatSessionExportResponse:
+    """Export one chat session transcript to the vault on demand."""
+    exported = export_chat_transcript(
+        store=_chat_store,
+        vault_path=vault_path,
+        vault_name=vault_name,
+        session_id=session_id,
+    )
+    return ChatSessionExportResponse(
+        session_id=session_id,
+        filename=exported.filename,
+        path=exported.path,
+    )
+
+
+def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
+    """Delete one chat session from the canonical store only."""
+    del vault_path
+    _chat_store.delete_sessions(vault_name, session_id=session_id)
+
+
+def purge_chat_sessions(
+    vault_name: str,
+    vault_path: str,
+    *,
+    older_than_days: int | None,
+) -> ChatSessionsPurgeResponse:
+    """Delete old chat sessions and their transcript files for a vault."""
+    deleted_ids = _chat_store.delete_sessions(vault_name, older_than_days=older_than_days)
+    remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted_ids)
+
+    n = len(deleted_ids)
+    if n == 0:
+        message = "No sessions matched."
+    elif n == 1:
+        message = "Deleted 1 session."
+    else:
+        message = f"Deleted {n} sessions."
+    return ChatSessionsPurgeResponse(deleted=n, message=message)
+
+
+def _is_tool_message_text(content: str) -> bool:
+    text = (content or "").strip()
+    return text.startswith("[") and "]" in text
+
+
+def _load_json_object(raw_value: str | None) -> Dict[str, Any] | None:
+    if not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return {"raw": raw_value}
+    if isinstance(parsed, dict):
+        return parsed
+    return {"value": parsed}
 
 
 async def collect_vault_status() -> List[VaultInfo]:
@@ -494,7 +647,7 @@ def get_workflow_summaries() -> List[WorkflowSummary]:
             name=workflow.name,
             vault=workflow.vault,
             enabled=workflow.enabled,
-            workflow_engine=workflow.workflow_name,
+            run_type=workflow.run_type,
             schedule_cron=workflow.schedule_string,
             description=workflow.description
         )
@@ -1187,7 +1340,7 @@ async def execute_workflow_manually(
         start_time = datetime.now()
         try:
             # Create job arguments
-            job_args = create_job_args(target_workflow.global_id)
+            job_args = create_job_args(target_workflow.global_id, file_path=target_workflow.file_path)
 
             # Execute workflow with job arguments and optional step_name
             kwargs = {}
@@ -1195,7 +1348,7 @@ async def execute_workflow_manually(
                 kwargs['step_name'] = step_name
             if expect_failure:
                 kwargs['expected_failure'] = True
-            await workflow_function(job_args, **kwargs)
+            execution_result = await workflow_function(job_args, **kwargs)
             execution_time = (datetime.now() - start_time).total_seconds()
             
         except Exception as workflow_error:
@@ -1203,18 +1356,28 @@ async def execute_workflow_manually(
             # Re-raise as SystemConfigurationError for API layer
             raise SystemConfigurationError(f"Workflow execution failed for '{global_id}': {str(workflow_error)}")
         
+        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
+        terminal_reason = str(getattr(execution_result, "reason", "") or "")
+
         # Prepare results
         results = {
             'success': True,
             'global_id': global_id,
+            'status': terminal_status,
             'execution_time_seconds': execution_time,
             'output_files': [],  # TODO: Enhanced in Phase 4
-            'message': f"Workflow '{global_id}' executed successfully in {execution_time:.2f} seconds"
+            'reason': terminal_reason or None,
+            'message': (
+                f"Workflow '{global_id}' {terminal_status} in {execution_time:.2f} seconds"
+                + (f": {terminal_reason}" if terminal_reason else "")
+            ),
         }
         logger.info(
             "Workflow execution finished",
             data={
                 "global_id": global_id,
+                "status": terminal_status,
+                "reason": terminal_reason,
                 "execution_time_seconds": execution_time,
             },
         )
@@ -1289,10 +1452,15 @@ async def get_metadata() -> MetadataResponse:
             else:
                 requires_secrets = list(getattr(config, "requires_secrets", []) or getattr(config, "requires_env", []) or [])
             user_editable = getattr(config, "user_editable", False)
+            chat_visible = getattr(config, "chat_visible", True)
         else:
             description = config.get('description', '')
             requires_secrets = list(config.get('requires_secrets') or config.get('requires_env') or [])
             user_editable = config.get('user_editable', False)
+            chat_visible = config.get('chat_visible', True)
+
+        if not chat_visible:
+            continue
 
         tools.append(
             ToolInfo(
@@ -1301,25 +1469,43 @@ async def get_metadata() -> MetadataResponse:
                 requires_secrets=requires_secrets,
                 available=config_status.tool_availability.get(name, True),
                 user_editable=user_editable,
+                chat_visible=chat_visible,
             )
         )
 
-    default_context_template = None
+    default_context_script = None
     try:
-        default_entry = get_general_settings().get("default_context_template")
+        default_entry = get_general_settings().get("default_context_script")
         if default_entry and default_entry.value:
-            default_context_template = str(default_entry.value).strip() or None
+            default_context_script = str(default_entry.value).strip() or None
     except Exception:
-        default_context_template = None
+        default_context_script = None
+
+    default_chat_tools: list[str] = []
+    try:
+        default_tools_entry = get_general_settings().get("default_chat_tools")
+        raw_default_tools = getattr(default_tools_entry, "value", [])
+        if isinstance(raw_default_tools, list):
+            default_chat_tools = [
+                str(tool_name).strip()
+                for tool_name in raw_default_tools
+                if str(tool_name).strip()
+            ]
+    except Exception:
+        default_chat_tools = []
 
     return MetadataResponse(
         vaults=vaults,
         models=models,
         tools=tools,
         settings={
-            "auto_buffer_max_tokens": getattr(
-                get_general_settings().get("auto_buffer_max_tokens"), "value", 0
+            "default_chat_tools": default_chat_tools,
+            "default_model_thinking": getattr(
+                get_general_settings().get("default_model_thinking"), "value", "default"
+            ),
+            "auto_cache_max_tokens": getattr(
+                get_general_settings().get("auto_cache_max_tokens"), "value", 0
             )
         },
-        default_context_template=default_context_template,
+        default_context_script=default_context_script,
     )

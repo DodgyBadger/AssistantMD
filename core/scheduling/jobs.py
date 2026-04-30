@@ -34,7 +34,7 @@ def _get_job_snapshot(scheduler, job_id: str) -> Dict[str, Any]:
         "next_run_time": next_run_time,
     }
 
-def create_job_args(global_id: str, data_root: str = None):
+def create_job_args(global_id: str, data_root: str = None, file_path: str = None):
     """Create picklable job arguments for workflow execution.
 
     Returns lightweight, serializable arguments with flexible config dictionary.
@@ -44,6 +44,7 @@ def create_job_args(global_id: str, data_root: str = None):
     Args:
         global_id: Workflow identifier (vault/name)
         data_root: Data root override (defaults to current runtime context data root)
+        file_path: Absolute path to the workflow file (avoids reconstruction at runtime)
     """
     if data_root is None:
         runtime = get_runtime_context()
@@ -51,6 +52,7 @@ def create_job_args(global_id: str, data_root: str = None):
 
     return {
         'global_id': global_id,
+        'file_path': file_path,
         'config': {
             'data_root': str(data_root),
         }
@@ -112,7 +114,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                 if schedule_changed or workflow_changed:
                     scheduler.remove_job(existing_job.id)
 
-                    job_args = create_job_args(workflow.global_id)
+                    job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
                     job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.add_job(
@@ -125,7 +127,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
 
                     snapshot = _get_job_snapshot(scheduler, workflow.scheduler_job_id)
                     logger.add_sink("validation").info(
-                        "Workflow job replaced (schedule/engine changed)",
+                        "Workflow job replaced (schedule metadata changed)",
                         data={
                             "event": "job_synced",
                             "vault": workflow.vault,
@@ -135,12 +137,12 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                             "action": "replaced",
                             "trigger": str(workflow.trigger),
                             "next_run_time": snapshot.get("next_run_time"),
-                            "engine": workflow.workflow_name,
+                            "run_type": workflow.run_type,
                             "schedule": str(workflow.trigger),
                         },
                     )
                 else:
-                    job_args = create_job_args(workflow.global_id)
+                    job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
                     job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.modify_job(
@@ -161,14 +163,14 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                             "action": "updated",
                             "trigger": str(workflow.trigger),
                             "next_run_time": snapshot.get("next_run_time"),
-                            "engine": workflow.workflow_name,
+                            "run_type": workflow.run_type,
                             "schedule": str(workflow.trigger),
                         },
                     )
 
                 scheduler_jobs_synced += 1
             else:
-                job_args = create_job_args(workflow.global_id)
+                job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
                 job_name = f"Workflow: {workflow.global_id}"
 
                 scheduler.add_job(
@@ -191,7 +193,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> Dict[s
                         "action": "created",
                         "trigger": str(workflow.trigger),
                         "next_run_time": snapshot.get("next_run_time"),
-                        "engine": workflow.workflow_name,
+                        "run_type": workflow.run_type,
                         "schedule": str(workflow.trigger),
                     },
                 )

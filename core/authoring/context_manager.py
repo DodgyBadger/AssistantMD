@@ -1,0 +1,671 @@
+"""
+Context manager for assembling chat history via Monty authoring templates.
+
+Merged from core/context/manager_types.py, core/context/manager_helpers.py,
+and core/context/manager.py.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
+
+from pydantic import TypeAdapter
+from pydantic_ai import RunContext
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    UserPromptPart,
+)
+
+from core.authoring.contracts import (
+    AssembleContextResult,
+    ContextMessage,
+    HistoryMessage,
+    LatestMessage,
+    ToolExchange,
+)
+from core.authoring.template_discovery import load_template
+from core.authoring.template_loader import parse_authoring_template_text
+from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, run_authoring_monty
+from core.authoring.cache import add_context_summary, upsert_session
+from core.constants import VALID_WEEK_DAYS
+from core.logger import UnifiedLogger
+from core.runtime.state import get_runtime_context, has_runtime_context
+from core.utils.hash import hash_file_content
+from core.utils.messages import extract_role_and_text
+
+logger = UnifiedLogger(tag="context-manager")
+_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
+
+
+# ---------------------------------------------------------------------------
+# ContextTemplateError
+# ---------------------------------------------------------------------------
+
+class ContextTemplateError(ValueError):
+    """Template-facing context manager error with section/pointer metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        template_pointer: str,
+        section_name: Optional[str] = None,
+        phase: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.template_pointer = template_pointer
+        self.section_name = section_name
+        self.phase = phase
+
+
+class ContextTemplateExecutionError(RuntimeError):
+    """Raised when a selected context template cannot be used for chat execution."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        template_name: str,
+        phase: str,
+        template_pointer: str,
+    ):
+        super().__init__(message)
+        self.template_name = template_name
+        self.phase = phase
+        self.template_pointer = template_pointer
+
+
+# ---------------------------------------------------------------------------
+# Helper utilities
+# ---------------------------------------------------------------------------
+
+def normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any]]]:
+    if not input_file_data:
+        return []
+    if isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
+        return [input_file_data]
+    if isinstance(input_file_data, list):
+        return input_file_data
+    return []
+
+
+def count_input_files(input_file_data: Any) -> Dict[str, int]:
+    file_lists = normalize_input_file_lists(input_file_data)
+    if not file_lists:
+        return {"total": 0, "refs_only": 0, "missing": 0}
+    total = 0
+    refs_only = 0
+    missing = 0
+    for file_list in file_lists:
+        for file_data in file_list:
+            if not isinstance(file_data, dict):
+                continue
+            if file_data.get("manifest"):
+                continue
+            total += 1
+            if file_data.get("refs_only"):
+                refs_only += 1
+            if file_data.get("found") is False:
+                missing += 1
+    return {"total": total, "refs_only": refs_only, "missing": missing}
+
+
+def summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> List[Dict[str, Any]]:
+    file_lists = normalize_input_file_lists(input_file_data)
+    if not file_lists:
+        return []
+    summaries: List[Dict[str, Any]] = []
+    for file_list in file_lists:
+        for file_data in file_list:
+            if not isinstance(file_data, dict):
+                continue
+            if file_data.get("manifest"):
+                continue
+            content = ""
+            if file_data.get("found") and not file_data.get("refs_only"):
+                content = file_data.get("content", "") or ""
+            preview = None
+            if content:
+                preview = content.strip().replace("\n", " ")
+                if len(preview) > preview_limit:
+                    preview = f"{preview[:preview_limit - 1]}…"
+            summaries.append(
+                {
+                    "filepath": file_data.get("filepath"),
+                    "found": file_data.get("found", True),
+                    "refs_only": file_data.get("refs_only", False),
+                    "content_length": len(content),
+                    "content_preview": preview,
+                }
+            )
+    return summaries
+
+
+def hash_output(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return hash_file_content(value, length=12)
+
+
+def resolve_cache_now(run_context: RunContext[Any]) -> datetime:
+    deps = getattr(run_context, "deps", None)
+    now_override = getattr(deps, "context_manager_now", None) if deps is not None else None
+    if isinstance(now_override, datetime):
+        return now_override
+    if isinstance(now_override, str):
+        try:
+            return datetime.fromisoformat(now_override)
+        except ValueError:
+            pass
+    if has_runtime_context():
+        try:
+            runtime = get_runtime_context()
+            raw_value = (runtime.config.features or {}).get("context_manager_now")
+            if isinstance(raw_value, datetime):
+                return raw_value
+            if isinstance(raw_value, str):
+                return datetime.fromisoformat(raw_value)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to read context_manager_now from runtime config; using current time",
+                data={"error": str(exc)},
+            )
+    return datetime.now(timezone.utc)
+
+
+def _frontmatter_value_with_alias(
+    frontmatter: Optional[Dict[str, Any]],
+    canonical_key: str,
+    alias_key: str,
+) -> Any:
+    """Get a frontmatter value supporting both canonical and alias keys."""
+    if not frontmatter:
+        return None
+
+    canonical_present = canonical_key in frontmatter
+    alias_present = alias_key in frontmatter
+    canonical_value = frontmatter.get(canonical_key)
+    alias_value = frontmatter.get(alias_key)
+
+    if canonical_present and alias_present and canonical_value != alias_value:
+        logger.warning(
+            "Conflicting frontmatter keys; preferring canonical key",
+            data={
+                "canonical_key": canonical_key,
+                "alias_key": alias_key,
+                "canonical_value": canonical_value,
+                "alias_value": alias_value,
+            },
+        )
+
+    if canonical_present:
+        return canonical_value
+    if alias_present:
+        return alias_value
+    return None
+
+
+def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
+    """
+    Resolve week_start_day from template frontmatter.
+
+    Returns 0=Monday .. 6=Sunday, defaulting to Monday on missing/invalid values.
+    """
+    if not frontmatter:
+        return 0
+    raw_value = _frontmatter_value_with_alias(frontmatter, "week_start_day", "week-start-day")
+    if raw_value is None:
+        return 0
+    if isinstance(raw_value, int) and 0 <= raw_value <= 6:
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in VALID_WEEK_DAYS:
+            return VALID_WEEK_DAYS.index(normalized)
+    logger.warning(
+        "Invalid week_start_day in context template; defaulting to monday",
+        data={"value": raw_value},
+    )
+    return 0
+
+
+def find_last_user_idx(msgs: List[ModelMessage]) -> Optional[int]:
+    for idx in range(len(msgs) - 1, -1, -1):
+        m = msgs[idx]
+        role = getattr(m, "role", None)
+        if role and role.lower() == "user":
+            return idx
+        if isinstance(m, ModelRequest) and _model_request_has_user_prompt(m):
+            return idx
+    return None
+
+
+def _model_request_has_user_prompt(message: ModelRequest) -> bool:
+    parts = getattr(message, "parts", None) or ()
+    for part in parts:
+        if isinstance(part, UserPromptPart):
+            return True
+    return False
+
+
+def _context_message_to_model_message(message: ContextMessage) -> ModelMessage:
+    role = (message.role or "system").strip().lower()
+    content = message.content or ""
+    if role == "assistant":
+        return ModelResponse(parts=[TextPart(content=content)])
+    if role == "user":
+        return ModelRequest(parts=[UserPromptPart(content=content)])
+    return ModelRequest(parts=[SystemPromptPart(content=content)])
+
+
+def _deserialize_model_message(payload: dict[str, Any]) -> ModelMessage | None:
+    try:
+        message = _MODEL_MESSAGE_ADAPTER.validate_python(payload)
+    except Exception:
+        return None
+    return message if isinstance(message, (ModelRequest, ModelResponse)) else None
+
+
+def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
+    if isinstance(item, ContextMessage):
+        return [_context_message_to_model_message(item)]
+    if isinstance(item, HistoryMessage):
+        if isinstance(item.message, dict):
+            restored = _deserialize_model_message(item.message)
+            if restored is not None:
+                return [restored]
+        return [_context_message_to_model_message(ContextMessage(role=item.role, content=item.content, metadata=item.metadata))]
+    if isinstance(item, ToolExchange):
+        restored: list[ModelMessage] = []
+        for payload in (item.request_message, item.response_message):
+            message = _deserialize_model_message(payload)
+            if message is None:
+                return [_context_message_to_model_message(ContextMessage(role="system", content=item.result_text or "", metadata=item.metadata))]
+            restored.append(message)
+        return restored
+    raise ValueError("Unsupported assembled context item type")
+
+
+def _history_item_role_and_text(item: Any) -> tuple[str, str]:
+    if isinstance(item, ContextMessage):
+        return (item.role or "system").strip().lower(), item.content or ""
+    if isinstance(item, HistoryMessage):
+        return (item.role or "system").strip().lower(), item.content or ""
+    if isinstance(item, ToolExchange):
+        return "tool_exchange", item.result_text or ""
+    return extract_role_and_text(item)
+
+
+def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
+    if isinstance(value, AssembleContextResult):
+        return value
+    if isinstance(value, dict):
+        messages = value.get("messages", ())
+        instructions = value.get("instructions", ())
+        normalized_messages: list[Any] = []
+        if not isinstance(messages, (list, tuple)):
+            raise ValueError("assemble_context result must expose 'messages' as a list or tuple")
+        for item in messages:
+            if isinstance(item, (ContextMessage, HistoryMessage, ToolExchange)):
+                normalized_messages.append(item)
+                continue
+            if isinstance(item, dict):
+                if "request_message" in item and "response_message" in item:
+                    normalized_messages.append(
+                        ToolExchange(
+                            tool_call_id=str(item.get("tool_call_id") or ""),
+                            tool_name=str(item.get("tool_name") or ""),
+                            request_message=dict(item.get("request_message") or {}),
+                            response_message=dict(item.get("response_message") or {}),
+                            call_arguments=(
+                                dict(item.get("call_arguments"))
+                                if isinstance(item.get("call_arguments"), dict)
+                                else None
+                            ),
+                            result_text=None if item.get("result_text") is None else str(item.get("result_text")),
+                            metadata=dict(item.get("metadata") or {}),
+                        )
+                    )
+                    continue
+                if "message" in item:
+                    normalized_messages.append(
+                        HistoryMessage(
+                            role=str(item.get("role") or "system"),
+                            content=str(item.get("content") or ""),
+                            message=dict(item.get("message") or {}) if isinstance(item.get("message"), dict) else None,
+                            metadata=dict(item.get("metadata") or {}),
+                        )
+                    )
+                    continue
+                normalized_messages.append(
+                    ContextMessage(
+                        role=str(item.get("role") or "system"),
+                        content=str(item.get("content") or ""),
+                        metadata=dict(item.get("metadata") or {}),
+                    )
+                )
+                continue
+            raise ValueError("assemble_context result messages must contain context/history values or dictionaries")
+        normalized_instructions: list[str] = []
+        if isinstance(instructions, (list, tuple)):
+            for item in instructions:
+                text = str(item).strip()
+                if text:
+                    normalized_instructions.append(text)
+        return AssembleContextResult(
+            messages=tuple(normalized_messages),
+            instructions=tuple(normalized_instructions),
+        )
+    raise ValueError("Authoring context template must return AssembleContextResult or an equivalent dictionary")
+
+
+def _combined_context_text(messages: Sequence[Any]) -> str:
+    return "\n\n".join(
+        f"{role}: {text}"
+        for role, text in (_history_item_role_and_text(message) for message in messages)
+        if text.strip()
+    ).strip()
+
+
+def _latest_turn_messages(messages: Sequence[ModelMessage]) -> List[ModelMessage]:
+    """Return the active turn suffix starting at the latest real user prompt."""
+    last_user_idx = find_last_user_idx(list(messages))
+    if last_user_idx is None:
+        return list(messages)
+    return list(messages[last_user_idx:])
+
+
+def _message_has_tool_parts(message: ModelMessage) -> bool:
+    for part in getattr(message, "parts", ()) or ():
+        if getattr(part, "part_kind", None) in {"tool-call", "tool-return"}:
+            return True
+    return False
+
+
+def _messages_have_tool_parts(messages: Sequence[ModelMessage]) -> bool:
+    return any(_message_has_tool_parts(message) for message in messages)
+
+
+def _split_active_prompt(
+    messages: Sequence[ModelMessage],
+) -> tuple[list[ModelMessage], ModelMessage | None]:
+    """Separate completed prior history from Pydantic AI's active prompt request."""
+    if not messages:
+        return [], None
+    last_message = messages[-1]
+    if isinstance(last_message, ModelRequest) and _model_request_has_user_prompt(last_message):
+        return list(messages[:-1]), last_message
+    return list(messages), None
+
+
+def _latest_message_from_model_message(message: ModelMessage | None) -> LatestMessage:
+    if message is None:
+        return LatestMessage()
+    role, content = extract_role_and_text(message)
+    return LatestMessage(
+        role=role,
+        content=content,
+        metadata={
+            "message_type": type(message).__name__,
+            "run_id": getattr(message, "run_id", None),
+        },
+    )
+
+
+async def _build_authoring_context_history(
+    *,
+    run_context: RunContext[Any],
+    messages: List[ModelMessage],
+    session_id: str,
+    vault_name: str,
+    vault_path: str,
+    template,
+    source,
+) -> List[ModelMessage]:
+    if not messages:
+        return []
+
+    active_turn_messages = _latest_turn_messages(messages)
+    if _messages_have_tool_parts(active_turn_messages):
+        logger.info(
+            "Context history passthrough for active tool turn",
+            data={
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "template_name": template.name,
+                "message_count": len(messages),
+                "latest_turn_message_count": len(active_turn_messages),
+            },
+        )
+        logger.set_sinks(["validation"]).info(
+            "Context history passthrough for active tool turn",
+            data={
+                "event": "context_history_passthrough",
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "template_name": template.name,
+                "reason": "latest_turn_contains_tool_parts",
+                "message_count": len(messages),
+                "latest_turn_message_count": len(active_turn_messages),
+            },
+        )
+        return list(messages)
+
+    prior_history, active_prompt_message = _split_active_prompt(messages)
+
+    workflow_id = f"{vault_name}/context/{template.name}/{session_id}"
+    reference_date = resolve_cache_now(run_context)
+    host = WorkflowAuthoringHost(
+        workflow_id=workflow_id,
+        vault_path=vault_path,
+        reference_date=reference_date,
+        week_start_day=resolve_week_start_day(template.frontmatter),
+        session_key=session_id,
+        chat_session_id=session_id,
+        message_history=prior_history,
+        latest_message=_latest_message_from_model_message(active_prompt_message),
+    )
+
+    try:
+        result = await run_authoring_monty(
+            workflow_id=workflow_id,
+            code=source.code,
+            host=host,
+            inputs={},
+            script_name=template.name,
+        )
+    except AuthoringMontyExecutionError as exc:
+        logger.warning(
+            "Context authoring execution failed in history processor",
+            data={
+                "error": str(exc),
+                "template_name": template.name,
+                "phase": "authoring_run",
+                "template_pointer": source.docstring_summary or "```python``` block",
+            },
+        )
+        raise ContextTemplateExecutionError(
+            (
+                f"Context template '{template.name}' failed during execution. "
+                "Fix the template or select No template to continue without context management. "
+                f"Details: {exc}"
+            ),
+            template_name=template.name,
+            phase="authoring_run",
+            template_pointer=source.docstring_summary or "```python``` block",
+        )
+
+    try:
+        assembled = _normalize_authoring_context_result(result.value)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Context template returned invalid result shape",
+            data={
+                "error": str(exc),
+                "template_name": template.name,
+                "phase": "result_shape",
+                "template_pointer": source.docstring_summary or "assemble_context(...) result",
+            },
+        )
+        raise ContextTemplateExecutionError(
+            (
+                f"Context template '{template.name}' returned invalid context data. "
+                "Fix the template or select No template to continue without context management. "
+                f"Details: {exc}"
+            ),
+            template_name=template.name,
+            phase="result_shape",
+            template_pointer=source.docstring_summary or "assemble_context(...) result",
+        ) from exc
+    section_name = source.docstring_summary or "Context"
+    summary_text = _combined_context_text(assembled.messages)
+
+    logger.set_sinks(["validation"]).info(
+        "Context section completed",
+        data={
+            "event": "context_section_completed",
+            "section_name": section_name,
+            "section_key": f"authoring:{section_name}",
+            "model_alias": "authoring_monty",
+            "output_length": len(summary_text),
+            "output_hash": None,
+            "from_cache": False,
+            "cache_scope": None,
+            "cache_mode": None,
+        },
+    )
+
+    if summary_text:
+        try:
+            upsert_session(session_id=session_id, vault_name=vault_name, metadata=None)
+            combined_output = f"## {section_name}\n{summary_text}"
+            add_context_summary(
+                session_id=session_id,
+                vault_name=vault_name,
+                turn_index=None,
+                template=template,
+                model_alias="authoring_monty",
+                raw_output=combined_output,
+                budget_used=None,
+                sections_included=None,
+                compiled_prompt=None,
+                input_payload={"sections": [section_name]},
+            )
+            logger.info(
+                "Context summary persisted",
+                data={
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "template_name": template.name,
+                    "sections": [section_name],
+                },
+            )
+            logger.set_sinks(["validation"]).info(
+                "Context summary persisted",
+                data={
+                    "event": "context_summary_persisted",
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "template_name": template.name,
+                    "sections": [section_name],
+                    "summary_length": len(combined_output),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist authoring context summary", data={"error": str(exc)})
+
+    curated_history = []
+    for message in assembled.messages:
+        curated_history.extend(_history_item_to_model_messages(message))
+    if active_prompt_message is not None:
+        curated_history.append(active_prompt_message)
+    logger.set_sinks(["validation"]).info(
+        "Context history compiled",
+        data={
+            "event": "context_history_compiled",
+            "session_id": session_id,
+            "vault_name": vault_name,
+            "template_name": template.name,
+            "total_messages": len(curated_history),
+            "summary_section_count": 1 if summary_text else 0,
+            "summary_sections": [section_name] if summary_text else [],
+            "active_prompt_source": "history_processor_input" if active_prompt_message is not None else "absent",
+        },
+    )
+    return curated_history
+
+
+# ---------------------------------------------------------------------------
+# Public factory
+# ---------------------------------------------------------------------------
+
+def build_context_manager_history_processor(
+    *,
+    session_id: str,
+    vault_name: str,
+    vault_path: str,
+    model_alias: str,
+    template_name: str,
+) -> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
+    """
+    Factory for a history processor that runs a Monty authoring template and
+    injects the assembled context ahead of the recent turns.
+    """
+    try:
+        template = load_template(template_name, Path(vault_path))
+        authoring_source = parse_authoring_template_text(template.content)
+    except Exception as exc:
+        logger.warning(
+            "Context template load failed",
+            data={
+                "error": str(exc),
+                "template_name": template_name,
+                "phase": "template_load",
+                "template_pointer": "Template frontmatter and python block",
+            },
+        )
+        raise ContextTemplateExecutionError(
+            (
+                f"Context template '{template_name}' could not be loaded. "
+                "Fix the template or select No template to continue without context management. "
+                f"Details: {exc}"
+            ),
+            template_name=template_name,
+            phase="template_load",
+            template_pointer="Template frontmatter and python block",
+        ) from exc
+
+    logger.info(
+        "Context template loaded",
+        data={
+            "template_name": template.name,
+            "template_source": template.source,
+        },
+    )
+    logger.set_sinks(["validation"]).info(
+        "Context template loaded",
+        data={
+            "event": "context_template_loaded",
+            "template_name": template.name,
+            "template_source": template.source,
+        },
+    )
+
+    async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
+        return await _build_authoring_context_history(
+            run_context=run_context,
+            messages=messages,
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            template=template,
+            source=authoring_source,
+        )
+
+    return processor

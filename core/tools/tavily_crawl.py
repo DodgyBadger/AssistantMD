@@ -9,7 +9,6 @@ from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
 from core.logger import UnifiedLogger
-from core.constants import WEB_TOOL_SECURITY_NOTICE
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
 
@@ -103,31 +102,13 @@ class TavilyCrawl(BaseTool):
         return Tool(
             tavily_crawl,
             name='tavily_crawl',
-            description='Intelligently crawl websites to extract comprehensive content from multiple pages.'
+            description='Explore a website across multiple related pages when you need broader coverage than a single-page extract.',
         )
     
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Tavily Crawl."""
         return """
-## tavily_crawl usage instructions
-
-Use when you need to comprehensively explore a website and extract content from multiple related pages.
-- Crawling documentation sites for complete guides
-- Exploring knowledge bases and help centers
-- Conducting thorough research on company websites
-- Gathering comprehensive information from structured sites
-
-START SMALL:
-- Begin with max_depth=1 and max_breadth around 3-5 to verify you're on the right section.
-- Expand to deeper levels or larger breadth only in follow-up crawls once you confirm the previous run was useful.
-- Keep the `limit` low (5-10 pages) initially; request another crawl if you truly need more coverage.
-- Use targeted Tavily extract runs when you already know the exact pages you care about.
-
-If you need richer content from the pages returned, re-run with `extract_depth='advanced'` after the initial pass.
-
-IMPORTANT: If you get back only 1 page despite ambitious parameters, the site likely uses JavaScript navigation, is a single-page application, or has anti-crawling measures. In this case, inform the user that crawling isn't suitable for this site and recommend using multiple targeted extract operations on specific URLs instead.
-
-Provide clear instructions about what content you're seeking.
-Example: tavily_crawl(url="https://example.com", max_depth=1, max_breadth=3, limit=5).
-""" + WEB_TOOL_SECURITY_NOTICE
+Full documentation:
+- `__virtual_docs__/tools/tavily_crawl.md`
+"""

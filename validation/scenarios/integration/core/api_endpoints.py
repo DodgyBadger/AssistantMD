@@ -22,7 +22,7 @@ class ApiEndpointsScenario(BaseScenario):
         # Seed a minimal step workflow for execution and status checks
         self.create_file(
             vault,
-            "AssistantMD/Workflows/status_probe.md",
+            "AssistantMD/Authoring/status_probe.md",
             STATUS_PROBE_WORKFLOW,
         )
 
@@ -166,16 +166,24 @@ class ApiEndpointsScenario(BaseScenario):
         chat_metadata = self.call_api("/api/metadata")
         assert chat_metadata.status_code == 200, "Metadata endpoint available"
         metadata_payload = chat_metadata.json()
+        assert "default_model_thinking" in metadata_payload.get("settings", {}), (
+            "Metadata exposes default thinking hint for chat UI"
+        )
         assert any(
             tool.get("name") == "workflow_run"
             for tool in metadata_payload.get("tools", [])
         ), "workflow_run tool is exposed in metadata"
+        assert not any(
+            tool.get("name") == "memory_ops"
+            for tool in metadata_payload.get("tools", [])
+        ), "Disabled memory_ops tool is not exposed in metadata"
 
         chat_payload = {
             "vault_name": vault.name,
             "prompt": "Say hello from integration test.",
             "tools": [],
             "model": "test",
+            "thinking": "off",
         }
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
         assert chat_first.status_code == 200, "Chat execution succeeds"
@@ -235,14 +243,14 @@ class ApiEndpointsScenario(BaseScenario):
 # === WORKFLOW TEMPLATES ===
 
 STATUS_PROBE_WORKFLOW = """---
-workflow_engine: step
+run_type: workflow
 enabled: false
 description: Validation helper workflow
 ---
 
-## STEP1
-@output file: logs/{today}
-@model test
+## Run
 
-Summarize the validation run context.
+```python
+await finish(status="completed", reason="status-probe")
+```
 """

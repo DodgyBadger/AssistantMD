@@ -149,42 +149,142 @@
         details summary::-webkit-details-marker {
             display: none;
         }
+        .chat-settings-secondary-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.75rem;
+            align-items: start;
+        }
+        .tool-dropdown {
+            position: relative;
+        }
+        .tool-dropdown-trigger {
+            display: inline-flex;
+            width: 100%;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.5rem 0.875rem;
+            border: 1px solid rgb(var(--border-secondary));
+            border-radius: 0.5rem;
+            background: rgb(var(--bg-card));
+            color: rgb(var(--text-primary));
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+        .tool-dropdown-trigger:hover {
+            border-color: rgb(var(--border-primary));
+            background: rgb(var(--bg-elevated));
+        }
+        .tool-dropdown-trigger:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .tool-dropdown-label {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            overflow: hidden;
+            white-space: nowrap;
+            font-size: 0.92rem;
+            font-weight: 500;
+        }
+        .tool-dropdown-summary-text {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tool-dropdown-chevron {
+            width: 1rem;
+            height: 1rem;
+            color: rgb(var(--text-secondary));
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+        .tool-dropdown.open .tool-dropdown-chevron {
+            transform: rotate(180deg);
+        }
+        .tool-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 0.45rem);
+            right: 0;
+            z-index: 40;
+            width: min(18rem, 80vw);
+            max-height: 15rem;
+            overflow-y: auto;
+            padding: 0.4rem;
+            border: 1px solid rgb(var(--border-primary));
+            border-radius: 0.6rem;
+            background: rgb(var(--bg-card));
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+        }
+        .tool-dropdown-menu.hidden {
+            display: none;
+        }
+        .tool-dropdown-menu-header {
+            padding: 0.15rem 0.25rem 0.4rem;
+            font-size: 0.74rem;
+            color: rgb(var(--text-secondary));
+        }
+        .tool-dropdown-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+        }
         .tool-checkbox-wrapper {
             position: relative;
         }
         .tool-checkbox-wrapper input[type="checkbox"] {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
+            width: 0.95rem;
+            height: 0.95rem;
+            margin: 0;
+            accent-color: rgb(var(--accent-primary));
+            flex-shrink: 0;
         }
         .tool-checkbox-wrapper label {
-            display: inline-block;
-            padding: 6px 14px;
-            border: 1.5px solid rgb(var(--border-secondary));
-            border-radius: 9999px;
-            background: rgb(var(--bg-card));
-            color: rgb(var(--text-secondary));
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            padding: 0.4rem 0.45rem;
+            border-radius: 0.4rem;
+            color: rgb(var(--text-primary));
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: background 0.2s ease;
             user-select: none;
+            font-size: 0.88rem;
+            line-height: 1.25;
         }
         .tool-checkbox-wrapper label:hover {
-            border-color: rgb(var(--border-primary));
             background: rgb(var(--bg-elevated));
         }
-        .tool-checkbox-wrapper input[type="checkbox"]:checked + label {
-            background: rgb(var(--accent-primary));
-            border-color: rgb(var(--accent-primary));
-            color: rgb(var(--text-on-accent));
+        .tool-checkbox-name {
+            font-size: 0.88rem;
             font-weight: 500;
+            color: inherit;
         }
-        .tool-checkbox-wrapper input[type="checkbox"]:disabled + label {
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:checked) label {
+            background: rgb(var(--accent-primary) / 0.12);
+        }
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:checked) .tool-checkbox-name {
+            color: rgb(var(--accent-hover));
+        }
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:disabled) label {
             opacity: 0.5;
             cursor: not-allowed;
         }
-        .tool-checkbox-wrapper input[type="checkbox"]:disabled + label:hover {
-            border-color: rgb(var(--border-secondary));
-            background: rgb(var(--bg-card));
+        .tool-checkbox-wrapper:has(input[type="checkbox"]:disabled) label:hover {
+            background: transparent;
+        }
+        @media (min-width: 768px) {
+            .chat-settings-secondary-row {
+                grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem) minmax(0, 1fr);
+            }
+        }
+        .session-selector-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.75rem;
         }
         .tab-button.text-amber-600 {
             font-weight: 600;
@@ -315,6 +415,10 @@
         .message-bubble.message-user {
             background: rgb(var(--bg-elevated));
             color: rgb(var(--text-primary));
+        }
+        .message-bubble.message-user .message-body {
+            font-size: 0.875rem;
+            line-height: 1.7142857;
         }
         .message-bubble.message-assistant {
             background: rgb(var(--accent-primary) / 0.08);
@@ -809,9 +913,6 @@
                         <button id="theme-toggle" type="button" class="text-2xl hover:opacity-75 transition-opacity focus:outline-none cursor-pointer" style="touch-action: manipulation;" title="Change theme">
                             🎨
                         </button>
-                        <button id="new-session-btn" type="button" class="text-2xl text-txt-secondary hover:text-txt-primary focus:outline-none mr-2 cursor-pointer" style="touch-action: manipulation;" title="New Session">
-                            ➕
-                        </button>
                     </div>
                 </div>
             </div>
@@ -830,24 +931,76 @@
                     </svg>
                 </summary>
                 <div class="p-4 pt-2 space-y-3">
-                    <!-- Vault & Model Selection -->
+                    <!-- Row 1: Vault | Context template -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select vault...</option>
                         </select>
-                        <select id="model-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">Select model...</option>
-                        </select>
-                    </div>
-                    <!-- Context Template -->
-                    <div class="grid grid-cols-1 gap-3">
                         <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select template...</option>
                         </select>
                     </div>
-                    <!-- Tools -->
-                    <div id="tools-checkboxes" class="flex flex-wrap gap-2">
-                        <!-- Tool checkboxes will be added here -->
+                    <!-- Row 2: Model | Thinking | Tools -->
+                    <div class="chat-settings-secondary-row">
+                        <select id="model-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="">Select model...</option>
+                        </select>
+                        <select id="thinking-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="default">Thinking: Default</option>
+                            <option value="off">Thinking: Off</option>
+                            <option value="on">Thinking: On</option>
+                            <option value="minimal">Thinking: Minimal</option>
+                            <option value="low">Thinking: Low</option>
+                            <option value="medium">Thinking: Medium</option>
+                            <option value="high">Thinking: High</option>
+                            <option value="xhigh">Thinking: XHigh</option>
+                        </select>
+                        <div id="tool-dropdown" class="tool-dropdown">
+                            <button
+                                id="tool-dropdown-trigger"
+                                type="button"
+                                class="tool-dropdown-trigger"
+                                aria-expanded="false"
+                                aria-controls="tool-dropdown-menu"
+                            >
+                                <span class="tool-dropdown-label">
+                                    <span>Tools</span>
+                                    <span id="tool-dropdown-summary" class="tool-dropdown-summary-text">(none selected)</span>
+                                </span>
+                                <svg class="tool-dropdown-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                    <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                            </button>
+                            <div id="tool-dropdown-menu" class="tool-dropdown-menu hidden">
+                                <div class="tool-dropdown-menu-header">Select the tools available to the current chat session.</div>
+                                <div id="tools-checkboxes" class="tool-dropdown-options">
+                                    <!-- Tool checkboxes will be added here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Row 3: Session -->
+                    <div class="session-selector-row">
+                        <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="">New session</option>
+                        </select>
+                    </div>
+                    <div id="session-title-row" class="flex gap-2 hidden">
+                        <input id="session-title-input" type="text" maxlength="120"
+                            placeholder="Add a title…"
+                            class="flex-1 px-3 py-1.5 text-sm border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
+                        <button id="session-title-save" type="button"
+                            class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                            Save
+                        </button>
+                        <button id="session-export-btn" type="button"
+                            class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                            Export
+                        </button>
+                        <button id="session-delete-btn" type="button"
+                            class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed">
+                            Delete
+                        </button>
                     </div>
                 </div>
             </details>
@@ -927,9 +1080,11 @@
                             class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary"
                         />
                     </div>
-                    <button id="execute-workflow-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent self-start">
-                        Execute Workflow
-                    </button>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="execute-workflow-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent self-start">
+                            Execute Workflow
+                        </button>
+                    </div>
                     <div id="execute-workflow-result" class="text-sm"></div>
                 </div>
             </details>
@@ -1212,6 +1367,61 @@
 
                         <div id="import-results" class="border border-border-primary rounded-md bg-app-elevated p-4 text-sm text-txt-secondary">
                             No imports yet.
+                        </div>
+                    </div>
+                </details>
+
+                <details id="config-misc-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Misc</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-txt-secondary">
+                            Manual maintenance actions that do not fit elsewhere.
+                        </p>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Purge Expired Cache</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Deletes expired cache artifacts from <code>cache.db</code>. Unexpired cache entries are preserved.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <button id="purge-expired-cache" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                    Purge Expired Cache
+                                </button>
+                                <div id="misc-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
+                        </div>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Purge Chat Sessions</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Remove old chat sessions and their transcript files from the selected vault.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <select id="purge-sessions-vault" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="">Select vault…</option>
+                                    </select>
+                                    <select id="purge-sessions-age" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="7">Older than 7 days</option>
+                                        <option value="30" selected>Older than 30 days</option>
+                                        <option value="90">Older than 90 days</option>
+                                        <option value="">All sessions</option>
+                                    </select>
+                                    <button id="purge-sessions-btn" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                        Purge Sessions
+                                    </button>
+                                </div>
+                                <div id="purge-sessions-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
                         </div>
                     </div>
                 </details>

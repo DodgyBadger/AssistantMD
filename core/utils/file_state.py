@@ -1,5 +1,5 @@
 """
-File processing state management for {pending} patterns.
+File processing state management for pending-file tracking.
 
 Tracks which files have been processed by workflows to support incremental processing.
 """
@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import Column, String, DateTime
 
-from core.database import Base, create_engine_from_system_db, create_session_factory
+from core.database import Base, create_engine_from_system_db, create_session_factory, create_tables
 from core.runtime.paths import get_data_root
 from core.logger import UnifiedLogger
 from core.utils.hash import hash_file_bytes
@@ -29,7 +29,6 @@ class ProcessedFile(Base):
 
     vault_name = Column(String, primary_key=True, nullable=False)
     workflow_id = Column("assistant_id", String, primary_key=True, nullable=False)
-    pattern = Column(String, primary_key=True, nullable=False)
     # SHA256 hash for comparison
     content_hash = Column(String, primary_key=True, nullable=False)
     filepath = Column(String, nullable=False)  # Human-readable path for debugging
@@ -54,7 +53,7 @@ class WorkflowFileStateManager:
         self.workflow_id = workflow_id
         self.vault_path = os.path.join(str(get_data_root()), vault_name)
 
-        # Create SQLAlchemy engine and session factory for file_state database
+        # Uses the centralized declared system DB registry.
         self.engine = create_engine_from_system_db("file_state")
         self.SessionFactory = create_session_factory(self.engine)
 
@@ -62,7 +61,7 @@ class WorkflowFileStateManager:
     
     def _init_database(self):
         """Initialize database schema if it doesn't exist."""
-        Base.metadata.create_all(self.engine)
+        create_tables(self.engine, ProcessedFile.__table__)
     
     def _normalize_path_for_state(self, filepath: str) -> str:
         """
@@ -79,8 +78,8 @@ class WorkflowFileStateManager:
             relative_path = relative_path[:-3]
         return relative_path.replace('\\', '/')
 
-    def get_processed_state(self, pattern: str) -> Tuple[Set[str], Dict[str, datetime]]:
-        """Get processed hashes and per-path processed timestamps for a pattern."""
+    def get_processed_state(self) -> Tuple[Set[str], Dict[str, datetime]]:
+        """Get processed hashes and per-path processed timestamps for this workflow."""
         with self.SessionFactory() as session:
             results = session.query(
                 ProcessedFile.content_hash,
@@ -89,7 +88,6 @@ class WorkflowFileStateManager:
             ).filter(
                 ProcessedFile.vault_name == self.vault_name,
                 ProcessedFile.workflow_id == self.workflow_id,
-                ProcessedFile.pattern == pattern
             ).all()
 
             hashes = set()
@@ -103,18 +101,12 @@ class WorkflowFileStateManager:
                     path_processed_at[normalized_path] = processed_at
 
             return hashes, path_processed_at
-
-    def get_processed_files(self, pattern: str) -> Set[str]:
-        """Backward-compatible helper returning only processed hashes."""
-        hashes, _ = self.get_processed_state(pattern)
-        return hashes
     
-    def mark_files_processed(self, file_records: List[dict], pattern: str):
-        """Mark files as processed for a specific pattern.
+    def mark_files_processed(self, file_records: List[dict]):
+        """Mark files as processed for this workflow.
 
         Args:
             file_records: List of dicts with 'content_hash' and 'filepath' keys
-            pattern: The @input pattern (e.g., "file:journal/{pending:5}")
         """
         if not file_records:
             return
@@ -125,7 +117,6 @@ class WorkflowFileStateManager:
                 processed_file = ProcessedFile(
                     vault_name=self.vault_name,
                     workflow_id=self.workflow_id,
-                    pattern=pattern,
                     content_hash=record['content_hash'],
                     filepath=self._normalize_path_for_state(record['filepath']),
                     processed_at=datetime.utcnow()
@@ -137,7 +128,6 @@ class WorkflowFileStateManager:
     def get_pending_files(
         self,
         all_files: List[str],
-        pattern: str,
         count_limit: Optional[int] = None,
         *,
         order: str = "ctime",
@@ -148,22 +138,16 @@ class WorkflowFileStateManager:
         """Filter list of files to return only pending (unprocessed) files.
 
         Returns files in chronological order (oldest first) up to the count limit.
-        Core function that implements {pending} variable behavior.
-
-        Uses content hashing for file identification - files are matched by content
-        hash rather than path, making this robust to file renames/moves and
-        avoiding path format issues.
+        Uses content hashing for file identification — robust to renames/moves.
 
         Args:
-            all_files: List of all available file paths (absolute paths, should be
-                pre-sorted chronologically)
-            pattern: The @input pattern that requested these files
+            all_files: List of all available file paths (absolute paths)
             count_limit: Maximum number of files to return
 
         Returns:
             List of file paths for unprocessed files, preserving chronological order
         """
-        processed_hashes, path_processed_at = self.get_processed_state(pattern)
+        processed_hashes, path_processed_at = self.get_processed_state()
 
         # Filter out processed files - compare by content hash
         pending_files = []
@@ -211,7 +195,6 @@ class WorkflowFileStateManager:
                 "Pending files resolved",
                 data={
                     "workflow_id": self.workflow_id,
-                    "pattern": pattern,
                     "pending_count": pending_count,
                 },
             )
@@ -220,7 +203,6 @@ class WorkflowFileStateManager:
             "pending_files_resolved",
             data={
                 "workflow_id": self.workflow_id,
-                "pattern": pattern,
                 "candidate_count": len(all_files),
                 "pending_count": pending_count,
                 "order": order,
@@ -229,33 +211,3 @@ class WorkflowFileStateManager:
             },
         )
         return pending_files
-    
-    def update_from_processed_step(self, processed_step):
-        """Update state for patterns that require tracking from ProcessedStep data.
-        
-        Args:
-            processed_step: ProcessedStep instance containing directive results
-        """
-        input_file_data = processed_step.get_directive_value('input', [])
-        if not input_file_data:
-            return
-        
-        # Handle both single directive and multiple directives cases
-        if isinstance(input_file_data, list) and input_file_data:
-            if isinstance(input_file_data[0], dict):
-                # Single directive case: [{file1}, {file2}]
-                file_lists = [input_file_data]
-            else:
-                # Multiple directive case: [[{file1}], [{file2}]]
-                file_lists = input_file_data
-        else:
-            return
-        
-        # Check each file list for state metadata
-        for file_list in file_lists:
-            for file_data in file_list:
-                if ('_state_metadata' in file_data
-                        and file_data['_state_metadata'].get('requires_tracking')):
-                    pattern = file_data['_state_metadata']['pattern']
-                    file_records = file_data['_state_metadata']['file_records']
-                    self.mark_files_processed(file_records, pattern)

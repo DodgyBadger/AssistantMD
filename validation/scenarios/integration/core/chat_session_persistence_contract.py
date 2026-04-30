@@ -1,0 +1,363 @@
+"""
+Integration scenario validating the durable chat session persistence contract.
+
+Exercises a real chat turn, persists a normal tool result, restarts the system,
+and verifies both SQLite-backed session history and structured tool-event rows.
+"""
+
+import sqlite3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
+from validation.core.base_scenario import BaseScenario
+
+
+class ChatSessionPersistenceContractScenario(BaseScenario):
+    """Validate persisted chat messages and tool events across restart."""
+
+    async def test_scenario(self):
+        vault = self.create_vault("ChatSessionPersistenceContractVault")
+
+        await self.start_system()
+
+        import core.chat.executor as chat_executor
+        from core.authoring.runtime import WorkflowAuthoringHost, run_authoring_monty
+        from core.constants import ASSISTANTMD_ROOT_DIR, CHAT_SESSIONS_DIR
+        from core.runtime.state import get_runtime_context
+        from pydantic_ai.models.test import TestModel
+
+        session_id = "chat_session_persistence_contract_session"
+
+        async def session_probe() -> str:
+            return "SESSION_PROBE_RESULT"
+
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            del vault_name, vault_path, tools, model, thinking
+            return (
+                "You must call the session_probe tool before responding.",
+                "",
+                TestModel(),
+                [session_probe],
+            )
+
+        original_prepare_agent_config = chat_executor._prepare_agent_config
+        chat_executor._prepare_agent_config = _patched_prepare_agent_config
+        try:
+            response = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Use the session_probe tool and then answer briefly.",
+                    "session_id": session_id,
+                    "tools": ["session_probe"],
+                    "model": "test",
+                },
+            )
+            assert response.status_code == 200, "Chat execution should succeed for persistence contract coverage"
+
+            payload = response.json()
+            self.soft_assert_equal(payload["session_id"], session_id, "Expected stable explicit session id")
+            self.soft_assert(
+                "SESSION_PROBE_RESULT" in payload["response"],
+                "Expected assistant response to reflect the tool result",
+            )
+
+            runtime = get_runtime_context()
+            chat_sessions_db = Path(runtime.config.system_root) / "chat_sessions.db"
+            assert chat_sessions_db.exists(), "Chat session persistence DB should be created"
+
+            with sqlite3.connect(chat_sessions_db) as conn:
+                session_row = conn.execute(
+                    """
+                    SELECT session_id, vault_name
+                    FROM chat_sessions
+                    WHERE session_id = ? AND vault_name = ?
+                    """,
+                    (session_id, vault.name),
+                ).fetchone()
+                assert session_row is not None, "Chat session row should be persisted"
+
+                message_rows = conn.execute(
+                    """
+                    SELECT role, content_text, message_json
+                    FROM chat_messages
+                    WHERE session_id = ? AND vault_name = ?
+                    ORDER BY sequence_index ASC
+                    """,
+                    (session_id, vault.name),
+                ).fetchall()
+                self.soft_assert(
+                    len(message_rows) >= 2,
+                    "Expected persisted provider-native chat messages for the completed turn",
+                )
+                self.soft_assert(
+                    any(
+                        "Use the session_probe tool and then answer briefly."
+                        in str(row[1] or "")
+                        for row in message_rows
+                    ),
+                    "Persisted chat messages should include the original user prompt",
+                )
+                self.soft_assert_equal(
+                    _count_user_prompt_rows(
+                        message_rows,
+                        "Use the session_probe tool and then answer briefly.",
+                    ),
+                    1,
+                    "Canonical chat history should store the first active user prompt exactly once",
+                )
+                first_prompt_rows = [
+                    row for row in message_rows
+                    if row[0] == "user"
+                    and row[1] == "Use the session_probe tool and then answer briefly."
+                ]
+                first_prompt_json = str(first_prompt_rows[0][2] if first_prompt_rows else "")
+                self.soft_assert(
+                    '"run_id"' in first_prompt_json,
+                    "Persisted active user prompt should come from provider-native new_messages()",
+                )
+                self.soft_assert(
+                    any("SESSION_PROBE_RESULT" in str(row[1] or "") for row in message_rows),
+                    "Persisted chat messages should include the resulting assistant/tool content",
+                )
+
+                tool_event_rows = conn.execute(
+                    """
+                    SELECT event_type, tool_name, result_text, artifact_ref
+                    FROM chat_tool_events
+                    WHERE session_id = ? AND vault_name = ?
+                    ORDER BY id ASC
+                    """,
+                    (session_id, vault.name),
+                ).fetchall()
+
+            self.soft_assert_equal(
+                [row[0] for row in tool_event_rows],
+                ["call", "result"],
+                "Expected normal tool execution to persist call and result events",
+            )
+            self.soft_assert(
+                all(row[1] == "session_probe" for row in tool_event_rows),
+                "Persisted tool events should record the originating tool name",
+            )
+            result_rows = [row for row in tool_event_rows if row[0] == "result"]
+            assert result_rows, "Expected a persisted tool result row"
+            self.soft_assert_equal(
+                result_rows[0][2],
+                "SESSION_PROBE_RESULT",
+                "Persisted tool result row should retain the tool output",
+            )
+            self.soft_assert_equal(
+                result_rows[0][3],
+                None,
+                "Non-overflow tool results should not create an artifact ref",
+            )
+
+            transcript_dir = Path(vault) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR
+            transcript = transcript_dir / f"{session_id}.md"
+            self.soft_assert(
+                not transcript.exists(),
+                "Normal chat execution should not write a transcript by default",
+            )
+
+            title_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/title",
+                method="PATCH",
+                data={"vault_name": vault.name, "title": "Session Probe Title"},
+            )
+            assert title_response.status_code == 200, "Setting the session title should succeed"
+
+            export_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/export",
+                method="POST",
+                data={"vault_name": vault.name},
+            )
+            assert export_response.status_code == 200, "Transcript export should succeed on demand"
+            export_payload = export_response.json()
+            self.soft_assert_equal(
+                export_payload["filename"],
+                f"{session_id} - Session_Probe_Title.md",
+                "Transcript filename should include the titled session label",
+            )
+
+            titled_transcript = transcript_dir / export_payload["filename"]
+            assert titled_transcript.exists(), "Export should create the transcript file"
+            transcript_text = titled_transcript.read_text(encoding="utf-8")
+            self.soft_assert(
+                "**User:**" in transcript_text and "**Assistant:**" in transcript_text,
+                "Transcript should contain exported user and assistant sections",
+            )
+            self.soft_assert(
+                "Use the session_probe tool and then answer briefly." in transcript_text,
+                "Transcript export should include the persisted user prompt",
+            )
+            self.soft_assert(
+                "[session_probe]" not in transcript_text,
+                "Transcript export should exclude tool-call and tool-return markers",
+            )
+
+            follow_up = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Call the session_probe tool again and answer with the result only.",
+                    "session_id": session_id,
+                    "tools": ["session_probe"],
+                    "model": "test",
+                },
+            )
+            assert follow_up.status_code == 200, "Follow-up chat execution should succeed"
+
+            second_export_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/export",
+                method="POST",
+                data={"vault_name": vault.name},
+            )
+            assert second_export_response.status_code == 200, "Repeated transcript export should succeed"
+            second_export_payload = second_export_response.json()
+            self.soft_assert_equal(
+                second_export_payload["filename"],
+                export_payload["filename"],
+                "Repeated export should overwrite the same titled transcript file",
+            )
+
+            transcript_text = titled_transcript.read_text(encoding="utf-8")
+            self.soft_assert(
+                "Call the session_probe tool again and answer with the result only." in transcript_text,
+                "Repeated export should overwrite the transcript with newly added session messages",
+            )
+            with sqlite3.connect(chat_sessions_db) as conn:
+                message_rows_after_follow_up = conn.execute(
+                    """
+                    SELECT role, content_text, message_json
+                    FROM chat_messages
+                    WHERE session_id = ? AND vault_name = ?
+                    ORDER BY sequence_index ASC
+                    """,
+                    (session_id, vault.name),
+                ).fetchall()
+            self.soft_assert_equal(
+                _count_user_prompt_rows(
+                    message_rows_after_follow_up,
+                    "Use the session_probe tool and then answer briefly.",
+                ),
+                1,
+                "Canonical chat history should not duplicate the first user prompt after follow-up",
+            )
+            self.soft_assert_equal(
+                _count_user_prompt_rows(
+                    message_rows_after_follow_up,
+                    "Call the session_probe tool again and answer with the result only.",
+                ),
+                1,
+                "Canonical chat history should store the follow-up active user prompt exactly once",
+            )
+            self.soft_assert_equal(
+                len(list(transcript_dir.glob(f"{session_id}*.md"))),
+                1,
+                "Export should keep a single transcript variant for the session",
+            )
+
+            await self.restart_system()
+
+            workflow_id = f"{vault.name}/chat/{session_id}"
+            host = WorkflowAuthoringHost(
+                workflow_id=workflow_id,
+                vault_path=str(vault),
+                session_key=session_id,
+                chat_session_id=session_id,
+                message_history=[],
+            )
+            checkpoint = self.event_checkpoint()
+            result = await run_authoring_monty(
+                workflow_id=workflow_id,
+                code=CHAT_SESSION_PERSISTENCE_CONTRACT_CODE,
+                host=host,
+                script_name="chat_session_persistence_contract.py",
+            )
+            events = self.events_since(checkpoint)
+
+            self.assert_event_contains(
+                events,
+                name="authoring_retrieve_history_completed",
+                expected={
+                    "workflow_id": workflow_id,
+                    "source": "sqlite_chat_sessions",
+                },
+            )
+
+            output = result.value
+            self.soft_assert_equal(
+                output["source"],
+                "sqlite_chat_sessions",
+                "Expected retrieve_history to rehydrate from the persisted SQLite chat store after restart",
+            )
+            self.soft_assert_equal(
+                output["history_source"],
+                "chat_messages",
+                "Expected retrieve_history metadata to identify canonical chat message storage",
+            )
+            self.soft_assert_equal(
+                output["history_message_filter"],
+                "all",
+                "Expected default history retrieval to preserve the full canonical message timeline",
+            )
+            self.soft_assert(
+                output["item_count"] >= 2,
+                "Expected restarted history retrieval to contain persisted session messages",
+            )
+            self.soft_assert(
+                output["last_content"],
+                "Expected restarted history retrieval to include a final persisted message",
+            )
+            self.soft_assert_equal(
+                output["first_prompt_count"],
+                1,
+                "retrieve_history should expose one canonical copy of the first user prompt",
+            )
+            self.soft_assert_equal(
+                output["follow_up_prompt_count"],
+                1,
+                "retrieve_history should expose one canonical copy of the follow-up user prompt",
+            )
+        finally:
+            chat_executor._prepare_agent_config = original_prepare_agent_config
+            await self.stop_system()
+            self.teardown_scenario()
+            self.assert_no_failures()
+
+
+def _count_user_prompt_rows(rows, prompt: str) -> int:
+    return sum(1 for role, content, _message_json in rows if role == "user" and content == prompt)
+
+
+CHAT_SESSION_PERSISTENCE_CONTRACT_CODE = """
+history = await retrieve_history(scope="session", limit="all")
+last_content = history.items[-1].content if history.items else ""
+first_prompt_count = 0
+follow_up_prompt_count = 0
+for item in history.items:
+    try:
+        role = item.role
+        content = item.content
+    except AttributeError:
+        continue
+    if role == "user" and content == "Use the session_probe tool and then answer briefly.":
+        first_prompt_count += 1
+    if role == "user" and content == "Call the session_probe tool again and answer with the result only.":
+        follow_up_prompt_count += 1
+
+{
+    "source": history.source,
+    "item_count": history.item_count,
+    "last_content": last_content,
+    "history_source": history.metadata.get("canonical_source", ""),
+    "history_message_filter": history.metadata.get("message_filter", ""),
+    "first_prompt_count": first_prompt_count,
+    "follow_up_prompt_count": follow_up_prompt_count,
+}
+"""

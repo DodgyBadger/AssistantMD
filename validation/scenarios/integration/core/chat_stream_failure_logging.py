@@ -8,11 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.llm.chat_executor import (
-    PreparedChatExecution,
-    execute_chat_prompt_stream,
-)
-from core.llm.session_manager import SessionManager
+from core.chat.executor import PreparedChatExecution, execute_chat_prompt_stream
 from validation.core.base_scenario import BaseScenario
 
 
@@ -32,7 +28,7 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
 
         await self.start_system()
 
-        import core.llm.chat_executor as chat_executor
+        import core.chat.executor as chat_executor
 
         async def _prepared_failure(*args, **kwargs):
             return PreparedChatExecution(
@@ -48,16 +44,16 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
         chat_executor._prepare_chat_execution = _prepared_failure
         try:
+            prompt = "Trigger the forced streaming chat failure."
             stream = execute_chat_prompt_stream(
                 vault_name=vault.name,
                 vault_path=str(vault),
-                prompt="Trigger the forced streaming chat failure.",
+                prompt=prompt,
                 image_paths=[],
                 image_uploads=[],
                 session_id="chat_stream_failure_session",
                 tools=[],
                 model="test",
-                session_manager=SessionManager(),
                 context_template=None,
             )
 
@@ -76,6 +72,9 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             assert any('"event": "error"' in chunk for chunk in chunks), (
                 "Streaming failure should emit an SSE error chunk before raising"
             )
+
+            transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_stream_failure_session.md"
+            assert not transcript.exists(), "Failed streaming chat execution should not write a transcript by default"
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"

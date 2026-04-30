@@ -103,3 +103,15 @@ class ChatCapabilityMismatchError(APIException):
             message=message,
             details=details,
         )
+
+
+class ChatContextTemplateFailureError(APIException):
+    """Raised when a selected chat context template cannot be loaded or executed."""
+
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            status_code=400,
+            error_type="ChatContextTemplateFailure",
+            message=message,
+            details=details,
+        )

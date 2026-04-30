@@ -6,11 +6,27 @@
 settings:
   default_model:
     value: sonnet
-    description: "Default model alias used in the chat UI and as fallback when @model is omitted in workflow and context templates."
+    description: "Default model alias used in the chat UI and as fallback when workflow and context templates omit an explicit model."
     restart_required: false
-  default_context_template:
+  default_model_thinking:
+    value: default
+    description: "Default thinking policy for model calls. Use default, on, off, minimal, low, medium, high, or xhigh."
+    restart_required: false
+  default_context_script:
     value: "default.md"
-    description: "Default context template name for chat sessions (vault templates override system templates by name)."
+    description: "Default context script name for chat sessions (vault scripts override system scripts by name)."
+    restart_required: false
+  default_chat_tools:
+    value:
+      - web_search_tavily
+      - browser
+      - file_ops_safe
+      - file_ops_unsafe
+      - tavily_extract
+      - tavily_crawl
+      - code_execution
+      - delegate
+    description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   default_api_timeout:
     value: 120
@@ -28,9 +44,9 @@ settings:
     value: 0
     description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
     restart_required: false
-  auto_buffer_max_tokens:
+  auto_cache_max_tokens:
     value: 10000
-    description: "Automatically route tool output to a buffer variable when it exceeds this token count. 0 = disabled. Caution: very low values will increase tool churn and token usage. This setting is used to protect context window from massive tool outputs. buffer_ops tool is automatically enabled if this setting > 0."
+    description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
     restart_required: false
   file_search_timeout_seconds:
     value: 10
@@ -39,10 +55,6 @@ settings:
   file_ops_safe_list_max_results:
     value: 200
     description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
-    restart_required: false
-  routing_allowed_tools:
-    value: []
-    description: "The chat agent cannot route tool outputs to a buffer variable unless they are listed here. JSON array. E.g. [\"file_ops,safe\", \"web_search_duckduckgo\"]"
     restart_required: false
   chunking_max_images_per_prompt:
     value: 20
@@ -265,11 +277,6 @@ tools:
     description: "Read, write, append, list, search"
     requires_secrets: []
     user_editable: false
-  buffer_ops:
-    module: core.tools.buffer_ops
-    description: "Read-only buffer inspection (list, info, peek, read, search)"
-    requires_secrets: []
-    user_editable: false
   file_ops_unsafe:
     module: core.tools.file_ops_unsafe
     description: "Edit, delete, move/overwrite (use with caution)"
@@ -292,13 +299,20 @@ tools:
     description: "Browser-based page extraction using Playwright"
     requires_secrets: []
     user_editable: false
-  code_execution:
-    module: core.tools.code_execution_piston
-    description: "Multi-language code execution via Piston API"
-    requires_secrets: []
-    user_editable: false
   workflow_run:
     module: core.tools.workflow_run
     description: "List, run, enable, and disable workflows in the current vault"
     requires_secrets: []
     user_editable: false
+  code_execution:
+    module: core.tools.code_execution
+    description: "Run constrained local Python against the current chat cache namespace"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true
+  delegate:
+    module: core.tools.delegate
+    description: "Run a bounded child agent for focused model reasoning or limited tool exploration"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true

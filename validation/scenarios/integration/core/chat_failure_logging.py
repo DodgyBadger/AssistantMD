@@ -19,7 +19,7 @@ class ChatFailureLoggingScenario(BaseScenario):
 
         await self.start_system()
 
-        import core.llm.chat_executor as chat_executor
+        import core.chat.executor as chat_executor
 
         async def _forced_failure(*args, **kwargs):
             raise RuntimeError("forced chat failure for logging validation")
@@ -27,18 +27,22 @@ class ChatFailureLoggingScenario(BaseScenario):
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
         chat_executor._prepare_chat_execution = _forced_failure
         try:
+            prompt = "Trigger the forced chat failure."
             response = self.call_api(
                 "/api/chat/execute",
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Trigger the forced chat failure.",
+                    "prompt": prompt,
                     "session_id": "chat_failure_session",
                     "tools": [],
                     "model": "test",
                 },
             )
             assert response.status_code == 500, "Forced chat failure should return 500"
+
+            transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_failure_session.md"
+            assert not transcript.exists(), "Failed chat execution should not write a transcript by default"
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"

@@ -44,10 +44,12 @@ class ChatExecuteRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
     tools: List[str] = Field(..., description="List of tool names to enable")
     model: str = Field(..., description="Model name to use")
+    thinking: Optional[str] = Field(
+        None,
+        description="Optional per-request thinking override: default, on, off, minimal, low, medium, high, xhigh",
+    )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
-
-
 
 
 #######################################################################
@@ -133,8 +135,10 @@ class ExecuteWorkflowResponse(BaseModel):
     """Response model for manual workflow execution."""
     success: bool = Field(..., description="Whether execution succeeded")
     global_id: str = Field(..., description="Workflow global ID that was executed")
+    status: str = Field(..., description="Terminal workflow status such as completed or skipped")
     execution_time_seconds: float = Field(..., description="Workflow execution time")
     output_files: List[str] = Field(default_factory=list, description="Created output file paths")
+    reason: Optional[str] = Field(None, description="Optional structured reason for non-default termination")
     message: str = Field(..., description="Human-readable execution summary")
 
 
@@ -170,6 +174,7 @@ class ToolInfo(BaseModel):
     requires_secrets: List[str] = Field(default_factory=list, description="Secret names required for activation")
     available: bool = Field(True, description="Whether required credentials are configured")
     user_editable: bool = Field(False, description="If the tool entry is user-editable via UI")
+    chat_visible: bool = Field(True, description="Whether the tool should be exposed in chat metadata/UI")
 
 
 class ProviderInfo(BaseModel):
@@ -196,9 +201,9 @@ class MetadataResponse(BaseModel):
         default_factory=dict,
         description="Selected settings values for UI hints.",
     )
-    default_context_template: Optional[str] = Field(
+    default_context_script: Optional[str] = Field(
         None,
-        description="Default context template name for chat sessions.",
+        description="Default context script name for chat sessions.",
     )
 
 
@@ -207,6 +212,83 @@ class TemplateInfo(BaseModel):
     name: str = Field(..., description="Template filename")
     source: str = Field(..., description="Template source: vault or system")
     path: Optional[str] = Field(None, description="Full path to template, if available")
+
+
+class ChatSessionInfo(BaseModel):
+    """Persisted chat session summary for UI selection."""
+
+    session_id: str = Field(..., description="Session identifier")
+    created_at: str = Field(..., description="Session creation timestamp")
+    last_activity_at: str = Field(..., description="Most recent activity timestamp")
+    title: Optional[str] = Field(None, description="User-defined title, if set")
+
+
+class ChatSessionTitleRequest(BaseModel):
+    """Request to set or clear the user-defined title for a session."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    title: Optional[str] = Field(None, description="New title; null or empty clears it")
+
+
+class ChatSessionExportRequest(BaseModel):
+    """Request to export one persisted chat session as markdown."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+
+
+class ChatSessionMessageInfo(BaseModel):
+    """Persisted normalized chat message for session rehydration."""
+
+    sequence_index: int = Field(..., description="Stable sequence index within the session")
+    role: str = Field(..., description="Normalized role for rendering")
+    content: str = Field(..., description="Normalized rendered message content")
+    message_type: str = Field(..., description="Provider-native message class name")
+    direction: str = Field(..., description="Request/response direction for the provider-native message")
+    is_tool_message: bool = Field(False, description="Whether this row represents a tool call/return message")
+
+
+class ChatSessionToolEventInfo(BaseModel):
+    """Persisted structured tool event for UI rehydration."""
+
+    tool_call_id: str = Field(..., description="Tool call identifier")
+    tool_name: str = Field(..., description="Tool name")
+    event_type: str = Field(..., description="Event type such as call, result, or overflow_cached")
+    created_at: str = Field(..., description="Event timestamp")
+    args: Optional[Dict[str, Any]] = Field(None, description="Tool arguments when captured")
+    result_text: Optional[str] = Field(None, description="Tool result text or summary")
+    result_metadata: Dict[str, Any] = Field(default_factory=dict, description="Structured tool result metadata")
+    artifact_ref: Optional[str] = Field(None, description="Cache/artifact reference when present")
+
+
+class ChatSessionDetailResponse(BaseModel):
+    """Persisted chat session payload for client-side rehydration."""
+
+    session_id: str = Field(..., description="Session identifier")
+    vault_name: str = Field(..., description="Owning vault name")
+    messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
+    tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")
+
+
+class ChatSessionsPurgeRequest(BaseModel):
+    """Request to purge old chat sessions for a vault."""
+
+    vault_name: str = Field(..., description="Vault to purge sessions from")
+    older_than_days: Optional[int] = Field(None, description="Delete sessions older than this many days; null deletes all")
+
+
+class ChatSessionsPurgeResponse(BaseModel):
+    """Result of a chat session purge operation."""
+
+    deleted: int = Field(..., description="Number of sessions deleted")
+    message: str = Field(..., description="Human-readable summary")
+
+
+class ChatSessionExportResponse(BaseModel):
+    """Result of exporting one chat session transcript."""
+
+    session_id: str = Field(..., description="Session identifier")
+    filename: str = Field(..., description="Transcript filename created for the export")
+    path: str = Field(..., description="Absolute transcript path in the vault")
 
 
 class ModelConfigRequest(BaseModel):
@@ -239,6 +321,14 @@ class OperationResult(BaseModel):
         False,
         description="True when a full restart is still required for secret changes.",
     )
+
+
+class CachePurgeResponse(BaseModel):
+    """Response model for manual cache maintenance operations."""
+
+    success: bool = Field(True, description="Whether the purge completed successfully")
+    message: str = Field(..., description="Human-readable purge summary")
+    purged_count: int = Field(..., description="Number of expired cache artifacts removed")
 
 
 class SecretInfo(BaseModel):
@@ -300,6 +390,15 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict] = Field(None, description="Additional error details")
 
 
+class WorkflowLoadErrorsResponse(BaseModel):
+    """Structured workflow load errors for authoring and repair loops."""
+
+    errors: List["ConfigurationError"] = Field(
+        default_factory=list,
+        description="Workflow configuration errors discovered during loading",
+    )
+
+
 #######################################################################
 ## Internal Data Models
 #######################################################################
@@ -310,7 +409,7 @@ class WorkflowSummary(BaseModel):
     name: str
     vault: str
     enabled: bool
-    workflow_engine: str
+    run_type: str
     schedule_cron: Optional[str]
     description: str
 

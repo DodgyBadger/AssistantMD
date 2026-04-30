@@ -103,24 +103,24 @@ def evaluate_markdown_image_policy(
     markdown_chunks: Sequence[MarkdownChunk],
     source_markdown_path: str,
     vault_path: str,
-    auto_buffer_max_tokens: int,
+    auto_cache_max_tokens: int,
     policy: ChunkingPolicy,
 ) -> MarkdownImageDecision:
     """
     Determine whether images should be attached for this markdown input.
 
     Rules:
-    - If raw markdown text exceeds auto-buffer token limit, skip multimodal attachments.
+    - If raw markdown text exceeds auto-cache token limit, skip multimodal attachments.
     - Attach images only if all deduped local images satisfy policy limits.
     """
-    if auto_buffer_max_tokens > 0:
+    if auto_cache_max_tokens > 0:
         raw_text_tokens = estimate_token_count(file_content)
-        if raw_text_tokens > auto_buffer_max_tokens:
+        if raw_text_tokens > auto_cache_max_tokens:
             return MarkdownImageDecision(
                 attach_images=False,
                 reason=(
-                    "raw text exceeds auto-buffer limit "
-                    f"({raw_text_tokens} > {auto_buffer_max_tokens})"
+                    "raw text exceeds auto-cache limit "
+                    f"({raw_text_tokens} > {auto_cache_max_tokens})"
                 ),
                 normalized_text=normalize_embedded_image_refs(
                     markdown_chunks=markdown_chunks,

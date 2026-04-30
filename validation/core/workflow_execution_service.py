@@ -5,7 +5,6 @@ Provides isolated workflow execution with complete path redirection and environm
 """
 
 import sys
-import importlib
 from pathlib import Path
 from typing import Any, List, Optional
 from unittest.mock import patch
@@ -67,14 +66,7 @@ class WorkflowExecutionService:
         """
         vault_name = vault.name
         global_id = f"{vault_name}/{workflow_name}"
-        workflow_file_path = vault / "AssistantMD" / "Workflows" / f"{workflow_name}.md"
 
-        if not workflow_file_path.exists():
-            return WorkflowResult(
-                status="error",
-                error_message=f"Workflow file not found: {workflow_file_path}"
-            )
-        
         try:
             # Execute workflow in isolated environment
             with self._create_isolated_environment(test_date):
@@ -101,7 +93,7 @@ class WorkflowExecutionService:
                 )
 
                 # Create job arguments with test data root for clean dependency injection
-                job_args = create_job_args(global_id, data_root=str(self.test_vaults_path))
+                job_args = create_job_args(global_id, data_root=str(self.test_vaults_path), file_path=workflow_def.file_path)
 
                 # Execute workflow with job arguments - clean dependency injection
                 kwargs = {}
@@ -152,25 +144,13 @@ class WorkflowExecutionService:
                 return mutated
 
             with patch('core.llm.agents.get_general_settings', side_effect=_test_general_settings):
-
-                # Apply datetime mocking if test_date provided
-                if test_date:
-                    with patch('workflow_engines.step.workflow.datetime') as mock_datetime:
-                        mock_datetime.today.return_value = test_date
-                        mock_datetime.strftime = test_date.strftime
-
-                        self.logger.info("Created isolated workflow environment",
-                                       test_vaults_path=str(self.test_vaults_path),
-                                       model_override="test",
-                                       test_date=str(test_date))
-
-                        yield
-                else:
-                    self.logger.info("Created isolated workflow environment",
-                                   test_vaults_path=str(self.test_vaults_path),
-                                   model_override="test")
-
-                    yield
+                self.logger.info(
+                    "Created isolated workflow environment",
+                    test_vaults_path=str(self.test_vaults_path),
+                    model_override="test",
+                    **({"test_date": str(test_date)} if test_date else {}),
+                )
+                yield
 
         except Exception as e:
             self.logger.error("Isolated environment failed", error=str(e))
@@ -192,23 +172,14 @@ class WorkflowExecutionService:
         
         return vault_files
     
-    def validate_workflow_available(self, workflow_name: str = "step") -> bool:
-        """Validate that the specified workflow module is available."""
+    def validate_workflow_available(self, workflow_name: str = "monty") -> bool:
+        """Validate that the authoring engine is available."""
         try:
-            workflow_module = importlib.import_module(f"workflow_engines.{workflow_name}.workflow")
-            workflow_function = getattr(workflow_module, 'run_workflow')
-            return callable(workflow_function)
+            import core.authoring.engine as engine
+            return callable(engine.run_workflow)
         except (ImportError, AttributeError):
             return False
-    
+
     def get_available_workflows(self) -> List[str]:
-        """Get list of available workflow modules."""
-        workflows_path = Path(__file__).parent.parent.parent / "workflow_engines"
-        available = []
-        
-        if workflows_path.exists():
-            for item in workflows_path.iterdir():
-                if item.is_dir() and (item / "workflow.py").exists():
-                    available.append(item.name)
-        
-        return available
+        """Get list of available workflow engines."""
+        return ["monty"]

@@ -1,10 +1,11 @@
-"""
-Simple SQLAlchemy utilities for the AssistantMD.
-"""
+"""Centralized system database definitions and helpers."""
 
 import os
+import sqlite3
+from dataclasses import dataclass
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.schema import Table
 
 from core.logger import UnifiedLogger
 from core.runtime.paths import get_system_root
@@ -18,6 +19,53 @@ class Base(DeclarativeBase):
     pass
 
 
+@dataclass(frozen=True)
+class SystemDatabaseDefinition:
+    """Declared ownership metadata for one system DB file."""
+
+    name: str
+    owner: str
+    description: str
+
+
+SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
+    "chat_sessions": SystemDatabaseDefinition(
+        name="chat_sessions",
+        owner="core.chat.chat_store",
+        description="Durable structured chat sessions and provider-native messages.",
+    ),
+    "cache": SystemDatabaseDefinition(
+        name="cache",
+        owner="core.context.store",
+        description="Context template cache, sessions, and summaries.",
+    ),
+    "file_state": SystemDatabaseDefinition(
+        name="file_state",
+        owner="core.utils.file_state",
+        description="Processed file tracking for pending workflow inputs.",
+    ),
+    "ingestion_jobs": SystemDatabaseDefinition(
+        name="ingestion_jobs",
+        owner="core.ingestion.jobs",
+        description="Persistent ingestion job queue and outputs.",
+    ),
+    "scheduler_jobs": SystemDatabaseDefinition(
+        name="scheduler_jobs",
+        owner="core.scheduling.database",
+        description="APScheduler persistent job store.",
+    ),
+}
+
+
+def get_system_database_definition(db_name: str) -> SystemDatabaseDefinition:
+    """Return declared metadata for a known system DB."""
+    definition = SYSTEM_DATABASES.get(db_name)
+    if definition is None:
+        available = ", ".join(sorted(SYSTEM_DATABASES))
+        raise ValueError(f"Unknown system database '{db_name}'. Known databases: {available}")
+    return definition
+
+
 def get_system_database_path(db_name: str, system_root: str = None) -> str:
     """Get the full path for a system database file.
 
@@ -28,6 +76,7 @@ def get_system_database_path(db_name: str, system_root: str = None) -> str:
     Returns:
         Full path to the database file in the system directory
     """
+    get_system_database_definition(db_name)
     if system_root is None:
         system_root = str(get_system_root())
 
@@ -48,6 +97,7 @@ def create_engine_from_system_db(db_name: str):
     Returns:
         SQLAlchemy engine
     """
+    get_system_database_definition(db_name)
     # Check if runtime context is available (validation or production)
     if has_runtime_context():
         runtime = get_runtime_context()
@@ -61,6 +111,19 @@ def create_engine_from_system_db(db_name: str):
     return create_engine(database_url)
 
 
+def connect_sqlite_from_system_db(db_name: str, system_root: str = None) -> sqlite3.Connection:
+    """Open a raw sqlite3 connection for a declared system DB.
+
+    Mirrors `create_engine_from_system_db(...)` by honoring the active runtime
+    system root when no explicit override is provided.
+    """
+    if system_root is None and has_runtime_context():
+        runtime = get_runtime_context()
+        system_root = str(runtime.config.system_root)
+    database_path = get_system_database_path(db_name, system_root)
+    return sqlite3.connect(database_path)
+
+
 def create_session_factory(engine):
     """Create SQLAlchemy session factory for an engine.
 
@@ -71,3 +134,10 @@ def create_session_factory(engine):
         SQLAlchemy sessionmaker class
     """
     return sessionmaker(bind=engine)
+
+
+def create_tables(engine, *tables: Table) -> None:
+    """Create only the explicitly declared tables for a system DB."""
+    if not tables:
+        raise ValueError("create_tables requires at least one table")
+    Base.metadata.create_all(engine, tables=list(tables))

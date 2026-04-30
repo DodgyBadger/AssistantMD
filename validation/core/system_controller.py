@@ -21,9 +21,9 @@ from core.runtime.config import RuntimeConfig
 from core.runtime.bootstrap import bootstrap_runtime
 from core.runtime.state import clear_runtime_context
 from core.runtime.paths import set_bootstrap_roots
-from core.workflow.loader import discover_vaults
+from core.authoring.template_discovery import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
-import workflow_engines.step.workflow as workflow_module
+import core.authoring.runtime.host as authoring_host_module
 
 
 class SchedulerJobInfo:
@@ -152,7 +152,7 @@ class SystemController:
 
         # Restore original datetime module
         if self._current_test_date:
-            workflow_module.datetime = dt_module.datetime
+            authoring_host_module.datetime = dt_module.datetime
             self._current_test_date = None
 
         # Stop runtime services
@@ -361,7 +361,8 @@ class SystemController:
         self._current_test_date = test_date
         
         # Apply datetime monkey patch for scheduled jobs
-        workflow_module.datetime = self._create_mock_datetime(test_date)
+        mock_datetime = self._create_mock_datetime(test_date)
+        authoring_host_module.datetime = mock_datetime
         
     def _create_mock_datetime(self, test_date):
         """Create mock datetime module that returns test_date for today() calls."""

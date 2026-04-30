@@ -12,15 +12,18 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.llm.session_manager import SessionManager
-from core.llm.chat_executor import (
+from core.chat.executor import (
     ChatCapabilityError,
+    ChatContextTemplateError,
     UploadedImageAttachment,
     execute_chat_prompt,
     execute_chat_prompt_stream,
 )
+from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 
 from .models import (
+    WorkflowLoadErrorsResponse,
+    CachePurgeResponse,
     VaultRescanRequest,
     VaultRescanResponse,
     ExecuteWorkflowRequest,
@@ -42,8 +45,15 @@ from .models import (
     SettingUpdateRequest,
     MetadataResponse,
     TemplateInfo,
+    ChatSessionInfo,
+    ChatSessionDetailResponse,
+    ChatSessionExportRequest,
+    ChatSessionExportResponse,
+    ChatSessionsPurgeRequest,
+    ChatSessionsPurgeResponse,
+    ChatSessionTitleRequest,
 )
-from .exceptions import APIException, ChatCapabilityMismatchError
+from .exceptions import APIException, ChatCapabilityMismatchError, ChatContextTemplateFailureError
 from .utils import create_error_response, generate_session_id, serialize_exception
 from .services import (
     rescan_vaults_and_update_scheduler,
@@ -51,6 +61,12 @@ from .services import (
     execute_workflow_manually,
     get_metadata,
     list_context_templates,
+    list_chat_sessions,
+    get_chat_session_detail,
+    export_chat_session_markdown,
+    purge_chat_sessions,
+    set_chat_session_title,
+    delete_chat_session,
     get_system_activity_log,
     get_system_settings,
     update_system_settings,
@@ -68,6 +84,8 @@ from .services import (
     delete_secret_entry,
     scan_import_folder,
     import_url_direct,
+    get_workflow_load_errors,
+    purge_expired_cache,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -81,8 +99,6 @@ from api.import_models import (
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 logger = UnifiedLogger(tag="api-endpoints")
 
-# Create module-level session manager for chat conversations
-session_manager = SessionManager()
 
 
 def _parse_form_bool(value: object, default: bool = False) -> bool:
@@ -113,6 +129,12 @@ def _parse_form_tools(raw_tools: list[object]) -> list[str]:
     return values
 
 
+def _looks_like_workflow_path(value: str) -> bool:
+    """Return True when a workflow identifier looks like a file path instead of a workflow name."""
+    normalized = value.strip().replace("\\", "/")
+    return "/" in normalized or normalized.endswith((".md", ".markdown"))
+
+
 async def _parse_chat_execute_payload(
     request: Request,
 ) -> tuple[ChatExecuteRequest, list[UploadedImageAttachment]]:
@@ -134,6 +156,7 @@ async def _parse_chat_execute_payload(
                 "session_id": str(form.get("session_id") or "").strip() or None,
                 "tools": tools,
                 "model": str(form.get("model") or "").strip(),
+                "thinking": str(form.get("thinking") or "").strip() or None,
                 "context_template": str(form.get("context_template") or "").strip() or None,
                 "stream": _parse_form_bool(form.get("stream"), default=False),
             }
@@ -172,6 +195,7 @@ async def _execute_chat_request(
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
     session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
+    resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
     logger.info(
         "Chat request accepted",
         data={
@@ -179,6 +203,7 @@ async def _execute_chat_request(
             "session_id": session_id,
             "streaming": chat_request.stream,
             "model": chat_request.model,
+            "thinking": thinking_value_to_label(resolved_thinking),
             "tools": list(chat_request.tools),
             "tools_count": len(chat_request.tools),
             "prompt_length": len(chat_request.prompt),
@@ -199,7 +224,7 @@ async def _execute_chat_request(
                 session_id=session_id,
                 tools=chat_request.tools,
                 model=chat_request.model,
-                session_manager=session_manager,
+                thinking=resolved_thinking,
                 context_template=chat_request.context_template,
             )
 
@@ -224,7 +249,7 @@ async def _execute_chat_request(
             session_id=session_id,
             tools=chat_request.tools,
             model=chat_request.model,
-            session_manager=session_manager,
+            thinking=resolved_thinking,
             context_template=chat_request.context_template,
         )
     except ChatCapabilityError as exc:
@@ -241,6 +266,20 @@ async def _execute_chat_request(
             },
         )
         raise ChatCapabilityMismatchError(str(exc), details=exc.details) from exc
+    except ChatContextTemplateError as exc:
+        logger.warning(
+            "Chat request context template failure",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
+        raise ChatContextTemplateFailureError(str(exc), details=exc.details) from exc
     except Exception as exc:
         logger.error(
             "Chat request failed before response",
@@ -525,6 +564,15 @@ async def delete_secret_endpoint(secret_name: str):
         return create_error_response(e)
 
 
+@router.post("/system/cache/purge-expired", response_model=CachePurgeResponse)
+async def purge_expired_cache_endpoint():
+    """Manually delete expired cache artifacts."""
+    try:
+        return purge_expired_cache()
+    except Exception as e:
+        return create_error_response(e)
+
+
 #######################################################################
 ## Vault Management Endpoints  
 #######################################################################
@@ -589,6 +637,27 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         return create_error_response(e)
 
 
+@router.get("/workflows/load-errors", response_model=WorkflowLoadErrorsResponse)
+async def workflow_load_errors(vault_name: str | None = None, workflow_name: str | None = None):
+    """Return workflow load errors without exposing the full system status payload."""
+    try:
+        if workflow_name and _looks_like_workflow_path(workflow_name):
+            raise APIException(
+                status_code=400,
+                error_type="InvalidWorkflowNameFilter",
+                message=(
+                    "workflow_load_errors expects a workflow name, not a file path. "
+                    "Use compile-only workflow testing for draft files under AssistantMD/Workflows/."
+                ),
+                details={"workflow_name": workflow_name},
+            )
+        return WorkflowLoadErrorsResponse(
+            errors=get_workflow_load_errors(vault_name=vault_name, workflow_name=workflow_name)
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
 #######################################################################
 ## Chat Execution Endpoints
 #######################################################################
@@ -638,6 +707,79 @@ async def context_templates(vault_name: str):
     """
     try:
         return list_context_templates(vault_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions", response_model=List[ChatSessionInfo])
+async def chat_sessions(vault_name: str):
+    """
+    List persisted chat sessions for a vault ordered by latest activity.
+    """
+    try:
+        return list_chat_sessions(vault_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
+async def chat_session_detail(session_id: str, vault_name: str):
+    """
+    Load one persisted chat session for UI rehydration.
+    """
+    try:
+        return get_chat_session_detail(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete("/chat/sessions/{session_id}")
+async def delete_chat_session_endpoint(session_id: str, vault_name: str):
+    """Delete one chat session from the canonical store."""
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / vault_name)
+        delete_chat_session(vault_name, vault_path, session_id)
+        return {"session_id": session_id, "deleted": True}
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.patch("/chat/sessions/{session_id}/title")
+async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
+    """Set or clear the user-defined title for a chat session."""
+    try:
+        title = (request.title or "").strip() or None
+        set_chat_session_title(request.vault_name, session_id, title)
+        return {"session_id": session_id, "title": title}
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/export", response_model=ChatSessionExportResponse)
+async def export_chat_session_endpoint(session_id: str, request: ChatSessionExportRequest):
+    """Export one persisted chat session transcript into the owning vault."""
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        return export_chat_session_markdown(request.vault_name, vault_path, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/purge", response_model=ChatSessionsPurgeResponse)
+async def purge_chat_sessions_endpoint(request: ChatSessionsPurgeRequest):
+    """
+    Delete old chat sessions and their transcript files for a vault.
+    """
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        return purge_chat_sessions(
+            request.vault_name,
+            vault_path,
+            older_than_days=request.older_than_days,
+        )
     except Exception as e:
         return create_error_response(e)
 

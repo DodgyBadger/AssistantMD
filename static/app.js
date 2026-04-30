@@ -26,6 +26,7 @@ const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
 
 const state = {
     sessionId: null,
+    sessions: [],
     metadata: null,
     isLoading: false,
     systemStatus: null,
@@ -34,7 +35,8 @@ const state = {
 };
 const chatComposeState = {
     pendingAttachments: [],
-    popoverOpen: false
+    popoverOpen: false,
+    toolMenuOpen: false
 };
 
 let mathTypesetQueue = Promise.resolve();
@@ -44,6 +46,12 @@ const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
+    thinkingSelector: document.getElementById('thinking-selector'),
+    sessionSelector: document.getElementById('session-selector'),
+    toolDropdown: document.getElementById('tool-dropdown'),
+    toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
+    toolDropdownMenu: document.getElementById('tool-dropdown-menu'),
+    toolDropdownSummary: document.getElementById('tool-dropdown-summary'),
     toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
@@ -52,7 +60,11 @@ const chatElements = {
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
     sendBtn: document.getElementById('send-btn'),
-    newSessionBtn: document.getElementById('new-session-btn')
+    sessionTitleRow: document.getElementById('session-title-row'),
+    sessionTitleInput: document.getElementById('session-title-input'),
+    sessionTitleSave: document.getElementById('session-title-save'),
+    sessionExportBtn: document.getElementById('session-export-btn'),
+    sessionDeleteBtn: document.getElementById('session-delete-btn'),
 };
 
 // DOM elements - Dashboard
@@ -261,6 +273,245 @@ function syncChatControlLocks() {
     chatElements.vaultSelector.title = lockVaultSelector
         ? 'Vault is locked for this chat session. Start a new session (+) to switch vaults.'
         : '';
+
+    if (chatElements.toolDropdownTrigger) {
+        chatElements.toolDropdownTrigger.disabled = state.isLoading;
+    }
+    if (chatElements.thinkingSelector) {
+        chatElements.thinkingSelector.disabled = state.isLoading;
+    }
+    if (chatElements.sessionSelector) {
+        chatElements.sessionSelector.disabled = state.isLoading;
+    }
+    if (chatElements.sessionTitleInput) {
+        chatElements.sessionTitleInput.disabled = state.isLoading;
+    }
+    if (chatElements.sessionTitleSave) {
+        chatElements.sessionTitleSave.disabled = state.isLoading;
+    }
+    if (chatElements.sessionExportBtn) {
+        chatElements.sessionExportBtn.disabled = state.isLoading || !state.sessionId;
+    }
+    if (chatElements.sessionDeleteBtn) {
+        chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
+    }
+}
+
+function populateThinkingSelector() {
+    if (!chatElements.thinkingSelector) return;
+    const defaultThinking = state.metadata?.settings?.default_model_thinking || 'default';
+    const allowed = new Set(Array.from(chatElements.thinkingSelector.options).map((option) => option.value));
+    const selected = allowed.has(defaultThinking) ? defaultThinking : 'default';
+    chatElements.thinkingSelector.value = selected;
+}
+
+function getSelectedToolNames() {
+    return Array.from(chatElements.toolsCheckboxes?.querySelectorAll('input:checked') || [])
+        .map((input) => input.value);
+}
+
+function updateToolDropdownSummary() {
+    if (!chatElements.toolDropdownSummary) return;
+
+    const selectedTools = getSelectedToolNames();
+    if (selectedTools.length === 0) {
+        chatElements.toolDropdownSummary.textContent = '(none selected)';
+        return;
+    }
+
+    chatElements.toolDropdownSummary.textContent = `(${selectedTools.length} selected)`;
+}
+
+function setToolMenuOpen(open) {
+    chatComposeState.toolMenuOpen = Boolean(open);
+    if (chatElements.toolDropdown) {
+        chatElements.toolDropdown.classList.toggle('open', chatComposeState.toolMenuOpen);
+    }
+    if (chatElements.toolDropdownMenu) {
+        chatElements.toolDropdownMenu.classList.toggle('hidden', !chatComposeState.toolMenuOpen);
+    }
+    if (chatElements.toolDropdownTrigger) {
+        chatElements.toolDropdownTrigger.setAttribute('aria-expanded', chatComposeState.toolMenuOpen ? 'true' : 'false');
+    }
+}
+
+function formatSessionOptionLabel(session) {
+    if (!session || !session.session_id) {
+        return 'New session';
+    }
+    const rawDate = session.last_activity_at || session.created_at || '';
+    const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
+    const timeStr = parsed && !Number.isNaN(parsed.getTime())
+        ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+        : rawDate;
+    const base = timeStr ? `${session.session_id} (last activity: ${timeStr})` : session.session_id;
+    return session.title ? `${base}: ${session.title}` : base;
+}
+
+function renderSessionSelector() {
+    if (!chatElements.sessionSelector) return;
+
+    const previousValue = chatElements.sessionSelector.value;
+    chatElements.sessionSelector.innerHTML = '<option value="">New session</option>';
+
+    state.sessions.forEach((session) => {
+        const option = document.createElement('option');
+        option.value = session.session_id;
+        option.textContent = formatSessionOptionLabel(session);
+        chatElements.sessionSelector.appendChild(option);
+    });
+
+    const activeValue = state.sessionId || previousValue || '';
+    if (activeValue && state.sessions.some((session) => session.session_id === activeValue)) {
+        chatElements.sessionSelector.value = activeValue;
+    } else {
+        chatElements.sessionSelector.value = '';
+    }
+}
+
+async function fetchSessions(vault, preferredSessionId = '') {
+    state.sessions = [];
+    renderSessionSelector();
+    if (!vault) {
+        return;
+    }
+    try {
+        const response = await fetch(`api/chat/sessions?vault_name=${encodeURIComponent(vault)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch chat sessions');
+        }
+        state.sessions = await response.json();
+        renderSessionSelector();
+        if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
+            chatElements.sessionSelector.value = preferredSessionId;
+        }
+    } catch (error) {
+        console.error('Error fetching chat sessions:', error);
+    }
+}
+
+async function loadSession(sessionId) {
+    const vault = chatElements.vaultSelector?.value || '';
+    if (!vault || !sessionId) {
+        return;
+    }
+    try {
+        state.isLoading = true;
+        syncChatControlLocks();
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`
+        );
+        if (!response.ok) {
+            throw new Error('Failed to load chat session');
+        }
+        const payload = await response.json();
+        state.sessionId = payload.session_id || sessionId;
+        renderPersistedSession(payload);
+        renderSessionSelector();
+        updateSessionTitleRow();
+        updateStatus();
+    } catch (error) {
+        console.error('Error loading chat session:', error);
+        addChatErrorMessage(error.message);
+    } finally {
+        state.isLoading = false;
+        syncChatControlLocks();
+    }
+}
+
+function renderPersistedSession(payload) {
+    chatElements.chatMessages.innerHTML = '';
+
+    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+    const toolEventsQueue = Array.isArray(payload?.tool_events) ? [...payload.tool_events] : [];
+    const pendingToolEvents = [];
+
+    if (messages.length === 0) {
+        renderChatEmptyState('Selected session has no persisted messages.');
+        return;
+    }
+
+    messages.forEach((message) => {
+        if (message.is_tool_message) {
+            const nextToolEvent = toolEventsQueue.shift();
+            if (nextToolEvent) {
+                pendingToolEvents.push(nextToolEvent);
+            }
+            return;
+        }
+
+        if (message.role === 'assistant') {
+            const assistantToolEvents = pendingToolEvents.splice(0, pendingToolEvents.length);
+            renderPersistedAssistantMessage(message.content || '', assistantToolEvents);
+            return;
+        }
+
+        addMessage('user', message.content || '');
+    });
+
+    if (pendingToolEvents.length > 0) {
+        renderPersistedAssistantMessage('', pendingToolEvents.splice(0, pendingToolEvents.length));
+    }
+}
+
+function renderPersistedAssistantMessage(content, toolEvents) {
+    const context = createAssistantStreamingMessage();
+    context.fullText = content || '';
+    renderAssistantMarkdown(context, { finalize: true });
+    hydratePersistedToolEvents(context, toolEvents);
+    finalizeAssistantMessage(context, {
+        sessionId: state.sessionId || 'unknown',
+        messageCount: 1,
+        toolCount: Array.isArray(toolEvents) ? toolEvents.length : 0,
+        status: 'done'
+    });
+}
+
+function hydratePersistedToolEvents(context, toolEvents) {
+    if (!context || !Array.isArray(toolEvents) || toolEvents.length === 0) {
+        return;
+    }
+
+    toolEvents.forEach((event) => {
+        if (!event || !event.tool_call_id) {
+            return;
+        }
+
+        let entry = context.toolStatusMap.get(event.tool_call_id);
+        if (!entry) {
+            ensureToolCallsSection(context);
+            entry = createToolStatusEntry(context, event.tool_call_id, {
+                tool_name: event.tool_name,
+                arguments: event.args || null
+            });
+        }
+
+        entry.container.classList.remove('tool-status-running');
+        entry.container.classList.add('tool-status-complete');
+
+        if (event.args) {
+            entry.args = event.args;
+        }
+
+        if (event.event_type !== 'call') {
+            const resultPayload = {};
+            if (event.result_text) {
+                resultPayload.text = event.result_text;
+            }
+            if (event.artifact_ref) {
+                resultPayload.artifact_ref = event.artifact_ref;
+            }
+            if (event.result_metadata && Object.keys(event.result_metadata).length > 0) {
+                resultPayload.metadata = event.result_metadata;
+            }
+            entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
+        }
+
+        updateToolDetail(entry);
+        entry.chevron.textContent = entry.container.open ? '▾' : '▸';
+    });
+
+    updateToolCallsSummary(context);
 }
 
 // Tab management
@@ -445,9 +696,11 @@ function populateSelectors() {
     const previousVault = chatElements.vaultSelector?.value || '';
     const previousModel = chatElements.modelSelector?.value || '';
     const previousTemplate = chatElements.templateSelector?.value || '';
-    const previousTools = new Set(
-        Array.from(chatElements.toolsCheckboxes?.querySelectorAll('input:checked') || [])
-            .map((input) => input.value)
+    const previousTools = new Set(getSelectedToolNames());
+    const configuredDefaultTools = new Set(
+        Array.isArray(state.metadata?.settings?.default_chat_tools)
+            ? state.metadata.settings.default_chat_tools
+            : []
     );
 
     chatElements.vaultSelector.innerHTML = '<option value="">Select vault...</option>';
@@ -457,6 +710,7 @@ function populateSelectors() {
         chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
         chatElements.templateSelector.disabled = true;
     }
+    populateThinkingSelector();
 
     state.metadata.vaults.forEach(vault => {
         const option = document.createElement('option');
@@ -501,11 +755,8 @@ function populateSelectors() {
     // Trigger template fetch if a vault is already selected (e.g., persisted UI state in future)
     if (chatElements.vaultSelector && chatElements.vaultSelector.value) {
         fetchTemplates(chatElements.vaultSelector.value, previousTemplate);
+        fetchSessions(chatElements.vaultSelector.value, state.sessionId || '');
     }
-
-    const preferredWebTool = (['web_search_tavily', 'web_search_duckduckgo']
-        .map(name => state.metadata.tools.find(tool => tool.name === name && tool.available !== false))
-        .find(Boolean)?.name) || null;
 
     const toolMap = new Map(state.metadata.tools.map(tool => [tool.name, tool]));
     const handledTools = new Set();
@@ -513,6 +764,9 @@ function populateSelectors() {
     const createToolElement = (tool) => {
         const wrapper = document.createElement('div');
         wrapper.className = 'tool-checkbox-wrapper';
+
+        const label = document.createElement('label');
+        label.htmlFor = `tool-${tool.name}`;
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -523,33 +777,17 @@ function populateSelectors() {
         if (!checkbox.disabled) {
             if (previousTools.size > 0) {
                 checkbox.checked = previousTools.has(tool.name);
-            } else if (
-                tool.name === 'file_ops_safe' ||
-                tool.name === 'buffer_ops' ||
-                (preferredWebTool && tool.name === preferredWebTool)
-            ) {
-                checkbox.checked = true;
+            } else {
+                checkbox.checked = configuredDefaultTools.has(tool.name);
             }
         }
 
-        const label = document.createElement('label');
-        label.htmlFor = `tool-${tool.name}`;
-        label.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'tool-checkbox-name';
+        nameSpan.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
+        label.appendChild(checkbox);
+        label.appendChild(nameSpan);
 
-        const description = tool.description ? String(tool.description).trim() : '';
-        if (description) {
-            label.title = description;
-        }
-
-        if (tool.name === 'buffer_ops' && state.metadata.settings?.auto_buffer_max_tokens > 0) {
-            checkbox.checked = true;
-            checkbox.disabled = true;
-            label.title = description
-                ? `${description} Auto-enabled because auto_buffer_max_tokens is set.`
-                : 'Auto-enabled because auto_buffer_max_tokens is set.';
-        }
-
-        wrapper.appendChild(checkbox);
         wrapper.appendChild(label);
         return wrapper;
     };
@@ -558,10 +796,9 @@ function populateSelectors() {
         'web_search_duckduckgo',
         'web_search_tavily',
         'browser',
+        'memory_ops',
         'file_ops_safe',
         'file_ops_unsafe',
-        'buffer_ops',
-        'documentation_access',
         'tavily_extract',
         'tavily_crawl',
         'code_execution'
@@ -581,6 +818,8 @@ function populateSelectors() {
         chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
     });
 
+    updateToolDropdownSummary();
+    renderSessionSelector();
     syncChatControlLocks();
 }
 
@@ -735,7 +974,7 @@ function populateWorkflowSelector() {
     allWorkflows.forEach(workflow => {
         const option = document.createElement('option');
         option.value = workflow.global_id;
-        option.textContent = `${workflow.global_id} (${workflow.workflow_engine})`;
+        option.textContent = `${workflow.global_id} (${workflow.run_type})`;
         dashElements.workflowSelector.appendChild(option);
     });
 }
@@ -755,8 +994,49 @@ function setupEventListeners() {
         });
     }
 
-    if (chatElements.newSessionBtn) {
-        chatElements.newSessionBtn.addEventListener('click', clearSession);
+    if (chatElements.sessionSelector) {
+        chatElements.sessionSelector.addEventListener('change', async (event) => {
+            const selectedSessionId = event.target.value || '';
+            if (!selectedSessionId) {
+                await clearSession(false);
+                return;
+            }
+            await loadSession(selectedSessionId);
+        });
+    }
+
+    if (chatElements.sessionTitleSave) {
+        chatElements.sessionTitleSave.addEventListener('click', saveSessionTitle);
+    }
+
+    if (chatElements.sessionTitleInput) {
+        chatElements.sessionTitleInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') saveSessionTitle();
+        });
+    }
+
+    if (chatElements.sessionDeleteBtn) {
+        chatElements.sessionDeleteBtn.addEventListener('click', deleteCurrentSession);
+    }
+
+    if (chatElements.sessionExportBtn) {
+        chatElements.sessionExportBtn.addEventListener('click', exportCurrentSession);
+    }
+
+    if (chatElements.toolDropdownTrigger) {
+        chatElements.toolDropdownTrigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (chatElements.toolDropdownTrigger.disabled) {
+                return;
+            }
+            setToolMenuOpen(!chatComposeState.toolMenuOpen);
+        });
+    }
+
+    if (chatElements.toolsCheckboxes) {
+        chatElements.toolsCheckboxes.addEventListener('change', () => {
+            updateToolDropdownSummary();
+        });
     }
 
     if (chatElements.attachBtn && chatElements.attachInput) {
@@ -818,13 +1098,22 @@ function setupEventListeners() {
     }
 
     document.addEventListener('click', (event) => {
-        if (!chatComposeState.popoverOpen) return;
         const target = event.target;
         if (!(target instanceof Node)) return;
-        const clickedAttachBtn = chatElements.attachBtn && chatElements.attachBtn.contains(target);
-        const clickedPopover = chatElements.attachmentPopover && chatElements.attachmentPopover.contains(target);
-        if (!clickedAttachBtn && !clickedPopover) {
-            setAttachmentPopoverOpen(false);
+
+        if (chatComposeState.popoverOpen) {
+            const clickedAttachBtn = chatElements.attachBtn && chatElements.attachBtn.contains(target);
+            const clickedPopover = chatElements.attachmentPopover && chatElements.attachmentPopover.contains(target);
+            if (!clickedAttachBtn && !clickedPopover) {
+                setAttachmentPopoverOpen(false);
+            }
+        }
+
+        if (chatComposeState.toolMenuOpen) {
+            const clickedToolDropdown = chatElements.toolDropdown && chatElements.toolDropdown.contains(target);
+            if (!clickedToolDropdown) {
+                setToolMenuOpen(false);
+            }
         }
     });
 
@@ -843,42 +1132,47 @@ function setupEventListeners() {
     if (chatElements.vaultSelector) {
         chatElements.vaultSelector.addEventListener('change', handleVaultChange);
     }
-
     syncChatControlLocks();
 }
 
 function handleVaultChange() {
     const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
+    state.sessionId = null;
+    state.sessions = [];
+    renderSessionSelector();
+    renderChatEmptyState();
+    updateStatus();
     populateTemplates([]); // reset while loading
     if (vault) {
         fetchTemplates(vault);
+        fetchSessions(vault);
     }
 }
 
 function populateTemplates(templates, preferredTemplate = '') {
     if (!chatElements.templateSelector) return;
-    chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
-    if (!templates || templates.length === 0) {
-        chatElements.templateSelector.disabled = true;
-        return;
-    }
-    templates.forEach((tmpl) => {
+    const templateList = Array.isArray(templates) ? templates : [];
+    chatElements.templateSelector.innerHTML = '<option value="">No template</option>';
+    templateList.forEach((tmpl) => {
         const option = document.createElement('option');
         option.value = tmpl.name;
         option.textContent = `${tmpl.name} (${tmpl.source})`;
         chatElements.templateSelector.appendChild(option);
     });
-    const templateToUse = preferredTemplate || state.metadata?.default_context_template || 'default.md';
-    const selectedTemplate = Array.from(chatElements.templateSelector.options)
-        .find((option) => option.value === templateToUse);
+    const configuredDefaultTemplate = state.metadata?.default_context_script || '';
+    const fallbackCandidates = [
+        preferredTemplate,
+        configuredDefaultTemplate,
+        'default.md'
+    ].filter((value, index, values) => value && values.indexOf(value) === index);
+
+    const selectedTemplate = fallbackCandidates.find((candidate) =>
+        Array.from(chatElements.templateSelector.options).some((option) => option.value === candidate)
+    );
     if (selectedTemplate) {
-        chatElements.templateSelector.value = selectedTemplate.value;
+        chatElements.templateSelector.value = selectedTemplate;
     } else {
-        const fallbackTemplate = Array.from(chatElements.templateSelector.options)
-            .find((option) => option.value === 'default.md');
-        if (fallbackTemplate) {
-            chatElements.templateSelector.value = fallbackTemplate.value;
-        }
+        chatElements.templateSelector.value = '';
     }
     chatElements.templateSelector.disabled = false;
 }
@@ -910,6 +1204,7 @@ async function sendMessage() {
 
     const vault = chatElements.vaultSelector.value;
     const model = chatElements.modelSelector.value;
+    const thinking = chatElements.thinkingSelector ? (chatElements.thinkingSelector.value || 'default') : 'default';
 
     if (!vault) {
         alert('Please select a vault');
@@ -944,6 +1239,7 @@ async function sendMessage() {
             formData.append('vault_name', vault);
             formData.append('prompt', effectivePrompt);
             formData.append('model', model);
+            formData.append('thinking', thinking);
             formData.append('stream', 'true');
             if (contextTemplateValue) {
                 formData.append('context_template', contextTemplateValue);
@@ -965,6 +1261,7 @@ async function sendMessage() {
                 prompt: effectivePrompt,
                 tools: selectedTools,
                 model: model,
+                thinking: thinking,
                 context_template: contextTemplateValue,
                 stream: true
             };
@@ -991,6 +1288,8 @@ async function sendMessage() {
         if (sessionId) {
             state.sessionId = sessionId;
             syncChatControlLocks();
+            renderSessionSelector();
+            updateSessionTitleRow();
         }
 
         // Fallback for environments that do not support streaming
@@ -1076,6 +1375,9 @@ async function sendMessage() {
             toolCount: assistantMessage.toolStatusMap.size,
             status: finished ? 'done' : 'incomplete'
         });
+        if (vault) {
+            await fetchSessions(vault, state.sessionId || '');
+        }
 
     } catch (error) {
         console.error('Error sending message:', error);
@@ -1159,7 +1461,7 @@ function replaceLatexSegments(text, segments) {
     if (!text) return '';
 
     const pattern =
-        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|(?<!\\)\$[^$\n]+?(?<!\\)\$)/g;
+        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|(?<!\\)\$(?!\d)[^$\n]+?(?<!\\)\$)/g;
 
     return text.replace(pattern, (rawMath) => {
         const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
@@ -1752,13 +2054,123 @@ function flashCopyFeedback(button, didCopy) {
 }
 
 // Clear session
-async function clearSession() {
-    const confirmed = window.confirm('Do you want to start a new chat session? The current session is saved as a markdown file in your vault.');
+function updateSessionTitleRow() {
+    const row = chatElements.sessionTitleRow;
+    const input = chatElements.sessionTitleInput;
+    if (!row || !input) return;
+
+    const sessionId = state.sessionId;
+    if (!sessionId) {
+        row.classList.add('hidden');
+        input.value = '';
+        return;
+    }
+
+    const session = state.sessions.find((s) => s.session_id === sessionId);
+    input.value = session?.title || '';
+    row.classList.remove('hidden');
+}
+
+async function saveSessionTitle() {
+    const sessionId = state.sessionId;
+    const vault = chatElements.vaultSelector?.value || '';
+    const input = chatElements.sessionTitleInput;
+    const btn = chatElements.sessionTitleSave;
+    if (!sessionId || !vault || !input || !btn) return;
+
+    const title = input.value.trim() || null;
+    btn.disabled = true;
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/title`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_name: vault, title }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        // Update local state so the picker label refreshes immediately
+        const session = state.sessions.find((s) => s.session_id === sessionId);
+        if (session) session.title = title;
+        renderSessionSelector();
+    } catch (error) {
+        console.error('Failed to save session title:', error);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function exportCurrentSession() {
+    const sessionId = state.sessionId;
+    const vault = chatElements.vaultSelector?.value || '';
+    const btn = chatElements.sessionExportBtn;
+    if (!sessionId || !vault || !btn) return;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Exporting...';
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_name: vault }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const payload = await response.json();
+        alert(`Transcript exported to ${payload.filename}`);
+    } catch (error) {
+        console.error('Failed to export session transcript:', error);
+        alert('Failed to export transcript');
+    } finally {
+        btn.textContent = originalText;
+        syncChatControlLocks();
+    }
+}
+
+async function deleteCurrentSession() {
+    const sessionId = state.sessionId;
+    const vault = chatElements.vaultSelector?.value || '';
+    const btn = chatElements.sessionDeleteBtn;
+    if (!sessionId || !vault || !btn) return;
+
+    if (!confirm(
+        `Delete session "${sessionId}"? This removes it from the chat session list and database only. Exported transcripts are not deleted.`
+    )) return;
+
+    btn.disabled = true;
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`,
+            { method: 'DELETE' }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        state.sessions = state.sessions.filter((s) => s.session_id !== sessionId);
+        state.sessionId = null;
+        clearPendingAttachments();
+        renderChatEmptyState();
+        renderSessionSelector();
+        updateSessionTitleRow();
+        syncChatControlLocks();
+        updateStatus();
+    } catch (error) {
+        console.error('Failed to delete session:', error);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function clearSession(confirmReset = true) {
+    const confirmed = confirmReset
+        ? window.confirm('Do you want to start a new chat session? The current session remains available in chat history unless you delete it.')
+        : true;
     if (!confirmed) return;
 
     state.sessionId = null;
     clearPendingAttachments();
     renderChatEmptyState();
+    renderSessionSelector();
+    updateSessionTitleRow();
     syncChatControlLocks();
     updateStatus();
 }
@@ -1780,16 +2192,6 @@ async function rescanVaults() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
-        dashElements.rescanResult.innerHTML = `
-            <div class="state-surface-success p-3 rounded border">
-                <p class="font-medium">✅ Rescan Completed</p>
-                <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
-                <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
-                <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
-                <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
-                <p class="mt-2 text-sm">${data.message || ''}</p>
-            </div>
-        `;
 
         if (data.metadata) {
             state.metadata = data.metadata;
@@ -1801,6 +2203,7 @@ async function rescanVaults() {
         }
 
         await fetchSystemStatus();
+        renderRescanResult(data);
 
     } catch (error) {
         console.error('Error rescanning:', error);
@@ -1808,6 +2211,40 @@ async function rescanVaults() {
     } finally {
         dashElements.rescanBtn.disabled = false;
     }
+}
+
+function renderRescanResult(data) {
+    if (!dashElements.rescanResult) return;
+
+    const configurationErrors = state.systemStatus?.configuration_errors || [];
+    const workflowErrors = configurationErrors.filter((error) => {
+        const filePath = String(error.file_path || '');
+        return filePath.includes('/AssistantMD/Workflows/');
+    });
+
+    dashElements.rescanResult.innerHTML = `
+        <div class="state-surface-success p-3 rounded border">
+            <p class="font-medium">✅ Rescan Completed</p>
+            <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
+            <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
+            <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
+            <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
+            <p class="mt-2 text-sm">${data.message || ''}</p>
+        </div>
+        ${workflowErrors.length ? `
+            <div class="state-surface-error p-3 rounded border mt-3">
+                <p class="font-medium">⚠️ Workflows Failed To Load</p>
+                <ul class="list-disc list-inside mt-2 space-y-1">
+                    ${workflowErrors.map((error) => `
+                        <li>
+                            <span class="font-medium">${escapeHtml(error.workflow_name || error.file_path || 'workflow')}</span>:
+                            ${escapeHtml(error.error_message || 'Unknown load error')}
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        ` : ''}
+    `;
 }
 
 // Execute workflow manually

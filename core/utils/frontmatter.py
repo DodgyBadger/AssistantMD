@@ -47,7 +47,7 @@ def parse_simple_frontmatter(
 
         key, value = line.split(":", 1)
         key = key.strip()
-        value = value.strip()
+        value = _strip_unquoted_inline_comment(value).strip()
         if not key:
             raise ValueError(f"Line {line_num}: Empty key not allowed")
 
@@ -65,6 +65,24 @@ def parse_simple_frontmatter(
 
     remaining_content = "\n".join(lines[end_idx + 1 :])
     return properties, remaining_content
+
+
+def _strip_unquoted_inline_comment(value: str) -> str:
+    """Strip YAML-style inline comments while preserving quoted '#' characters."""
+    in_single_quote = False
+    in_double_quote = False
+
+    for idx, char in enumerate(value):
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            continue
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            continue
+        if char == "#" and not in_single_quote and not in_double_quote:
+            return value[:idx]
+
+    return value
 
 
 def upsert_frontmatter_key(content: str, *, key: str, value: str) -> str:

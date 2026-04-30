@@ -196,15 +196,16 @@ class CodeExecutionPiston(BaseTool):
                 return "Code execution completed:\n\n" + "\n\n".join(response_parts)
             return "Code executed successfully (no output)"
 
-        return Tool(execute_code, name="execute_code")
+        return Tool(
+            execute_code,
+            name="execute_code",
+            description="Run code in a remote Piston sandbox when you need broader language support than the local constrained Python tool provides.",
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for Piston code execution."""
         return """
-## code_execution usage instructions
-        
-Supports many languages, pass language or language@version (e.g., python@3.10.0).
-Optional stdin is supported.
-Example: execute_code(code="print('hi')", language="python", stdin="").
+Full documentation:
+- `__virtual_docs__/tools/code_execution_piston.md`
 """

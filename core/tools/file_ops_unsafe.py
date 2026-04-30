@@ -7,6 +7,9 @@ Provides file editing, deletion, and overwrite capabilities within vault boundar
 """
 
 import os
+from typing import Any
+
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
@@ -40,7 +43,7 @@ class FileOpsUnsafe(BaseTool):
             confirm_path: str = "",
             count: int = 1,
             destination: str = "",
-        ) -> str:
+        ) -> str | ToolReturn:
             """Perform unsafe file operations within vault boundaries.
 
             :param operation: Operation name (edit_line, delete, replace_text, move_overwrite, truncate)
@@ -75,76 +78,97 @@ class FileOpsUnsafe(BaseTool):
                 elif operation == "truncate":
                     return cls._truncate_file(path, confirm_path, vault_path)
                 else:
-                    return f"Unknown operation '{operation}'. Available: edit_line, delete, replace_text, move_overwrite, truncate"
+                    return cls._result(
+                        message=(
+                            f"Unknown operation '{operation}'. Available: edit_line, delete, replace_text, move_overwrite, truncate"
+                        ),
+                        operation=operation,
+                        path=path,
+                        destination=destination,
+                        status="error",
+                        error_type="unknown_operation",
+                    )
 
             except Exception as e:
-                return f"Error performing '{operation}' operation: {str(e)}"
+                return cls._result(
+                    message=f"Error performing '{operation}' operation: {str(e)}",
+                    operation=operation,
+                    path=path,
+                    destination=destination,
+                    status="error",
+                    error_type=type(e).__name__,
+                )
 
-        return Tool(file_ops_unsafe, name="file_ops_unsafe")
+        return Tool(
+            file_ops_unsafe,
+            name="file_ops_unsafe",
+            description=(
+                "Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed. "
+                "Always confirm with the user before performing a destructive operation with this tool. "
+            ),
+        )
 
     @classmethod
     def get_instructions(cls) -> str:
         """Get usage instructions for unsafe file operations."""
         return """
-## file_ops_unsafe usage instructions
-        
-⚠️ UNSAFE file operations - CAN PERMANENTLY MODIFY OR DELETE FILES:
-
-CRITICAL REQUIREMENT: This tool does NOT include read operations (read, list, search).
-Before performing ANY file operations, you MUST:
-1. Check if file_ops_safe is also enabled
-2. If NOT enabled, immediately notify the user: "I need file_ops_safe enabled to read and verify files. Please add it.
-3. Do NOT proceed with any operations until file_ops_safe is available
-
-**DESTRUCTIVE OPERATIONS - USE WITH CAUTION:**
-
-EDIT LINE (modify specific line in file):
-- file_ops_unsafe(operation="edit_line", path="path/to/file.md", line_number=5, old_content="expected line", new_content="new line")
-- Line numbers are 1-indexed
-- old_content must match current line EXACTLY or operation fails
-- new_content can contain \\n for multi-line replacements
-- Safety: Fails if old_content doesn't match
-
-DELETE FILE (permanently remove file):
-- file_ops_unsafe(operation="delete", path="path/to/file.md", confirm_path="path/to/file.md")
-- Requires confirm_path to match path exactly
-- Safety: Requires explicit path confirmation
-
-REPLACE TEXT (search and replace in file):
-- file_ops_unsafe(operation="replace_text", path="path/to/file.md", old_content="find this", new_content="replace with", count=1)
-- Replaces up to 'count' occurrences (default 1)
-- Safety: Limited replacement count prevents mass changes
-
-MOVE WITH OVERWRITE (move file, overwriting destination):
-- file_ops_unsafe(operation="move_overwrite", path="source.md", destination="dest.md")
-- Will overwrite destination if it exists
-- Safety: Operation name clearly indicates overwrite risk
-
-TRUNCATE (clear all file contents):
-- file_ops_unsafe(operation="truncate", path="path/to/file.md", confirm_path="path/to/file.md")
-- Empties file completely
-- Requires confirm_path to match path exactly
-- Safety: Requires explicit path confirmation
-
-⚠️ CRITICAL SAFETY RULES:
-1. All files must use .md extension
-2. All operations stay within vault boundaries
-3. Delete and truncate require path confirmation
-4. Edit operations require exact content match
-5. NO UNDO - changes are permanent
-6. Double-check paths before destructive operations
+Full documentation:
+- `__virtual_docs__/tools/file_ops_unsafe.md`
 """
 
     @classmethod
-    def _edit_line(cls, path: str, line_number: int, old_content: str, new_content: str, vault_path: str) -> str:
+    def _result(
+        cls,
+        *,
+        message: str,
+        operation: str,
+        path: str = "",
+        destination: str = "",
+        status: str = "completed",
+        exists: bool | None = None,
+        error_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ToolReturn:
+        payload: dict[str, Any] = {
+            "status": status,
+            "operation": operation,
+        }
+        if path:
+            payload["path"] = path
+        if destination:
+            payload["destination"] = destination
+        if exists is not None:
+            payload["exists"] = exists
+        if error_type:
+            payload["error_type"] = error_type
+        if metadata:
+            payload.update(metadata)
+        return ToolReturn(return_value=message, metadata=payload)
+
+    @classmethod
+    def _edit_line(cls, path: str, line_number: int, old_content: str, new_content: str, vault_path: str) -> ToolReturn:
         """Edit a specific line in a file with exact match validation."""
         full_path = validate_and_resolve_path(path, vault_path)
 
         if not os.path.exists(full_path):
-            return f"Cannot edit '{path}' - file does not exist"
+            return cls._result(
+                message=f"Cannot edit '{path}' - file does not exist",
+                operation="edit_line",
+                path=path,
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
+            )
 
         if line_number < 1:
-            return f"Invalid line_number {line_number} - must be >= 1"
+            return cls._result(
+                message=f"Invalid line_number {line_number} - must be >= 1",
+                operation="edit_line",
+                path=path,
+                status="error",
+                exists=True,
+                error_type="invalid_line_number",
+            )
 
         # Read all lines
         with open(full_path, 'r', encoding='utf-8') as file:
@@ -152,14 +176,32 @@ TRUNCATE (clear all file contents):
 
         # Validate line number
         if line_number > len(lines):
-            return f"Line {line_number} does not exist - file only has {len(lines)} lines"
+            return cls._result(
+                message=f"Line {line_number} does not exist - file only has {len(lines)} lines",
+                operation="edit_line",
+                path=path,
+                status="invalid_target",
+                exists=True,
+                error_type="line_not_found",
+                metadata={"line_count": len(lines)},
+            )
 
         # Get current line (remove newline for comparison)
         current_line = lines[line_number - 1].rstrip('\n')
 
         # Validate old_content matches
         if current_line != old_content:
-            return f"Line {line_number} content mismatch. Expected: '{old_content}', Found: '{current_line}'"
+            return cls._result(
+                message=(
+                    f"Line {line_number} content mismatch. Expected: '{old_content}', Found: '{current_line}'"
+                ),
+                operation="edit_line",
+                path=path,
+                status="error",
+                exists=True,
+                error_type="content_mismatch",
+                metadata={"line_number": line_number},
+            )
 
         # Replace the line (handle multi-line new_content)
         if '\n' in new_content:
@@ -174,35 +216,82 @@ TRUNCATE (clear all file contents):
         with open(full_path, 'w', encoding='utf-8') as file:
             file.writelines(lines)
 
-        return f"Successfully edited line {line_number} in '{path}'"
+        return cls._result(
+            message=f"Successfully edited line {line_number} in '{path}'",
+            operation="edit_line",
+            path=path,
+            status="completed",
+            exists=True,
+            metadata={"line_number": line_number},
+        )
 
     @classmethod
-    def _delete_file(cls, path: str, confirm_path: str, vault_path: str) -> str:
+    def _delete_file(cls, path: str, confirm_path: str, vault_path: str) -> ToolReturn:
         """Delete a file with path confirmation."""
         if path != confirm_path:
-            return f"Path confirmation failed - path '{path}' does not match confirm_path '{confirm_path}'"
+            return cls._result(
+                message=f"Path confirmation failed - path '{path}' does not match confirm_path '{confirm_path}'",
+                operation="delete",
+                path=path,
+                status="error",
+                error_type="confirmation_failed",
+            )
 
         full_path = validate_and_resolve_path(path, vault_path)
 
         if not os.path.exists(full_path):
-            return f"Cannot delete '{path}' - file does not exist"
+            return cls._result(
+                message=f"Cannot delete '{path}' - file does not exist",
+                operation="delete",
+                path=path,
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
+            )
 
         if os.path.isdir(full_path):
-            return f"Cannot delete '{path}' - this is a directory, not a file"
+            return cls._result(
+                message=f"Cannot delete '{path}' - this is a directory, not a file",
+                operation="delete",
+                path=path,
+                status="invalid_target",
+                exists=True,
+                error_type="is_directory",
+            )
 
         os.remove(full_path)
-        return f"⚠️ Successfully deleted '{path}' - this action cannot be undone"
+        return cls._result(
+            message=f"⚠️ Successfully deleted '{path}' - this action cannot be undone",
+            operation="delete",
+            path=path,
+            status="completed",
+            exists=False,
+        )
 
     @classmethod
-    def _replace_text(cls, path: str, old_text: str, new_text: str, count: int, vault_path: str) -> str:
+    def _replace_text(cls, path: str, old_text: str, new_text: str, count: int, vault_path: str) -> ToolReturn:
         """Replace text in file with limited count."""
         full_path = validate_and_resolve_path(path, vault_path)
 
         if not os.path.exists(full_path):
-            return f"Cannot replace text in '{path}' - file does not exist"
+            return cls._result(
+                message=f"Cannot replace text in '{path}' - file does not exist",
+                operation="replace_text",
+                path=path,
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
+            )
 
         if count < 1:
-            return f"Invalid count {count} - must be >= 1"
+            return cls._result(
+                message=f"Invalid count {count} - must be >= 1",
+                operation="replace_text",
+                path=path,
+                status="error",
+                exists=True,
+                error_type="invalid_count",
+            )
 
         # Read file
         with open(full_path, 'r', encoding='utf-8') as file:
@@ -210,7 +299,14 @@ TRUNCATE (clear all file contents):
 
         # Check if old_text exists
         if old_text not in content:
-            return f"Text not found in '{path}': '{old_text}'"
+            return cls._result(
+                message=f"Text not found in '{path}': '{old_text}'",
+                operation="replace_text",
+                path=path,
+                status="invalid_target",
+                exists=True,
+                error_type="text_not_found",
+            )
 
         # Replace with count limit
         new_content = content.replace(old_text, new_text, count)
@@ -222,16 +318,31 @@ TRUNCATE (clear all file contents):
         with open(full_path, 'w', encoding='utf-8') as file:
             file.write(new_content)
 
-        return f"Successfully replaced {replacements} occurrence(s) in '{path}'"
+        return cls._result(
+            message=f"Successfully replaced {replacements} occurrence(s) in '{path}'",
+            operation="replace_text",
+            path=path,
+            status="completed",
+            exists=True,
+            metadata={"replacement_count": replacements},
+        )
 
     @classmethod
-    def _move_overwrite(cls, path: str, destination: str, vault_path: str) -> str:
+    def _move_overwrite(cls, path: str, destination: str, vault_path: str) -> ToolReturn:
         """Move file, allowing destination overwrite."""
         src_path = validate_and_resolve_path(path, vault_path)
         dest_path = validate_and_resolve_path(destination, vault_path)
 
         if not os.path.exists(src_path):
-            return f"Cannot move '{path}' - source file does not exist"
+            return cls._result(
+                message=f"Cannot move '{path}' - source file does not exist",
+                operation="move_overwrite",
+                path=path,
+                destination=destination,
+                status="not_found",
+                exists=False,
+                error_type="source_not_found",
+            )
 
         # Create destination directory if needed
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -244,24 +355,58 @@ TRUNCATE (clear all file contents):
         # Move (overwriting if exists)
         os.replace(src_path, dest_path)
 
-        return f"Successfully moved '{path}' to '{destination}'{overwrite_msg}"
+        return cls._result(
+            message=f"Successfully moved '{path}' to '{destination}'{overwrite_msg}",
+            operation="move_overwrite",
+            path=path,
+            destination=destination,
+            status="completed",
+            exists=True,
+            metadata={"overwrote_destination": bool(overwrite_msg)},
+        )
 
     @classmethod
-    def _truncate_file(cls, path: str, confirm_path: str, vault_path: str) -> str:
+    def _truncate_file(cls, path: str, confirm_path: str, vault_path: str) -> ToolReturn:
         """Clear all contents of a file with path confirmation."""
         if path != confirm_path:
-            return f"Path confirmation failed - path '{path}' does not match confirm_path '{confirm_path}'"
+            return cls._result(
+                message=f"Path confirmation failed - path '{path}' does not match confirm_path '{confirm_path}'",
+                operation="truncate",
+                path=path,
+                status="error",
+                error_type="confirmation_failed",
+            )
 
         full_path = validate_and_resolve_path(path, vault_path)
 
         if not os.path.exists(full_path):
-            return f"Cannot truncate '{path}' - file does not exist"
+            return cls._result(
+                message=f"Cannot truncate '{path}' - file does not exist",
+                operation="truncate",
+                path=path,
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
+            )
 
         if os.path.isdir(full_path):
-            return f"Cannot truncate '{path}' - this is a directory, not a file"
+            return cls._result(
+                message=f"Cannot truncate '{path}' - this is a directory, not a file",
+                operation="truncate",
+                path=path,
+                status="invalid_target",
+                exists=True,
+                error_type="is_directory",
+            )
 
         # Clear file contents
         with open(full_path, 'w', encoding='utf-8') as file:
             file.write('')
 
-        return f"⚠️ Successfully truncated '{path}' - all contents cleared (this action cannot be undone)"
+        return cls._result(
+            message=f"⚠️ Successfully truncated '{path}' - all contents cleared (this action cannot be undone)",
+            operation="truncate",
+            path=path,
+            status="completed",
+            exists=True,
+        )

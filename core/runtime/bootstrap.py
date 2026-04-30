@@ -5,19 +5,19 @@ Provides single entry point for initializing all runtime services
 with proper configuration, error handling, and lifecycle management.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.workflow.loader import WorkflowLoader
+from core.authoring.template_discovery import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.settings import validate_settings
 from core.settings.store import get_general_settings
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
-from core.context.templates import seed_system_templates
+from core.authoring.template_discovery import seed_system_templates
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
@@ -118,13 +118,33 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             max_workers=config.max_scheduler_workers
         )
 
-        # Start scheduler in paused mode to allow job synchronization
-        scheduler.start(paused=True)
-        # Scheduler starts paused to sync jobs before first run.
+        # Start scheduler paused to allow job synchronization.
+        # If the job store has stale job references (e.g. from a module rename),
+        # wipe it and retry with a clean store so startup isn't blocked.
+        try:
+            scheduler.start(paused=True)
+        except Exception as start_err:
+            logger.warning(
+                "Scheduler failed to start — job store may contain stale references. "
+                "Wiping job store and retrying.",
+                data={"error": str(start_err)},
+            )
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:
+                pass
+            job_store = create_job_store(
+                system_root=str(config.system_root), wipe=True
+            )
+            scheduler = AsyncIOScheduler(
+                jobstores={"default": job_store},
+                max_workers=config.max_scheduler_workers,
+            )
+            scheduler.start(paused=True)
 
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,

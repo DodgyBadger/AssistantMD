@@ -13,6 +13,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.settings.store import (
     ModelConfig,
     ProviderConfig,
@@ -384,9 +385,16 @@ def get_default_max_output_tokens() -> int:
         return 0
 
 
-def get_auto_buffer_max_tokens() -> int:
-    """Return the configured auto-buffer token limit, falling back to 0 (disabled)."""
-    entry = get_general_settings().get("auto_buffer_max_tokens")
+def get_default_model_thinking() -> ThinkingValue:
+    """Return the configured default thinking policy."""
+    entry = get_general_settings().get("default_model_thinking")
+    value = getattr(entry, "value", None) if entry is not None else None
+    return normalize_thinking_value(value, source_name="default_model_thinking")
+
+
+def get_auto_cache_max_tokens() -> int:
+    """Return the configured auto-cache token limit, falling back to 0 (disabled)."""
+    entry = get_general_settings().get("auto_cache_max_tokens")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
         return int(value)
@@ -417,17 +425,6 @@ def get_file_ops_safe_list_max_results() -> int:
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed >= 0 else template_default
-
-
-def get_routing_allowed_tools() -> list[str]:
-    """Return list of tool names allowed to accept routing in chat."""
-    entry = get_general_settings().get("routing_allowed_tools")
-    value = getattr(entry, "value", None) if entry is not None else None
-    if isinstance(value, list):
-        return [str(item).strip().lower() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [item.strip().lower() for item in value.split(",") if item.strip()]
-    return []
 
 
 def get_chunking_max_images_per_prompt() -> int:
