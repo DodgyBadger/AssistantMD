@@ -1,62 +1,27 @@
 ---
 name: Authoring
-description: Guidelines for creating and modifying AssistantMD workflows, context templates, and skills. Use when the user asks to create, edit, or debug any file in AssistantMD/Authoring/ or AssistantMD/Skills/.
+description: Guidelines for creating and modifying AssistantMD workflow scripts, context assembly scripts, and skills. Use when the user asks to create, edit, or debug any file in AssistantMD/Authoring/ or AssistantMD/Skills/.
 ---
 
-## Workflows and context templates
+Use this skill when creating or editing AssistantMD authoring files:
 
-Read `__virtual_docs__/use/authoring.md` for file shape and frontmatter field reference before starting.
+- workflow scripts
+- context assembly scripts
+- skill files
 
-Inspect `__virtual_docs__/tools/code_execution.md` for current capability signatures and return shapes. Do not guess — check the contract.
+Before changing files, read the current contract docs:
 
-- `AssistantMD/Authoring/` is the canonical location for all workflows and context templates.
-- Every file needs `run_type: workflow` or `run_type: context` in frontmatter plus exactly one fenced `python` block.
-- Use the compile tool to check for syntax errors before asking the user to run.
-- Make one small change at a time. Test before continuing.
-- Do not treat existing vault workflow files as authoritative examples of the current API.
+- `__virtual_docs__/use/build-guide.md` for skill behavior and the built-in skill discovery script.
+- `__virtual_docs__/use/authoring.md` for workflow and context script structure.
+- `__virtual_docs__/tools/code_execution.md` for Monty runtime features, helper signatures, direct tool calls, and return shapes.
 
-## Skills
+Do not infer the current API from older vault files. Existing user files may predate the current authoring contract.
 
-Skills live in `AssistantMD/Skills/`. The agent reads all skill descriptions at session start and loads the body only when the skill triggers. Use either flat markdown files like `AssistantMD/Skills/name.md` or one-level skill folders like `AssistantMD/Skills/name/SKILL.md`.
+When writing authoring scripts:
 
-### File format
+- Keep user-editable constants such as paths, prompts, model aliases, and thinking settings near the top.
+- Use direct tool calls and helper functions exactly as documented.
+- Use `delegate(...)` only when the script needs model judgment, and pass explicit instructions and tool access.
+- Make one small change at a time.
 
-```markdown
----
-name: skill-name
-description: What this skill does and when to use it.
----
-
-Body: instructions, procedures, examples.
-```
-
-Only `name` and `description` are required in frontmatter. Do not add other fields.
-
-### Description is the trigger
-
-The description is the primary mechanism for deciding when a skill activates — it is always in context, the body is not. Put all "when to use" information in the description. A "When to Use" section in the body is useless because the body only loads after triggering.
-
-Good description: *"Step-by-step guide for rotating, splitting, and extracting pages from PDFs. Use when the user needs to manipulate PDF files."*
-
-### Concise is key
-
-The context window is shared with conversation history, other skill descriptions, and the user's request. Only include what Claude doesn't already know. Challenge every sentence: does this justify its token cost? Prefer a short example over a long explanation.
-
-### Set appropriate degrees of freedom
-
-- **High freedom** (plain prose): when multiple approaches are valid or context drives the decision
-- **Medium freedom** (pseudocode, patterns): when a preferred approach exists but variation is acceptable
-- **Low freedom** (exact steps or code): when the operation is fragile or a specific sequence must be followed
-
-### Progressive disclosure
-
-Keep the body lean. For complex skills, reference other vault files rather than loading everything upfront — tell Claude when to read them:
-
-```markdown
-For the full schema, read `References/db-schema.md`.
-For brand assets, use files in `Assets/brand/`.
-```
-
-### What not to include
-
-Do not create README files or changelogs as substitutes for the skill body. Keep auxiliary docs only when the skill body explicitly tells the agent when to read them.
+Offer to test using `run_workflow` tool. Note that this can only test workflow scripts, not context assemblys scripts. Fix any errors returned by the tool. Even if no errors are returned, inspect the artifacts to ensure they meet requirements.
