@@ -1,13 +1,13 @@
 # Release Notes
 
-## 2026-04-22 - v0.6.0
+## 2026-04-30 - v0.6.0
 
 ### BREAKING: Markdown DSL replaced by Python authoring runtime
 
 ⚠️WARNING: This release replaces the markdown step-based authoring surface entirely with a Python-based authoring environment built on the **Pydantic Monty sandbox**. This affects every workflow and context template in your vault — all existing `.md` templates written using ## Step headings and @directives are now obsolete and must be migrated to the new format.
 
 **Rationale**  
-The old authoring approach relied on a custom language which was becoming increasingly complex for both humans and LLMs to understand. Attempts to teach the chat agent to write automations for you were failing. Rather than invent a new language, this release leans into what LLMs already know how to do well - write code. Now you can describe the research / knowledge automation you want and the chat agent will create it for you.
+The old authoring approach relied on a custom language which was becoming increasingly complex for both humans and LLMs to understand. Attempts to teach the chat agent to write automations were failing. Rather than invent a new language, this release leans into what LLMs already know how to do well - write code. Now you can describe the research / knowledge automation you want and the chat agent will create it for you.
 
 **Safety**  
 This is not free-form Python. Authoring scripts run inside the Monty sandbox — a Python interpreter written in Rust with its own bytecode VM. Monty's default is zero access: no filesystem, no network, no environment variables, no arbitrary imports. The only way a script can interact with the outside world is through tools (e.g. `file_ops_safe`, `tavily_extract`) and host-owned helper functions (e.g. `retrieve_history`, `parse_markdown`). Each integration point is deliberate and auditable. The chat agent can write and run automation code on your behalf without any risk of it reaching outside the boundaries AssistantMD sets.
@@ -50,6 +50,7 @@ Chat sessions are now persisted in SQLite and survive app restarts.
   - `scope` renamed to `search_term` (search semantics flipped: `path` is now the directory boundary).
   - New `frontmatter` operation (returns selected frontmatter keys).
   - New `head` operation (returns the first N lines of a file).
+  - `read` and `head` now return the requested file content directly, without success-message wrapper text.
 - Local db-backed cache is now used for oversized tool results that exceed context limits, replacing the former buffer.
 - Manual cache purge controls added to Configuration.
 
@@ -61,6 +62,7 @@ Chat sessions are now persisted in SQLite and survive app restarts.
 - Fixed LaTeX false-positive on currency values: `$10` no longer triggers inline math detection.
 - Tweaked the chat context template fallback chain.
 - Validation event filenames padded to 5 digits for correct sort order past 99 events.
+- Global built-in authoring scripts are automatically upgraded on startup. Duplicate and rename if you want to customize any of the built-in scripts in `system/`.
 - Integration test suite updated throughout to match the new authoring contracts.
 
 
