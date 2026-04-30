@@ -2,9 +2,9 @@
 
 AssistantMD has a unified authoring surface for two types of automation: **workflow scripts** and **context assembly scripts**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
 
-You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test authoring files. Use this document as orientation.
+You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test. Use this document as orientation.
 
-The common script pattern is: use tools and helpers for host-owned access to allowed capabilities like vault access, message history and web search; use ordinary Python to manipulate, filter, sort, and transform data; use the `delegate` tool when the script needs model inference.
+The common script pattern is: use tools and helpers for host-owned access to allowed capabilities like vault access, message history and web search; use ordinary Python to manipulate, filter, sort, and transform data; use the `delegate` tool when the script needs model inference. Always pass `delegate` explicit instructions - never assume it knows anything about the environment including tool use.
 
 When a delegated step gives odd results, inspect `result.metadata["audit"]` before changing the script blindly. The audit summarizes the child agent's tool calls, arguments, return previews, and tool errors, so you can tell whether the child used the intended tools, hit a file/tool problem, or produced a poor model answer.
 

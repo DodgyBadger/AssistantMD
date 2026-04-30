@@ -20,9 +20,11 @@ Open the app, pick a model, and start talking. The chat agent can read, search, 
 
 When you find yourself giving the same instructions repeatedly, or when a task needs a precise procedure, write a **skill file**.
 
-A skill is a plain markdown file describing a task in clear English. Put skills in `AssistantMD/Skills/`. The default context assembly script scans that folder and injects a summary of available skills before every chat session — so when your request matches a skill, the agent reads and follows it automatically without you needing to name it explicitly.
+A skill is a plain markdown file describing a task in clear English. The built-in default script will discover skill files from both of the following structures using `name` and `description` frontmatter as the discovery surface:
+- `AssistantMD/Skills/skill-name/SKILL.md` 
+- `AssistantMD/Skills/skill-name.md`
 
-AssistantMD's skill convention is similar to Anthropic's [skills protocol](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/skills-protocol): both use `name` and `description` frontmatter fields as the discovery surface. The difference is you don't need to name files `skill.md` or organize them into per-skill subfolders. A single markdown file per skill is fine, and you can name and organize them however suits your vault.
+AssistantMD is not inherently opinionated about how skills are defined. Skills are discovered by the active context assembly script, so a custom script can load them however you want. For example, you could could bundle skills under each project folder and then load only those that are relevant to the project.
 
 ### What makes a good skill
 
@@ -102,8 +104,7 @@ For the full authoring reference, see [Authoring](authoring.md).
 
 ## Level 4: Context Assembly Script
 
-A Context Assembly Script controls what the chat agent knows at the start of every conversation. AssistantMD ships with a default script that loads skills, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`.
-Packaged system scripts are refreshed on startup; copy a system script into `AssistantMD/Authoring/` under a new name before customizing it.
+A Context Assembly Script controls what the chat agent knows at the start of every conversation. AssistantMD ships with a default script that loads skills in `AssistantMD/Skills/`, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`. Built-in global scripts (found in the `system/` folder) are refreshed on startup; copy a system script into `AssistantMD/Authoring/` under a new name before customizing it.
 
 ### Customizing the agent's personality: soul.md
 
@@ -116,18 +117,18 @@ Prefer bullet points over prose.
 Ask one clarifying question before starting any multi-step task.
 ```
 
-The default script loads this file automatically and uses it as the agent's system instruction. Edit it whenever you want to adjust the agent's behavior.
+The default context assembly script loads this file automatically and uses it as the agent's system instruction. Edit it whenever you want to adjust the agent's behavior.
 
 ### Custom Context Assembly Scripts
 
 For more control — curating message history, loading specific files, summarizing prior conversations — create a context script in `AssistantMD/Authoring/` with `run_type: context`.
 
-Like workflow scripts, you don't need to write these by hand. Describe what you want to the agent and it will draft the file.
+Like workflow scripts, you don't need to write these by hand. Describe what you want to the chat agent and it will draft the file.
 
 **Example use cases:**
 - Summarize long conversation histories so the agent stays focused as chats grow
 - Load project-specific files into context automatically when starting a session
-- Build a specialized mode for a particular domain (coding assistant, research assistant, writing editor)
+- Build a specialized mode for a particular domain (research assistant, writing editor)
 
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 

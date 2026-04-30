@@ -22,19 +22,39 @@ soul_instructions = (
     )
 )
 
-skills_result = await file_ops_safe(
+def skill_name_from_path(path):
+    parts = path.split("/")
+    filename = parts[-1] if parts else path
+    if filename == "SKILL.md" and len(parts) >= 2:
+        return parts[-2]
+    return filename[:-3] if filename.endswith(".md") else filename
+
+
+flat_skills_result = await file_ops_safe(
     operation="frontmatter",
     path="AssistantMD/Skills",
     keys="name,description",
 )
+folder_skills_result = await file_ops_safe(
+    operation="frontmatter",
+    path="AssistantMD/Skills/*/SKILL.md",
+    keys="name,description",
+)
+
+skill_items_by_path = {}
+for result in (flat_skills_result, folder_skills_result):
+    if result.metadata.get("status") == "completed":
+        for item in result.metadata.get("items", []):
+            path = item.get("path", "")
+            if path:
+                skill_items_by_path[path] = item
+
 skills_lines = []
-if skills_result.metadata.get("status") == "completed":
-    for item in skills_result.metadata.get("items", []):
-        fm = item.get("frontmatter", {})
-        name = fm.get("name") or item["path"].rsplit("/", 1)[-1].replace(".md", "")
-        description = fm.get("description", "")
-        path = item["path"]
-        skills_lines.append(f"- **{name}** (`{path}`): {description}" if description else f"- **{name}** (`{path}`)")
+for path, item in skill_items_by_path.items():
+    fm = item.get("frontmatter", {})
+    name = fm.get("name") or skill_name_from_path(path)
+    description = fm.get("description", "")
+    skills_lines.append(f"- **{name}** (`{path}`): {description}" if description else f"- **{name}** (`{path}`)")
 
 instructions = soul_instructions
 if skills_lines:

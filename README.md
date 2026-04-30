@@ -3,34 +3,30 @@
 > [!WARNING]
 > **v0.6.0 introduces a major change that breaks all existing automations. See the [release notes](RELEASE_NOTES.md) for details. Pin your docker compose file to v0.5.0 (ghcr.io/dodgybadger/assistantmd:v0.5.0) if you are not ready to migrate.**
 
-AssistantMD is a **markdown-native chat UI** and **agent harness** for automating research and knowledge workflow scripts. It works alongside Obsidian (or any markdown editor) so you retain **full control of your data**: chats, skills, workflow scripts, and automation outputs are saved as plain markdown that you can inspect and version control.
+AssistantMD is a customizable **markdown-native chat UI** and **agent harness** for automating research and knowledge work. It is intended to be used alongside Obsidian (or any markdown editor), giving you **full control of your data**.
 
-> **Security note:** AssistantMD has **no built-in auth or TLS**. Run it on a trusted network and/or add your own security layers. See [docs/setup/security.md](docs/setup/security.md).
-
-
-## Why AssistantMD
-
-- **File-first ownership:** Markdown wherever possible; SQLite only when a database is required.
-- **Vault-native automation:** Skills, workflow scripts, and agent behaviour are defined in plain markdown files that live inside your vault alongside your notes.
+- **File-first ownership:** Markdown wherever possible; SQLite when a database is required.
+- **Vault-native automation:** Skills, scripts and agent behaviour are defined in markdown files that live in your vault alongside your notes.
 - **Cautious automation:** Built with prompt-injection awareness and a conservative stance toward untrusted content.
 
+> **Security note:** AssistantMD has **no built-in auth or TLS**. Run it on a trusted network and/or add your own security layers. See [docs/setup/security.md](docs/setup/security.md).
 
 ## How it works
 
 When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
 
 - `AssistantMD/Skills/` — skill files that teach the agent reusable procedures
-- `AssistantMD/Authoring/` — workflow scripts and context assembly scripts
+- `AssistantMD/Authoring/` — workflow and context assembly scripts
 - `AssistantMD/Chat_Sessions/` — exported chat transcripts
 - `AssistantMD/Import/` — drop PDFs and images here to import to markdown
 
 ### Skills
 
-A skill is a plain markdown file describing a task procedure. The default context assembly script loads your skills catalog at the start of each chat session so the agent can reference them as needed. Or integrate the skills library into your own workflow scripts and context scripts however you want. Write skills in plain English — no special syntax required.
+A skill is a plain markdown file describing a task procedure. The default context assembly script loads your skills catalog at the start of each chat session so the agent can reference them as needed. Or integrate the skills library into your own scripts however you want.
 
 ### Workflow Scripts
 
-Workflow scripts are Python scripts stored in markdown files in your vault. Use them for scheduled automations or tasks that need strict sequencing, conditional logic, or deterministic file routing. You don't write the Python yourself — describe what you want to the chat agent and it drafts the file for you.
+Workflow scripts are Python stored in markdown files in your vault. Use them for scheduled automations or tasks that need strict sequencing, conditional logic, or deterministic file routing. You don't write the Python yourself — describe what you want to the chat agent and it drafts the file for you.
 
 ### Context Assembly Script
 

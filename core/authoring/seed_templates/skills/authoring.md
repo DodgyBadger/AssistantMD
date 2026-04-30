@@ -17,7 +17,7 @@ Inspect `__virtual_docs__/tools/code_execution.md` for current capability signat
 
 ## Skills
 
-Skills are plain markdown files in `AssistantMD/Skills/`. The agent reads all skill descriptions at session start and loads the body only when the skill triggers.
+Skills live in `AssistantMD/Skills/`. The agent reads all skill descriptions at session start and loads the body only when the skill triggers. Use either flat markdown files like `AssistantMD/Skills/name.md` or one-level skill folders like `AssistantMD/Skills/name/SKILL.md`.
 
 ### File format
 
@@ -59,4 +59,4 @@ For brand assets, use files in `Assets/brand/`.
 
 ### What not to include
 
-Do not create README files, changelogs, or auxiliary docs alongside skill files. The skill body should contain only what an agent needs to do the job.
+Do not create README files or changelogs as substitutes for the skill body. Keep auxiliary docs only when the skill body explicitly tells the agent when to read them.
