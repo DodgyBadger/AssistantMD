@@ -21,6 +21,8 @@ from core.authoring.template_discovery import seed_system_templates
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
+from .execution_tasks import TaskCoordinator
+from .workflow_governor import WorkflowGovernor
 from .state import set_runtime_context, clear_runtime_context
 from .paths import set_bootstrap_roots
 from . import state as runtime_state
@@ -145,12 +147,16 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
+        task_coordinator = TaskCoordinator()
+        workflow_governor = WorkflowGovernor(task_coordinator=task_coordinator)
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,
             workflow_loader=workflow_loader,
             logger=logger,
             ingestion=ingestion_service,
+            task_coordinator=task_coordinator,
+            workflow_governor=workflow_governor,
             boot_id=boot_id,
             started_at=started_at,
         )

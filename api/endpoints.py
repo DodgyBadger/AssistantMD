@@ -28,6 +28,9 @@ from .models import (
     VaultRescanResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
+    ExecutionTaskCancelResponse,
+    ExecutionTaskInfo,
+    ExecutionTaskListResponse,
     StatusResponse,
     ChatExecuteRequest,
     ChatExecuteResponse,
@@ -86,6 +89,12 @@ from .services import (
     import_url_direct,
     get_workflow_load_errors,
     purge_expired_cache,
+    cancel_chat_session_task,
+    cancel_execution_task,
+    get_active_chat_task,
+    get_execution_task,
+    list_execution_tasks,
+    list_workflow_tasks,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -387,6 +396,45 @@ async def system_activity_log(limit_bytes: int = 65_536):
         return create_error_response(e)
 
 
+#######################################################################
+## Execution Task Endpoints
+#######################################################################
+
+@router.get("/tasks", response_model=ExecutionTaskListResponse)
+async def execution_tasks(
+    kind: str | None = None,
+    scope: str | None = None,
+    include_terminal: bool = True,
+):
+    """List process-local execution task snapshots."""
+    try:
+        return await list_execution_tasks(
+            kind=kind,
+            scope=scope,
+            include_terminal=include_terminal,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/tasks/{task_id}", response_model=ExecutionTaskInfo)
+async def execution_task(task_id: str):
+    """Return one process-local execution task snapshot."""
+    try:
+        return await get_execution_task(task_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=ExecutionTaskCancelResponse)
+async def cancel_task(task_id: str):
+    """Request cancellation for one process-local execution task."""
+    try:
+        return await cancel_execution_task(task_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.get("/system/settings", response_model=SystemSettingsResponse)
 async def system_settings():
     """Return the current settings configuration file."""
@@ -658,6 +706,15 @@ async def workflow_load_errors(vault_name: str | None = None, workflow_name: str
         return create_error_response(e)
 
 
+@router.get("/workflows/tasks", response_model=ExecutionTaskListResponse)
+async def workflow_tasks(vault_name: str | None = None):
+    """List process-local workflow execution task snapshots."""
+    try:
+        return await list_workflow_tasks(vault_name=vault_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
 #######################################################################
 ## Chat Execution Endpoints
 #######################################################################
@@ -718,6 +775,24 @@ async def chat_sessions(vault_name: str):
     """
     try:
         return list_chat_sessions(vault_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions/{session_id}/active-task", response_model=ExecutionTaskInfo)
+async def chat_session_active_task(session_id: str):
+    """Return the active process-local execution task for a chat session."""
+    try:
+        return await get_active_chat_task(session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/cancel", response_model=ExecutionTaskCancelResponse)
+async def cancel_chat_session(session_id: str):
+    """Request cancellation for the active process-local task in a chat session."""
+    try:
+        return await cancel_chat_session_task(session_id)
     except Exception as e:
         return create_error_response(e)
 

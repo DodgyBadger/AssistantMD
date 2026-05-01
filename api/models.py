@@ -149,6 +149,37 @@ class ChatExecuteResponse(BaseModel):
     message_count: int = Field(..., description="Total messages in conversation")
 
 
+class ExecutionTaskInfo(BaseModel):
+    """Process-local execution task snapshot."""
+
+    task_id: str = Field(..., description="Execution task identifier")
+    kind: str = Field(..., description="Task kind, such as chat or workflow")
+    scope: str = Field(..., description="Task scope")
+    source: str = Field(..., description="Task source, such as api, scheduler, tool, or system")
+    label: str = Field(..., description="User-readable task label")
+    status: str = Field(..., description="Task lifecycle status")
+    created_at: datetime = Field(..., description="Task creation timestamp")
+    started_at: Optional[datetime] = Field(None, description="Task start timestamp")
+    finished_at: Optional[datetime] = Field(None, description="Task terminal timestamp")
+    cancel_requested: bool = Field(False, description="Whether cancellation has been requested")
+    terminal_reason: Optional[str] = Field(None, description="Terminal reason when available")
+    latest_event: Optional[str] = Field(None, description="Latest task lifecycle event")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Task metadata")
+
+
+class ExecutionTaskListResponse(BaseModel):
+    """Response model for execution task listing."""
+
+    tasks: List[ExecutionTaskInfo] = Field(default_factory=list, description="Matching task snapshots")
+
+
+class ExecutionTaskCancelResponse(BaseModel):
+    """Response model for execution task cancellation."""
+
+    task: ExecutionTaskInfo = Field(..., description="Task snapshot after cancellation request")
+    cancelled: bool = Field(..., description="Whether the task was already or newly cancelled")
+
+
 
 
 class ModelInfo(BaseModel):

@@ -32,6 +32,10 @@ settings:
     value: 120
     description: "Default timeout in seconds for external API calls."
     restart_required: false
+  workflow_task_timeout_seconds:
+    value: 0
+    description: "Maximum seconds for one workflow execution task. 0 disables the workflow task timeout."
+    restart_required: false
   browser_navigation_timeout_seconds:
     value: 20
     description: "Navigation timeout in seconds for the browser extraction tool."

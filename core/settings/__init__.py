@@ -353,6 +353,17 @@ def get_default_api_timeout() -> float:
         return 120.0
 
 
+def get_workflow_task_timeout_seconds() -> float:
+    """Return workflow task timeout seconds, where 0 disables the timeout."""
+    entry = get_general_settings().get("workflow_task_timeout_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return timeout if timeout > 0 else 0.0
+
+
 def get_browser_navigation_timeout_seconds() -> float:
     """Return browser navigation timeout seconds, falling back to 20 seconds."""
     entry = get_general_settings().get("browser_navigation_timeout_seconds")

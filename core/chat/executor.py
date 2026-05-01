@@ -5,6 +5,7 @@ Handles stateful/stateless chat with user-selected tools and models.
 Persists canonical chat history in the structured chat store.
 """
 
+import asyncio
 import json
 import traceback
 from dataclasses import dataclass, field
@@ -599,24 +600,38 @@ async def execute_chat_prompt(
         )
 
         phase = "agent_run"
-        session_buffer_store = get_session_buffer_store(session_id)
-        run_deps = ChatRunDeps(
-            context_manager_now=_resolve_context_manager_now(),
-            buffer_store=session_buffer_store,
-            buffer_store_registry={"session": session_buffer_store},
-            session_id=session_id,
-            vault_name=vault_name,
-            message_history=list(prepared.message_history or []),
-            tools=list(prepared.tools or []),
-        )
-        result = await prepared.agent.run(
-            prepared.user_prompt,
-            message_history=prepared.message_history,
-            deps=run_deps,
-        )
+        runtime = get_runtime_context()
+        async with runtime.task_coordinator.track_current_task(
+            kind="chat",
+            scope=f"chat_session:{session_id}",
+            source="api",
+            label=f"chat:{session_id}",
+            metadata={
+                "vault": vault_name,
+                "session_id": session_id,
+                "streaming": False,
+                "model": model,
+                "tools": list(tools),
+            },
+        ):
+            session_buffer_store = get_session_buffer_store(session_id)
+            run_deps = ChatRunDeps(
+                context_manager_now=_resolve_context_manager_now(),
+                buffer_store=session_buffer_store,
+                buffer_store_registry={"session": session_buffer_store},
+                session_id=session_id,
+                vault_name=vault_name,
+                message_history=list(prepared.message_history or []),
+                tools=list(prepared.tools or []),
+            )
+            result = await prepared.agent.run(
+                prepared.user_prompt,
+                message_history=prepared.message_history,
+                deps=run_deps,
+            )
 
-        phase = "session_persist"
-        _CHAT_STORE.add_messages(session_id, vault_name, result.new_messages())
+            phase = "session_persist"
+            _CHAT_STORE.add_messages(session_id, vault_name, result.new_messages())
         _log_chat_lifecycle(
             "Chat execution completed",
             vault_name=vault_name,
@@ -639,6 +654,20 @@ async def execute_chat_prompt(
             message_count=len(result.all_messages()),
             history_file=None,
         )
+    except asyncio.CancelledError as exc:
+        _log_chat_failure(
+            "Chat execution cancelled",
+            vault_name=vault_name,
+            session_id=session_id,
+            model=model,
+            tools=tools,
+            streaming=False,
+            phase=phase,
+            prompt_length=len(prompt),
+            attached_image_count=attached_image_count,
+            exc=exc,
+        )
+        raise
     except Exception as exc:
         _log_chat_failure(
             "Chat execution failed",
@@ -676,6 +705,7 @@ async def _stream_prepared_chat_prompt(
     session_id: str,
 ) -> AsyncIterator[str]:
     """Stream a preflighted chat execution as SSE events."""
+    del vault_path
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
@@ -689,199 +719,23 @@ async def _stream_prepared_chat_prompt(
         message_history=list(prepared.message_history or []),
         tools=list(prepared.tools or []),
     )
-    _log_chat_lifecycle(
-        "Streaming chat execution started",
-        vault_name=vault_name,
-        session_id=session_id,
-        model=prepared.model,
-        tools=prepared.tools,
-        streaming=True,
-        phase="agent_stream",
-        prompt_length=len(prepared.prompt_for_history),
-        attached_image_count=prepared.attached_image_count,
-        extra={
-            "history_message_count": len(prepared.message_history or []),
-            "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
+
+    runtime = get_runtime_context()
+    async with runtime.task_coordinator.track_current_task(
+        kind="chat",
+        scope=f"chat_session:{session_id}",
+        source="api",
+        label=f"chat:{session_id}",
+        metadata={
+            "vault": vault_name,
+            "session_id": session_id,
+            "streaming": True,
+            "model": prepared.model,
+            "tools": list(prepared.tools),
         },
-    )
-
-    try:
-        # Use run_stream_events() to properly handle tool calls
-        # This runs the agent graph to completion and streams all events
-        async for event in prepared.agent.run_stream_events(
-            prepared.user_prompt,
-            message_history=prepared.message_history,
-            deps=run_deps,
-        ):
-            if isinstance(event, PartStartEvent):
-                # Initial visible assistant text part
-                if isinstance(event.part, TextPart) and event.part.content:
-                    delta_text = event.part.content
-                    full_response += delta_text
-
-                    chunk = {
-                        "event": "delta",
-                        "choices": [{
-                            "delta": {"content": delta_text},
-                            "index": 0,
-                            "finish_reason": None
-                        }]
-                    }
-                    yield f"data: {json.dumps(chunk)}\n\n"
-
-            elif isinstance(event, PartDeltaEvent):
-                # Incremental text delta
-                if isinstance(event.delta, TextPartDelta):
-                    delta_text = event.delta.content_delta
-                    full_response += delta_text
-
-                    chunk = {
-                        "event": "delta",
-                        "choices": [{
-                            "delta": {"content": delta_text},
-                            "index": 0,
-                            "finish_reason": None
-                        }]
-                    }
-                    yield f"data: {json.dumps(chunk)}\n\n"
-
-            elif isinstance(event, FunctionToolCallEvent):
-                # Tool is being called - optionally show progress
-                tool_id = event.tool_call_id
-                tool_part = getattr(event, "part", None)
-                tool_name = getattr(tool_part, "tool_name", "tool")
-                tool_args = None
-                if tool_part is not None:
-                    try:
-                        tool_args = tool_part.args_as_json_str()
-                    except Exception as exc:  # noqa: BLE001 - defensive: upstream variations
-                        logger.debug("args_as_json_str failed; using raw args", data={"error": str(exc)})
-                        tool_args = tool_part.args
-                tool_activity[tool_id] = {
-                    "tool_name": tool_name,
-                    "status": "running"
-                }
-                metadata_chunk = {
-                    "event": "tool_call_started",
-                    "tool_call_id": tool_id,
-                    "tool_name": tool_name,
-                    "arguments": _normalize_tool_args(tool_args)
-                }
-                logger.info(
-                    "Streaming tool call started",
-                    data={
-                        "vault_name": vault_name,
-                        "session_id": session_id,
-                        "tool_call_id": tool_id,
-                        "tool_name": tool_name,
-                        "arguments_length": len(tool_args or ""),
-                        "memory_rss_bytes": _get_process_rss_bytes(),
-                    },
-                )
-                yield f"data: {json.dumps(metadata_chunk)}\n\n"
-
-            elif isinstance(event, FunctionToolResultEvent):
-                # Tool returned a result
-                tool_id = event.tool_call_id
-                result_part = getattr(event, "result", None)
-                tool_name = getattr(result_part, "tool_name", "tool")
-                result_content = None
-                if result_part is not None:
-                    try:
-                        result_content = result_part.model_response_str()
-                    except Exception as exc:  # noqa: BLE001 - defensive fallback
-                        logger.debug("model_response_str failed; using raw content", data={"error": str(exc)})
-                        result_content = getattr(result_part, "content", None)
-                tool_activity[tool_id] = {
-                    "tool_name": tool_name,
-                    "status": "completed"
-                }
-                metadata_chunk = {
-                    "event": "tool_call_finished",
-                    "tool_call_id": tool_id,
-                    "tool_name": tool_name,
-                    "result": _normalize_tool_result(result_content)
-                }
-                result_text = tool_result_as_text(result_content)
-                logger.info(
-                    "Streaming tool call finished",
-                    data={
-                        "vault_name": vault_name,
-                        "session_id": session_id,
-                        "tool_call_id": tool_id,
-                        "tool_name": tool_name,
-                        "result_length": len(result_text),
-                        "result_token_estimate": estimate_token_count(result_text) if result_text else 0,
-                        "memory_rss_bytes": _get_process_rss_bytes(),
-                    },
-                )
-                yield f"data: {json.dumps(metadata_chunk)}\n\n"
-
-            elif isinstance(event, AgentRunResultEvent):
-                # Final result with complete message history
-                final_result = event.result
-
-        # Send final chunk with finish_reason
-        final_chunk = {
-            "event": "done",
-            "choices": [{
-                "delta": {},
-                "index": 0,
-                "finish_reason": "stop"
-            }],
-            "tool_summary": tool_activity
-        }
-        yield f"data: {json.dumps(final_chunk)}\n\n"
-
-    except ChatCapabilityError as exc:
-        logger.warning("Streaming capability mismatch", data=exc.details)
-        error_chunk = {
-            "event": "error",
-            "choices": [{
-                "delta": {"content": f"\n\n❌ Error: {str(exc)}"},
-                "index": 0,
-                "finish_reason": "error"
-            }],
-            "details": exc.details,
-        }
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        return
-    except ContextTemplateExecutionError as exc:
-        details = build_context_template_error_details(
-            vault_name=vault_name,
-            session_id=session_id,
-            template_name=exc.template_name,
-            phase=exc.phase,
-            template_pointer=exc.template_pointer,
-        )
-        logger.warning("Streaming context template execution failure", data=details | {"error": str(exc)})
-        error_chunk = {
-            "event": "error",
-            "choices": [{
-                "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
-                "index": 0,
-                "finish_reason": "error"
-            }],
-            "details": details,
-        }
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        return
-    except ChatContextTemplateError as exc:
-        logger.warning("Streaming context template failure", data=exc.details)
-        error_chunk = {
-            "event": "error",
-            "choices": [{
-                "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
-                "index": 0,
-                "finish_reason": "error"
-            }],
-            "details": exc.details,
-        }
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        return
-    except Exception as e:
-        _log_chat_failure(
-            "Streaming chat execution failed",
+    ) as task:
+        _log_chat_lifecycle(
+            "Streaming chat execution started",
             vault_name=vault_name,
             session_id=session_id,
             model=prepared.model,
@@ -890,37 +744,244 @@ async def _stream_prepared_chat_prompt(
             phase="agent_stream",
             prompt_length=len(prepared.prompt_for_history),
             attached_image_count=prepared.attached_image_count,
-            extra={"tool_activity": tool_activity},
-            exc=e,
-        )
-        error_chunk = {
-            "event": "error",
-            "choices": [{
-                "delta": {"content": "\n\n❌ Error: An unexpected error occurred"},
-                "index": 0,
-                "finish_reason": "error"
-            }]
-        }
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        raise
-
-    if final_result:
-        _CHAT_STORE.add_messages(session_id, vault_name, final_result.new_messages())
-        _log_chat_lifecycle(
-            "Streaming chat execution completed",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=prepared.model,
-            tools=prepared.tools,
-            streaming=True,
-            phase="session_persist",
-            prompt_length=len(prepared.prompt_for_history),
-            attached_image_count=prepared.attached_image_count,
             extra={
-                "tool_activity": tool_activity,
-                "response_length": len(full_response),
+                "history_message_count": len(prepared.message_history or []),
+                "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
+                "task_id": task.task_id,
             },
         )
+
+        try:
+            async for event in prepared.agent.run_stream_events(
+                prepared.user_prompt,
+                message_history=prepared.message_history,
+                deps=run_deps,
+            ):
+                if isinstance(event, PartStartEvent):
+                    if isinstance(event.part, TextPart) and event.part.content:
+                        delta_text = event.part.content
+                        full_response += delta_text
+                        chunk = {
+                            "event": "delta",
+                            "choices": [{
+                                "delta": {"content": delta_text},
+                                "index": 0,
+                                "finish_reason": None,
+                            }],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
+
+                elif isinstance(event, PartDeltaEvent):
+                    if isinstance(event.delta, TextPartDelta):
+                        delta_text = event.delta.content_delta
+                        full_response += delta_text
+                        chunk = {
+                            "event": "delta",
+                            "choices": [{
+                                "delta": {"content": delta_text},
+                                "index": 0,
+                                "finish_reason": None,
+                            }],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
+
+                elif isinstance(event, FunctionToolCallEvent):
+                    tool_id = event.tool_call_id
+                    tool_part = getattr(event, "part", None)
+                    tool_name = getattr(tool_part, "tool_name", "tool")
+                    tool_args = None
+                    if tool_part is not None:
+                        try:
+                            tool_args = tool_part.args_as_json_str()
+                        except Exception as exc:  # noqa: BLE001 - defensive: upstream variations
+                            logger.debug("args_as_json_str failed; using raw args", data={"error": str(exc)})
+                            tool_args = tool_part.args
+                    tool_activity[tool_id] = {
+                        "tool_name": tool_name,
+                        "status": "running",
+                    }
+                    metadata_chunk = {
+                        "event": "tool_call_started",
+                        "tool_call_id": tool_id,
+                        "tool_name": tool_name,
+                        "arguments": _normalize_tool_args(tool_args),
+                    }
+                    logger.info(
+                        "Streaming tool call started",
+                        data={
+                            "vault_name": vault_name,
+                            "session_id": session_id,
+                            "tool_call_id": tool_id,
+                            "tool_name": tool_name,
+                            "arguments_length": len(tool_args or ""),
+                            "memory_rss_bytes": _get_process_rss_bytes(),
+                        },
+                    )
+                    yield f"data: {json.dumps(metadata_chunk)}\n\n"
+
+                elif isinstance(event, FunctionToolResultEvent):
+                    tool_id = event.tool_call_id
+                    result_part = getattr(event, "result", None)
+                    tool_name = getattr(result_part, "tool_name", "tool")
+                    result_content = None
+                    if result_part is not None:
+                        try:
+                            result_content = result_part.model_response_str()
+                        except Exception as exc:  # noqa: BLE001 - defensive fallback
+                            logger.debug("model_response_str failed; using raw content", data={"error": str(exc)})
+                            result_content = getattr(result_part, "content", None)
+                    tool_activity[tool_id] = {
+                        "tool_name": tool_name,
+                        "status": "completed",
+                    }
+                    metadata_chunk = {
+                        "event": "tool_call_finished",
+                        "tool_call_id": tool_id,
+                        "tool_name": tool_name,
+                        "result": _normalize_tool_result(result_content),
+                    }
+                    result_text = tool_result_as_text(result_content)
+                    logger.info(
+                        "Streaming tool call finished",
+                        data={
+                            "vault_name": vault_name,
+                            "session_id": session_id,
+                            "tool_call_id": tool_id,
+                            "tool_name": tool_name,
+                            "result_length": len(result_text),
+                            "result_token_estimate": estimate_token_count(result_text) if result_text else 0,
+                            "memory_rss_bytes": _get_process_rss_bytes(),
+                        },
+                    )
+                    yield f"data: {json.dumps(metadata_chunk)}\n\n"
+
+                elif isinstance(event, AgentRunResultEvent):
+                    final_result = event.result
+
+            final_chunk = {
+                "event": "done",
+                "choices": [{
+                    "delta": {},
+                    "index": 0,
+                    "finish_reason": "stop",
+                }],
+                "tool_summary": tool_activity,
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+
+        except asyncio.CancelledError as exc:
+            await runtime.task_coordinator.mark_cancelled(task.task_id, reason="cancelled")
+            _log_chat_failure(
+                "Streaming chat execution cancelled",
+                vault_name=vault_name,
+                session_id=session_id,
+                model=prepared.model,
+                tools=prepared.tools,
+                streaming=True,
+                phase="agent_stream",
+                prompt_length=len(prepared.prompt_for_history),
+                attached_image_count=prepared.attached_image_count,
+                extra={"tool_activity": tool_activity},
+                exc=exc,
+            )
+            cancel_chunk = {
+                "event": "cancelled",
+                "choices": [{
+                    "delta": {},
+                    "index": 0,
+                    "finish_reason": "cancelled",
+                }],
+            }
+            yield f"data: {json.dumps(cancel_chunk)}\n\n"
+            return
+        except ChatCapabilityError as exc:
+            logger.warning("Streaming capability mismatch", data=exc.details)
+            error_chunk = {
+                "event": "error",
+                "choices": [{
+                    "delta": {"content": f"\n\n❌ Error: {str(exc)}"},
+                    "index": 0,
+                    "finish_reason": "error",
+                }],
+                "details": exc.details,
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            return
+        except ContextTemplateExecutionError as exc:
+            details = build_context_template_error_details(
+                vault_name=vault_name,
+                session_id=session_id,
+                template_name=exc.template_name,
+                phase=exc.phase,
+                template_pointer=exc.template_pointer,
+            )
+            logger.warning("Streaming context template execution failure", data=details | {"error": str(exc)})
+            error_chunk = {
+                "event": "error",
+                "choices": [{
+                    "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                    "index": 0,
+                    "finish_reason": "error",
+                }],
+                "details": details,
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            return
+        except ChatContextTemplateError as exc:
+            logger.warning("Streaming context template failure", data=exc.details)
+            error_chunk = {
+                "event": "error",
+                "choices": [{
+                    "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                    "index": 0,
+                    "finish_reason": "error",
+                }],
+                "details": exc.details,
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            return
+        except Exception as e:
+            _log_chat_failure(
+                "Streaming chat execution failed",
+                vault_name=vault_name,
+                session_id=session_id,
+                model=prepared.model,
+                tools=prepared.tools,
+                streaming=True,
+                phase="agent_stream",
+                prompt_length=len(prepared.prompt_for_history),
+                attached_image_count=prepared.attached_image_count,
+                extra={"tool_activity": tool_activity},
+                exc=e,
+            )
+            error_chunk = {
+                "event": "error",
+                "choices": [{
+                    "delta": {"content": "\n\n❌ Error: An unexpected error occurred"},
+                    "index": 0,
+                    "finish_reason": "error",
+                }],
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            raise
+
+        if final_result:
+            _CHAT_STORE.add_messages(session_id, vault_name, final_result.new_messages())
+            _log_chat_lifecycle(
+                "Streaming chat execution completed",
+                vault_name=vault_name,
+                session_id=session_id,
+                model=prepared.model,
+                tools=prepared.tools,
+                streaming=True,
+                phase="session_persist",
+                prompt_length=len(prepared.prompt_for_history),
+                attached_image_count=prepared.attached_image_count,
+                extra={
+                    "tool_activity": tool_activity,
+                    "response_length": len(full_response),
+                },
+            )
 
 
 async def execute_chat_prompt_stream(

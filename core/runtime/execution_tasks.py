@@ -1,0 +1,371 @@
+"""In-process execution task tracking for AssistantMD runtime work."""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any, AsyncIterator
+
+from core.logger import UnifiedLogger
+
+
+class ExecutionTaskStatus(StrEnum):
+    """Lifecycle states for process-local execution tasks."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIMED_OUT = "timed_out"
+    SKIPPED = "skipped"
+
+
+TERMINAL_STATUSES = {
+    ExecutionTaskStatus.COMPLETED,
+    ExecutionTaskStatus.FAILED,
+    ExecutionTaskStatus.CANCELLED,
+    ExecutionTaskStatus.TIMED_OUT,
+    ExecutionTaskStatus.SKIPPED,
+}
+
+
+@dataclass(frozen=True)
+class ExecutionTaskSnapshot:
+    """Public immutable view of an execution task."""
+
+    task_id: str
+    kind: str
+    scope: str
+    source: str
+    label: str
+    status: str
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    cancel_requested: bool = False
+    terminal_reason: str | None = None
+    latest_event: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_terminal(self) -> bool:
+        """Return True when the task is in a terminal state."""
+        return self.status in {status.value for status in TERMINAL_STATUSES}
+
+
+@dataclass
+class _ExecutionTaskRecord:
+    task_id: str
+    kind: str
+    scope: str
+    source: str
+    label: str
+    status: ExecutionTaskStatus
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    cancel_requested: bool = False
+    terminal_reason: str | None = None
+    latest_event: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    handle: asyncio.Task[Any] | None = None
+
+    def snapshot(self) -> ExecutionTaskSnapshot:
+        """Return a public snapshot without the private asyncio handle."""
+        return ExecutionTaskSnapshot(
+            task_id=self.task_id,
+            kind=self.kind,
+            scope=self.scope,
+            source=self.source,
+            label=self.label,
+            status=self.status.value,
+            created_at=self.created_at,
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+            cancel_requested=self.cancel_requested,
+            terminal_reason=self.terminal_reason,
+            latest_event=self.latest_event,
+            metadata=dict(self.metadata),
+        )
+
+
+class TaskCoordinator:
+    """Track active and recently terminal execution tasks in this process."""
+
+    def __init__(
+        self,
+        *,
+        logger: UnifiedLogger | None = None,
+        terminal_history_limit: int = 100,
+    ) -> None:
+        self._logger = logger or UnifiedLogger(tag="execution-tasks")
+        self._terminal_history_limit = max(1, terminal_history_limit)
+        self._records: dict[str, _ExecutionTaskRecord] = {}
+        self._terminal_order: list[str] = []
+        self._lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def track_current_task(
+        self,
+        *,
+        kind: str,
+        scope: str,
+        source: str,
+        label: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> AsyncIterator[ExecutionTaskSnapshot]:
+        """Register the current asyncio task for the duration of one operation."""
+        current = asyncio.current_task()
+        if current is None:
+            raise RuntimeError("TaskCoordinator requires an active asyncio task")
+
+        task_id = self._new_task_id()
+        await self._create_record(
+            task_id=task_id,
+            kind=kind,
+            scope=scope,
+            source=source,
+            label=label,
+            handle=current,
+            metadata=metadata,
+        )
+        await self._mark_started(task_id)
+
+        try:
+            snapshot = await self.get_task(task_id)
+            if snapshot is None:  # pragma: no cover - defensive
+                raise RuntimeError(f"Execution task disappeared: {task_id}")
+            yield snapshot
+        except asyncio.CancelledError:
+            await self.mark_cancelled(task_id, reason="cancelled")
+            raise
+        except Exception as exc:
+            await self.mark_failed(task_id, reason=f"{type(exc).__name__}: {exc}")
+            raise
+        else:
+            await self.mark_completed(task_id)
+
+    async def get_task(self, task_id: str) -> ExecutionTaskSnapshot | None:
+        """Return one task snapshot by id."""
+        async with self._lock:
+            record = self._records.get(task_id)
+            return record.snapshot() if record else None
+
+    async def list_tasks(
+        self,
+        *,
+        kind: str | None = None,
+        scope: str | None = None,
+        include_terminal: bool = True,
+    ) -> list[ExecutionTaskSnapshot]:
+        """Return task snapshots filtered by kind and scope."""
+        async with self._lock:
+            snapshots = []
+            for record in self._records.values():
+                if kind is not None and record.kind != kind:
+                    continue
+                if scope is not None and record.scope != scope:
+                    continue
+                if not include_terminal and record.status in TERMINAL_STATUSES:
+                    continue
+                snapshots.append(record.snapshot())
+
+        return sorted(snapshots, key=lambda item: item.created_at)
+
+    async def cancel_task(
+        self,
+        task_id: str,
+        *,
+        reason: str = "cancel_requested",
+    ) -> ExecutionTaskSnapshot | None:
+        """Request cancellation for one task by id."""
+        handle: asyncio.Task[Any] | None = None
+        async with self._lock:
+            record = self._records.get(task_id)
+            if record is None:
+                return None
+            record.cancel_requested = True
+            record.latest_event = reason
+            if record.status not in TERMINAL_STATUSES:
+                handle = record.handle
+            snapshot = record.snapshot()
+
+        self._log_event("execution_task_cancel_requested", snapshot)
+        if handle is not None and not handle.done():
+            handle.cancel()
+        return snapshot
+
+    async def cancel_scope(
+        self,
+        scope: str,
+        *,
+        reason: str = "scope_cancel_requested",
+    ) -> list[ExecutionTaskSnapshot]:
+        """Request cancellation for all active tasks in one scope."""
+        tasks = await self.list_tasks(scope=scope, include_terminal=False)
+        snapshots = []
+        for task in tasks:
+            snapshot = await self.cancel_task(task.task_id, reason=reason)
+            if snapshot is not None:
+                snapshots.append(snapshot)
+        return snapshots
+
+    async def mark_completed(self, task_id: str, *, reason: str | None = None) -> None:
+        """Mark one task completed."""
+        await self._mark_terminal(
+            task_id,
+            ExecutionTaskStatus.COMPLETED,
+            reason=reason,
+            event="execution_task_completed",
+        )
+
+    async def mark_failed(self, task_id: str, *, reason: str | None = None) -> None:
+        """Mark one task failed."""
+        await self._mark_terminal(
+            task_id,
+            ExecutionTaskStatus.FAILED,
+            reason=reason,
+            event="execution_task_failed",
+        )
+
+    async def mark_cancelled(self, task_id: str, *, reason: str | None = None) -> None:
+        """Mark one task cancelled."""
+        await self._mark_terminal(
+            task_id,
+            ExecutionTaskStatus.CANCELLED,
+            reason=reason,
+            event="execution_task_cancelled",
+        )
+
+    async def mark_timed_out(self, task_id: str, *, reason: str | None = None) -> None:
+        """Mark one task timed out."""
+        await self._mark_terminal(
+            task_id,
+            ExecutionTaskStatus.TIMED_OUT,
+            reason=reason,
+            event="execution_task_timed_out",
+        )
+
+    async def mark_skipped(self, task_id: str, *, reason: str | None = None) -> None:
+        """Mark one task skipped."""
+        await self._mark_terminal(
+            task_id,
+            ExecutionTaskStatus.SKIPPED,
+            reason=reason,
+            event="execution_task_skipped",
+        )
+
+    async def shutdown(self, *, reason: str = "runtime_shutdown") -> None:
+        """Cancel all active tasks and mark unfinished records cancelled."""
+        active_tasks = await self.list_tasks(include_terminal=False)
+        for task in active_tasks:
+            await self.cancel_task(task.task_id, reason=reason)
+        for task in active_tasks:
+            await self.mark_cancelled(task.task_id, reason=reason)
+
+    async def _create_record(
+        self,
+        *,
+        task_id: str,
+        kind: str,
+        scope: str,
+        source: str,
+        label: str,
+        handle: asyncio.Task[Any],
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        now = self._now()
+        record = _ExecutionTaskRecord(
+            task_id=task_id,
+            kind=kind,
+            scope=scope,
+            source=source,
+            label=label,
+            status=ExecutionTaskStatus.QUEUED,
+            created_at=now,
+            handle=handle,
+            metadata=dict(metadata or {}),
+        )
+        async with self._lock:
+            self._records[task_id] = record
+
+        self._log_event("execution_task_created", record.snapshot())
+
+    async def _mark_started(self, task_id: str) -> None:
+        snapshot = None
+        async with self._lock:
+            record = self._records.get(task_id)
+            if record is None:
+                return
+            record.status = ExecutionTaskStatus.RUNNING
+            record.started_at = self._now()
+            record.latest_event = "started"
+            snapshot = record.snapshot()
+
+        self._log_event("execution_task_started", snapshot)
+
+    async def _mark_terminal(
+        self,
+        task_id: str,
+        status: ExecutionTaskStatus,
+        *,
+        reason: str | None,
+        event: str,
+    ) -> None:
+        snapshot = None
+        async with self._lock:
+            record = self._records.get(task_id)
+            if record is None:
+                return
+            if record.status in TERMINAL_STATUSES:
+                return
+            record.status = status
+            record.finished_at = self._now()
+            record.terminal_reason = reason
+            record.latest_event = event
+            record.handle = None
+            snapshot = record.snapshot()
+            self._remember_terminal(task_id)
+
+        self._log_event(event, snapshot)
+
+    def _remember_terminal(self, task_id: str) -> None:
+        if task_id in self._terminal_order:
+            self._terminal_order.remove(task_id)
+        self._terminal_order.append(task_id)
+
+        while len(self._terminal_order) > self._terminal_history_limit:
+            stale_id = self._terminal_order.pop(0)
+            stale_record = self._records.get(stale_id)
+            if stale_record is None or stale_record.status not in TERMINAL_STATUSES:
+                continue
+            del self._records[stale_id]
+
+    def _log_event(self, event: str, snapshot: ExecutionTaskSnapshot) -> None:
+        self._logger.add_sink("validation").info(
+            event,
+            data={
+                "event": event,
+                "task_id": snapshot.task_id,
+                "kind": snapshot.kind,
+                "scope": snapshot.scope,
+                "source": snapshot.source,
+                "label": snapshot.label,
+                "status": snapshot.status,
+                "cancel_requested": snapshot.cancel_requested,
+                "terminal_reason": snapshot.terminal_reason,
+            },
+        )
+
+    @staticmethod
+    def _new_task_id() -> str:
+        return f"task_{uuid.uuid4().hex}"
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(UTC)
