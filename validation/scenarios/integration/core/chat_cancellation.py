@@ -106,6 +106,19 @@ class ChatCancellationScenario(BaseScenario):
             assert active_after_cancel.status_code == 404, (
                 "Cancelled chat session should no longer have an active task"
             )
+
+            detail = self.call_api(
+                f"/api/chat/sessions/{session_id}?vault_name={vault.name}"
+            )
+            assert detail.status_code == 200, "Cancelled chat session detail is persisted"
+            messages = detail.json().get("messages", [])
+            assert len(messages) == 1, "Cancelled chat should persist only the user turn"
+            assert messages[0].get("role") == "user", (
+                "Cancelled chat persisted message should be the user prompt"
+            )
+            assert "Cancel this chat." in messages[0].get("content", ""), (
+                "Cancelled chat should retain the submitted prompt"
+            )
         finally:
             if chat_task is not None and not chat_task.done():
                 chat_task.cancel()

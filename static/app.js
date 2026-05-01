@@ -29,6 +29,9 @@ const state = {
     sessions: [],
     metadata: null,
     isLoading: false,
+    isCancellingChat: false,
+    activeChatSessionId: null,
+    activeChatAbortController: null,
     systemStatus: null,
     restartRequired: false,
     shouldAutoScroll: true
@@ -265,6 +268,40 @@ function openAttachmentPicker() {
     }
 }
 
+function createClientSessionId(vault) {
+    const safeVault = String(vault || 'chat').trim().replace(/[\s/\\]+/g, '_') || 'chat';
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const stamp = [
+        now.getFullYear(),
+        pad(now.getMonth() + 1),
+        pad(now.getDate())
+    ].join('') + '_' + [
+        pad(now.getHours()),
+        pad(now.getMinutes()),
+        pad(now.getSeconds())
+    ].join('');
+    return `${safeVault}_${stamp}_${now.getMilliseconds()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function syncSendButtonState() {
+    const btn = chatElements.sendBtn;
+    if (!btn) return;
+
+    btn.classList.toggle('chat-stop-btn', state.isLoading);
+    btn.textContent = state.isLoading
+        ? (state.isCancellingChat ? 'Stopping...' : 'Stop')
+        : 'Send';
+    btn.title = state.isLoading
+        ? 'Stop the active response'
+        : 'Send message';
+    btn.setAttribute(
+        'aria-label',
+        state.isLoading ? 'Stop the active response' : 'Send message'
+    );
+    btn.disabled = state.isLoading && state.isCancellingChat;
+}
+
 function syncChatControlLocks() {
     if (!chatElements.vaultSelector) return;
 
@@ -295,6 +332,7 @@ function syncChatControlLocks() {
     if (chatElements.sessionDeleteBtn) {
         chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
     }
+    syncSendButtonState();
 }
 
 function populateThinkingSelector() {
@@ -982,7 +1020,13 @@ function populateWorkflowSelector() {
 // Setup event listeners
 function setupEventListeners() {
     if (chatElements.sendBtn) {
-        chatElements.sendBtn.addEventListener('click', sendMessage);
+        chatElements.sendBtn.addEventListener('click', () => {
+            if (state.isLoading) {
+                stopChatResponse();
+                return;
+            }
+            sendMessage();
+        });
     }
 
     if (chatElements.chatInput) {
@@ -1229,6 +1273,10 @@ async function sendMessage() {
         .map(cb => cb.value);
 
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
+    const requestSessionId = state.sessionId || createClientSessionId(vault);
+    state.activeChatSessionId = requestSessionId;
+    const abortController = new AbortController();
+    state.activeChatAbortController = abortController;
 
     const loadingMessage = addLoadingMessage();
 
@@ -1245,15 +1293,14 @@ async function sendMessage() {
                 formData.append('context_template', contextTemplateValue);
             }
             selectedTools.forEach((toolName) => formData.append('tools', toolName));
-            if (state.sessionId) {
-                formData.append('session_id', state.sessionId);
-            }
+            formData.append('session_id', requestSessionId);
             pendingUploads.forEach((item) => {
                 formData.append('images', item.file, item.file.name);
             });
             response = await fetch('api/chat/execute', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: abortController.signal
             });
         } else {
             const requestData = {
@@ -1263,15 +1310,14 @@ async function sendMessage() {
                 model: model,
                 thinking: thinking,
                 context_template: contextTemplateValue,
+                session_id: requestSessionId,
                 stream: true
             };
-            if (state.sessionId) {
-                requestData.session_id = state.sessionId;
-            }
             response = await fetch('api/chat/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestData)
+                body: JSON.stringify(requestData),
+                signal: abortController.signal
             });
         }
 
@@ -1339,6 +1385,11 @@ async function sendMessage() {
                 } else if (eventType === 'done') {
                     finished = true;
                     messageCount = Math.max(messageCount, 1);
+                } else if (eventType === 'cancelled') {
+                    finished = true;
+                    state.isCancellingChat = false;
+                    syncChatControlLocks();
+                    setAssistantStatus(assistantMessage, 'Stopped', 'done');
                 } else if (eventType === 'error') {
                     finished = true;
                     const errorDelta = payload.choices?.[0]?.delta?.content;
@@ -1365,6 +1416,11 @@ async function sendMessage() {
                     }
                 } else if (eventType === 'done') {
                     finished = true;
+                } else if (eventType === 'cancelled') {
+                    finished = true;
+                    state.isCancellingChat = false;
+                    syncChatControlLocks();
+                    setAssistantStatus(assistantMessage, 'Stopped', 'done');
                 }
             }
         }
@@ -1382,12 +1438,49 @@ async function sendMessage() {
     } catch (error) {
         console.error('Error sending message:', error);
         removeLoadingMessage(loadingMessage);
-        addChatErrorMessage(error.message);
+        if (state.isCancellingChat || error.name === 'AbortError') {
+            addMessage('assistant', 'Response stopped.');
+        } else {
+            addChatErrorMessage(error.message);
+        }
     } finally {
         state.isLoading = false;
+        state.isCancellingChat = false;
+        state.activeChatSessionId = null;
+        state.activeChatAbortController = null;
         chatElements.sendBtn.disabled = false;
         syncChatControlLocks();
         chatElements.chatInput.focus();
+    }
+}
+
+async function stopChatResponse() {
+    if (!state.isLoading || state.isCancellingChat) return;
+    const sessionId = state.activeChatSessionId || state.sessionId;
+    if (!sessionId) return;
+
+    state.isCancellingChat = true;
+    syncChatControlLocks();
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/cancel`,
+            { method: 'POST' }
+        );
+        if (response.status === 404) {
+            if (state.activeChatAbortController) {
+                state.activeChatAbortController.abort();
+            }
+            return;
+        }
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Error stopping chat response:', error);
+        state.isCancellingChat = false;
+        syncChatControlLocks();
+        addChatErrorMessage(`Failed to stop response: ${error.message}`);
     }
 }
 

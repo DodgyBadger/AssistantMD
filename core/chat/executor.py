@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage, TextPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, TextPart, UserPromptPart
 from pydantic_ai import (
     BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
@@ -97,6 +97,29 @@ class PreparedChatExecution:
     attached_image_count: int
     model: str
     tools: List[str]
+
+
+def _accepted_user_request(prepared: PreparedChatExecution) -> ModelRequest:
+    """Build the accepted user turn persisted before model execution."""
+    return ModelRequest(parts=[UserPromptPart(content=prepared.prompt_for_history)])
+
+
+def _messages_after_accepted_user_request(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Drop the active user request that AssistantMD already persisted."""
+    filtered: list[ModelMessage] = []
+    skipped_accepted_user = False
+    for message in messages:
+        if not skipped_accepted_user and _is_user_prompt_request(message):
+            skipped_accepted_user = True
+            continue
+        filtered.append(message)
+    return filtered
+
+
+def _is_user_prompt_request(message: ModelMessage) -> bool:
+    if not isinstance(message, ModelRequest):
+        return False
+    return any(isinstance(part, UserPromptPart) for part in getattr(message, "parts", ()))
 
 
 def _serialize_exception(exc: Exception) -> dict[str, Any]:
@@ -558,6 +581,7 @@ async def execute_chat_prompt(
     """
     phase = "preflight"
     attached_image_count = 0
+    prepared = None
     _log_chat_lifecycle(
         "Chat execution started",
         vault_name=vault_name,
@@ -600,6 +624,7 @@ async def execute_chat_prompt(
         )
 
         phase = "agent_run"
+        _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
         runtime = get_runtime_context()
         async with runtime.task_coordinator.track_current_task(
             kind="chat",
@@ -631,7 +656,11 @@ async def execute_chat_prompt(
             )
 
             phase = "session_persist"
-            _CHAT_STORE.add_messages(session_id, vault_name, result.new_messages())
+            _CHAT_STORE.add_messages(
+                session_id,
+                vault_name,
+                _messages_after_accepted_user_request(result.new_messages()),
+            )
         _log_chat_lifecycle(
             "Chat execution completed",
             vault_name=vault_name,
@@ -721,6 +750,7 @@ async def _stream_prepared_chat_prompt(
     )
 
     runtime = get_runtime_context()
+    _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
     async with runtime.task_coordinator.track_current_task(
         kind="chat",
         scope=f"chat_session:{session_id}",
@@ -966,7 +996,11 @@ async def _stream_prepared_chat_prompt(
             raise
 
         if final_result:
-            _CHAT_STORE.add_messages(session_id, vault_name, final_result.new_messages())
+            _CHAT_STORE.add_messages(
+                session_id,
+                vault_name,
+                _messages_after_accepted_user_request(final_result.new_messages()),
+            )
             _log_chat_lifecycle(
                 "Streaming chat execution completed",
                 vault_name=vault_name,
