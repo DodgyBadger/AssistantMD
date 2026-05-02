@@ -434,8 +434,10 @@ function renderCompactionProgress(status) {
     } else if (percent >= 70) {
         fill.classList.add('compaction-warm');
     }
-    const modeLabel = status.compaction_type === 'auto' ? 'auto compact' : 'suggest compact';
-    track.title = `Chat history: ${percent}% of compaction threshold (${tokens}/${threshold} estimated tokens, ${modeLabel})`;
+    const actionText = status.compaction_type === 'auto'
+        ? 'Chat will be automatically compacted at 100%.'
+        : 'Ask chat to compact when ready.';
+    track.title = `${percent}% (${tokens.toLocaleString()} / ${threshold.toLocaleString()} threshold). ${actionText}`;
 }
 
 function clearCompactionProgress() {
