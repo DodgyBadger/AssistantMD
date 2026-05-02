@@ -413,6 +413,49 @@ def get_auto_cache_max_tokens() -> int:
         return 0
 
 
+def get_compaction_type() -> str:
+    """Return the configured chat-history compaction policy."""
+    entry = get_general_settings().get("compaction_type")
+    value = getattr(entry, "value", None) if entry is not None else None
+    normalized = str(value or "suggested").strip().lower()
+    return normalized if normalized in {"none", "suggested", "auto"} else "suggested"
+
+
+def get_compaction_keep_recent() -> int:
+    """Return the target recent message count to preserve when compacting."""
+    entry = get_general_settings().get("compaction_keep_recent")
+    value = getattr(entry, "value", None) if entry is not None else None
+    template_default = _get_template_setting_positive_int("compaction_keep_recent", 8)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return template_default
+    return parsed if parsed > 0 else template_default
+
+
+def get_compaction_token_threshold() -> int:
+    """Return the estimated token threshold for chat-history compaction."""
+    entry = get_general_settings().get("compaction_token_threshold")
+    value = getattr(entry, "value", None) if entry is not None else None
+    template_default = _get_template_setting_positive_int("compaction_token_threshold", 80_000)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return template_default
+    return parsed if parsed > 0 else template_default
+
+
+def get_compaction_export_before() -> bool:
+    """Return whether compaction should export transcripts by default."""
+    entry = get_general_settings().get("compaction_export_before")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def get_file_search_timeout_seconds() -> float:
     """Return file search timeout seconds, falling back to 10 seconds."""
     entry = get_general_settings().get("file_search_timeout_seconds")

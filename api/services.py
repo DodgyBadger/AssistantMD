@@ -6,6 +6,7 @@ Handles business logic for status reporting, vault management, etc.
 import json
 import re
 import shutil
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -47,6 +48,7 @@ from core.settings.secrets_store import (
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
+from core.chat.compaction import compact_chat_history, get_compaction_status
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -76,6 +78,8 @@ from .models import (
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
     ChatSessionExportResponse,
+    ChatHistoryCompactionResponse,
+    ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeResponse,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
@@ -332,6 +336,48 @@ def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: s
         filename=exported.filename,
         path=exported.path,
     )
+
+
+async def get_chat_history_compaction_status(
+    vault_name: str,
+    session_id: str,
+) -> ChatHistoryCompactionStatusResponse:
+    """Return compaction status for one chat session."""
+    status = await get_compaction_status(
+        session_id=session_id,
+        vault_name=vault_name,
+        store=_chat_store,
+    )
+    return ChatHistoryCompactionStatusResponse(**asdict(status))
+
+
+async def compact_chat_session_history(
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    *,
+    focus: str | None,
+    export_before: bool | None,
+) -> ChatHistoryCompactionResponse:
+    """Compact one chat session through the shared compaction service."""
+    runtime = get_runtime_context()
+    async with runtime.task_coordinator.track_current_task(
+        kind="history_compaction",
+        scope=f"chat_session:{session_id}",
+        source="api",
+        label=f"compact:{session_id}",
+        metadata={"vault": vault_name, "session_id": session_id},
+    ):
+        result = await compact_chat_history(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            focus=focus,
+            export_before=export_before,
+            source="api",
+            store=_chat_store,
+        )
+    return ChatHistoryCompactionResponse(**result.as_api_dict())
 
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:

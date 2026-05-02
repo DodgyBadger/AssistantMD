@@ -52,6 +52,9 @@ from .models import (
     ChatSessionDetailResponse,
     ChatSessionExportRequest,
     ChatSessionExportResponse,
+    ChatHistoryCompactionRequest,
+    ChatHistoryCompactionResponse,
+    ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeRequest,
     ChatSessionsPurgeResponse,
     ChatSessionTitleRequest,
@@ -67,6 +70,8 @@ from .services import (
     list_chat_sessions,
     get_chat_session_detail,
     export_chat_session_markdown,
+    compact_chat_session_history,
+    get_chat_history_compaction_status,
     purge_chat_sessions,
     set_chat_session_title,
     delete_chat_session,
@@ -838,6 +843,32 @@ async def export_chat_session_endpoint(session_id: str, request: ChatSessionExpo
         runtime = get_runtime_context()
         vault_path = str(runtime.config.data_root / request.vault_name)
         return export_chat_session_markdown(request.vault_name, vault_path, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions/{session_id}/compaction-status", response_model=ChatHistoryCompactionStatusResponse)
+async def chat_history_compaction_status_endpoint(session_id: str, vault_name: str):
+    """Return compaction status for one persisted chat session."""
+    try:
+        return await get_chat_history_compaction_status(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/compact", response_model=ChatHistoryCompactionResponse)
+async def compact_chat_history_endpoint(session_id: str, request: ChatHistoryCompactionRequest):
+    """Compact one persisted chat session into a summary plus recent turns."""
+    try:
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        return await compact_chat_session_history(
+            request.vault_name,
+            vault_path,
+            session_id,
+            focus=request.focus,
+            export_before=request.export_before,
+        )
     except Exception as e:
         return create_error_response(e)
 

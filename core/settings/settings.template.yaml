@@ -26,6 +26,7 @@ settings:
       - tavily_crawl
       - code_execution
       - delegate
+      - chat_history_compact
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   default_api_timeout:
@@ -51,6 +52,22 @@ settings:
   auto_cache_max_tokens:
     value: 10000
     description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
+    restart_required: false
+  compaction_type:
+    value: suggested
+    description: "Chat history compaction policy: none, suggested, or auto."
+    restart_required: false
+  compaction_keep_recent:
+    value: 8
+    description: "Target number of recent raw chat messages to preserve verbatim when compacting history."
+    restart_required: false
+  compaction_token_threshold:
+    value: 80000
+    description: "Estimated chat-history token threshold for suggested or automatic compaction."
+    restart_required: false
+  compaction_export_before:
+    value: false
+    description: "When true, export a transcript before compacting canonical chat history by default."
     restart_required: false
   file_search_timeout_seconds:
     value: 10
@@ -317,6 +334,12 @@ tools:
   delegate:
     module: core.tools.delegate
     description: "Run a bounded child agent for focused model reasoning or limited tool exploration"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true
+  chat_history_compact:
+    module: core.tools.chat_history_compact
+    description: "Check or compact the current chat session history"
     requires_secrets: []
     user_editable: false
     chat_visible: true

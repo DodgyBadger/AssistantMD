@@ -23,6 +23,10 @@ from pydantic_ai.messages import UserContent
 
 from core.llm.agents import create_agent
 from core.chat.chat_store import ChatStore
+from core.chat.compaction import (
+    chat_session_history_lock,
+    maybe_auto_compact_after_turn,
+)
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
@@ -206,6 +210,31 @@ def _log_chat_failure(
             **payload,
         },
     )
+
+
+async def _try_auto_compact_after_turn(
+    *,
+    session_id: str,
+    vault_name: str,
+    vault_path: str,
+) -> None:
+    """Run post-turn automatic compaction without failing the completed chat."""
+    try:
+        await maybe_auto_compact_after_turn(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Automatic chat history compaction failed after completed chat turn",
+            data={
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
 
 
 def _get_process_rss_bytes() -> int | None:
@@ -624,7 +653,6 @@ async def execute_chat_prompt(
         )
 
         phase = "agent_run"
-        _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
         runtime = get_runtime_context()
         async with runtime.task_coordinator.track_current_task(
             kind="chat",
@@ -639,6 +667,8 @@ async def execute_chat_prompt(
                 "tools": list(tools),
             },
         ):
+            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+                _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
             session_buffer_store = get_session_buffer_store(session_id)
             run_deps = ChatRunDeps(
                 context_manager_now=_resolve_context_manager_now(),
@@ -656,11 +686,17 @@ async def execute_chat_prompt(
             )
 
             phase = "session_persist"
-            _CHAT_STORE.add_messages(
-                session_id,
-                vault_name,
-                _messages_after_accepted_user_request(result.new_messages()),
-            )
+            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+                _CHAT_STORE.add_messages(
+                    session_id,
+                    vault_name,
+                    _messages_after_accepted_user_request(result.new_messages()),
+                )
+        await _try_auto_compact_after_turn(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+        )
         _log_chat_lifecycle(
             "Chat execution completed",
             vault_name=vault_name,
@@ -734,7 +770,6 @@ async def _stream_prepared_chat_prompt(
     session_id: str,
 ) -> AsyncIterator[str]:
     """Stream a preflighted chat execution as SSE events."""
-    del vault_path
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
@@ -750,7 +785,6 @@ async def _stream_prepared_chat_prompt(
     )
 
     runtime = get_runtime_context()
-    _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
     async with runtime.task_coordinator.track_current_task(
         kind="chat",
         scope=f"chat_session:{session_id}",
@@ -764,6 +798,9 @@ async def _stream_prepared_chat_prompt(
             "tools": list(prepared.tools),
         },
     ) as task:
+        async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+            _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
+
         _log_chat_lifecycle(
             "Streaming chat execution started",
             vault_name=vault_name,
@@ -996,11 +1033,12 @@ async def _stream_prepared_chat_prompt(
             raise
 
         if final_result:
-            _CHAT_STORE.add_messages(
-                session_id,
-                vault_name,
-                _messages_after_accepted_user_request(final_result.new_messages()),
-            )
+            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+                _CHAT_STORE.add_messages(
+                    session_id,
+                    vault_name,
+                    _messages_after_accepted_user_request(final_result.new_messages()),
+                )
             _log_chat_lifecycle(
                 "Streaming chat execution completed",
                 vault_name=vault_name,
@@ -1016,6 +1054,13 @@ async def _stream_prepared_chat_prompt(
                     "response_length": len(full_response),
                 },
             )
+
+    if final_result:
+        await _try_auto_compact_after_turn(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+        )
 
 
 async def execute_chat_prompt_stream(

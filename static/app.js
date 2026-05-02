@@ -434,6 +434,8 @@ async function loadSession(sessionId) {
         return;
     }
     try {
+        state.sessionId = sessionId;
+        renderSessionSelector();
         state.isLoading = true;
         syncChatControlLocks();
         const response = await fetch(
@@ -1274,6 +1276,9 @@ async function sendMessage() {
 
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
+    state.sessionId = requestSessionId;
+    renderSessionSelector();
+    updateSessionTitleRow();
     state.activeChatSessionId = requestSessionId;
     const abortController = new AbortController();
     state.activeChatAbortController = abortController;
