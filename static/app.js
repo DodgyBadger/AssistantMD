@@ -34,7 +34,8 @@ const state = {
     activeChatAbortController: null,
     systemStatus: null,
     restartRequired: false,
-    shouldAutoScroll: true
+    shouldAutoScroll: true,
+    compactionStatusRequestId: 0
 };
 const chatComposeState = {
     pendingAttachments: [],
@@ -63,6 +64,8 @@ const chatElements = {
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
     sendBtn: document.getElementById('send-btn'),
+    compactionTrack: document.getElementById('chat-compaction-track'),
+    compactionFill: document.getElementById('chat-compaction-fill'),
     sessionTitleRow: document.getElementById('session-title-row'),
     sessionTitleInput: document.getElementById('session-title-input'),
     sessionTitleSave: document.getElementById('session-title-save'),
@@ -407,10 +410,71 @@ function renderSessionSelector() {
     }
 }
 
+function renderCompactionProgress(status) {
+    const fill = chatElements.compactionFill;
+    const track = chatElements.compactionTrack;
+    if (!fill || !track) return;
+
+    fill.classList.remove('compaction-warm', 'compaction-hot');
+    if (!status || !status.compaction_token_threshold || status.compaction_type === 'none') {
+        fill.style.width = '0%';
+        track.title = status && status.compaction_type === 'none'
+            ? 'Chat history compaction is disabled'
+            : 'Chat history compaction status unavailable';
+        return;
+    }
+
+    const threshold = Math.max(Number(status.compaction_token_threshold) || 0, 1);
+    const tokens = Math.max(Number(status.estimated_tokens_before) || 0, 0);
+    const percent = Math.round((tokens / threshold) * 100);
+    const boundedPercent = tokens > 0 ? Math.max(2, Math.min(percent, 100)) : 0;
+    fill.style.width = `${boundedPercent}%`;
+    if (percent >= 100) {
+        fill.classList.add('compaction-hot');
+    } else if (percent >= 70) {
+        fill.classList.add('compaction-warm');
+    }
+    const modeLabel = status.compaction_type === 'auto' ? 'auto compact' : 'suggest compact';
+    track.title = `Chat history: ${percent}% of compaction threshold (${tokens}/${threshold} estimated tokens, ${modeLabel})`;
+}
+
+function clearCompactionProgress() {
+    state.compactionStatusRequestId += 1;
+    renderCompactionProgress(null);
+}
+
+async function refreshCompactionProgress() {
+    const vault = chatElements.vaultSelector?.value || '';
+    const sessionId = state.sessionId || '';
+    if (!vault || !sessionId) {
+        clearCompactionProgress();
+        return;
+    }
+
+    const requestId = state.compactionStatusRequestId + 1;
+    state.compactionStatusRequestId = requestId;
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/compaction-status?vault_name=${encodeURIComponent(vault)}`
+        );
+        if (requestId !== state.compactionStatusRequestId) return;
+        if (!response.ok) {
+            throw new Error('Failed to fetch chat compaction status');
+        }
+        renderCompactionProgress(await response.json());
+    } catch (error) {
+        if (requestId === state.compactionStatusRequestId) {
+            console.error('Error fetching chat compaction status:', error);
+            renderCompactionProgress(null);
+        }
+    }
+}
+
 async function fetchSessions(vault, preferredSessionId = '') {
     state.sessions = [];
     renderSessionSelector();
     if (!vault) {
+        clearCompactionProgress();
         return;
     }
     try {
@@ -423,6 +487,7 @@ async function fetchSessions(vault, preferredSessionId = '') {
         if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
             chatElements.sessionSelector.value = preferredSessionId;
         }
+        await refreshCompactionProgress();
     } catch (error) {
         console.error('Error fetching chat sessions:', error);
     }
@@ -436,6 +501,7 @@ async function loadSession(sessionId) {
     try {
         state.sessionId = sessionId;
         renderSessionSelector();
+        refreshCompactionProgress();
         state.isLoading = true;
         syncChatControlLocks();
         const response = await fetch(
@@ -450,6 +516,7 @@ async function loadSession(sessionId) {
         renderSessionSelector();
         updateSessionTitleRow();
         updateStatus();
+        await refreshCompactionProgress();
     } catch (error) {
         console.error('Error loading chat session:', error);
         addChatErrorMessage(error.message);
@@ -1185,6 +1252,7 @@ function handleVaultChange() {
     const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
     state.sessionId = null;
     state.sessions = [];
+    clearCompactionProgress();
     renderSessionSelector();
     renderChatEmptyState();
     updateStatus();
@@ -1279,6 +1347,7 @@ async function sendMessage() {
     state.sessionId = requestSessionId;
     renderSessionSelector();
     updateSessionTitleRow();
+    refreshCompactionProgress();
     state.activeChatSessionId = requestSessionId;
     const abortController = new AbortController();
     state.activeChatAbortController = abortController;
@@ -1341,6 +1410,7 @@ async function sendMessage() {
             syncChatControlLocks();
             renderSessionSelector();
             updateSessionTitleRow();
+            refreshCompactionProgress();
         }
 
         // Fallback for environments that do not support streaming
@@ -1456,6 +1526,7 @@ async function sendMessage() {
         chatElements.sendBtn.disabled = false;
         syncChatControlLocks();
         chatElements.chatInput.focus();
+        refreshCompactionProgress();
     }
 }
 
@@ -2265,6 +2336,7 @@ async function clearSession(confirmReset = true) {
     if (!confirmed) return;
 
     state.sessionId = null;
+    clearCompactionProgress();
     clearPendingAttachments();
     renderChatEmptyState();
     renderSessionSelector();
