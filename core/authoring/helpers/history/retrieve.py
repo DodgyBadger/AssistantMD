@@ -49,11 +49,18 @@ async def execute(
             "message_filter": message_filter,
         },
     )
+    host_message_history = getattr(host, "message_history", None)
+    workflow_id = str(context.workflow_id)
+    prefer_host_history = (
+        host_message_history is not None
+        and bool(getattr(host, "prefer_message_history", False))
+    )
     result = _MEMORY_SERVICE.get_conversation_history(
         context=MemoryContext(
-            message_history=tuple(getattr(host, "message_history", []) or ()),
+            message_history=tuple(host_message_history or ()),
             session_id=getattr(host, "chat_session_id", None) or getattr(host, "session_key", None),
-            vault_name=str(context.workflow_id).split("/", 1)[0] if "/" in str(context.workflow_id) else None,
+            vault_name=workflow_id.split("/", 1)[0] if "/" in workflow_id else None,
+            prefer_message_history=prefer_host_history,
         ),
         scope=scope,
         session_id=session_id,

@@ -9,12 +9,16 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - `core/runtime/state.py`
 - `core/runtime/config.py`
 - `core/runtime/reload_service.py`
+- `core/runtime/execution_tasks.py`
+- `core/runtime/workflow_governor.py`
 
 ## Responsibilities
 
 - Bootstrap app services from `RuntimeConfig`.
 - Create and register global `RuntimeContext`.
 - Manage scheduler lifecycle and workflow reload delegation.
+- Track process-local execution tasks for chat, workflows, and history compaction.
+- Coordinate workflow execution lanes by vault.
 - Track reload metadata (`last_config_reload`).
 - Provide runtime summary/health context to API surfaces.
 
@@ -22,7 +26,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 
 1. Build `RuntimeConfig`.
 2. `bootstrap_runtime(...)` seeds bootstrap roots and validates config.
-3. Initialize workflow loader, ingestion service/worker, scheduler/job store.
+3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, and workflow governor.
 4. Register global runtime context.
 5. Sync workflows into scheduler jobs and resume scheduler.
 
@@ -83,6 +87,14 @@ Reload behavior:
 - refresh logging configuration
 - update `runtime.last_config_reload` when runtime exists
 - return structured reload result used by API responses
+
+## Execution Task Coordination
+
+Runtime owns a process-local `TaskCoordinator` and `WorkflowGovernor`.
+
+`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. See [Execution Tasks](execution-tasks.md) for the task contract.
+
+`WorkflowGovernor` is the policy layer for workflow runs. It serializes workflow execution per vault, registers workflow tasks, applies the configured workflow task timeout, and logs workflow lifecycle events.
 
 ## Common Failure Modes
 

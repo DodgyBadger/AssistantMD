@@ -217,6 +217,7 @@ def _build_direct_tool_functions(
                 if "/" in str(context.workflow_id)
                 else None,
                 message_history=getattr(host, "message_history", None),
+                prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
             )
             tool_result = normalize_tool_result(
                 _spec.name,

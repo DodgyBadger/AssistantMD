@@ -9,6 +9,12 @@ from pydantic_ai.tools import Tool
 
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    chat_session_scope,
+    compaction_task_label,
+)
 from core.runtime.state import get_runtime_context
 
 from .base import BaseTool
@@ -60,10 +66,10 @@ class ChatHistoryCompact(BaseTool):
                 data={"tool": "chat_history_compact", "operation": "compact"},
             )
             async with runtime.task_coordinator.track_current_task(
-                kind="history_compaction",
-                scope=f"chat_session:{session_id}",
-                source="tool",
-                label=f"compact:{session_id}",
+                kind=ExecutionTaskKind.HISTORY_COMPACTION,
+                scope=chat_session_scope(session_id),
+                source=ExecutionTaskSource.TOOL,
+                label=compaction_task_label(session_id),
                 metadata={"vault": vault_name, "session_id": session_id},
             ):
                 result = await compact_chat_history(
@@ -72,7 +78,7 @@ class ChatHistoryCompact(BaseTool):
                     vault_path=effective_vault_path,
                     focus=focus or None,
                     export_before=export_before,
-                    source="tool",
+                    source=ExecutionTaskSource.TOOL,
                 )
             return json.dumps(result.as_tool_dict(), ensure_ascii=False, sort_keys=True)
 

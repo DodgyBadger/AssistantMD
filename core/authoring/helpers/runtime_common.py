@@ -225,6 +225,7 @@ async def invoke_bound_tool(
     chat_session_id: str | None = None,
     vault_name: str | None = None,
     message_history: list[ModelMessage] | tuple[ModelMessage, ...] | None = None,
+    prefer_message_history: bool = False,
 ) -> Any:
     ctx = RunContext(
         deps=SimpleNamespace(
@@ -237,6 +238,7 @@ async def invoke_bound_tool(
             chat_session_id=chat_session_id,
             vault_name=vault_name,
             message_history=list(message_history or ()),
+            prefer_message_history=prefer_message_history,
         ),
         model=TestModel(),
         usage=RunUsage(),

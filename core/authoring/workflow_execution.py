@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from time import perf_counter
 from typing import Any
 
 from core.authoring.service import run_authoring_template
@@ -78,8 +78,6 @@ async def execute_workflow_by_id(
     include_load_errors: bool = False,
 ) -> WorkflowExecutionResult:
     """Resolve and execute one workflow by global id."""
-    del step_name, expect_failure
-
     if "/" not in global_id:
         raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
 
@@ -102,12 +100,14 @@ async def execute_workflow_by_id(
     target = loaded[0]
     await loader.ensure_workflow_directories(target)
 
-    started = datetime.now()
+    started = perf_counter()
     execution_result = await run_authoring_template(
         workflow_id=target.global_id,
         file_path=target.file_path,
+        step_name=step_name,
+        expect_failure=expect_failure,
     )
-    elapsed = (datetime.now() - started).total_seconds()
+    elapsed = perf_counter() - started
     terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
     terminal_reason = str(getattr(execution_result, "reason", "") or "")
 

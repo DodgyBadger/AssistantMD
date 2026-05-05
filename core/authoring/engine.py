@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.authoring.template_loader import parse_authoring_template_text
+from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 
 
@@ -32,7 +33,7 @@ async def run_workflow(job_args: dict, **kwargs) -> object:
     runtime = get_runtime_context()
     return await runtime.workflow_governor.execute_workflow(
         global_id=global_id,
-        source="scheduler",
+        source=ExecutionTaskSource.SCHEDULER,
         step_name=step_name,
         expect_failure=expect_failure,
     )

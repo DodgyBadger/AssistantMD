@@ -9,7 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.chat.executor import PreparedChatExecution, execute_chat_prompt
+from core.runtime.execution_tasks import chat_session_scope
 from core.runtime.state import get_runtime_context
+from core.utils.messages import extract_role_and_text
 from validation.core.base_scenario import BaseScenario
 
 
@@ -29,6 +31,7 @@ class ChatCancellationScenario(BaseScenario):
         await self.start_system()
 
         import core.chat.executor as chat_executor
+        from pydantic_ai.models.test import TestModel
 
         async def _prepared_hanging_chat(*args, **kwargs):
             return PreparedChatExecution(
@@ -42,6 +45,7 @@ class ChatCancellationScenario(BaseScenario):
             )
 
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
+        original_prepare_agent_config = chat_executor._prepare_agent_config
         chat_executor._prepare_chat_execution = _prepared_hanging_chat
         session_id = "chat_cancellation_session"
         chat_task = None
@@ -64,7 +68,7 @@ class ChatCancellationScenario(BaseScenario):
             active = []
             for _ in range(50):
                 active = await runtime.task_coordinator.list_tasks(
-                    scope=f"chat_session:{session_id}",
+                    scope=chat_session_scope(session_id),
                     include_terminal=False,
                 )
                 if active:
@@ -119,6 +123,39 @@ class ChatCancellationScenario(BaseScenario):
             assert "Cancel this chat." in messages[0].get("content", ""), (
                 "Cancelled chat should retain the submitted prompt"
             )
+
+            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+                del vault_name, vault_path, tools, model, thinking
+                return ("Answer briefly.", "", TestModel(), [])
+
+            captured_preflight_history = []
+
+            async def _capturing_prepare_chat_execution(*args, **kwargs):
+                prepared = await original_prepare_chat_execution(*args, **kwargs)
+                captured_preflight_history.extend(
+                    extract_role_and_text(message)
+                    for message in (prepared.message_history or [])
+                )
+                return prepared
+
+            chat_executor._prepare_agent_config = _patched_prepare_agent_config
+            chat_executor._prepare_chat_execution = _capturing_prepare_chat_execution
+
+            follow_up = await execute_chat_prompt(
+                vault_name=vault.name,
+                vault_path=str(vault),
+                prompt="Continue after cancellation.",
+                image_paths=[],
+                image_uploads=[],
+                session_id=session_id,
+                tools=[],
+                model="test",
+                context_template=None,
+            )
+            assert follow_up.response, "Follow-up chat execution should complete"
+            assert captured_preflight_history == [("user", "Cancel this chat.")], (
+                "The next turn should load the cancelled user prompt from persisted session history"
+            )
         finally:
             if chat_task is not None and not chat_task.done():
                 chat_task.cancel()
@@ -127,5 +164,6 @@ class ChatCancellationScenario(BaseScenario):
                 except asyncio.CancelledError:
                     pass
             chat_executor._prepare_chat_execution = original_prepare_chat_execution
+            chat_executor._prepare_agent_config = original_prepare_agent_config
             await self.stop_system()
             self.teardown_scenario()

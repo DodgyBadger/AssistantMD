@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Literal
 
 from core.authoring.workflow_execution import WorkflowExecutionResult, execute_workflow_by_id
 from core.logger import UnifiedLogger
 from core.settings import get_workflow_task_timeout_seconds
 
-from .execution_tasks import TaskCoordinator
+from .execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    TaskCoordinator,
+    workflow_vault_scope,
+)
 
 
-WorkflowSource = Literal["scheduler", "api", "tool", "system"]
+WorkflowSource = ExecutionTaskSource
 
 
 class WorkflowGovernor:
@@ -41,6 +45,7 @@ class WorkflowGovernor:
     ) -> WorkflowExecutionResult:
         """Execute one workflow if its vault lane is available."""
         vault_name = self._split_vault_name(global_id)
+        source_value = str(source)
         lane_lock = await self._get_lane_lock(vault_name)
         if lane_lock.locked():
             reason = f"workflow_vault_active:{vault_name}"
@@ -50,7 +55,7 @@ class WorkflowGovernor:
                     "event": "workflow_task_overlap_skipped",
                     "workflow_id": global_id,
                     "vault": vault_name,
-                    "source": source,
+                    "source": source_value,
                     "reason": reason,
                 },
             )
@@ -69,8 +74,8 @@ class WorkflowGovernor:
         task_id = ""
         try:
             async with self._task_coordinator.track_current_task(
-                kind="workflow",
-                scope=f"workflow_vault:{vault_name}",
+                kind=ExecutionTaskKind.WORKFLOW,
+                scope=workflow_vault_scope(vault_name),
                 source=source,
                 label=global_id,
                 metadata={
@@ -84,7 +89,7 @@ class WorkflowGovernor:
                     "workflow_task_started",
                     global_id=global_id,
                     vault_name=vault_name,
-                    source=source,
+                    source=source_value,
                     task_id=task_id,
                 )
                 timeout = get_workflow_task_timeout_seconds()
@@ -113,7 +118,7 @@ class WorkflowGovernor:
                         "workflow_task_timed_out",
                         global_id=global_id,
                         vault_name=vault_name,
-                        source=source,
+                        source=source_value,
                         task_id=task_id,
                         status="timed_out",
                         reason=reason,
@@ -134,7 +139,7 @@ class WorkflowGovernor:
                     "workflow_task_completed",
                     global_id=global_id,
                     vault_name=vault_name,
-                    source=source,
+                    source=source_value,
                     task_id=task_id,
                     status=result.status,
                     reason=result.reason,
@@ -145,7 +150,7 @@ class WorkflowGovernor:
                 "workflow_task_cancelled",
                 global_id=global_id,
                 vault_name=vault_name,
-                source=source,
+                source=source_value,
                 task_id=task_id,
                 status="cancelled",
                 reason="cancelled",
@@ -156,7 +161,7 @@ class WorkflowGovernor:
                 "workflow_task_failed",
                 global_id=global_id,
                 vault_name=vault_name,
-                source=source,
+                source=source_value,
                 task_id=task_id,
                 status="failed",
                 reason=f"{type(exc).__name__}: {exc}",

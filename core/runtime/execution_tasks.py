@@ -25,6 +25,23 @@ class ExecutionTaskStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class ExecutionTaskKind(StrEnum):
+    """Stable task kind values shared across runtime/API/tool callers."""
+
+    CHAT = "chat"
+    WORKFLOW = "workflow"
+    HISTORY_COMPACTION = "history_compaction"
+
+
+class ExecutionTaskSource(StrEnum):
+    """Stable execution task source values."""
+
+    API = "api"
+    SCHEDULER = "scheduler"
+    TOOL = "tool"
+    SYSTEM = "system"
+
+
 TERMINAL_STATUSES = {
     ExecutionTaskStatus.COMPLETED,
     ExecutionTaskStatus.FAILED,
@@ -32,6 +49,29 @@ TERMINAL_STATUSES = {
     ExecutionTaskStatus.TIMED_OUT,
     ExecutionTaskStatus.SKIPPED,
 }
+
+
+TERMINAL_STATUS_VALUES = {status.value for status in TERMINAL_STATUSES}
+
+
+def chat_session_scope(session_id: str) -> str:
+    """Return the stable task scope for a chat session."""
+    return f"chat_session:{session_id}"
+
+
+def workflow_vault_scope(vault_name: str) -> str:
+    """Return the stable task scope for workflow work in one vault."""
+    return f"workflow_vault:{vault_name}"
+
+
+def chat_task_label(session_id: str) -> str:
+    """Return the stable label for chat execution tasks."""
+    return f"chat:{session_id}"
+
+
+def compaction_task_label(session_id: str) -> str:
+    """Return the stable label for chat history compaction tasks."""
+    return f"compact:{session_id}"
 
 
 @dataclass(frozen=True)
@@ -55,7 +95,15 @@ class ExecutionTaskSnapshot:
     @property
     def is_terminal(self) -> bool:
         """Return True when the task is in a terminal state."""
-        return self.status in {status.value for status in TERMINAL_STATUSES}
+        return self.status in TERMINAL_STATUS_VALUES
+
+
+@dataclass(frozen=True)
+class ExecutionTaskCancellationResult:
+    """Result of requesting cancellation for one task."""
+
+    snapshot: ExecutionTaskSnapshot
+    effective: bool
 
 
 @dataclass
@@ -182,23 +230,30 @@ class TaskCoordinator:
         task_id: str,
         *,
         reason: str = "cancel_requested",
-    ) -> ExecutionTaskSnapshot | None:
+    ) -> ExecutionTaskCancellationResult | None:
         """Request cancellation for one task by id."""
         handle: asyncio.Task[Any] | None = None
         async with self._lock:
             record = self._records.get(task_id)
             if record is None:
                 return None
+            if record.status in TERMINAL_STATUSES:
+                snapshot = record.snapshot()
+                self._log_event(
+                    "execution_task_cancel_ignored",
+                    snapshot,
+                    extra={"reason": reason, "ignored_reason": "task_terminal"},
+                )
+                return ExecutionTaskCancellationResult(snapshot=snapshot, effective=False)
             record.cancel_requested = True
             record.latest_event = reason
-            if record.status not in TERMINAL_STATUSES:
-                handle = record.handle
+            handle = record.handle
             snapshot = record.snapshot()
 
         self._log_event("execution_task_cancel_requested", snapshot)
         if handle is not None and not handle.done():
             handle.cancel()
-        return snapshot
+        return ExecutionTaskCancellationResult(snapshot=snapshot, effective=True)
 
     async def cancel_scope(
         self,
@@ -210,9 +265,9 @@ class TaskCoordinator:
         tasks = await self.list_tasks(scope=scope, include_terminal=False)
         snapshots = []
         for task in tasks:
-            snapshot = await self.cancel_task(task.task_id, reason=reason)
-            if snapshot is not None:
-                snapshots.append(snapshot)
+            cancellation = await self.cancel_task(task.task_id, reason=reason)
+            if cancellation is not None:
+                snapshots.append(cancellation.snapshot)
         return snapshots
 
     async def mark_completed(self, task_id: str, *, reason: str | None = None) -> None:
@@ -282,9 +337,9 @@ class TaskCoordinator:
         now = self._now()
         record = _ExecutionTaskRecord(
             task_id=task_id,
-            kind=kind,
+            kind=str(kind),
             scope=scope,
-            source=source,
+            source=str(source),
             label=label,
             status=ExecutionTaskStatus.QUEUED,
             created_at=now,
@@ -346,20 +401,29 @@ class TaskCoordinator:
                 continue
             del self._records[stale_id]
 
-    def _log_event(self, event: str, snapshot: ExecutionTaskSnapshot) -> None:
+    def _log_event(
+        self,
+        event: str,
+        snapshot: ExecutionTaskSnapshot,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        data = {
+            "event": event,
+            "task_id": snapshot.task_id,
+            "kind": snapshot.kind,
+            "scope": snapshot.scope,
+            "source": snapshot.source,
+            "label": snapshot.label,
+            "status": snapshot.status,
+            "cancel_requested": snapshot.cancel_requested,
+            "terminal_reason": snapshot.terminal_reason,
+        }
+        if extra:
+            data.update(extra)
         self._logger.add_sink("validation").info(
             event,
-            data={
-                "event": event,
-                "task_id": snapshot.task_id,
-                "kind": snapshot.kind,
-                "scope": snapshot.scope,
-                "source": snapshot.source,
-                "label": snapshot.label,
-                "status": snapshot.status,
-                "cancel_requested": snapshot.cancel_requested,
-                "terminal_reason": snapshot.terminal_reason,
-            },
+            data=data,
         )
 
     @staticmethod

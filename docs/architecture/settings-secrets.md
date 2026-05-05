@@ -25,6 +25,14 @@ Sections:
 - `providers`: provider wiring (secret pointer names, optional base-url pointers)
 - `tools`: tool registry used by chat, delegate child agents, and authored direct-tool calls
 
+Runtime-relevant general settings include:
+
+- `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the governor timeout.
+- `compaction_type`: chat history compaction policy (`none`, `suggested`, or `auto`).
+- `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.
+- `compaction_token_threshold`: estimated-token threshold for suggesting or automatically running compaction.
+- `compaction_export_before`: whether compaction exports a transcript before rewriting canonical history by default.
+
 ## Secrets Store
 
 Primary implementation: `core/settings/secrets_store.py`

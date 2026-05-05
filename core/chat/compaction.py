@@ -8,7 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any, AsyncIterator, Literal
+from typing import Any, AsyncIterator
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -22,6 +22,12 @@ from pydantic_ai.messages import (
 
 from core.constants import CHAT_HISTORY_COMPACTION_INSTRUCTION
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    chat_session_scope,
+    compaction_task_label,
+)
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.settings import (
     get_compaction_export_before,
@@ -131,83 +137,141 @@ async def compact_chat_history(
     vault_path: str | None = None,
     focus: str | None = None,
     export_before: bool | None = None,
-    source: Literal["api", "tool", "system"] = "api",
+    source: ExecutionTaskSource = ExecutionTaskSource.API,
     store: ChatStore | None = None,
 ) -> ChatHistoryCompactionResult:
     """Compact one chat session into a summary plus recent raw messages."""
     chat_store = store or ChatStore()
-    async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
-        messages = chat_store.get_history(session_id, vault_name) or []
-        if not messages:
-            raise ValueError("Cannot compact an empty chat session.")
+    source_value = str(source)
+    logger.info(
+        "chat_compaction_started",
+        data={
+            "event": "chat_compaction_started",
+            "session_id": session_id,
+            "vault_name": vault_name,
+            "source": source_value,
+            "focus_provided": bool((focus or "").strip()),
+            "export_before_override": export_before,
+        },
+    )
+    try:
+        async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+            messages = chat_store.get_history(session_id, vault_name) or []
+            if not messages:
+                raise ValueError("Cannot compact an empty chat session.")
 
-        keep_recent = get_compaction_keep_recent()
-        older_messages, recent_messages = split_history_for_compaction(messages, keep_recent=keep_recent)
-        if not older_messages:
-            raise ValueError("Chat session does not have older history to compact.")
-
-        estimated_before = estimate_history_tokens(messages)
-        export_created = False
-        export_path: str | None = None
-        should_export = get_compaction_export_before() if export_before is None else bool(export_before)
-        if should_export:
-            if not vault_path:
-                raise ValueError("vault_path is required when export_before is true.")
-            exported = export_chat_transcript(
-                store=chat_store,
-                vault_path=vault_path,
-                vault_name=vault_name,
-                session_id=session_id,
+            keep_recent = get_compaction_keep_recent()
+            older_messages, recent_messages = split_history_for_compaction(
+                messages,
+                keep_recent=keep_recent,
             )
-            export_created = True
-            export_path = exported.path
+            if not older_messages:
+                raise ValueError("Chat session does not have older history to compact.")
 
-        summary = await _generate_compaction_summary(
-            older_messages=older_messages,
-            recent_messages=recent_messages,
-            focus=focus,
-        )
-        summary_message = build_compaction_summary_message(summary)
-        replacement = [summary_message, *recent_messages]
-        compacted_at = datetime.now(UTC).isoformat()
-        compaction_id = uuid.uuid4().hex
-        metadata_update = {
-            "last_compaction": {
-                "compaction_id": compaction_id,
-                "compacted_at": compacted_at,
-                "source": source,
-                "messages_before": len(messages),
-                "messages_after": len(replacement),
-                "estimated_tokens_before": estimated_before,
-                "estimated_tokens_after": estimate_history_tokens(replacement),
-                "export_created": export_created,
+            estimated_before = estimate_history_tokens(messages)
+            export_created = False
+            export_path: str | None = None
+            should_export = (
+                get_compaction_export_before()
+                if export_before is None
+                else bool(export_before)
+            )
+            logger.info(
+                "chat_compaction_plan_selected",
+                data={
+                    "event": "chat_compaction_plan_selected",
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "source": source_value,
+                    "messages_before": len(messages),
+                    "older_messages": len(older_messages),
+                    "recent_messages": len(recent_messages),
+                    "configured_keep_recent": keep_recent,
+                    "estimated_tokens_before": estimated_before,
+                    "export_before": should_export,
+                },
+            )
+            if should_export:
+                if not vault_path:
+                    raise ValueError("vault_path is required when export_before is true.")
+                exported = export_chat_transcript(
+                    store=chat_store,
+                    vault_path=vault_path,
+                    vault_name=vault_name,
+                    session_id=session_id,
+                )
+                export_created = True
+                export_path = exported.path
+
+            summary = await _generate_compaction_summary(
+                older_messages=older_messages,
+                recent_messages=recent_messages,
+                focus=focus,
+            )
+            if not summary:
+                raise ValueError("Compaction summary generation returned empty output.")
+            summary_message = build_compaction_summary_message(summary)
+            replacement = [summary_message, *recent_messages]
+            estimated_after = estimate_history_tokens(replacement)
+            compacted_at = datetime.now(UTC).isoformat()
+            compaction_id = uuid.uuid4().hex
+            metadata_update = {
+                "last_compaction": {
+                    "compaction_id": compaction_id,
+                    "compacted_at": compacted_at,
+                    "source": source_value,
+                    "messages_before": len(messages),
+                    "messages_after": len(replacement),
+                    "estimated_tokens_before": estimated_before,
+                    "estimated_tokens_after": estimated_after,
+                    "export_created": export_created,
+                }
             }
-        }
-        chat_store.replace_session_messages(
-            session_id,
-            vault_name,
-            replacement,
-            metadata_update=metadata_update,
+            chat_store.replace_session_messages(
+                session_id,
+                vault_name,
+                replacement,
+                metadata_update=metadata_update,
+            )
+            result = ChatHistoryCompactionResult(
+                session_id=session_id,
+                vault_name=vault_name,
+                status="completed",
+                messages_before=len(messages),
+                messages_after=len(replacement),
+                estimated_tokens_before=estimated_before,
+                estimated_tokens_after=estimated_after,
+                kept_recent=len(recent_messages),
+                summary_message_index=0,
+                export_recommended=True,
+                export_created=export_created,
+                export_path=export_path,
+                compaction_id=compaction_id,
+                compacted_at=compacted_at,
+                source=source_value,
+            )
+            logger.info(
+                "chat_compaction_completed",
+                data={
+                    "event": "chat_compaction_completed",
+                    **result.as_tool_dict(),
+                    "token_delta": estimated_before - estimated_after,
+                },
+            )
+            return result
+    except Exception as exc:
+        logger.warning(
+            "chat_compaction_failed",
+            data={
+                "event": "chat_compaction_failed",
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "source": source_value,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
         )
-        result = ChatHistoryCompactionResult(
-            session_id=session_id,
-            vault_name=vault_name,
-            status="completed",
-            messages_before=len(messages),
-            messages_after=len(replacement),
-            estimated_tokens_before=estimated_before,
-            estimated_tokens_after=metadata_update["last_compaction"]["estimated_tokens_after"],
-            kept_recent=len(recent_messages),
-            summary_message_index=0,
-            export_recommended=True,
-            export_created=export_created,
-            export_path=export_path,
-            compaction_id=compaction_id,
-            compacted_at=compacted_at,
-            source=source,
-        )
-        logger.info("Chat history compacted", data=result.as_tool_dict())
-        return result
+        raise
 
 
 def estimate_history_tokens(messages: list[ModelMessage]) -> int:
@@ -256,20 +320,20 @@ async def maybe_auto_compact_after_turn(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
-            source="system",
+            source=ExecutionTaskSource.SYSTEM,
         )
     async with runtime.task_coordinator.track_current_task(
-        kind="history_compaction",
-        scope=f"chat_session:{session_id}",
-        source="system",
-        label=f"compact:{session_id}",
+        kind=ExecutionTaskKind.HISTORY_COMPACTION,
+        scope=chat_session_scope(session_id),
+        source=ExecutionTaskSource.SYSTEM,
+        label=compaction_task_label(session_id),
         metadata={"vault": vault_name, "session_id": session_id, "automatic": True},
     ):
         return await compact_chat_history(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
-            source="system",
+            source=ExecutionTaskSource.SYSTEM,
         )
 
 

@@ -49,6 +49,13 @@ from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    chat_session_scope,
+    compaction_task_label,
+    workflow_vault_scope,
+)
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -153,18 +160,18 @@ async def get_execution_task(task_id: str) -> ExecutionTaskInfo:
 async def cancel_execution_task(task_id: str) -> ExecutionTaskCancelResponse:
     """Request cancellation for one process-local execution task."""
     runtime = get_runtime_context()
-    snapshot = await runtime.task_coordinator.cancel_task(task_id)
-    if snapshot is None:
+    cancellation = await runtime.task_coordinator.cancel_task(task_id)
+    if cancellation is None:
         raise APIException(
             status_code=404,
             error_type="ExecutionTaskNotFound",
             message=f"Execution task not found: {task_id}",
             details={"task_id": task_id},
         )
-    task = _execution_task_info(snapshot)
+    task = _execution_task_info(cancellation.snapshot)
     return ExecutionTaskCancelResponse(
         task=task,
-        cancelled=task.cancel_requested or task.status == "cancelled",
+        cancelled=cancellation.effective,
     )
 
 
@@ -172,7 +179,7 @@ async def get_active_chat_task(session_id: str) -> ExecutionTaskInfo:
     """Return the active task for a chat session."""
     runtime = get_runtime_context()
     snapshots = await runtime.task_coordinator.list_tasks(
-        scope=f"chat_session:{session_id}",
+        scope=chat_session_scope(session_id),
         include_terminal=False,
     )
     if not snapshots:
@@ -193,8 +200,8 @@ async def cancel_chat_session_task(session_id: str) -> ExecutionTaskCancelRespon
 
 async def list_workflow_tasks(vault_name: str | None = None) -> ExecutionTaskListResponse:
     """List process-local workflow task snapshots."""
-    scope = f"workflow_vault:{vault_name}" if vault_name else None
-    return await list_execution_tasks(kind="workflow", scope=scope)
+    scope = workflow_vault_scope(vault_name) if vault_name else None
+    return await list_execution_tasks(kind=ExecutionTaskKind.WORKFLOW.value, scope=scope)
 
 
 def purge_expired_cache() -> CachePurgeResponse:
@@ -362,10 +369,10 @@ async def compact_chat_session_history(
     """Compact one chat session through the shared compaction service."""
     runtime = get_runtime_context()
     async with runtime.task_coordinator.track_current_task(
-        kind="history_compaction",
-        scope=f"chat_session:{session_id}",
-        source="api",
-        label=f"compact:{session_id}",
+        kind=ExecutionTaskKind.HISTORY_COMPACTION,
+        scope=chat_session_scope(session_id),
+        source=ExecutionTaskSource.API,
+        label=compaction_task_label(session_id),
         metadata={"vault": vault_name, "session_id": session_id},
     ):
         result = await compact_chat_history(
@@ -374,7 +381,7 @@ async def compact_chat_session_history(
             vault_path=vault_path,
             focus=focus,
             export_before=export_before,
-            source="api",
+            source=ExecutionTaskSource.API,
             store=_chat_store,
         )
     return ChatHistoryCompactionResponse(**result.as_api_dict())
@@ -1468,7 +1475,7 @@ async def execute_workflow_manually(
             runtime = get_runtime_context()
             execution_result = await runtime.workflow_governor.execute_workflow(
                 global_id=global_id,
-                source="api",
+                source=ExecutionTaskSource.API,
                 step_name=step_name,
                 expect_failure=expect_failure,
             )

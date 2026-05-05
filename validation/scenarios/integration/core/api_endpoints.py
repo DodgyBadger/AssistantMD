@@ -199,6 +199,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert terminal_cancel.json().get("task", {}).get("status") == "completed", (
             "Cancelling a terminal task should preserve terminal status"
         )
+        assert terminal_cancel.json().get("cancelled") is False, (
+            "Cancelling a completed task should not report an effective cancellation"
+        )
 
         missing_active_chat_task = self.call_api(
             "/api/chat/sessions/not-active/active-task"

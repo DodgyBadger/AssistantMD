@@ -50,6 +50,12 @@ from core.settings import (
     get_default_model_thinking,
 )
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    chat_session_scope,
+    chat_task_label,
+)
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
 from core.tools.utils import estimate_token_count
@@ -655,10 +661,10 @@ async def execute_chat_prompt(
         phase = "agent_run"
         runtime = get_runtime_context()
         async with runtime.task_coordinator.track_current_task(
-            kind="chat",
-            scope=f"chat_session:{session_id}",
-            source="api",
-            label=f"chat:{session_id}",
+            kind=ExecutionTaskKind.CHAT,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=chat_task_label(session_id),
             metadata={
                 "vault": vault_name,
                 "session_id": session_id,
@@ -786,10 +792,10 @@ async def _stream_prepared_chat_prompt(
 
     runtime = get_runtime_context()
     async with runtime.task_coordinator.track_current_task(
-        kind="chat",
-        scope=f"chat_session:{session_id}",
-        source="api",
-        label=f"chat:{session_id}",
+        kind=ExecutionTaskKind.CHAT,
+        scope=chat_session_scope(session_id),
+        source=ExecutionTaskSource.API,
+        label=chat_task_label(session_id),
         metadata={
             "vault": vault_name,
             "session_id": session_id,

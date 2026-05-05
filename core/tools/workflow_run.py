@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import traceback
 import os
-from datetime import datetime
+import traceback
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from pydantic_ai.tools import Tool
@@ -14,6 +14,7 @@ from core.authoring.contracts import AssembleContextResult, ContextMessage
 from core.authoring.service import run_authoring_template
 from core.authoring.template_discovery import discover_workflow_files
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
@@ -339,7 +340,7 @@ Full documentation:
         runtime = get_runtime_context()
         result = await runtime.workflow_governor.execute_workflow(
             global_id=global_id,
-            source="tool",
+            source=ExecutionTaskSource.TOOL,
             step_name=step_name,
             include_load_errors=True,
         )
@@ -356,12 +357,12 @@ Full documentation:
         file_path: Path,
     ) -> dict[str, Any]:
         global_id = f"{vault_name}/{workflow_name}"
-        started = datetime.now()
+        started = perf_counter()
         execution_result = await run_authoring_template(
             workflow_id=f"{vault_name}/context/{workflow_name}",
             file_path=str(file_path),
         )
-        elapsed = (datetime.now() - started).total_seconds()
+        elapsed = perf_counter() - started
         details = cls._summarize_context_execution(execution_result.value)
         return {
             "success": True,
