@@ -29,9 +29,13 @@ const state = {
     sessions: [],
     metadata: null,
     isLoading: false,
+    isCancellingChat: false,
+    activeChatSessionId: null,
+    activeChatAbortController: null,
     systemStatus: null,
     restartRequired: false,
-    shouldAutoScroll: true
+    shouldAutoScroll: true,
+    compactionStatusRequestId: 0
 };
 const chatComposeState = {
     pendingAttachments: [],
@@ -60,6 +64,8 @@ const chatElements = {
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
     sendBtn: document.getElementById('send-btn'),
+    compactionTrack: document.getElementById('chat-compaction-track'),
+    compactionFill: document.getElementById('chat-compaction-fill'),
     sessionTitleRow: document.getElementById('session-title-row'),
     sessionTitleInput: document.getElementById('session-title-input'),
     sessionTitleSave: document.getElementById('session-title-save'),
@@ -265,6 +271,40 @@ function openAttachmentPicker() {
     }
 }
 
+function createClientSessionId(vault) {
+    const safeVault = String(vault || 'chat').trim().replace(/[\s/\\]+/g, '_') || 'chat';
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const stamp = [
+        now.getFullYear(),
+        pad(now.getMonth() + 1),
+        pad(now.getDate())
+    ].join('') + '_' + [
+        pad(now.getHours()),
+        pad(now.getMinutes()),
+        pad(now.getSeconds())
+    ].join('');
+    return `${safeVault}_${stamp}_${now.getMilliseconds()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function syncSendButtonState() {
+    const btn = chatElements.sendBtn;
+    if (!btn) return;
+
+    btn.classList.toggle('chat-stop-btn', state.isLoading);
+    btn.textContent = state.isLoading
+        ? (state.isCancellingChat ? 'Stopping...' : 'Stop')
+        : 'Send';
+    btn.title = state.isLoading
+        ? 'Stop the active response'
+        : 'Send message';
+    btn.setAttribute(
+        'aria-label',
+        state.isLoading ? 'Stop the active response' : 'Send message'
+    );
+    btn.disabled = state.isLoading && state.isCancellingChat;
+}
+
 function syncChatControlLocks() {
     if (!chatElements.vaultSelector) return;
 
@@ -295,6 +335,7 @@ function syncChatControlLocks() {
     if (chatElements.sessionDeleteBtn) {
         chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
     }
+    syncSendButtonState();
 }
 
 function populateThinkingSelector() {
@@ -369,10 +410,73 @@ function renderSessionSelector() {
     }
 }
 
+function renderCompactionProgress(status) {
+    const fill = chatElements.compactionFill;
+    const track = chatElements.compactionTrack;
+    if (!fill || !track) return;
+
+    fill.classList.remove('compaction-warm', 'compaction-hot');
+    if (!status || !status.compaction_token_threshold || status.compaction_type === 'none') {
+        fill.style.width = '0%';
+        track.title = status && status.compaction_type === 'none'
+            ? 'Chat history compaction is disabled'
+            : 'Chat history compaction status unavailable';
+        return;
+    }
+
+    const threshold = Math.max(Number(status.compaction_token_threshold) || 0, 1);
+    const tokens = Math.max(Number(status.estimated_tokens_before) || 0, 0);
+    const percent = Math.round((tokens / threshold) * 100);
+    const boundedPercent = tokens > 0 ? Math.max(2, Math.min(percent, 100)) : 0;
+    fill.style.width = `${boundedPercent}%`;
+    if (percent >= 100) {
+        fill.classList.add('compaction-hot');
+    } else if (percent >= 70) {
+        fill.classList.add('compaction-warm');
+    }
+    const actionText = status.compaction_type === 'auto'
+        ? 'Chat will be automatically compacted at 100%.'
+        : 'Ask chat to compact when ready.';
+    track.title = `${percent}% (${tokens.toLocaleString()} / ${threshold.toLocaleString()} threshold). ${actionText}`;
+}
+
+function clearCompactionProgress() {
+    state.compactionStatusRequestId += 1;
+    renderCompactionProgress(null);
+}
+
+async function refreshCompactionProgress() {
+    const vault = chatElements.vaultSelector?.value || '';
+    const sessionId = state.sessionId || '';
+    if (!vault || !sessionId) {
+        clearCompactionProgress();
+        return;
+    }
+
+    const requestId = state.compactionStatusRequestId + 1;
+    state.compactionStatusRequestId = requestId;
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/compaction-status?vault_name=${encodeURIComponent(vault)}`
+        );
+        if (requestId !== state.compactionStatusRequestId) return;
+        if (!response.ok) {
+            throw new Error('Failed to fetch chat compaction status');
+        }
+        renderCompactionProgress(await response.json());
+    } catch (error) {
+        if (requestId === state.compactionStatusRequestId) {
+            console.error('Error fetching chat compaction status:', error);
+            renderCompactionProgress(null);
+        }
+    }
+}
+
 async function fetchSessions(vault, preferredSessionId = '') {
     state.sessions = [];
     renderSessionSelector();
     if (!vault) {
+        clearCompactionProgress();
         return;
     }
     try {
@@ -385,6 +489,7 @@ async function fetchSessions(vault, preferredSessionId = '') {
         if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
             chatElements.sessionSelector.value = preferredSessionId;
         }
+        await refreshCompactionProgress();
     } catch (error) {
         console.error('Error fetching chat sessions:', error);
     }
@@ -396,6 +501,9 @@ async function loadSession(sessionId) {
         return;
     }
     try {
+        state.sessionId = sessionId;
+        renderSessionSelector();
+        refreshCompactionProgress();
         state.isLoading = true;
         syncChatControlLocks();
         const response = await fetch(
@@ -410,6 +518,7 @@ async function loadSession(sessionId) {
         renderSessionSelector();
         updateSessionTitleRow();
         updateStatus();
+        await refreshCompactionProgress();
     } catch (error) {
         console.error('Error loading chat session:', error);
         addChatErrorMessage(error.message);
@@ -982,7 +1091,13 @@ function populateWorkflowSelector() {
 // Setup event listeners
 function setupEventListeners() {
     if (chatElements.sendBtn) {
-        chatElements.sendBtn.addEventListener('click', sendMessage);
+        chatElements.sendBtn.addEventListener('click', () => {
+            if (state.isLoading) {
+                stopChatResponse();
+                return;
+            }
+            sendMessage();
+        });
     }
 
     if (chatElements.chatInput) {
@@ -1139,6 +1254,7 @@ function handleVaultChange() {
     const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
     state.sessionId = null;
     state.sessions = [];
+    clearCompactionProgress();
     renderSessionSelector();
     renderChatEmptyState();
     updateStatus();
@@ -1229,6 +1345,14 @@ async function sendMessage() {
         .map(cb => cb.value);
 
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
+    const requestSessionId = state.sessionId || createClientSessionId(vault);
+    state.sessionId = requestSessionId;
+    renderSessionSelector();
+    updateSessionTitleRow();
+    refreshCompactionProgress();
+    state.activeChatSessionId = requestSessionId;
+    const abortController = new AbortController();
+    state.activeChatAbortController = abortController;
 
     const loadingMessage = addLoadingMessage();
 
@@ -1245,15 +1369,14 @@ async function sendMessage() {
                 formData.append('context_template', contextTemplateValue);
             }
             selectedTools.forEach((toolName) => formData.append('tools', toolName));
-            if (state.sessionId) {
-                formData.append('session_id', state.sessionId);
-            }
+            formData.append('session_id', requestSessionId);
             pendingUploads.forEach((item) => {
                 formData.append('images', item.file, item.file.name);
             });
             response = await fetch('api/chat/execute', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: abortController.signal
             });
         } else {
             const requestData = {
@@ -1263,15 +1386,14 @@ async function sendMessage() {
                 model: model,
                 thinking: thinking,
                 context_template: contextTemplateValue,
+                session_id: requestSessionId,
                 stream: true
             };
-            if (state.sessionId) {
-                requestData.session_id = state.sessionId;
-            }
             response = await fetch('api/chat/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestData)
+                body: JSON.stringify(requestData),
+                signal: abortController.signal
             });
         }
 
@@ -1290,6 +1412,7 @@ async function sendMessage() {
             syncChatControlLocks();
             renderSessionSelector();
             updateSessionTitleRow();
+            refreshCompactionProgress();
         }
 
         // Fallback for environments that do not support streaming
@@ -1339,6 +1462,11 @@ async function sendMessage() {
                 } else if (eventType === 'done') {
                     finished = true;
                     messageCount = Math.max(messageCount, 1);
+                } else if (eventType === 'cancelled') {
+                    finished = true;
+                    state.isCancellingChat = false;
+                    syncChatControlLocks();
+                    setAssistantStatus(assistantMessage, 'Stopped', 'done');
                 } else if (eventType === 'error') {
                     finished = true;
                     const errorDelta = payload.choices?.[0]?.delta?.content;
@@ -1365,6 +1493,11 @@ async function sendMessage() {
                     }
                 } else if (eventType === 'done') {
                     finished = true;
+                } else if (eventType === 'cancelled') {
+                    finished = true;
+                    state.isCancellingChat = false;
+                    syncChatControlLocks();
+                    setAssistantStatus(assistantMessage, 'Stopped', 'done');
                 }
             }
         }
@@ -1382,12 +1515,50 @@ async function sendMessage() {
     } catch (error) {
         console.error('Error sending message:', error);
         removeLoadingMessage(loadingMessage);
-        addChatErrorMessage(error.message);
+        if (state.isCancellingChat || error.name === 'AbortError') {
+            addMessage('assistant', 'Response stopped.');
+        } else {
+            addChatErrorMessage(error.message);
+        }
     } finally {
         state.isLoading = false;
+        state.isCancellingChat = false;
+        state.activeChatSessionId = null;
+        state.activeChatAbortController = null;
         chatElements.sendBtn.disabled = false;
         syncChatControlLocks();
         chatElements.chatInput.focus();
+        refreshCompactionProgress();
+    }
+}
+
+async function stopChatResponse() {
+    if (!state.isLoading || state.isCancellingChat) return;
+    const sessionId = state.activeChatSessionId || state.sessionId;
+    if (!sessionId) return;
+
+    state.isCancellingChat = true;
+    syncChatControlLocks();
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/cancel`,
+            { method: 'POST' }
+        );
+        if (response.status === 404) {
+            if (state.activeChatAbortController) {
+                state.activeChatAbortController.abort();
+            }
+            return;
+        }
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Error stopping chat response:', error);
+        state.isCancellingChat = false;
+        syncChatControlLocks();
+        addChatErrorMessage(`Failed to stop response: ${error.message}`);
     }
 }
 
@@ -2167,6 +2338,7 @@ async function clearSession(confirmReset = true) {
     if (!confirmed) return;
 
     state.sessionId = null;
+    clearCompactionProgress();
     clearPendingAttachments();
     renderChatEmptyState();
     renderSessionSelector();

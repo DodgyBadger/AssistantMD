@@ -67,6 +67,7 @@ class CodeExecution(BaseTool):
                     session_key=session_id,
                     chat_session_id=session_id,
                     message_history=list(getattr(deps, "message_history", []) or []),
+                    prefer_message_history=True,
                 )
                 result = await run_authoring_monty(
                     workflow_id=workflow_id,

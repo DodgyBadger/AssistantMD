@@ -23,6 +23,8 @@ class MemoryContext:
     message_history: tuple[ModelMessage, ...] = ()
     session_id: str | None = None
     vault_name: str | None = None
+    # Use caller-curated history for the active session instead of persisted storage.
+    prefer_message_history: bool = False
 
     @classmethod
     def from_deps(cls, deps: Any) -> "MemoryContext":
@@ -36,6 +38,7 @@ class MemoryContext:
             message_history=message_history,
             session_id=session_id,
             vault_name=vault_name,
+            prefer_message_history=bool(getattr(deps, "prefer_message_history", False)),
         )
 
 
@@ -334,6 +337,16 @@ class MemoryService:
     ) -> ConversationHistoryProvider:
         """Resolve the active conversation-history source for the runtime context."""
         requested_session_id = (session_id or "").strip() or context.session_id
+        requested_active_session = (
+            not session_id
+            or not context.session_id
+            or (session_id or "").strip() == context.session_id
+        )
+        if context.prefer_message_history and requested_active_session:
+            return InMemoryConversationHistoryProvider(
+                message_history=tuple(context.message_history or ()),
+                active_session_id=requested_session_id,
+            )
         if requested_session_id and context.vault_name:
             if self.chat_store.get_message_count(requested_session_id, context.vault_name) > 0:
                 return SQLiteConversationHistoryProvider(
@@ -353,6 +366,7 @@ def resolve_conversation_history_provider(
     session_id: str | None,
     vault_name: str | None,
     chat_store: ChatStore | None = None,
+    prefer_message_history: bool = False,
 ) -> ConversationHistoryProvider:
     """Compatibility wrapper for older direct provider resolution imports."""
     service = MemoryService(chat_store=chat_store)
@@ -361,6 +375,7 @@ def resolve_conversation_history_provider(
             message_history=tuple(message_history or ()),
             session_id=(session_id or "").strip() or None,
             vault_name=(vault_name or "").strip() or None,
+            prefer_message_history=prefer_message_history,
         )
     )
 

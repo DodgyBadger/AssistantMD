@@ -6,6 +6,7 @@ Handles business logic for status reporting, vault management, etc.
 import json
 import re
 import shutil
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -14,7 +15,7 @@ import yaml
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.scheduling.jobs import setup_scheduler_jobs, create_job_args
+from core.scheduling.jobs import setup_scheduler_jobs
 from core.settings.store import (
     get_models_config,
     get_tools_config,
@@ -47,6 +48,14 @@ from core.settings.secrets_store import (
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
+from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    chat_session_scope,
+    compaction_task_label,
+    workflow_vault_scope,
+)
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -76,9 +85,14 @@ from .models import (
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
     ChatSessionExportResponse,
+    ChatHistoryCompactionResponse,
+    ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeResponse,
+    ExecutionTaskCancelResponse,
+    ExecutionTaskInfo,
+    ExecutionTaskListResponse,
 )
-from .exceptions import SystemConfigurationError
+from .exceptions import APIException, SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
@@ -92,6 +106,102 @@ _chat_store = ChatStore()
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
+
+
+def _execution_task_info(snapshot) -> ExecutionTaskInfo:
+    """Convert a runtime task snapshot into an API model."""
+    return ExecutionTaskInfo(
+        task_id=snapshot.task_id,
+        kind=snapshot.kind,
+        scope=snapshot.scope,
+        source=snapshot.source,
+        label=snapshot.label,
+        status=snapshot.status,
+        created_at=snapshot.created_at,
+        started_at=snapshot.started_at,
+        finished_at=snapshot.finished_at,
+        cancel_requested=snapshot.cancel_requested,
+        terminal_reason=snapshot.terminal_reason,
+        latest_event=snapshot.latest_event,
+        metadata=dict(snapshot.metadata or {}),
+    )
+
+
+async def list_execution_tasks(
+    *,
+    kind: str | None = None,
+    scope: str | None = None,
+    include_terminal: bool = True,
+) -> ExecutionTaskListResponse:
+    """List process-local execution task snapshots."""
+    runtime = get_runtime_context()
+    snapshots = await runtime.task_coordinator.list_tasks(
+        kind=kind,
+        scope=scope,
+        include_terminal=include_terminal,
+    )
+    return ExecutionTaskListResponse(tasks=[_execution_task_info(item) for item in snapshots])
+
+
+async def get_execution_task(task_id: str) -> ExecutionTaskInfo:
+    """Return one process-local execution task snapshot."""
+    runtime = get_runtime_context()
+    snapshot = await runtime.task_coordinator.get_task(task_id)
+    if snapshot is None:
+        raise APIException(
+            status_code=404,
+            error_type="ExecutionTaskNotFound",
+            message=f"Execution task not found: {task_id}",
+            details={"task_id": task_id},
+        )
+    return _execution_task_info(snapshot)
+
+
+async def cancel_execution_task(task_id: str) -> ExecutionTaskCancelResponse:
+    """Request cancellation for one process-local execution task."""
+    runtime = get_runtime_context()
+    cancellation = await runtime.task_coordinator.cancel_task(task_id)
+    if cancellation is None:
+        raise APIException(
+            status_code=404,
+            error_type="ExecutionTaskNotFound",
+            message=f"Execution task not found: {task_id}",
+            details={"task_id": task_id},
+        )
+    task = _execution_task_info(cancellation.snapshot)
+    return ExecutionTaskCancelResponse(
+        task=task,
+        cancelled=cancellation.effective,
+    )
+
+
+async def get_active_chat_task(session_id: str) -> ExecutionTaskInfo:
+    """Return the active task for a chat session."""
+    runtime = get_runtime_context()
+    snapshots = await runtime.task_coordinator.list_tasks(
+        scope=chat_session_scope(session_id),
+        include_terminal=False,
+    )
+    if not snapshots:
+        raise APIException(
+            status_code=404,
+            error_type="ExecutionTaskNotFound",
+            message=f"No active execution task for chat session: {session_id}",
+            details={"session_id": session_id},
+        )
+    return _execution_task_info(snapshots[-1])
+
+
+async def cancel_chat_session_task(session_id: str) -> ExecutionTaskCancelResponse:
+    """Request cancellation for the active task in a chat session."""
+    task = await get_active_chat_task(session_id)
+    return await cancel_execution_task(task.task_id)
+
+
+async def list_workflow_tasks(vault_name: str | None = None) -> ExecutionTaskListResponse:
+    """List process-local workflow task snapshots."""
+    scope = workflow_vault_scope(vault_name) if vault_name else None
+    return await list_execution_tasks(kind=ExecutionTaskKind.WORKFLOW.value, scope=scope)
 
 
 def purge_expired_cache() -> CachePurgeResponse:
@@ -233,6 +343,48 @@ def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: s
         filename=exported.filename,
         path=exported.path,
     )
+
+
+async def get_chat_history_compaction_status(
+    vault_name: str,
+    session_id: str,
+) -> ChatHistoryCompactionStatusResponse:
+    """Return compaction status for one chat session."""
+    status = await get_compaction_status(
+        session_id=session_id,
+        vault_name=vault_name,
+        store=_chat_store,
+    )
+    return ChatHistoryCompactionStatusResponse(**asdict(status))
+
+
+async def compact_chat_session_history(
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    *,
+    focus: str | None,
+    export_before: bool | None,
+) -> ChatHistoryCompactionResponse:
+    """Compact one chat session through the shared compaction service."""
+    runtime = get_runtime_context()
+    async with runtime.task_coordinator.track_current_task(
+        kind=ExecutionTaskKind.HISTORY_COMPACTION,
+        scope=chat_session_scope(session_id),
+        source=ExecutionTaskSource.API,
+        label=compaction_task_label(session_id),
+        metadata={"vault": vault_name, "session_id": session_id},
+    ):
+        result = await compact_chat_history(
+            session_id=session_id,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            focus=focus,
+            export_before=export_before,
+            source=ExecutionTaskSource.API,
+            store=_chat_store,
+        )
+    return ChatHistoryCompactionResponse(**result.as_api_dict())
 
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
@@ -1311,23 +1463,6 @@ async def execute_workflow_manually(
         ValueError: If global_id format is invalid or step_name not found
     """
     try:
-        # Validate global_id format
-        if '/' not in global_id:
-            raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
-        
-        loaded_workflows = await _get_workflow_loader().load_workflows(
-            force_reload=True, target_global_id=global_id
-        )
-
-        if not loaded_workflows:
-            raise ValueError(f"Workflow not found: {global_id}")
-
-        target_workflow = loaded_workflows[0]
-
-        await _get_workflow_loader().ensure_workflow_directories(target_workflow)
-
-        workflow_function = target_workflow.workflow_function
-        
         logger.info(
             "Workflow execution started",
             data={
@@ -1336,49 +1471,27 @@ async def execute_workflow_manually(
             },
         )
 
-        # Execute workflow with timing using job arguments
-        start_time = datetime.now()
         try:
-            # Create job arguments
-            job_args = create_job_args(target_workflow.global_id, file_path=target_workflow.file_path)
-
-            # Execute workflow with job arguments and optional step_name
-            kwargs = {}
-            if step_name is not None:
-                kwargs['step_name'] = step_name
-            if expect_failure:
-                kwargs['expected_failure'] = True
-            execution_result = await workflow_function(job_args, **kwargs)
-            execution_time = (datetime.now() - start_time).total_seconds()
-            
+            runtime = get_runtime_context()
+            execution_result = await runtime.workflow_governor.execute_workflow(
+                global_id=global_id,
+                source=ExecutionTaskSource.API,
+                step_name=step_name,
+                expect_failure=expect_failure,
+            )
         except Exception as workflow_error:
-            execution_time = (datetime.now() - start_time).total_seconds()
-            # Re-raise as SystemConfigurationError for API layer
+            if isinstance(workflow_error, ValueError):
+                raise
             raise SystemConfigurationError(f"Workflow execution failed for '{global_id}': {str(workflow_error)}")
-        
-        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
-        terminal_reason = str(getattr(execution_result, "reason", "") or "")
 
-        # Prepare results
-        results = {
-            'success': True,
-            'global_id': global_id,
-            'status': terminal_status,
-            'execution_time_seconds': execution_time,
-            'output_files': [],  # TODO: Enhanced in Phase 4
-            'reason': terminal_reason or None,
-            'message': (
-                f"Workflow '{global_id}' {terminal_status} in {execution_time:.2f} seconds"
-                + (f": {terminal_reason}" if terminal_reason else "")
-            ),
-        }
+        results = execution_result.to_dict()
         logger.info(
             "Workflow execution finished",
             data={
                 "global_id": global_id,
-                "status": terminal_status,
-                "reason": terminal_reason,
-                "execution_time_seconds": execution_time,
+                "status": execution_result.status,
+                "reason": execution_result.reason or "",
+                "execution_time_seconds": execution_result.execution_time_seconds,
             },
         )
         

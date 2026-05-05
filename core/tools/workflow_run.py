@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import traceback
 import os
-from datetime import datetime
+import traceback
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from pydantic_ai.tools import Tool
@@ -14,8 +14,8 @@ from core.authoring.contracts import AssembleContextResult, ContextMessage
 from core.authoring.service import run_authoring_template
 from core.authoring.template_discovery import discover_workflow_files
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import RuntimeStateError, get_runtime_context
-from core.scheduling.jobs import create_job_args
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
 from .base import BaseTool
@@ -307,38 +307,6 @@ Full documentation:
             lines.extend([f"  {line}" for line in tail])
         return "\n".join(lines)
 
-    @staticmethod
-    def _format_load_errors(loader, global_id: str) -> str:
-        if "/" not in global_id:
-            return ""
-
-        vault, name = global_id.split("/", 1)
-        matches = [
-            error
-            for error in loader.get_configuration_errors()
-            if error.vault == vault and (error.workflow_name == name or error.workflow_name is None)
-        ]
-        if not matches:
-            return ""
-
-        deduped = []
-        seen = set()
-        for error in matches:
-            key = (error.error_type, error.error_message, error.file_path)
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(error)
-
-        lines = ["workflow_configuration_errors:"]
-        for error in deduped[:5]:
-            lines.append(
-                f"- [{error.error_type}] {error.error_message} (file: {error.file_path})"
-            )
-        if len(deduped) > 5:
-            lines.append(f"- ... and {len(deduped) - 5} more")
-        return "\n".join(lines)
-
     @classmethod
     async def _execute_authoring_artifact(
         cls,
@@ -369,51 +337,16 @@ Full documentation:
 
     @staticmethod
     async def _execute_workflow(global_id: str, step_name: str | None) -> dict:
-        if "/" not in global_id:
-            raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
-
         runtime = get_runtime_context()
-        loader = runtime.workflow_loader
-        try:
-            loaded = await loader.load_workflows(force_reload=True, target_global_id=global_id)
-        except Exception as exc:
-            load_errors = WorkflowRun._format_load_errors(loader, global_id)
-            if load_errors:
-                raise ValueError(
-                    f"Workflow load failed for '{global_id}': {exc}\n{load_errors}"
-                ) from exc
-            raise
-        if not loaded:
-            raise ValueError(f"Workflow not found: {global_id}")
-
-        target = loaded[0]
-        await loader.ensure_workflow_directories(target)
-
-        kwargs = {}
-        if step_name is not None:
-            kwargs["step_name"] = step_name
-
-        started = datetime.now()
-        job_args = create_job_args(target.global_id, file_path=target.file_path)
-        execution_result = await target.workflow_function(job_args, **kwargs)
-        elapsed = (datetime.now() - started).total_seconds()
-        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
-        terminal_reason = str(getattr(execution_result, "reason", "") or "")
-
-        return {
-            "success": True,
-            "global_id": target.global_id,
-            "run_type": "workflow",
-            "status": terminal_status,
-            "execution_time_seconds": elapsed,
-            "output_files": [],
-            "reason": terminal_reason or None,
-            "details": [],
-            "message": (
-                f"Workflow '{target.global_id}' {terminal_status} in {elapsed:.2f} seconds"
-                + (f": {terminal_reason}" if terminal_reason else "")
-            ),
-        }
+        result = await runtime.workflow_governor.execute_workflow(
+            global_id=global_id,
+            source=ExecutionTaskSource.TOOL,
+            step_name=step_name,
+            include_load_errors=True,
+        )
+        data = result.to_dict()
+        data["run_type"] = "workflow"
+        return data
 
     @classmethod
     async def _execute_context_template(
@@ -424,12 +357,12 @@ Full documentation:
         file_path: Path,
     ) -> dict[str, Any]:
         global_id = f"{vault_name}/{workflow_name}"
-        started = datetime.now()
+        started = perf_counter()
         execution_result = await run_authoring_template(
             workflow_id=f"{vault_name}/context/{workflow_name}",
             file_path=str(file_path),
         )
-        elapsed = (datetime.now() - started).total_seconds()
+        elapsed = perf_counter() - started
         details = cls._summarize_context_execution(execution_result.value)
         return {
             "success": True,

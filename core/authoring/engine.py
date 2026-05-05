@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from core.authoring.template_loader import parse_authoring_template_text
-from core.authoring.service import run_authoring_template
+from core.runtime.execution_tasks import ExecutionTaskSource
+from core.runtime.state import get_runtime_context
 
 
 def validate_workflow_definition(
@@ -22,11 +23,17 @@ def validate_workflow_definition(
 
 async def run_workflow(job_args: dict, **kwargs) -> object:
     """Execute a Monty-authored markdown workflow template."""
-    del kwargs
     global_id = job_args["global_id"]
-    file_path = job_args["file_path"]
+    step_name = kwargs.get("step_name")
+    expect_failure = bool(kwargs.get("expected_failure", False))
 
     if "/" not in global_id:
         raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
 
-    return await run_authoring_template(workflow_id=global_id, file_path=file_path)
+    runtime = get_runtime_context()
+    return await runtime.workflow_governor.execute_workflow(
+        global_id=global_id,
+        source=ExecutionTaskSource.SCHEDULER,
+        step_name=step_name,
+        expect_failure=expect_failure,
+    )

@@ -146,6 +146,83 @@ class ChatStore:
         finally:
             conn.close()
 
+    def replace_session_messages(
+        self,
+        session_id: str,
+        vault_name: str,
+        messages: list[ModelMessage],
+        *,
+        metadata_update: dict[str, Any] | None = None,
+    ) -> None:
+        """Replace one session's canonical messages in a single transaction."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            conn.execute(
+                """
+                DELETE FROM chat_messages
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (session_id, vault_name),
+            )
+            for sequence_index, message in enumerate(messages):
+                role, content_text = _extract_role_and_text(message)
+                direction = "response" if type(message).__name__ == "ModelResponse" else "request"
+                conn.execute(
+                    """
+                    INSERT INTO chat_messages (
+                        session_id,
+                        vault_name,
+                        sequence_index,
+                        direction,
+                        message_type,
+                        role,
+                        content_text,
+                        message_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        vault_name,
+                        sequence_index,
+                        direction,
+                        type(message).__name__,
+                        role,
+                        content_text,
+                        _MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
+                    ),
+                )
+            metadata_json = None
+            if metadata_update:
+                metadata_json = self._merged_session_metadata_json(
+                    conn,
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    metadata_update=metadata_update,
+                )
+            if metadata_json is None:
+                conn.execute(
+                    """
+                    UPDATE chat_sessions
+                    SET last_activity_at = CURRENT_TIMESTAMP
+                    WHERE session_id = ? AND vault_name = ?
+                    """,
+                    (session_id, vault_name),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE chat_sessions
+                    SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
+                    WHERE session_id = ? AND vault_name = ?
+                    """,
+                    (metadata_json, session_id, vault_name),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     def set_session_title(self, session_id: str, vault_name: str, title: str | None) -> None:
         """Set or clear the user-defined title for a session."""
         conn = self._connect()
@@ -453,6 +530,17 @@ class ChatStore:
             metadata_json=None if metadata_json is None else str(metadata_json),
         )
 
+    def get_session_metadata(self, session_id: str, vault_name: str) -> dict[str, Any]:
+        """Return parsed session metadata, ignoring malformed stored JSON."""
+        session = self.get_session(session_id, vault_name)
+        if session is None or not session.metadata_json:
+            return {}
+        try:
+            parsed = json.loads(session.metadata_json)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
     def _fetch_messages(
         self,
         *,
@@ -550,6 +638,33 @@ class ChatStore:
             (session_id, vault_name),
         ).fetchone()
         return int(row[0] or 0) if row else 0
+
+    @staticmethod
+    def _merged_session_metadata_json(
+        conn,
+        *,
+        session_id: str,
+        vault_name: str,
+        metadata_update: dict[str, Any],
+    ) -> str:
+        row = conn.execute(
+            """
+            SELECT metadata_json
+            FROM chat_sessions
+            WHERE session_id = ? AND vault_name = ?
+            """,
+            (session_id, vault_name),
+        ).fetchone()
+        metadata: dict[str, Any] = {}
+        if row and row[0]:
+            try:
+                parsed = json.loads(str(row[0]))
+                if isinstance(parsed, dict):
+                    metadata = parsed
+            except Exception:
+                metadata = {}
+        metadata.update(metadata_update)
+        return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
 
 
 def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:

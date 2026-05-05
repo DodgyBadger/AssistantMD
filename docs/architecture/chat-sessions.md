@@ -7,6 +7,8 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/chat_store.py` — read/write sessions and messages
 - `core/chat/schema.py` — SQLite schema bootstrap
 - `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
+- `core/chat/compaction.py` — summarize and rewrite long canonical histories
+- `core/chat/executor.py` — register chat execution tasks and persist completed turns
 
 ## SQLite store
 
@@ -22,8 +24,38 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 
 ## History loading
 
-`ChatStore.get_history()` returns the full `list[ModelMessage]` for a session, which the chat executor passes directly to the model as prior context. This replaces the old approach of re-parsing the markdown transcript.
+`ChatStore.get_history()` returns the full `list[ModelMessage]` for a session, which the chat executor passes directly to the model as prior context.
 
-Canonical history contains completed prior turns only while a chat run is in flight. The active user input is passed separately to Pydantic AI and is persisted only after completion through the provider-native `new_messages()` for that run. Do not pre-store the active prompt in `chat_messages`; doing so creates duplicate user turns and makes memory/context assembly ambiguous.
+Canonical history contains completed prior turns plus the accepted user request for an active chat run. The active user input is passed separately to Pydantic AI, and provider-native response messages are persisted after completion through `new_messages()` for that run. On cancellation, the accepted user request remains persisted and no assistant response is added.
 
 `core/memory/` is the shared broker over this store for tools and authoring helpers. Context scripts should access session history through `retrieve_history(...)`, which preserves tool call/return pairs as atomic units before `assemble_context(...)` hands curated history back to chat.
+
+## Execution tasks and cancellation
+
+Chat execution registers a process-local task scoped to `chat_session:<session_id>`.
+
+- Non-streaming and streaming chat runs both use the same task kind (`chat`) and API source (`api`).
+- `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.
+- `/api/chat/sessions/{session_id}/cancel` requests cancellation for the active chat task.
+- A cancelled chat task reaches terminal status `cancelled`; the session remains queryable through normal session detail endpoints.
+
+See [Execution Tasks](execution-tasks.md) for task lifecycle and cancellation semantics.
+
+## History compaction
+
+Chat history compaction rewrites one session's canonical provider-native history into:
+
+1. A system-maintained summary message marked with `AssistantMD compacted chat history`.
+2. A recent raw message slice preserved verbatim.
+
+The compaction split preserves tool call/return pairs in the recent slice. If transcript export is requested or configured, compaction exports the pre-rewrite transcript before replacing stored messages.
+
+Compaction writes audit metadata under the session's `last_compaction` metadata key, including compaction ID, timestamp, source, before/after message counts, token estimates, and export status.
+
+Compaction can be invoked by:
+
+- API: `/api/chat/sessions/{session_id}/compact`
+- chat tool: `chat_history_compact`
+- automatic post-turn compaction when configured with `compaction_type: auto` and the estimated token threshold is reached
+
+Compaction emits stable lifecycle events: `chat_compaction_started`, `chat_compaction_plan_selected`, `chat_compaction_completed`, and `chat_compaction_failed`.

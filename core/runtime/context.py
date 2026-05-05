@@ -17,6 +17,8 @@ from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
 from core.runtime.buffers import BufferStore
+from core.runtime.execution_tasks import TaskCoordinator
+from core.runtime.workflow_governor import WorkflowGovernor
 from . import state as runtime_state
 from .config import RuntimeConfig
 
@@ -37,6 +39,8 @@ class RuntimeContext:
         logger: Unified logger for runtime operations
         last_config_reload: Timestamp of most recent configuration reload (if any)
         ingestion: IngestionService
+        task_coordinator: Process-local execution task tracker
+        workflow_governor: Workflow execution policy layer
     """
 
     config: RuntimeConfig
@@ -44,6 +48,8 @@ class RuntimeContext:
     workflow_loader: WorkflowLoader
     logger: UnifiedLogger
     ingestion: IngestionService
+    task_coordinator: TaskCoordinator
+    workflow_governor: WorkflowGovernor
     boot_id: int
     started_at: datetime
     last_config_reload: Optional[datetime] = None
@@ -61,6 +67,8 @@ class RuntimeContext:
     async def shutdown(self):
         """Gracefully shutdown all runtime services and clear global context."""
         self.logger.info("Shutting down runtime context")
+
+        await self.task_coordinator.shutdown(reason="runtime_shutdown")
 
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=True)

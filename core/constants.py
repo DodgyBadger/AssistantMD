@@ -173,3 +173,19 @@ CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
     "First explain this context-template error to the user and ask whether to proceed "
     "without template management (for example by switching to the default template). "
 )
+
+CHAT_HISTORY_COMPACTION_INSTRUCTION = """
+Summarize the older portion of a chat session so future turns can continue with
+substantially less context.
+
+Preserve durable facts, explicit user preferences, architecture decisions,
+open tasks, unresolved questions, important file paths, commands, validation
+results, and any constraints the assistant must still follow. Keep tool results
+only when their outcomes matter for future work. Do not invent details. Do not
+make secrets or API keys more explicit than they appeared in the source history.
+Summarize only the provided older source history; recent turns are preserved
+verbatim outside the summary and should not be restated.
+
+Write the summary as system-maintained session history. It should be concise,
+structured, and directly useful to the next assistant turn.
+""".strip()

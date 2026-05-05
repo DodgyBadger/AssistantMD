@@ -126,6 +126,8 @@ class WorkflowAuthoringHost(AuthoringHost):
     session_key: str | None = None
     chat_session_id: str | None = None
     message_history: list | None = None
+    # Context assembly sets this when message_history is already curated prior history.
+    prefer_message_history: bool = False
     latest_message: LatestMessage = field(default_factory=LatestMessage)
 
     def __post_init__(self) -> None:

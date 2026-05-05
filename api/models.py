@@ -149,6 +149,37 @@ class ChatExecuteResponse(BaseModel):
     message_count: int = Field(..., description="Total messages in conversation")
 
 
+class ExecutionTaskInfo(BaseModel):
+    """Process-local execution task snapshot."""
+
+    task_id: str = Field(..., description="Execution task identifier")
+    kind: str = Field(..., description="Task kind, such as chat or workflow")
+    scope: str = Field(..., description="Task scope")
+    source: str = Field(..., description="Task source, such as api, scheduler, tool, or system")
+    label: str = Field(..., description="User-readable task label")
+    status: str = Field(..., description="Task lifecycle status")
+    created_at: datetime = Field(..., description="Task creation timestamp")
+    started_at: Optional[datetime] = Field(None, description="Task start timestamp")
+    finished_at: Optional[datetime] = Field(None, description="Task terminal timestamp")
+    cancel_requested: bool = Field(False, description="Whether cancellation has been requested")
+    terminal_reason: Optional[str] = Field(None, description="Terminal reason when available")
+    latest_event: Optional[str] = Field(None, description="Latest task lifecycle event")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Task metadata")
+
+
+class ExecutionTaskListResponse(BaseModel):
+    """Response model for execution task listing."""
+
+    tasks: List[ExecutionTaskInfo] = Field(default_factory=list, description="Matching task snapshots")
+
+
+class ExecutionTaskCancelResponse(BaseModel):
+    """Response model for execution task cancellation."""
+
+    task: ExecutionTaskInfo = Field(..., description="Task snapshot after cancellation request")
+    cancelled: bool = Field(..., description="Whether the task was already or newly cancelled")
+
+
 
 
 class ModelInfo(BaseModel):
@@ -289,6 +320,49 @@ class ChatSessionExportResponse(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     filename: str = Field(..., description="Transcript filename created for the export")
     path: str = Field(..., description="Absolute transcript path in the vault")
+
+
+class ChatHistoryCompactionRequest(BaseModel):
+    """Request to compact one persisted chat session."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    focus: Optional[str] = Field(None, description="Optional summary focus instructions")
+    export_before: Optional[bool] = Field(None, description="Override transcript export before rewrite")
+
+
+class ChatHistoryCompactionStatusResponse(BaseModel):
+    """Estimated compaction status for one chat session."""
+
+    session_id: str = Field(..., description="Session identifier")
+    vault_name: str = Field(..., description="Owning vault name")
+    compaction_type: str = Field(..., description="Configured compaction policy")
+    messages_before: int = Field(..., description="Current stored message count")
+    estimated_tokens_before: int = Field(..., description="Estimated current history tokens")
+    compaction_token_threshold: int = Field(..., description="Configured compaction threshold")
+    compaction_keep_recent: int = Field(..., description="Target recent message count to keep")
+    recommended: bool = Field(..., description="Whether compaction is currently recommended")
+    export_recommended: bool = Field(..., description="Whether transcript export should be offered")
+    already_compacted: bool = Field(..., description="Whether this session has prior compaction metadata")
+
+
+class ChatHistoryCompactionResponse(BaseModel):
+    """Result of compacting one chat session."""
+
+    session_id: str = Field(..., description="Session identifier")
+    vault_name: str = Field(..., description="Owning vault name")
+    status: str = Field(..., description="Compaction status")
+    messages_before: int = Field(..., description="Message count before compaction")
+    messages_after: int = Field(..., description="Message count after compaction")
+    estimated_tokens_before: int = Field(..., description="Estimated tokens before compaction")
+    estimated_tokens_after: int = Field(..., description="Estimated tokens after compaction")
+    kept_recent: int = Field(..., description="Recent raw messages preserved verbatim")
+    summary_message_index: int = Field(..., description="Stored summary message index")
+    export_recommended: bool = Field(..., description="Whether transcript export was recommended")
+    export_created: bool = Field(..., description="Whether a transcript export was created")
+    export_path: Optional[str] = Field(None, description="Exported transcript path for API/UI callers")
+    compaction_id: str = Field(..., description="Compaction audit identifier")
+    compacted_at: str = Field(..., description="Compaction timestamp")
+    source: str = Field(..., description="Compaction source")
 
 
 class ModelConfigRequest(BaseModel):

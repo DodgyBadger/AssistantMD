@@ -1,5 +1,30 @@
 # Release Notes
 
+## 2026-05-05 - v0.6.1
+
+### Chat cancellation
+
+Long-running chat responses can now be stopped cleanly.
+
+- The chat UI now has a stop control while a response is running.
+- Cancelled chats keep the submitted user message in the session history, without adding a partial assistant response.
+- Cancellation works for both normal and streaming chat runs.
+
+### Chat history compaction
+
+Long chat sessions can now be compacted into a summary plus recent messages, helping keep future turns focused without losing the important context.
+
+- Added a compact progress indicator under the chat prompt.
+- Added a `chat_history_compact` tool so the assistant can compact the current session after explicit user approval.
+- Compaction preserves recent tool call/result pairs and can export a transcript before rewriting the stored session history.
+- New settings control whether compaction is disabled, suggested, or automatic, plus how much recent history is kept.
+
+### Reliability improvements
+
+- Workflow runs now share one coordination path across schedules, API runs, and the `workflow_run` tool.
+- Workflow runs are guarded against overlapping execution within the same vault.
+- Activity logging and validation coverage were expanded around chat cancellation, compaction, and workflow execution.
+
 ## 2026-04-30 - v0.6.0
 
 ### BREAKING: Markdown DSL replaced by Python authoring runtime

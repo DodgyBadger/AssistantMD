@@ -162,6 +162,54 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert execute_response.json().get("success") is True, "Workflow reports success"
 
+        # Execution task status endpoints expose the completed workflow task.
+        tasks_response = self.call_api("/api/tasks")
+        assert tasks_response.status_code == 200, "Execution task listing succeeds"
+        tasks_payload = tasks_response.json()
+        workflow_tasks = [
+            task
+            for task in tasks_payload.get("tasks", [])
+            if task.get("kind") == "workflow"
+            and task.get("metadata", {}).get("workflow_id") == f"{vault.name}/status_probe"
+        ]
+        assert workflow_tasks, "Workflow execution should create a task snapshot"
+        workflow_task = workflow_tasks[-1]
+        assert workflow_task.get("status") == "completed", "Workflow task should complete"
+
+        task_detail = self.call_api(f"/api/tasks/{workflow_task['task_id']}")
+        assert task_detail.status_code == 200, "Execution task detail succeeds"
+        assert task_detail.json().get("task_id") == workflow_task["task_id"], (
+            "Execution task detail returns the requested task"
+        )
+
+        workflow_task_list = self.call_api(
+            f"/api/workflows/tasks?vault_name={vault.name}"
+        )
+        assert workflow_task_list.status_code == 200, "Workflow task listing succeeds"
+        assert any(
+            task.get("task_id") == workflow_task["task_id"]
+            for task in workflow_task_list.json().get("tasks", [])
+        ), "Workflow task listing includes the completed task"
+
+        terminal_cancel = self.call_api(
+            f"/api/tasks/{workflow_task['task_id']}/cancel",
+            method="POST",
+        )
+        assert terminal_cancel.status_code == 200, "Terminal task cancel is idempotent"
+        assert terminal_cancel.json().get("task", {}).get("status") == "completed", (
+            "Cancelling a terminal task should preserve terminal status"
+        )
+        assert terminal_cancel.json().get("cancelled") is False, (
+            "Cancelling a completed task should not report an effective cancellation"
+        )
+
+        missing_active_chat_task = self.call_api(
+            "/api/chat/sessions/not-active/active-task"
+        )
+        assert missing_active_chat_task.status_code == 404, (
+            "Missing active chat task returns 404"
+        )
+
         # Chat execution, metadata, history transforms
         chat_metadata = self.call_api("/api/metadata")
         assert chat_metadata.status_code == 200, "Metadata endpoint available"

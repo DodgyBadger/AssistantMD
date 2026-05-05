@@ -97,6 +97,8 @@ Good boundaries:
 - routing decisions (destination, item count, refs-only vs inline)
 - cache decisions (hit/miss + reason)
 - load/parse outcomes (success/failure + error class)
+- execution task lifecycle changes (start, cancellation request, terminal status)
+- compaction lifecycle decisions (plan selected, completed, failed)
 
 Avoid:
 - logging every local variable/state transition

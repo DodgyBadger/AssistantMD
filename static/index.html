@@ -704,7 +704,6 @@
             transform: rotate(180deg);
             color: rgb(var(--text-primary));
         }
-
         /* Theme-aware state helpers */
         .state-success {
             color: rgb(var(--state-success));
@@ -794,6 +793,27 @@
         .chat-compose-wrap {
             position: relative;
         }
+        .chat-compaction-track {
+            height: 2px;
+            width: 100%;
+            margin-top: 0.35rem;
+            overflow: hidden;
+            border-radius: 9999px;
+            background: rgb(var(--border-primary));
+        }
+        .chat-compaction-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: rgb(var(--accent-primary) / 0.55);
+            transition: width 0.2s ease, background-color 0.2s ease;
+        }
+        .chat-compaction-fill.compaction-warm {
+            background: rgb(var(--state-warning) / 0.85);
+        }
+        .chat-compaction-fill.compaction-hot {
+            background: rgb(234 88 12 / 0.95);
+        }
         .chat-attach-btn {
             position: absolute;
             right: 1rem;
@@ -817,6 +837,12 @@
             color: rgb(var(--accent-primary));
             border-color: transparent;
             background: transparent;
+        }
+        .chat-stop-btn {
+            background: rgb(var(--state-error)) !important;
+        }
+        .chat-stop-btn:hover {
+            background: rgb(var(--state-error) / 0.88) !important;
         }
         .chat-attach-badge {
             display: none;
@@ -1028,6 +1054,9 @@
                                 </button>
                                 <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
                                 <div id="chat-attachment-popover" class="chat-attachment-popover hidden" role="menu" aria-label="Pending attachments"></div>
+                            </div>
+                            <div id="chat-compaction-track" class="chat-compaction-track" title="Chat history compaction status unavailable" aria-hidden="true">
+                                <div id="chat-compaction-fill" class="chat-compaction-fill"></div>
                             </div>
                         </div>
                         <button

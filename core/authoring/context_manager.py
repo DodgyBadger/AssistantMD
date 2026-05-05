@@ -469,6 +469,7 @@ async def _build_authoring_context_history(
         session_key=session_id,
         chat_session_id=session_id,
         message_history=prior_history,
+        prefer_message_history=True,
         latest_message=_latest_message_from_model_message(active_prompt_message),
     )
 

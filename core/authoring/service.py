@@ -52,10 +52,17 @@ async def run_authoring_template(
     *,
     workflow_id: str,
     file_path: str,
+    step_name: str | None = None,
+    expect_failure: bool = False,
 ) -> AuthoringMontyExecutionResult:
     """Load one markdown authoring template file and execute its python block."""
     source = load_authoring_template_file(file_path)
-    return await _run_loaded_template(workflow_id=workflow_id, source=source)
+    return await _run_loaded_template(
+        workflow_id=workflow_id,
+        source=source,
+        step_name=step_name,
+        expect_failure=expect_failure,
+    )
 
 
 async def run_authoring_template_text(
@@ -131,14 +138,22 @@ async def _run_loaded_template(
     *,
     workflow_id: str,
     source: AuthoringTemplateSource,
+    step_name: str | None = None,
+    expect_failure: bool = False,
 ) -> AuthoringMontyExecutionResult:
     frontmatter = dict(source.frontmatter)
     week_start_day = _resolve_week_start_day(frontmatter)
+    inputs: dict[str, object] = {}
+    if step_name:
+        inputs["step_name"] = step_name
+    if expect_failure:
+        inputs["expected_failure"] = True
 
     return await run_authoring_monty(
         workflow_id=workflow_id,
         code=source.code,
         host=WorkflowAuthoringHost(workflow_id=workflow_id, week_start_day=week_start_day),
+        inputs=inputs or None,
     )
 
 def _split_workflow_id(workflow_id: str) -> tuple[str, str]:

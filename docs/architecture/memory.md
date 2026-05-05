@@ -25,6 +25,10 @@ The memory subsystem is the shared broker for conversation-history access. It ke
 - `SQLiteConversationHistoryProvider`: used when the requested session has persisted messages in `system/chat_sessions.db`.
 - `InMemoryConversationHistoryProvider`: used for active in-flight history when persisted history is not yet available.
 
+Persisted session history is the default source when a requested session has stored messages.
+Callers may explicitly opt into in-memory history for the active session when they have already
+curated the message list.
+
 Both providers return `ConversationHistoryResult` and `ConversationToolEventResult` objects with normalized item records.
 
 ## Authoring Contract
@@ -36,6 +40,13 @@ Context scripts should use `retrieve_history(...)` rather than reading chat stor
 - one atomic tool call + tool return exchange
 
 `assemble_context(...)` accepts those safe units and preserves provider-native message fidelity for downstream chat context. The latest active message is not appended by scripts; the chat runtime adds it once after assembled history.
+
+During active context assembly, the context manager passes curated prior history in
+`message_history` and exposes the current user prompt through `latest_message`. That path
+explicitly opts into the in-memory history source so `retrieve_history(...)` cannot see the active
+prompt that has already been accepted into the durable chat store for cancellation safety. Outside
+context assembly, authored history retrieval defaults to persisted session history when it exists,
+including after process restart.
 
 ## Tool Contract
 

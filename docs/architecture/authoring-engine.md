@@ -7,6 +7,7 @@ The authoring subsystem handles discovery, parsing, and execution of both workfl
 - `core/authoring/template_discovery.py` — find and load authoring files from vaults and system
 - `core/authoring/template_loader.py` — parse frontmatter and extract the Python block
 - `core/authoring/engine.py` — run authoring files in the Monty sandbox
+- `core/authoring/workflow_execution.py` — shared workflow execution result contract
 - `core/authoring/runtime/` — host object and Monty runner
 - `core/authoring/context_manager.py` — assemble chat context using context templates
 - `core/authoring/registry.py` — register and resolve named authoring files
@@ -86,4 +87,6 @@ Expired artifacts are purged on a schedule via `purge_expired_cache_artifacts`.
 
 - Runtime bootstrap creates the authoring registry and wires it to the scheduler.
 - Scheduler sync (`setup_scheduler_jobs`) loads workflow definitions and reconciles APScheduler jobs.
+- Workflow execution flows through `RuntimeContext.workflow_governor`, which registers process-local workflow tasks, serializes runs by vault, and returns `WorkflowExecutionResult`.
+- Manual API runs, scheduled jobs, and the `workflow_run` tool share the same workflow execution path.
 - Chat sessions invoke the context manager, which runs the matching context template (or the default) to assemble the agent's starting context.
