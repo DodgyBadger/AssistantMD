@@ -15,16 +15,23 @@ SCAN_ROOTS = (
     Path("api"),
 )
 
+SHARED_MUTATION_API_FILES = {
+    Path("core/vault_state/file_mutations.py"),
+}
+
 ALLOWED_DIRECT_MUTATION_FILES = {
-    Path("core/tools/file_ops_safe.py"),
-    Path("core/tools/file_ops_unsafe.py"),
     Path("core/ingestion/storage.py"),
     Path("core/ingestion/service.py"),
     Path("core/tools/workflow_run.py"),
     Path("api/services.py"),
 }
 
+ALLOWED_DIRECT_MUTATION_CALLS = {
+    (Path("core/tools/file_ops_safe.py"), "_make_directory", "os.makedirs"),
+}
+
 MUTATING_METHODS = {
+    "mkdir",
     "write_text",
     "write_bytes",
     "unlink",
@@ -33,9 +40,11 @@ MUTATING_METHODS = {
 }
 
 MUTATING_FUNCTIONS = {
+    ("os", "makedirs"),
     ("os", "remove"),
     ("os", "unlink"),
     ("os", "rmdir"),
+    ("os", "replace"),
     ("shutil", "move"),
     ("shutil", "rmtree"),
 }
@@ -47,6 +56,8 @@ def main() -> int:
         if not root.exists():
             continue
         for path in sorted(root.rglob("*.py")):
+            if path in SHARED_MUTATION_API_FILES:
+                continue
             if path in ALLOWED_DIRECT_MUTATION_FILES:
                 continue
             offenders.extend(_find_direct_mutations(path))
@@ -68,18 +79,60 @@ def main() -> int:
 def _find_direct_mutations(path: Path) -> list[str]:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
+    parents = _parent_map(tree)
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         name = _call_name(node.func)
-        if name == "open" and _open_mode_is_mutating(node):
+        if (name == "open" or name.endswith(".open")) and _open_mode_is_mutating(node):
+            if _is_allowed_direct_mutation(path, node, name, parents):
+                continue
             offenders.append(f"{path}:{node.lineno}: open mutating mode")
-        if name in {f".{method}" for method in MUTATING_METHODS}:
+        if _attribute_is_mutating_method(name):
+            if _is_allowed_direct_mutation(path, node, name, parents):
+                continue
             offenders.append(f"{path}:{node.lineno}: {name}")
         if any(name == f"{module}.{function}" for module, function in MUTATING_FUNCTIONS):
+            if _is_allowed_direct_mutation(path, node, name, parents):
+                continue
             offenders.append(f"{path}:{node.lineno}: {name}")
     return offenders
+
+
+def _parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    return parents
+
+
+def _is_allowed_direct_mutation(
+    path: Path,
+    node: ast.AST,
+    call_name: str,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    function_name = _containing_function_name(node, parents)
+    return (path, function_name, call_name) in ALLOWED_DIRECT_MUTATION_CALLS
+
+
+def _containing_function_name(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
+    current = node
+    while current in parents:
+        current = parents[current]
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return current.name
+    return ""
+
+
+def _attribute_is_mutating_method(name: str) -> bool:
+    if not any(name == f".{method}" or name.endswith(f".{method}") for method in MUTATING_METHODS):
+        return False
+    if name.endswith(".open"):
+        return False
+    return True
 
 
 def _call_name(node: ast.AST) -> str:

@@ -66,6 +66,69 @@ def write_vault_file(
     )
 
 
+def append_vault_file(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: str,
+    markdown_only: bool = False,
+) -> RecordedMutationResult:
+    """Append text to an existing vault file while recording mutation metadata."""
+
+    def append_content(full_path: Path) -> None:
+        with full_path.open("a", encoding="utf-8") as file:
+            file.write(content)
+
+    return mutate_vault_file(
+        vault_path=vault_path,
+        path=path,
+        operation="append",
+        mutator=append_content,
+        require_exists=True,
+        markdown_only=markdown_only,
+    )
+
+
+def replace_vault_file_content(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: str,
+    operation: str,
+    markdown_only: bool = False,
+) -> RecordedMutationResult:
+    """Replace the full contents of an existing vault file and record the mutation."""
+
+    def write_content(full_path: Path) -> None:
+        full_path.write_text(content, encoding="utf-8")
+
+    return mutate_vault_file(
+        vault_path=vault_path,
+        path=path,
+        operation=operation,
+        mutator=write_content,
+        require_exists=True,
+        markdown_only=markdown_only,
+    )
+
+
+def delete_vault_file(
+    *,
+    vault_path: str | Path,
+    path: str,
+    markdown_only: bool = False,
+) -> RecordedMutationResult:
+    """Delete an existing vault file while recording mutation metadata."""
+    return mutate_vault_file(
+        vault_path=vault_path,
+        path=path,
+        operation="delete",
+        mutator=lambda full_path: os.remove(full_path),
+        require_exists=True,
+        markdown_only=markdown_only,
+    )
+
+
 def move_vault_file(
     *,
     vault_path: str | Path,

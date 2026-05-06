@@ -348,6 +348,9 @@ Routing rule:
 - A static CI routing guard should scan likely tool/helper/ingestion/API modules
   and fail if new direct mutation primitives are introduced outside the approved
   migration list.
+- The routing guard should not blanket-allow `file_ops_safe` or
+  `file_ops_unsafe`; only intentional exceptions such as directory creation
+  should be allowlisted by function/call.
 
 Validation target:
 

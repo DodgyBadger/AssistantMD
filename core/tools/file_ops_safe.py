@@ -32,7 +32,7 @@ from core.settings import (
 from core.utils.image_inputs import build_image_tool_payload
 from core.vault_state.file_mutations import (
     VaultMutationRejected,
-    mutate_vault_file,
+    append_vault_file,
     move_vault_file,
     write_vault_file,
 )
@@ -546,16 +546,10 @@ Full documentation:
     def _append_file(cls, path: str, content: str, vault_path: str) -> str:
         """Append to existing file."""
         try:
-            def append_content(full_path: Path) -> None:
-                with full_path.open("a", encoding="utf-8") as file:
-                    file.write(content)
-
-            mutation = mutate_vault_file(
+            mutation = append_vault_file(
                 vault_path=vault_path,
                 path=path,
-                operation="append",
-                mutator=append_content,
-                require_exists=True,
+                content=content,
                 markdown_only=True,
             )
         except VaultMutationRejected as exc:

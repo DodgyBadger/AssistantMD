@@ -15,8 +15,9 @@ from pydantic_ai.tools import Tool
 from core.logger import UnifiedLogger
 from core.vault_state.file_mutations import (
     VaultMutationRejected,
+    delete_vault_file,
     move_vault_file,
-    mutate_vault_file,
+    replace_vault_file_content,
 )
 from .base import BaseTool
 from .utils import validate_and_resolve_path
@@ -217,16 +218,11 @@ Full documentation:
             # Single line replacement
             lines[line_number - 1] = new_content + '\n'
 
-        def write_lines(target_path) -> None:
-            with open(target_path, 'w', encoding='utf-8') as file:
-                file.writelines(lines)
-
-        mutation = mutate_vault_file(
+        mutation = replace_vault_file_content(
             vault_path=vault_path,
             path=path,
+            content="".join(lines),
             operation="edit_line",
-            mutator=write_lines,
-            require_exists=True,
         )
 
         return cls._result(
@@ -277,12 +273,9 @@ Full documentation:
             )
 
         try:
-            mutation = mutate_vault_file(
+            mutation = delete_vault_file(
                 vault_path=vault_path,
                 path=path,
-                operation="delete",
-                mutator=lambda target_path: os.remove(target_path),
-                require_exists=True,
             )
         except VaultMutationRejected as exc:
             if exc.code != "file_not_found":
@@ -354,16 +347,11 @@ Full documentation:
         # Count actual replacements
         replacements = content.count(old_text) if count >= content.count(old_text) else count
 
-        def write_replacement(target_path) -> None:
-            with open(target_path, 'w', encoding='utf-8') as file:
-                file.write(new_content)
-
-        mutation = mutate_vault_file(
+        mutation = replace_vault_file_content(
             vault_path=vault_path,
             path=path,
+            content=new_content,
             operation="replace_text",
-            mutator=write_replacement,
-            require_exists=True,
         )
 
         return cls._result(
@@ -467,16 +455,11 @@ Full documentation:
                 error_type="is_directory",
             )
 
-        def clear_file(target_path) -> None:
-            with open(target_path, 'w', encoding='utf-8') as file:
-                file.write('')
-
-        mutation = mutate_vault_file(
+        mutation = replace_vault_file_content(
             vault_path=vault_path,
             path=path,
+            content="",
             operation="truncate",
-            mutator=clear_file,
-            require_exists=True,
         )
 
         return cls._result(
