@@ -521,6 +521,8 @@ Behavior:
 - If authored code catches its own errors and intentionally finishes
   `completed` or `skipped`, treat that as author intent and do not infer failure
   from file mutations alone.
+- Rollback retry after a task has already been marked rolled back should be a
+  no-op with an explicit `already_rolled_back` result.
 - On task failure or cancellation, restore all recorded task mutations in reverse
   path order.
 - Existing files restore from snapshot.

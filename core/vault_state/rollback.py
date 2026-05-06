@@ -88,6 +88,25 @@ def rollback_task_file_mutations(
         )
         if not rows:
             return _skipped_result(task_id=task_id, status=status, reason="no_mutations")
+        snapshots = session.query(TaskSnapshot).filter(TaskSnapshot.task_id == task_id).all()
+        if snapshots and all(snapshot.status == "rolled_back" for snapshot in snapshots):
+            result = _skipped_result(
+                task_id=task_id,
+                status=status,
+                reason="already_rolled_back",
+                mutation_rows_seen=len(rows),
+            )
+            logger.add_sink("validation").info(
+                "task_rollback_skipped",
+                data={
+                    "event": "task_rollback_skipped",
+                    "task_id": task_id,
+                    "terminal_status": status,
+                    "reason": result.reason,
+                    "mutation_rows_seen": result.mutation_rows_seen,
+                },
+            )
+            return result
 
         logger.add_sink("validation").info(
             "task_rollback_started",
@@ -136,7 +155,7 @@ def rollback_task_file_mutations(
                 )
             refreshed_vaults.add((first.vault_name, str(vault_root)))
 
-        for snapshot in session.query(TaskSnapshot).filter(TaskSnapshot.task_id == task_id).all():
+        for snapshot in snapshots:
             snapshot.status = "rolled_back"
             snapshot.rolled_back_at = now
         session.commit()
@@ -211,13 +230,19 @@ def _vault_root(vault_name: str) -> Path:
     return Path(vault_path)
 
 
-def _skipped_result(*, task_id: str, status: str, reason: str) -> TaskRollbackResult:
+def _skipped_result(
+    *,
+    task_id: str,
+    status: str,
+    reason: str,
+    mutation_rows_seen: int = 0,
+) -> TaskRollbackResult:
     return TaskRollbackResult(
         task_id=task_id,
         status=status,
         skipped=True,
         reason=reason,
-        mutation_rows_seen=0,
+        mutation_rows_seen=mutation_rows_seen,
         paths_restored=0,
         paths_deleted=0,
         vaults_refreshed=0,

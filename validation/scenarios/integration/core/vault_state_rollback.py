@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.vault_state.rollback import rollback_task_file_mutations
 from validation.core.base_scenario import BaseScenario
 
 
@@ -78,6 +79,31 @@ class VaultStateRollbackScenario(BaseScenario):
 
         snapshot_status = self._snapshot_status(task_id)
         self.soft_assert_equal(snapshot_status, "rolled_back", "Task snapshot should be marked rolled back")
+        retry_result = rollback_task_file_mutations(
+            task_id=task_id,
+            terminal_status="failed",
+            reason="validation retry",
+        )
+        self.soft_assert(retry_result.skipped, "Second rollback should be skipped")
+        self.soft_assert_equal(
+            retry_result.reason,
+            "already_rolled_back",
+            "Second rollback should report already rolled back",
+        )
+        self.soft_assert_equal(
+            retry_result.mutation_rows_seen,
+            len(self._mutation_rows(task_id)),
+            "Second rollback should still report retained mutation rows",
+        )
+        self.soft_assert(
+            not (Path(vault) / "notes/created-before-failure.md").exists(),
+            "Second rollback should leave created file deleted",
+        )
+        self.soft_assert_equal(
+            (Path(vault) / "notes/preexisting-append.md").read_text(encoding="utf-8"),
+            "Original append\n",
+            "Second rollback should not change restored append content",
+        )
 
         await self.stop_system()
         self.teardown_scenario()
@@ -92,6 +118,17 @@ class VaultStateRollbackScenario(BaseScenario):
                 (task_id,),
             ).fetchone()
             return row[0] if row is not None else None
+        finally:
+            conn.close()
+
+    def _mutation_rows(self, task_id: str) -> list[tuple]:
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            return conn.execute(
+                "SELECT id FROM task_file_mutations WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
         finally:
             conn.close()
 
