@@ -13,6 +13,11 @@ from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
+from core.vault_state.file_mutations import (
+    VaultMutationRejected,
+    move_vault_file,
+    mutate_vault_file,
+)
 from .base import BaseTool
 from .utils import validate_and_resolve_path
 
@@ -212,9 +217,17 @@ Full documentation:
             # Single line replacement
             lines[line_number - 1] = new_content + '\n'
 
-        # Write back
-        with open(full_path, 'w', encoding='utf-8') as file:
-            file.writelines(lines)
+        def write_lines(target_path) -> None:
+            with open(target_path, 'w', encoding='utf-8') as file:
+                file.writelines(lines)
+
+        mutation = mutate_vault_file(
+            vault_path=vault_path,
+            path=path,
+            operation="edit_line",
+            mutator=write_lines,
+            require_exists=True,
+        )
 
         return cls._result(
             message=f"Successfully edited line {line_number} in '{path}'",
@@ -222,7 +235,11 @@ Full documentation:
             path=path,
             status="completed",
             exists=True,
-            metadata={"line_number": line_number},
+            metadata={
+                "line_number": line_number,
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+            },
         )
 
     @classmethod
@@ -259,13 +276,36 @@ Full documentation:
                 error_type="is_directory",
             )
 
-        os.remove(full_path)
+        try:
+            mutation = mutate_vault_file(
+                vault_path=vault_path,
+                path=path,
+                operation="delete",
+                mutator=lambda target_path: os.remove(target_path),
+                require_exists=True,
+            )
+        except VaultMutationRejected as exc:
+            if exc.code != "file_not_found":
+                raise
+            return cls._result(
+                message=f"Cannot delete '{path}' - file does not exist",
+                operation="delete",
+                path=path,
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
+            )
+
         return cls._result(
             message=f"⚠️ Successfully deleted '{path}' - this action cannot be undone",
             operation="delete",
             path=path,
             status="completed",
             exists=False,
+            metadata={
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+            },
         )
 
     @classmethod
@@ -314,9 +354,17 @@ Full documentation:
         # Count actual replacements
         replacements = content.count(old_text) if count >= content.count(old_text) else count
 
-        # Write back
-        with open(full_path, 'w', encoding='utf-8') as file:
-            file.write(new_content)
+        def write_replacement(target_path) -> None:
+            with open(target_path, 'w', encoding='utf-8') as file:
+                file.write(new_content)
+
+        mutation = mutate_vault_file(
+            vault_path=vault_path,
+            path=path,
+            operation="replace_text",
+            mutator=write_replacement,
+            require_exists=True,
+        )
 
         return cls._result(
             message=f"Successfully replaced {replacements} occurrence(s) in '{path}'",
@@ -324,7 +372,11 @@ Full documentation:
             path=path,
             status="completed",
             exists=True,
-            metadata={"replacement_count": replacements},
+            metadata={
+                "replacement_count": replacements,
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+            },
         )
 
     @classmethod
@@ -344,16 +396,28 @@ Full documentation:
                 error_type="source_not_found",
             )
 
-        # Create destination directory if needed
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        overwrote_destination = os.path.exists(dest_path)
+        try:
+            source_mutation, destination_mutation = move_vault_file(
+                vault_path=vault_path,
+                path=path,
+                destination=destination,
+                overwrite=True,
+            )
+        except VaultMutationRejected as exc:
+            if exc.code != "source_not_found":
+                raise
+            return cls._result(
+                message=f"Cannot move '{path}' - source file does not exist",
+                operation="move_overwrite",
+                path=path,
+                destination=destination,
+                status="not_found",
+                exists=False,
+                error_type="source_not_found",
+            )
 
-        # Check if destination exists
-        overwrite_msg = ""
-        if os.path.exists(dest_path):
-            overwrite_msg = " (⚠️ overwrote existing file)"
-
-        # Move (overwriting if exists)
-        os.replace(src_path, dest_path)
+        overwrite_msg = " (⚠️ overwrote existing file)" if overwrote_destination else ""
 
         return cls._result(
             message=f"Successfully moved '{path}' to '{destination}'{overwrite_msg}",
@@ -362,7 +426,11 @@ Full documentation:
             destination=destination,
             status="completed",
             exists=True,
-            metadata={"overwrote_destination": bool(overwrite_msg)},
+            metadata={
+                "overwrote_destination": bool(overwrite_msg),
+                "task_id": source_mutation.task_id or destination_mutation.task_id,
+                "vault_id": source_mutation.vault_id,
+            },
         )
 
     @classmethod
@@ -399,9 +467,17 @@ Full documentation:
                 error_type="is_directory",
             )
 
-        # Clear file contents
-        with open(full_path, 'w', encoding='utf-8') as file:
-            file.write('')
+        def clear_file(target_path) -> None:
+            with open(target_path, 'w', encoding='utf-8') as file:
+                file.write('')
+
+        mutation = mutate_vault_file(
+            vault_path=vault_path,
+            path=path,
+            operation="truncate",
+            mutator=clear_file,
+            require_exists=True,
+        )
 
         return cls._result(
             message=f"⚠️ Successfully truncated '{path}' - all contents cleared (this action cannot be undone)",
@@ -409,4 +485,8 @@ Full documentation:
             path=path,
             status="completed",
             exists=True,
+            metadata={
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+            },
         )

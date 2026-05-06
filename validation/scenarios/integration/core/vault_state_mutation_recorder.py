@@ -16,6 +16,8 @@ class VaultStateMutationRecorderScenario(BaseScenario):
 
     async def test_scenario(self):
         vault = self.create_vault("VaultStateMutationVault")
+        self.create_file(vault, "notes/preexisting-append.md", "Original line\n")
+        self.create_file(vault, "notes/preexisting-delete.md", "Delete original\n")
         self.create_file(vault, "AssistantMD/Authoring/write_probe.md", WRITE_PROBE_WORKFLOW)
 
         await self.start_system()
@@ -58,8 +60,27 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             },
         )
 
-        row = self._mutation_row(task_id)
-        self.soft_assert(row is not None, "Mutation row should be persisted")
+        rows = self._mutation_rows(task_id)
+        self.soft_assert(rows, "Mutation rows should be persisted")
+        operations_by_path = {(row["operation"], row["path"]) for row in rows}
+        expected_operations = {
+            ("write", "notes/created-by-workflow.md"),
+            ("append", "notes/preexisting-append.md"),
+            ("edit_line", "notes/edit-target.md"),
+            ("replace_text", "notes/replace-target.md"),
+            ("truncate", "notes/truncate-target.md"),
+            ("delete", "notes/preexisting-delete.md"),
+            ("move", "notes/move-source.md"),
+            ("move", "notes/move-destination.md"),
+            ("move", "notes/overwrite-source.md"),
+            ("move", "notes/overwrite-destination.md"),
+        }
+        self.soft_assert_equal(
+            expected_operations - operations_by_path,
+            set(),
+            "Mutation rows should cover routed safe and unsafe operations",
+        )
+        row = next((item for item in rows if item["path"] == "notes/created-by-workflow.md"), None)
         if row is not None:
             self.soft_assert_equal(row["task_id"], task_id, "Mutation row task_id should match event")
             self.soft_assert_equal(row["task_kind"], "workflow", "Mutation row should persist task kind")
@@ -77,6 +98,15 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 None,
                 "Create-file snapshot should record absence without a file snapshot ref",
             )
+
+        append_row = next((item for item in rows if item["operation"] == "append"), None)
+        if append_row is not None:
+            self.soft_assert_equal(append_row["before_exists"], 1, "Append should capture existing before state")
+            self.soft_assert(append_row["snapshot_ref"], "Append should retain pre-mutation snapshot ref")
+        delete_row = next((item for item in rows if item["operation"] == "delete"), None)
+        if delete_row is not None:
+            self.soft_assert_equal(delete_row["after_exists"], 0, "Delete should record missing after state")
+            self.soft_assert(delete_row["snapshot_ref"], "Delete should retain pre-mutation snapshot ref")
 
         response = self.call_api(
             f"/api/vaults/{vault.name}/task-mutations",
@@ -97,23 +127,22 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 f"{vault.name}/write_probe",
                 "API should expose task label",
             )
-            self.soft_assert_equal(api_group.get("mutation_count"), 1, "API should group one mutation")
+            self.soft_assert_equal(api_group.get("mutation_count"), len(rows), "API should group routed mutations")
             mutations = api_group.get("mutations", [])
-            self.soft_assert_equal(len(mutations), 1, "API group should include mutation row")
+            self.soft_assert_equal(len(mutations), len(rows), "API group should include mutation rows")
             if mutations:
+                api_operations = {
+                    (mutation.get("operation"), mutation.get("path"))
+                    for mutation in mutations
+                }
                 self.soft_assert_equal(
-                    mutations[0].get("path"),
-                    "notes/created-by-workflow.md",
-                    "API mutation path should match",
-                )
-                self.soft_assert_equal(
-                    mutations[0].get("operation"),
-                    "write",
-                    "API mutation operation should match",
+                    expected_operations - api_operations,
+                    set(),
+                    "API mutations should include routed operations",
                 )
                 self.soft_assert(
-                    mutations[0].get("event_sequence") is not None,
-                    "API mutation should include event sequence",
+                    all(mutation.get("event_sequence") is not None for mutation in mutations),
+                    "API mutations should include event sequences",
                 )
 
         self._insert_chat_session(vault_name=vault.name)
@@ -166,12 +195,12 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         self.teardown_scenario()
         self.assert_no_failures()
 
-    def _mutation_row(self, task_id: str) -> dict | None:
+    def _mutation_rows(self, task_id: str) -> list[dict]:
         db_path = self._get_system_controller()._system_root / "vault_state.db"
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         try:
-            row = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT task_id, task_kind, task_source, task_scope, task_label,
                        vault_id, vault_name, path, operation,
@@ -179,10 +208,11 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                        after_exists, after_hash, snapshot_ref, expires_at
                 FROM task_file_mutations
                 WHERE task_id = ?
+                ORDER BY id ASC
                 """,
                 (task_id,),
-            ).fetchone()
-            return dict(row) if row is not None else None
+            ).fetchall()
+            return [dict(row) for row in rows]
         finally:
             conn.close()
 
@@ -304,6 +334,75 @@ await file_ops_safe(
     operation="write",
     path="notes/created-by-workflow.md",
     content="Created by workflow\\n",
+)
+await file_ops_safe(
+    operation="append",
+    path="notes/preexisting-append.md",
+    content="Second line\\n",
+)
+await file_ops_safe(
+    operation="write",
+    path="notes/edit-target.md",
+    content="alpha\\nbeta\\n",
+)
+await file_ops_unsafe(
+    operation="edit_line",
+    path="notes/edit-target.md",
+    line_number=2,
+    old_content="beta",
+    new_content="gamma",
+)
+await file_ops_safe(
+    operation="write",
+    path="notes/replace-target.md",
+    content="before text\\n",
+)
+await file_ops_unsafe(
+    operation="replace_text",
+    path="notes/replace-target.md",
+    old_content="before",
+    new_content="after",
+    count=1,
+)
+await file_ops_safe(
+    operation="write",
+    path="notes/truncate-target.md",
+    content="remove me\\n",
+)
+await file_ops_unsafe(
+    operation="truncate",
+    path="notes/truncate-target.md",
+    confirm_path="notes/truncate-target.md",
+)
+await file_ops_unsafe(
+    operation="delete",
+    path="notes/preexisting-delete.md",
+    confirm_path="notes/preexisting-delete.md",
+)
+await file_ops_safe(
+    operation="write",
+    path="notes/move-source.md",
+    content="move me\\n",
+)
+await file_ops_safe(
+    operation="move",
+    path="notes/move-source.md",
+    destination="notes/move-destination.md",
+)
+await file_ops_safe(
+    operation="write",
+    path="notes/overwrite-source.md",
+    content="overwrite source\\n",
+)
+await file_ops_safe(
+    operation="write",
+    path="notes/overwrite-destination.md",
+    content="overwrite destination\\n",
+)
+await file_ops_unsafe(
+    operation="move_overwrite",
+    path="notes/overwrite-source.md",
+    destination="notes/overwrite-destination.md",
 )
 await finish(status="completed", reason="write-probe-done")
 ```

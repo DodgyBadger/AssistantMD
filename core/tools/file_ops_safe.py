@@ -6,7 +6,6 @@ Provides secure file management capabilities within vault boundaries.
 
 import os
 import glob
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,7 +30,12 @@ from core.settings import (
     get_file_search_timeout_seconds,
 )
 from core.utils.image_inputs import build_image_tool_payload
-from core.vault_state.file_mutations import VaultMutationRejected, write_vault_file
+from core.vault_state.file_mutations import (
+    VaultMutationRejected,
+    mutate_vault_file,
+    move_vault_file,
+    write_vault_file,
+)
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
@@ -541,9 +545,22 @@ Full documentation:
     @classmethod
     def _append_file(cls, path: str, content: str, vault_path: str) -> str:
         """Append to existing file."""
-        full_path = validate_and_resolve_path(path, vault_path)
+        try:
+            def append_content(full_path: Path) -> None:
+                with full_path.open("a", encoding="utf-8") as file:
+                    file.write(content)
 
-        if not os.path.exists(full_path):
+            mutation = mutate_vault_file(
+                vault_path=vault_path,
+                path=path,
+                operation="append",
+                mutator=append_content,
+                require_exists=True,
+                markdown_only=True,
+            )
+        except VaultMutationRejected as exc:
+            if exc.code != "file_not_found":
+                raise
             return cls._result(
                 message=(
                     f"Cannot append to '{path}' - file does not exist. "
@@ -556,35 +573,43 @@ Full documentation:
                 error_type="file_not_found",
             )
 
-        with open(full_path, 'a', encoding='utf-8') as file:
-            file.write(content)
         return cls._result(
             message=f"Successfully appended {len(content)} characters to '{path}'",
             operation="append",
             path=path,
             status="completed",
             exists=True,
-            metadata={"content_chars": len(content)},
+            metadata={
+                "content_chars": len(content),
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+            },
         )
 
     @classmethod
     def _move_file(cls, path: str, destination: str, vault_path: str) -> str:
         """Move file to new location."""
-        src_path = validate_and_resolve_path(path, vault_path)
-        dest_path = validate_and_resolve_path(destination, vault_path)
-
-        if not os.path.exists(src_path):
-            return cls._result(
-                message=f"Cannot move '{path}' - source file does not exist",
-                operation="move",
+        try:
+            source_mutation, destination_mutation = move_vault_file(
+                vault_path=vault_path,
                 path=path,
                 destination=destination,
-                status="not_found",
-                exists=False,
-                error_type="source_not_found",
+                overwrite=False,
+                markdown_only=True,
             )
-
-        if os.path.exists(dest_path):
+        except VaultMutationRejected as exc:
+            if exc.code == "source_not_found":
+                return cls._result(
+                    message=f"Cannot move '{path}' - source file does not exist",
+                    operation="move",
+                    path=path,
+                    destination=destination,
+                    status="not_found",
+                    exists=False,
+                    error_type="source_not_found",
+                )
+            if exc.code != "destination_exists":
+                raise
             return cls._result(
                 message=(
                     f"Cannot move '{path}' to '{destination}' - destination already exists. "
@@ -598,8 +623,6 @@ Full documentation:
                 error_type="destination_exists",
             )
 
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        shutil.move(src_path, dest_path)
         return cls._result(
             message=f"Successfully moved '{path}' to '{destination}'",
             operation="move",
@@ -607,6 +630,10 @@ Full documentation:
             destination=destination,
             status="completed",
             exists=True,
+            metadata={
+                "task_id": source_mutation.task_id or destination_mutation.task_id,
+                "vault_id": source_mutation.vault_id,
+            },
         )
 
     @classmethod

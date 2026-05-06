@@ -45,8 +45,8 @@ def ensure_task_file_snapshot(
             TaskFileMutation.task_id == task_id,
             TaskFileMutation.vault_id == vault_id,
             TaskFileMutation.path == relative_path,
-            TaskFileMutation.snapshot_ref.isnot(None),
         )
+        .order_by(TaskFileMutation.id.asc())
         .first()
     )
     if existing is not None:

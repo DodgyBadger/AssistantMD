@@ -397,6 +397,37 @@ Feedback checkpoint:
   or workflow run change?" before wiring additional mutators through the shared
   mutation API.
 
+## Slice 3B: Mutation Coverage Expansion
+
+Move the remaining file tool mutations behind `core.vault_state.file_mutations`
+so Vault Activity is not limited to create/write operations.
+
+Behavior:
+
+- Route `file_ops_safe(append)` through the shared mutation recorder.
+- Route `file_ops_safe(move)` through the shared mutation recorder as two file
+  mutation rows: source path absent after move, destination path present after
+  move.
+- Route `file_ops_unsafe(edit_line)`, `replace_text`, `truncate`, `delete`, and
+  `move_overwrite` through the shared mutation recorder.
+- Keep directory creation out of task file mutation activity for now unless a
+  later rollback design needs directory-level records.
+- For overwrite moves, record both source and destination paths so later rollback
+  design can reason about both affected files.
+
+Validation target:
+
+- Extend the mutation recorder scenario so one workflow performs safe append,
+  safe move, unsafe edit, replace, truncate, delete, and move-overwrite.
+- Assert all routed operations appear in the task mutation API group with event
+  sequences and pre-mutation snapshot references where applicable.
+
+Feedback checkpoint:
+
+- Review whether move rows should gain an explicit `destination_path` field
+  before rollback APIs are added, or whether source/destination file rows are
+  sufficient.
+
 ## Slice 4: Snapshot Capture
 
 Create pre-mutation snapshots for supported mutations.

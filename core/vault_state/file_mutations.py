@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import os
 from pathlib import Path
 
 from core.logger import UnifiedLogger
@@ -53,6 +55,156 @@ def write_vault_file(
     markdown_only: bool = False,
 ) -> RecordedMutationResult:
     """Create or overwrite a vault file while recording task mutation metadata."""
+    return mutate_vault_file(
+        vault_path=vault_path,
+        path=path,
+        operation="write",
+        mutator=lambda full_path: full_path.write_text(content, encoding="utf-8"),
+        fail_if_exists=fail_if_exists,
+        markdown_only=markdown_only,
+        create_parent=True,
+    )
+
+
+def move_vault_file(
+    *,
+    vault_path: str | Path,
+    path: str,
+    destination: str,
+    overwrite: bool = False,
+    markdown_only: bool = False,
+) -> tuple[RecordedMutationResult, RecordedMutationResult]:
+    """Move a vault file while recording source and destination file mutations."""
+    vault_root = Path(vault_path).resolve()
+    source_relative = normalize_vault_relative_path(path)
+    destination_relative = normalize_vault_relative_path(destination)
+    source_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=source_relative,
+        markdown_only=markdown_only,
+    )
+    destination_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=destination_relative,
+        markdown_only=markdown_only,
+    )
+    if not source_path.exists():
+        raise VaultMutationRejected(
+            "source_not_found",
+            f"Cannot move '{source_relative}' - source file does not exist.",
+        )
+    if destination_path.exists() and not overwrite:
+        raise VaultMutationRejected(
+            "destination_exists",
+            f"Cannot move '{source_relative}' - destination file already exists.",
+        )
+
+    source_before_hash = hash_file_bytes(source_path, length=None)
+    destination_before_exists = destination_path.exists()
+    destination_before_hash = (
+        hash_file_bytes(destination_path, length=None) if destination_before_exists else None
+    )
+    identity = resolve_or_create_vault_identity(vault_root)
+    vault_name = vault_root.name
+    task = get_current_execution_task()
+    service = VaultStateService()
+    created_at = datetime.now(UTC)
+    expires_at = compute_snapshot_expiration(created_at)
+    source_snapshot_ref = None
+    destination_snapshot_ref = None
+
+    if task is not None:
+        with service.SessionFactory() as session:
+            source_snapshot = ensure_task_file_snapshot(
+                session=session,
+                task_id=task.task_id,
+                vault_id=identity.vault_id,
+                vault_name=vault_name,
+                vault_root=vault_root,
+                relative_path=source_relative,
+                before_exists=True,
+                source_path=source_path,
+                created_at=created_at,
+                expires_at=expires_at,
+            )
+            source_snapshot_ref = source_snapshot.snapshot_ref
+            destination_snapshot = ensure_task_file_snapshot(
+                session=session,
+                task_id=task.task_id,
+                vault_id=identity.vault_id,
+                vault_name=vault_name,
+                vault_root=vault_root,
+                relative_path=destination_relative,
+                before_exists=destination_before_exists,
+                source_path=destination_path,
+                created_at=created_at,
+                expires_at=expires_at,
+            )
+            destination_snapshot_ref = destination_snapshot.snapshot_ref
+            session.commit()
+
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source_path, destination_path)
+
+    destination_after_hash = hash_file_bytes(destination_path, length=None)
+    refresh = service.refresh_vault(vault_root, vault_name=vault_name)
+    event_sequence = refresh.latest_sequence
+
+    source_result = RecordedMutationResult(
+        vault_id=identity.vault_id,
+        vault_name=vault_name,
+        path=source_relative,
+        operation="move",
+        before_exists=True,
+        before_hash=source_before_hash,
+        after_exists=source_path.exists(),
+        after_hash=hash_file_bytes(source_path, length=None) if source_path.exists() else None,
+        task_id=task.task_id if task is not None else None,
+        event_sequence=event_sequence,
+        snapshot_ref=source_snapshot_ref,
+    )
+    destination_result = RecordedMutationResult(
+        vault_id=identity.vault_id,
+        vault_name=vault_name,
+        path=destination_relative,
+        operation="move",
+        before_exists=destination_before_exists,
+        before_hash=destination_before_hash,
+        after_exists=True,
+        after_hash=destination_after_hash,
+        task_id=task.task_id if task is not None else None,
+        event_sequence=event_sequence,
+        snapshot_ref=destination_snapshot_ref,
+    )
+    _persist_or_log_mutation(
+        service=service,
+        task=task,
+        result=source_result,
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    _persist_or_log_mutation(
+        service=service,
+        task=task,
+        result=destination_result,
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    return source_result, destination_result
+
+
+def mutate_vault_file(
+    *,
+    vault_path: str | Path,
+    path: str,
+    operation: str,
+    mutator: Callable[[Path], object],
+    require_exists: bool = False,
+    fail_if_exists: bool = False,
+    markdown_only: bool = False,
+    create_parent: bool = False,
+) -> RecordedMutationResult:
+    """Mutate one vault file while recording task-scoped mutation metadata."""
     vault_root = Path(vault_path).resolve()
     relative_path = normalize_vault_relative_path(path)
     full_path = resolve_vault_relative_path(
@@ -61,39 +213,94 @@ def write_vault_file(
         markdown_only=markdown_only,
     )
     before_exists = full_path.exists()
+    if require_exists and not before_exists:
+        raise VaultMutationRejected(
+            "file_not_found",
+            f"Cannot mutate '{relative_path}' - file does not exist.",
+        )
     if before_exists and fail_if_exists:
         raise VaultMutationRejected(
             "file_exists",
-            f"Cannot write to '{relative_path}' - file already exists.",
+            f"Cannot mutate '{relative_path}' - file already exists.",
         )
     before_hash = hash_file_bytes(full_path, length=None) if before_exists else None
-
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    full_path.write_text(content, encoding="utf-8")
-
-    after_exists = full_path.exists()
-    after_hash = hash_file_bytes(full_path, length=None) if after_exists else None
     identity = resolve_or_create_vault_identity(vault_root)
     vault_name = vault_root.name
     task = get_current_execution_task()
-
     service = VaultStateService()
+    snapshot_ref = None
+    created_at = datetime.now(UTC)
+    expires_at = compute_snapshot_expiration(created_at)
+
+    if task is not None:
+        with service.SessionFactory() as session:
+            snapshot = ensure_task_file_snapshot(
+                session=session,
+                task_id=task.task_id,
+                vault_id=identity.vault_id,
+                vault_name=vault_name,
+                vault_root=vault_root,
+                relative_path=relative_path,
+                before_exists=before_exists,
+                source_path=full_path,
+                created_at=created_at,
+                expires_at=expires_at,
+            )
+            snapshot_ref = snapshot.snapshot_ref
+            session.commit()
+
+    if create_parent:
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+    mutator(full_path)
+
+    after_exists = full_path.exists()
+    after_hash = hash_file_bytes(full_path, length=None) if after_exists else None
+
     refresh = service.refresh_vault(vault_root, vault_name=vault_name)
     event_sequence = refresh.latest_sequence
     result = RecordedMutationResult(
         vault_id=identity.vault_id,
         vault_name=vault_name,
         path=relative_path,
-        operation="write",
+        operation=operation,
         before_exists=before_exists,
         before_hash=before_hash,
         after_exists=after_exists,
         after_hash=after_hash,
         task_id=task.task_id if task is not None else None,
         event_sequence=event_sequence,
-        snapshot_ref=None,
+        snapshot_ref=snapshot_ref,
     )
 
+    if task is None:
+        _persist_or_log_mutation(
+            service=service,
+            task=task,
+            result=result,
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        return result
+
+    _persist_or_log_mutation(
+        service=service,
+        task=task,
+        result=result,
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    return result
+
+
+def _persist_or_log_mutation(
+    *,
+    service: VaultStateService,
+    task,
+    result: RecordedMutationResult,
+    created_at: datetime,
+    expires_at: datetime | None,
+) -> None:
+    """Persist a mutation row when task context exists, otherwise log it as untracked."""
     if task is None:
         logger.add_sink("validation").warning(
             "vault_state_mutation_untracked",
@@ -106,36 +313,9 @@ def write_vault_file(
                 "reason": "missing_execution_task_context",
             },
         )
-        return result
+        return
 
-    created_at = datetime.now(UTC)
-    expires_at = compute_snapshot_expiration(created_at)
     with service.SessionFactory() as session:
-        snapshot = ensure_task_file_snapshot(
-            session=session,
-            task_id=task.task_id,
-            vault_id=result.vault_id,
-            vault_name=result.vault_name,
-            vault_root=vault_root,
-            relative_path=result.path,
-            before_exists=result.before_exists,
-            source_path=full_path,
-            created_at=created_at,
-            expires_at=expires_at,
-        )
-        result = RecordedMutationResult(
-            vault_id=result.vault_id,
-            vault_name=result.vault_name,
-            path=result.path,
-            operation=result.operation,
-            before_exists=result.before_exists,
-            before_hash=result.before_hash,
-            after_exists=result.after_exists,
-            after_hash=result.after_hash,
-            task_id=result.task_id,
-            event_sequence=result.event_sequence,
-            snapshot_ref=snapshot.snapshot_ref,
-        )
         session.add(
             TaskFileMutation(
                 task_id=task.task_id,
@@ -177,8 +357,7 @@ def write_vault_file(
             "before_hash": result.before_hash,
             "after_hash": result.after_hash,
             "event_sequence": result.event_sequence,
-            "expires_at": expires_at.isoformat(),
+            "expires_at": expires_at.isoformat() if expires_at else None,
             "snapshot_ref": result.snapshot_ref,
         },
     )
-    return result
