@@ -33,6 +33,7 @@ Available tool docs:
 - `code_execution`
 - `code_execution_piston`
 - `delegate`
+- `diff_file`
 - `file_ops_safe`
 - `file_ops_unsafe`
 - `internal_api`

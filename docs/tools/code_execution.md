@@ -90,6 +90,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### Direct Tool Calls
 
 - call tools by their configured names, for example `await file_ops_safe(operation="read", path="notes/example.md")`
+- use `await diff_file(path="notes/example.md")` to compare current file content with the latest retained previous snapshot
 - `code_execution` itself is excluded to prevent recursive self-invocation
 - direct tool results expose `return_value`, `metadata`, `content`, and `items`
 - use `result.return_value` for the canonical tool result; `content` is reserved for Pydantic AI side-loaded content

@@ -660,6 +660,19 @@ Possible later direction:
 Use vault manifest and optional snapshots to support "what changed since this
 workflow processed the file?"
 
+Initial composable tool:
+
+- Add `diff_file(path=...)` as a settings-backed tool available to chat,
+  authored workflows, and chat-side `code_execution`.
+- Public contract takes only a vault-relative `path`.
+- It compares the current file against the latest retained pre-mutation
+  snapshot for that path.
+- It returns `available=false` with reason `previous_snapshot_unavailable` when
+  no retained snapshot can be resolved, including guidance to increase
+  `task_snapshot_retention_days`.
+- Do not expose arbitrary selectors or `last_processed` coupling in the first
+  slice.
+
 Behavior:
 
 - Extend processed-file state to store last processed hash per workflow/path.
