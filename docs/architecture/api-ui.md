@@ -15,6 +15,7 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - FastAPI lifespan startup/shutdown around runtime bootstrap.
 - REST endpoints for chat, workflows, config, ingestion, and metadata.
 - REST endpoints for process-local execution task visibility and cancellation.
+- REST endpoints for vault mutation activity and manual vault-state cleanup.
 - Service-layer orchestration for runtime operations.
 - Static single-page UI hosting.
 
@@ -32,6 +33,8 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - Ingestion and workflow manual runs are surfaced via API services.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
+- `/api/vaults/{vault_name}/task-mutations` exposes grouped task file mutation activity for the Workflows tab.
+- `/api/vault-state/cleanup` deletes expired vault-state mutation rows and retained task snapshot artifacts.
 - `/api/chat/sessions/{session_id}/active-task` and `/api/chat/sessions/{session_id}/cancel` expose chat-session-scoped task lookup and cancellation.
 - `/api/chat/sessions/{session_id}/compaction-status` and `/api/chat/sessions/{session_id}/compact` expose chat history compaction status and execution.
 - Interactive API docs are available at `/docs` (Swagger UI) and `/openapi.json` (OpenAPI schema).

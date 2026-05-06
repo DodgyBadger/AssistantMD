@@ -18,6 +18,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Create and register global `RuntimeContext`.
 - Manage scheduler lifecycle and workflow reload delegation.
 - Track process-local execution tasks for chat, workflows, and history compaction.
+- Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
 - Track reload metadata (`last_config_reload`).
 - Provide runtime summary/health context to API surfaces.
@@ -92,7 +93,7 @@ Reload behavior:
 
 Runtime owns a process-local `TaskCoordinator` and `WorkflowGovernor`.
 
-`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. See [Execution Tasks](execution-tasks.md) for the task contract.
+`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
 `WorkflowGovernor` is the policy layer for workflow runs. It serializes workflow execution per vault, registers workflow tasks, applies the configured workflow task timeout, and logs workflow lifecycle events.
 

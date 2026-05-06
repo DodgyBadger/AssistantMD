@@ -61,4 +61,6 @@ agent behavior toward Pydantic AI's composable capability model.
 
 `workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API and scheduled runs.
 
+`diff_file` compares a vault file's current raw contents with the latest retained pre-mutation snapshot recorded by vault state. It is a normal settings-backed tool, so chat can call it directly and Monty-authored workflows or code_execution snippets can call it as a direct tool function.
+
 `chat_history_compact` checks or compacts the active chat session after explicit user approval. Compaction rewrites canonical provider-native history to a summary plus recent raw messages and records a process-local history-compaction task.

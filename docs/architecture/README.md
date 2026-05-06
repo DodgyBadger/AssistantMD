@@ -8,12 +8,12 @@ AssistantMD is a single-user, markdown-first agent system. This page is the prim
 FastAPI app (main.py, api/)
     ↓ lifespan bootstrap
 Runtime context (core/runtime/)
-    ↓ scheduler + authoring loader + ingestion + execution tasks + shared services
+    ↓ scheduler + authoring loader + ingestion + execution tasks + vault state + shared services
 Chat execution (core/chat/) + Authoring execution (core/authoring/)
     ↓ Monty sandbox + tools + models
 Memory/history broker (core/memory/) + Chat store (core/chat/)
     ↓
-Vault files (data/) + system state/databases (system/)
+Vault files (data/) + system state/databases/snapshots (system/)
 ```
 
 The web UI (`static/`) talks to API endpoints, and those endpoints route into the same runtime context and model/tool stack used by scheduled workflows.
@@ -34,6 +34,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Runtime](runtime.md) | Bootstrap, global context, path roots, config reload | `core/runtime/` |
 | [API + UI](api-ui.md) | Endpoints, static UI, exception and lifecycle wiring | `api/`, `main.py`, `static/` |
 | [Execution Tasks](execution-tasks.md) | Process-local task snapshots, cancellation, and task lifecycle events | `core/runtime/execution_tasks.py`, `core/runtime/workflow_governor.py` |
+| [Vault State](vault-state.md) | Vault manifest, change feed, task mutation audit, snapshots, rollback, and diff support | `core/vault_state/`, `core/tools/diff_file.py` |
 | [Authoring](authoring-engine.md) | Discover/parse/execute workflows and context templates in the Monty sandbox, including script helpers | `core/authoring/` |
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
 | [Chat Sessions](chat-sessions.md) | SQLite session store and markdown transcript rendering | `core/chat/` |

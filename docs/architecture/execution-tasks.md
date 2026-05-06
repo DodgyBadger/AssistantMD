@@ -1,6 +1,6 @@
 # Execution Tasks Subsystem
 
-Execution tasks are process-local runtime records for long-running or cancellable work. They provide API/UI visibility, cancellation handles, and validation events for chat execution, workflow execution, and chat history compaction.
+Execution tasks are process-local runtime records for long-running or cancellable work. They provide API/UI visibility, cancellation handles, validation events, and task identity for vault mutation tracking across chat execution, workflow execution, code_execution, and chat history compaction.
 
 ## Primary code
 
@@ -14,6 +14,8 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 
 `TaskCoordinator` stores active and recently terminal tasks in memory. It is part of `RuntimeContext` and is not a persistent job store.
 Runtime bootstrap may attach terminal observers to the coordinator. Observers run after terminal lifecycle events and are used for process-local follow-up work such as vault mutation rollback.
+
+Vault-state mutation rows store the task id, kind, source, scope, and label from the active execution task. Chat mutations are grouped by chat-session scope for user-facing activity views; workflow mutations remain grouped by workflow task run.
 
 Each task snapshot includes:
 
