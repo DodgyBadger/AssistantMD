@@ -509,6 +509,16 @@ Add rollback execution for failed/cancelled rollback-enabled tasks.
 
 Behavior:
 
+- Rollback is driven by execution task terminal state, not by script-authored
+  cleanup code.
+- Workflow execution must mirror returned workflow statuses onto the execution
+  task record before rollback hooks run:
+  - `completed` and `skipped` are successful terminal states.
+  - `failed`, `cancelled`, and `timed_out` are rollback-triggering terminal
+    states.
+- If authored code catches its own errors and intentionally finishes
+  `completed` or `skipped`, treat that as author intent and do not infer failure
+  from file mutations alone.
 - On task failure or cancellation, restore all recorded task mutations in reverse
   path order.
 - Existing files restore from snapshot.
@@ -530,8 +540,11 @@ Integration point:
 
 Validation target:
 
+- Assert workflow `finish(status="skipped")` produces a skipped execution task
+  rather than a completed task.
 - Add workflow scenario that writes a file, then fails.
-- Assert the file system returns to the pre-task state.
+- Assert created, appended, deleted, and moved files return to the pre-task
+  state.
 - Assert activity log and validation events show rollback.
 - Add cancellation case if deterministic cancellation can be kept fast.
 

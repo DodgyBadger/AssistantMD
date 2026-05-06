@@ -25,6 +25,11 @@ class ApiEndpointsScenario(BaseScenario):
             "AssistantMD/Authoring/status_probe.md",
             STATUS_PROBE_WORKFLOW,
         )
+        self.create_file(
+            vault,
+            "AssistantMD/Authoring/skipped_probe.md",
+            SKIPPED_PROBE_WORKFLOW,
+        )
 
         # Health prior to runtime bootstrap should indicate startup state
         pre_health = self.call_api("/api/health")
@@ -42,7 +47,7 @@ class ApiEndpointsScenario(BaseScenario):
         assert status_response.status_code == 200, "Status endpoint succeeds"
         status_payload = status_response.json()
         assert status_payload.get("total_vaults") == 1, "One vault discovered"
-        assert status_payload.get("total_workflows") == 1, "Seeded workflow counted"
+        assert status_payload.get("total_workflows") == 2, "Seeded workflows counted"
 
         activity = self.call_api("/api/system/activity-log")
         assert activity.status_code == 200, "Activity log fetch succeeds"
@@ -203,6 +208,30 @@ class ApiEndpointsScenario(BaseScenario):
             "Cancelling a completed task should not report an effective cancellation"
         )
 
+        skipped_execute = self.call_api(
+            "/api/workflows/execute",
+            method="POST",
+            data={"global_id": f"{vault.name}/skipped_probe"},
+        )
+        assert skipped_execute.status_code == 200, "Skipped workflow execution succeeds"
+        skipped_payload = skipped_execute.json()
+        assert skipped_payload.get("status") == "skipped", "Workflow result should report skipped"
+
+        skipped_tasks_response = self.call_api("/api/tasks")
+        assert skipped_tasks_response.status_code == 200, "Execution task listing succeeds after skipped workflow"
+        skipped_workflow_tasks = [
+            task
+            for task in skipped_tasks_response.json().get("tasks", [])
+            if task.get("kind") == "workflow"
+            and task.get("metadata", {}).get("workflow_id") == f"{vault.name}/skipped_probe"
+        ]
+        assert skipped_workflow_tasks, "Skipped workflow should create a task snapshot"
+        skipped_task = skipped_workflow_tasks[-1]
+        assert skipped_task.get("status") == "skipped", "Skipped workflow task should be skipped"
+        assert skipped_task.get("terminal_reason") == "status-probe-skipped", (
+            "Skipped workflow task should retain finish reason"
+        )
+
         missing_active_chat_task = self.call_api(
             "/api/chat/sessions/not-active/active-task"
         )
@@ -300,5 +329,19 @@ description: Validation helper workflow
 
 ```python
 await finish(status="completed", reason="status-probe")
+```
+"""
+
+
+SKIPPED_PROBE_WORKFLOW = """---
+run_type: workflow
+enabled: false
+description: Validation skipped workflow
+---
+
+## Run
+
+```python
+await finish(status="skipped", reason="status-probe-skipped")
 ```
 """

@@ -507,6 +507,19 @@ def get_vault_state_enabled() -> bool:
     return True
 
 
+def get_task_rollback_enabled() -> bool:
+    """Return whether task failure/cancellation rollback behavior is enabled."""
+    entry = get_general_settings().get("task_rollback_enabled")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return True
+
+
 def get_vault_state_excluded_patterns() -> list[str]:
     """Return gitignore-style vault-relative patterns excluded from vault state."""
     entry = get_general_settings().get("vault_state_excluded_patterns")
