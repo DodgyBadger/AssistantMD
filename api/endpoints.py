@@ -27,6 +27,7 @@ from .models import (
     VaultRescanRequest,
     VaultRescanResponse,
     VaultTaskMutationsResponse,
+    VaultStateCleanupResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
     ExecutionTaskCancelResponse,
@@ -102,6 +103,7 @@ from .services import (
     list_execution_tasks,
     list_workflow_tasks,
     get_vault_task_mutations,
+    cleanup_vault_state,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -624,6 +626,15 @@ async def purge_expired_cache_endpoint():
     """Manually delete expired cache artifacts."""
     try:
         return purge_expired_cache()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/vault-state/cleanup", response_model=VaultStateCleanupResponse)
+async def cleanup_vault_state_endpoint():
+    """Manually delete expired vault-state task safety artifacts."""
+    try:
+        return cleanup_vault_state()
     except Exception as e:
         return create_error_response(e)
 

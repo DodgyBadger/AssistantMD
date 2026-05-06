@@ -1429,6 +1429,20 @@
                         </div>
                         <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                             <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Clean Up Vault State</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Deletes expired vault-state task mutation rows and retained task snapshot files. Vault files are preserved.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <button id="cleanup-vault-state" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                    Clean Up Vault State
+                                </button>
+                                <div id="cleanup-vault-state-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
+                        </div>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
                                 <div class="text-sm font-medium text-txt-primary">Purge Chat Sessions</div>
                                 <div class="text-xs text-txt-secondary">
                                     Remove old chat sessions and their transcript files from the selected vault.

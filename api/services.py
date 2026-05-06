@@ -57,6 +57,7 @@ from core.runtime.execution_tasks import (
     workflow_vault_scope,
 )
 from core.vault_state.service import VaultStateService
+from core.vault_state.cleanup import cleanup_expired_vault_state
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -95,6 +96,7 @@ from .models import (
     VaultTaskMutationGroupInfo,
     VaultTaskMutationInfo,
     VaultTaskMutationsResponse,
+    VaultStateCleanupResponse,
 )
 from .exceptions import APIException, SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
@@ -231,6 +233,25 @@ def get_vault_task_mutations(
             _vault_task_mutation_group_info(group)
             for group in groups
         ],
+    )
+
+
+def cleanup_vault_state() -> VaultStateCleanupResponse:
+    """Manually delete expired vault-state safety artifacts."""
+    result = cleanup_expired_vault_state()
+    return VaultStateCleanupResponse(
+        success=True,
+        expired_mutation_rows_deleted=result.expired_mutation_rows_deleted,
+        expired_snapshot_rows_deleted=result.expired_snapshot_rows_deleted,
+        snapshot_files_deleted=result.snapshot_files_deleted,
+        snapshot_dirs_deleted=result.snapshot_dirs_deleted,
+        message=(
+            "Vault-state cleanup completed: "
+            f"{result.expired_mutation_rows_deleted} mutation row(s), "
+            f"{result.expired_snapshot_rows_deleted} snapshot row(s), "
+            f"{result.snapshot_files_deleted} snapshot file(s), "
+            f"{result.snapshot_dirs_deleted} snapshot directory/directories deleted."
+        ),
     )
 
 

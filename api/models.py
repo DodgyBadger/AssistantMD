@@ -186,6 +186,17 @@ class VaultTaskMutationsResponse(BaseModel):
     )
 
 
+class VaultStateCleanupResponse(BaseModel):
+    """Response for manual vault-state cleanup."""
+
+    success: bool = Field(..., description="Whether cleanup completed")
+    expired_mutation_rows_deleted: int = Field(..., description="Deleted expired mutation rows")
+    expired_snapshot_rows_deleted: int = Field(..., description="Deleted expired snapshot rows")
+    snapshot_files_deleted: int = Field(..., description="Deleted snapshot files")
+    snapshot_dirs_deleted: int = Field(..., description="Deleted snapshot directories")
+    message: str = Field(..., description="Human-readable cleanup summary")
+
+
 class ExecuteWorkflowResponse(BaseModel):
     """Response model for manual workflow execution."""
     success: bool = Field(..., description="Whether execution succeeded")

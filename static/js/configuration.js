@@ -19,6 +19,7 @@
         isLoadingSecrets: false,
         isSavingSecret: false,
         isPurgingCache: false,
+        isCleaningVaultState: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
         isImportingUrl: false,
@@ -87,6 +88,8 @@
 
         miscFeedback: null,
         purgeExpiredCacheBtn: null,
+        cleanupVaultStateBtn: null,
+        cleanupVaultStateFeedback: null,
         purgeSessionsVault: null,
         purgeSessionsAge: null,
         purgeSessionsBtn: null,
@@ -142,6 +145,8 @@
 
         elements.miscFeedback = document.getElementById('misc-feedback');
         elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
+        elements.cleanupVaultStateBtn = document.getElementById('cleanup-vault-state');
+        elements.cleanupVaultStateFeedback = document.getElementById('cleanup-vault-state-feedback');
         elements.purgeSessionsVault = document.getElementById('purge-sessions-vault');
         elements.purgeSessionsAge = document.getElementById('purge-sessions-age');
         elements.purgeSessionsBtn = document.getElementById('purge-sessions-btn');
@@ -179,6 +184,7 @@
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
+        elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
         elements.purgeSessionsBtn?.addEventListener('click', handlePurgeSessions);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
@@ -1510,6 +1516,46 @@ async function saveModelRow(rowKey) {
             button.disabled = false;
             button.textContent = originalLabel;
             state.isPurgingCache = false;
+        }
+    }
+
+    async function handleCleanupVaultState() {
+        if (!elements.cleanupVaultStateBtn || state.isCleaningVaultState) return;
+
+        state.isCleaningVaultState = true;
+        const button = elements.cleanupVaultStateBtn;
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Cleaning…';
+        setStatus(elements.cleanupVaultStateFeedback, 'Cleaning expired vault-state artifacts…', 'info');
+
+        try {
+            const response = await fetch('api/vault-state/cleanup', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            const message = result?.message || (
+                `Deleted ${result?.expired_mutation_rows_deleted ?? 0} mutation row(s), `
+                + `${result?.expired_snapshot_rows_deleted ?? 0} snapshot row(s), `
+                + `${result?.snapshot_files_deleted ?? 0} snapshot file(s).`
+            );
+            setStatus(elements.cleanupVaultStateFeedback, message, 'success');
+        } catch (error) {
+            setStatus(
+                elements.cleanupVaultStateFeedback,
+                `Failed to clean vault state: ${error.message}`,
+                'error'
+            );
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
+            state.isCleaningVaultState = false;
         }
     }
 
