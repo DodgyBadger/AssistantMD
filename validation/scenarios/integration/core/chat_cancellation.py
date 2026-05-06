@@ -12,13 +12,22 @@ from core.chat.executor import PreparedChatExecution, execute_chat_prompt
 from core.runtime.execution_tasks import chat_session_scope
 from core.runtime.state import get_runtime_context
 from core.utils.messages import extract_role_and_text
+from core.vault_state.file_mutations import write_vault_file
 from validation.core.base_scenario import BaseScenario
 
 
 class _HangingAgent:
     """Fake agent that stays active until its asyncio task is cancelled."""
 
+    def __init__(self, vault_path: Path):
+        self._vault_path = vault_path
+
     async def run(self, *args, **kwargs):
+        write_vault_file(
+            vault_path=self._vault_path,
+            path="notes/cancelled-chat-write.md",
+            content="created before cancellation\n",
+        )
         await asyncio.Event().wait()
 
 
@@ -35,7 +44,7 @@ class ChatCancellationScenario(BaseScenario):
 
         async def _prepared_hanging_chat(*args, **kwargs):
             return PreparedChatExecution(
-                agent=_HangingAgent(),
+                agent=_HangingAgent(vault),
                 message_history=None,
                 prompt_for_history="Cancel this chat.",
                 user_prompt="Cancel this chat.",
@@ -84,6 +93,7 @@ class ChatCancellationScenario(BaseScenario):
                 "Active chat task endpoint returns the running task"
             )
 
+            checkpoint = self.event_checkpoint()
             cancel_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/cancel",
                 method="POST",
@@ -98,12 +108,24 @@ class ChatCancellationScenario(BaseScenario):
                 await chat_task
             except asyncio.CancelledError as exc:
                 caught = exc
+            rollback_events = self.events_since(checkpoint)
             assert caught is not None, "Cancelled chat task should raise CancelledError"
 
             task_detail = self.call_api(f"/api/tasks/{task_id}")
             assert task_detail.status_code == 200, "Cancelled task detail remains queryable"
             assert task_detail.json().get("status") == "cancelled", (
                 "Cancelled chat task should have cancelled terminal status"
+            )
+            assert not (Path(vault) / "notes/cancelled-chat-write.md").exists(), (
+                "Cancelled chat task should rollback files created before cancellation"
+            )
+            self.assert_event_contains(
+                rollback_events,
+                name="task_rollback_completed",
+                expected={
+                    "task_id": task_id,
+                    "terminal_status": "cancelled",
+                },
             )
 
             active_after_cancel = self.call_api(f"/api/chat/sessions/{session_id}/active-task")

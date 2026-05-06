@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from core.logger import UnifiedLogger
 
@@ -162,9 +162,11 @@ class TaskCoordinator:
         *,
         logger: UnifiedLogger | None = None,
         terminal_history_limit: int = 100,
+        terminal_observers: list[Callable[[ExecutionTaskSnapshot], None]] | None = None,
     ) -> None:
         self._logger = logger or UnifiedLogger(tag="execution-tasks")
         self._terminal_history_limit = max(1, terminal_history_limit)
+        self._terminal_observers = list(terminal_observers or [])
         self._records: dict[str, _ExecutionTaskRecord] = {}
         self._terminal_order: list[str] = []
         self._lock = asyncio.Lock()
@@ -403,6 +405,7 @@ class TaskCoordinator:
             self._remember_terminal(task_id)
 
         self._log_event(event, snapshot)
+        self._notify_terminal_observers(snapshot)
 
     def _remember_terminal(self, task_id: str) -> None:
         if task_id in self._terminal_order:
@@ -440,6 +443,25 @@ class TaskCoordinator:
             event,
             data=data,
         )
+
+    def _notify_terminal_observers(self, snapshot: ExecutionTaskSnapshot) -> None:
+        """Notify process-local observers after a task reaches a terminal state."""
+        for observer in self._terminal_observers:
+            try:
+                observer(snapshot)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.add_sink("validation").error(
+                    "execution_task_terminal_observer_failed",
+                    data={
+                        "event": "execution_task_terminal_observer_failed",
+                        "task_id": snapshot.task_id,
+                        "kind": snapshot.kind,
+                        "status": snapshot.status,
+                        "observer": getattr(observer, "__name__", observer.__class__.__name__),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
 
     @staticmethod
     def _new_task_id() -> str:

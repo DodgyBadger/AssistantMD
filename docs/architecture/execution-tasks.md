@@ -13,6 +13,7 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 ## Task model
 
 `TaskCoordinator` stores active and recently terminal tasks in memory. It is part of `RuntimeContext` and is not a persistent job store.
+Runtime bootstrap may attach terminal observers to the coordinator. Observers run after terminal lifecycle events and are used for process-local follow-up work such as vault mutation rollback.
 
 Each task snapshot includes:
 

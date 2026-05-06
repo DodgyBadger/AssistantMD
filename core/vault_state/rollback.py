@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import ExecutionTaskSnapshot
 from core.runtime.state import get_runtime_context
 from core.settings import get_task_rollback_enabled
 from core.vault_state.models import TaskFileMutation, TaskSnapshot
@@ -32,6 +33,31 @@ class TaskRollbackResult:
     paths_restored: int
     paths_deleted: int
     vaults_refreshed: int
+
+
+def handle_task_terminal_for_rollback(snapshot: ExecutionTaskSnapshot) -> None:
+    """TaskCoordinator terminal observer for rollback-triggering task states."""
+    status = str(snapshot.status or "").strip().lower()
+    if status not in ROLLBACK_TRIGGER_STATUSES:
+        return
+    try:
+        rollback_task_file_mutations(
+            task_id=snapshot.task_id,
+            terminal_status=status,
+            reason=snapshot.terminal_reason,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.add_sink("validation").error(
+            "task_rollback_failed",
+            data={
+                "event": "task_rollback_failed",
+                "task_id": snapshot.task_id,
+                "terminal_status": status,
+                "reason": snapshot.terminal_reason,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
 
 
 def rollback_task_file_mutations(

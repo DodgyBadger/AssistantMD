@@ -511,6 +511,8 @@ Behavior:
 
 - Rollback is driven by execution task terminal state, not by script-authored
   cleanup code.
+- Runtime bootstrap attaches vault rollback as a `TaskCoordinator` terminal
+  observer so workflow and chat tasks use the same rollback trigger.
 - Workflow execution must mirror returned workflow statuses onto the execution
   task record before rollback hooks run:
   - `completed` and `skipped` are successful terminal states.

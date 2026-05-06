@@ -15,6 +15,7 @@ from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.settings import validate_settings
 from core.settings.store import get_general_settings
+from core.vault_state.rollback import handle_task_terminal_for_rollback
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.authoring.template_discovery import seed_system_templates
@@ -147,7 +148,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
-        task_coordinator = TaskCoordinator()
+        task_coordinator = TaskCoordinator(
+            terminal_observers=[handle_task_terminal_for_rollback],
+        )
         workflow_governor = WorkflowGovernor(task_coordinator=task_coordinator)
         runtime_context = RuntimeContext(
             config=config,

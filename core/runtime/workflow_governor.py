@@ -8,7 +8,6 @@ from dataclasses import replace
 from core.authoring.workflow_execution import WorkflowExecutionResult, execute_workflow_by_id
 from core.logger import UnifiedLogger
 from core.settings import get_workflow_task_timeout_seconds
-from core.vault_state.rollback import ROLLBACK_TRIGGER_STATUSES, rollback_task_file_mutations
 
 from .execution_tasks import (
     ExecutionTaskKind,
@@ -125,7 +124,6 @@ class WorkflowGovernor:
                         status="timed_out",
                         reason=reason,
                     )
-                    self._rollback_task_if_needed(task_id, "timed_out", reason)
                     return WorkflowExecutionResult(
                         success=False,
                         global_id=global_id,
@@ -148,7 +146,6 @@ class WorkflowGovernor:
                     reason=result.reason,
                 )
                 await self._mark_task_terminal_from_result(task_id, result)
-                self._rollback_task_if_needed(task_id, result.status, result.reason)
                 return result
         except asyncio.CancelledError:
             self._log_workflow_event(
@@ -160,7 +157,6 @@ class WorkflowGovernor:
                 status="cancelled",
                 reason="cancelled",
             )
-            self._rollback_task_if_needed(task_id, "cancelled", "cancelled")
             raise
         except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}"
@@ -173,7 +169,6 @@ class WorkflowGovernor:
                 status="failed",
                 reason=reason,
             )
-            self._rollback_task_if_needed(task_id, "failed", reason)
             raise
         finally:
             lane_lock.release()
@@ -231,34 +226,6 @@ class WorkflowGovernor:
             await self._task_coordinator.mark_timed_out(task_id, reason=reason)
             return
         await self._task_coordinator.mark_completed(task_id, reason=reason)
-
-    def _rollback_task_if_needed(
-        self,
-        task_id: str,
-        terminal_status: str,
-        reason: str | None,
-    ) -> None:
-        """Rollback workflow file mutations for rollback-triggering terminal states."""
-        if not task_id or str(terminal_status or "").strip().lower() not in ROLLBACK_TRIGGER_STATUSES:
-            return
-        try:
-            rollback_task_file_mutations(
-                task_id=task_id,
-                terminal_status=terminal_status,
-                reason=reason,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._logger.add_sink("validation").error(
-                "task_rollback_failed",
-                data={
-                    "event": "task_rollback_failed",
-                    "task_id": task_id,
-                    "terminal_status": terminal_status,
-                    "reason": reason,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                },
-            )
 
     @staticmethod
     def _split_vault_name(global_id: str) -> str:
