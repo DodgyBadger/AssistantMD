@@ -481,6 +481,62 @@ def get_file_ops_safe_list_max_results() -> int:
     return parsed if parsed >= 0 else template_default
 
 
+def get_debug_enabled() -> bool:
+    """Return whether diagnostic debug behavior is enabled."""
+    entry = get_general_settings().get("debug")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
+def get_vault_state_enabled() -> bool:
+    """Return whether vault-state refresh behavior is enabled."""
+    entry = get_general_settings().get("vault_state_enabled")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return True
+
+
+def get_vault_state_excluded_patterns() -> list[str]:
+    """Return gitignore-style vault-relative patterns excluded from vault state."""
+    entry = get_general_settings().get("vault_state_excluded_patterns")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, str):
+        raw_items = [line.strip() for line in value.splitlines()]
+    elif isinstance(value, list):
+        raw_items = [str(item).strip() for item in value]
+    else:
+        raw_items = [
+            ".git/",
+            "**/.DS_Store",
+            "**/__pycache__/",
+            "AssistantMD/Chat_Sessions/",
+        ]
+    return [item for item in raw_items if item and not item.startswith("#")]
+
+
+def get_task_snapshot_retention_days() -> int:
+    """Return days to retain task snapshot and mutation audit state."""
+    entry = get_general_settings().get("task_snapshot_retention_days")
+    value = getattr(entry, "value", None) if entry is not None else None
+    template_default = _get_template_setting_positive_int("task_snapshot_retention_days", 7)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return template_default
+    return parsed if parsed >= 0 else template_default
+
+
 def get_chunking_max_images_per_prompt() -> int:
     """Return max image attachments per chunked prompt."""
     entry = get_general_settings().get("chunking_max_images_per_prompt")

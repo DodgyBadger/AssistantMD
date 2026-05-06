@@ -844,16 +844,15 @@ async def rescan_vaults_and_update_scheduler(scheduler=None) -> Dict[str, Any]:
         SystemConfigurationError: If rescan or scheduler update fails
     """
     try:
-        # Get scheduler if not provided
-        if scheduler is None:
-            try:
-                runtime = get_runtime_context()
-                scheduler = runtime.scheduler
-            except RuntimeStateError:
+        # Prefer the runtime reload path so workflow and vault-state refresh
+        # behavior stays centralized.
+        try:
+            runtime = get_runtime_context()
+            results = await runtime.reload_workflows(manual=True)
+        except RuntimeStateError:
+            if scheduler is None:
                 scheduler = None
-        
-        # Use the shared scheduler utilities for the rescan
-        results = await setup_scheduler_jobs(scheduler, manual_reload=True)
+            results = await setup_scheduler_jobs(scheduler, manual_reload=True)
 
         logger.info(
             "Vault rescan completed",

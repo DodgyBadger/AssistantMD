@@ -19,6 +19,7 @@ from core.ingestion.service import IngestionService
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
 from core.runtime.workflow_governor import WorkflowGovernor
+from core.vault_state import VaultStateService
 from . import state as runtime_state
 from .config import RuntimeConfig
 
@@ -107,7 +108,26 @@ class RuntimeContext:
         """
         if manual:
             self.logger.info("Reloading workflows (manual=True)")
-        return await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        results = await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        try:
+            vault_state_results = VaultStateService().refresh_all_vaults(self.config.data_root)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.add_sink("validation").warning(
+                "vault_state_refresh_all_failed",
+                data={
+                    "event": "vault_state_refresh_all_failed",
+                    "manual": manual,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            vault_state_results = {
+                "vault_state_enabled": True,
+                "vault_state_refreshed": 0,
+                "vault_state_failed": 1,
+            }
+        results.update(vault_state_results)
+        return results
 
     def get_runtime_summary(self) -> dict:
         """

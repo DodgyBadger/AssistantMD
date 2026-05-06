@@ -31,6 +31,7 @@ from core.settings import (
     get_file_search_timeout_seconds,
 )
 from core.utils.image_inputs import build_image_tool_payload
+from core.vault_state.file_mutations import VaultMutationRejected, write_vault_file
 from .base import BaseTool
 from .utils import (
     validate_and_resolve_path,
@@ -501,9 +502,17 @@ Full documentation:
     @classmethod
     def _write_file(cls, path: str, content: str, vault_path: str) -> str:
         """Write new file (fails if exists)."""
-        full_path = validate_and_resolve_path(path, vault_path)
-
-        if os.path.exists(full_path):
+        try:
+            mutation = write_vault_file(
+                vault_path=vault_path,
+                path=path,
+                content=content,
+                fail_if_exists=True,
+                markdown_only=True,
+            )
+        except VaultMutationRejected as exc:
+            if exc.code != "file_exists":
+                raise
             return cls._result(
                 message=(
                     f"Cannot write to '{path}' - file already exists. "
@@ -516,16 +525,17 @@ Full documentation:
                 error_type="file_exists",
             )
 
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, 'w', encoding='utf-8') as file:
-            file.write(content)
         return cls._result(
             message=f"Successfully created new file '{path}' with {len(content)} characters",
             operation="write",
             path=path,
             status="completed",
             exists=True,
-            metadata={"content_chars": len(content)},
+            metadata={
+                "content_chars": len(content),
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+            },
         )
 
     @classmethod

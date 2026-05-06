@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextvars import ContextVar
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -54,6 +55,12 @@ TERMINAL_STATUSES = {
 TERMINAL_STATUS_VALUES = {status.value for status in TERMINAL_STATUSES}
 
 
+_CURRENT_EXECUTION_TASK: ContextVar[ExecutionTaskSnapshot | None] = ContextVar(
+    "current_execution_task",
+    default=None,
+)
+
+
 def chat_session_scope(session_id: str) -> str:
     """Return the stable task scope for a chat session."""
     return f"chat_session:{session_id}"
@@ -72,6 +79,11 @@ def chat_task_label(session_id: str) -> str:
 def compaction_task_label(session_id: str) -> str:
     """Return the stable label for chat history compaction tasks."""
     return f"compact:{session_id}"
+
+
+def get_current_execution_task() -> ExecutionTaskSnapshot | None:
+    """Return the execution task associated with the current context, if any."""
+    return _CURRENT_EXECUTION_TASK.get()
 
 
 @dataclass(frozen=True)
@@ -184,10 +196,11 @@ class TaskCoordinator:
         )
         await self._mark_started(task_id)
 
+        snapshot = await self.get_task(task_id)
+        if snapshot is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"Execution task disappeared: {task_id}")
+        token = _CURRENT_EXECUTION_TASK.set(snapshot)
         try:
-            snapshot = await self.get_task(task_id)
-            if snapshot is None:  # pragma: no cover - defensive
-                raise RuntimeError(f"Execution task disappeared: {task_id}")
             yield snapshot
         except asyncio.CancelledError:
             await self.mark_cancelled(task_id, reason="cancelled")
@@ -197,6 +210,8 @@ class TaskCoordinator:
             raise
         else:
             await self.mark_completed(task_id)
+        finally:
+            _CURRENT_EXECUTION_TASK.reset(token)
 
     async def get_task(self, task_id: str) -> ExecutionTaskSnapshot | None:
         """Return one task snapshot by id."""
