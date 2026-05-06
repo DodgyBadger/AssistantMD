@@ -572,6 +572,8 @@ Validation target:
 
 - Extend chat cancellation validation with a tool call that writes a file before
   cancellation.
+- Add chat failure validation with a tool-mediated file mutation before the
+  failure.
 - Assert rollback removes/restores the file.
 - Assert user message history behavior from prior cancellation work remains
   unchanged.
@@ -581,34 +583,30 @@ Feedback checkpoint:
 - Confirm cancellation semantics and user-facing messaging before adding manual
   rollback APIs.
 
-## Slice 8: Manual Task Rollback API
+## Slice 8: Code Execution Rollback Coverage
 
-Expose rollback for recently completed tasks while snapshots remain available.
+Validate that code execution inherits rollback coverage from the parent
+execution task instead of becoming a separate rollback unit.
 
-Suggested endpoint:
+Behavior:
 
-```http
-POST /api/tasks/{task_id}/rollback
-```
-
-Rules:
-
-- Only tasks with retained snapshots are rollbackable.
-- Refuse rollback if any affected file has changed since the task completed,
-  unless a later explicit force path is added.
-- Rollback should be idempotent: already rolled back returns a clear no-op
-  result.
+- `code_execution` does not receive raw filesystem access.
+- File mutations caused by code execution through `file_ops_safe` or
+  `file_ops_unsafe` should be recorded under the active chat or workflow task.
+- If the parent chat or workflow task fails, is cancelled, or times out after
+  those mutations, automatic task rollback should restore/delete affected files.
 
 Validation target:
 
-- Workflow succeeds and creates a file.
-- API rollback restores previous state.
-- Second rollback returns already-rolled-back/no-op.
-- External edit after task completion blocks rollback.
+- Add a workflow or chat scenario where authored code invokes file mutation
+  tools from a code execution path, then the parent task fails.
+- Assert the recorded mutation rows use the parent task id.
+- Assert automatic rollback restores the vault.
 
 Feedback checkpoint:
 
-- Review API payload and UI affordance before adding frontend controls.
+- Confirm this covers the practical code execution risk before widening
+  rollback semantics further.
 
 ## Slice 9: Manual Retention Cleanup
 
@@ -640,6 +638,20 @@ Validation target:
 Feedback checkpoint:
 
 - Review cleanup payload and UI placement before adding scheduled retention.
+
+## Future Extension: Manual File Version Restore
+
+Manual file version restore is out of scope for this branch.
+
+Possible later direction:
+
+- Treat manual recovery as file-level version restore, not primary task-level
+  rollback.
+- Let a user select a file, inspect retained prior states from task snapshots or
+  mutation history, compare the current file with a selected prior version, and
+  restore that file or save the prior version as a separate copy.
+- Keep whole-task manual rollback as an optional admin/debug action only if a
+  concrete use case appears.
 
 ## Slice 10: Pending Diff Without Git
 
