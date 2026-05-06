@@ -33,6 +33,8 @@ const state = {
     activeChatSessionId: null,
     activeChatAbortController: null,
     systemStatus: null,
+    vaultActivity: {},
+    selectedActivityVault: '',
     restartRequired: false,
     shouldAutoScroll: true,
     compactionStatusRequestId: 0
@@ -1066,7 +1068,223 @@ function displaySystemStatus() {
         `;
     }
 
+    const activityVaults = status.vaults || [];
+    const selectedActivityVault = state.selectedActivityVault && activityVaults.some(v => v.name === state.selectedActivityVault)
+        ? state.selectedActivityVault
+        : activityVaults[0]?.name || '';
+    state.selectedActivityVault = selectedActivityVault;
+    html += `
+        <div class="mt-6 border-t border-border-primary pt-4">
+            <div class="flex flex-col md:flex-row md:items-end gap-3">
+                <div class="flex-1">
+                    <label class="block text-sm font-medium text-txt-primary mb-1">Vault Activity</label>
+                    <select id="vault-activity-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
+                        ${activityVaults.length ? activityVaults.map(v => `
+                            <option value="${escapeHtml(v.name)}" ${v.name === selectedActivityVault ? 'selected' : ''}>${escapeHtml(v.name)}</option>
+                        `).join('') : '<option value="">No vaults detected</option>'}
+                    </select>
+                </div>
+                <button id="vault-activity-refresh" type="button" class="px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
+                    Refresh Activity
+                </button>
+            </div>
+            <div id="vault-activity-result" class="mt-3">
+                ${renderVaultActivityResult(selectedActivityVault)}
+            </div>
+        </div>
+    `;
+
     dashElements.systemStatus.innerHTML = html;
+    if (selectedActivityVault && !state.vaultActivity[selectedActivityVault]) {
+        loadVaultActivity(selectedActivityVault);
+    }
+}
+
+function renderVaultActivityResult(vaultName) {
+    if (!vaultName) {
+        return '<p class="text-sm text-txt-secondary">No vault selected.</p>';
+    }
+    const activity = state.vaultActivity[vaultName];
+    if (!activity) {
+        return '<p class="text-sm text-txt-secondary">Loading task file mutations...</p>';
+    }
+    if (activity.error) {
+        return `<p class="state-error text-sm">${escapeHtml(activity.error)}</p>`;
+    }
+    const groups = activity.groups || [];
+    if (!groups.length) {
+        return '<p class="text-sm text-txt-secondary">No retained task file mutations for this vault.</p>';
+    }
+    return `
+        <table class="dashboard-table">
+            <thead>
+                <tr>
+                    <th>Task</th>
+                    <th>Last Run</th>
+                    <th>Files Mutated</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${groups.map(group => `
+                    <tr>
+                        <td>
+                            <strong>${escapeHtml(renderActivityTaskTitle(group))}</strong>
+                            <div class="cell-xs subtle cell-mono">${escapeHtml(group.vault_id)}</div>
+                        </td>
+                        <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
+                        <td>
+                            <button
+                                type="button"
+                                class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                                data-vault-activity-vault="${escapeHtml(vaultName)}"
+                                data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
+                            >
+                                ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
+                            </button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function renderActivityTaskTitle(group) {
+    if (group.activity_kind === 'chat' && group.chat_session_id) {
+        return formatSessionOptionLabel({
+            session_id: group.chat_session_id,
+            created_at: group.chat_session_created_at,
+            last_activity_at: group.chat_session_last_activity_at,
+            title: group.chat_session_title
+        });
+    }
+    return group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`;
+}
+
+function renderMutationHash(exists, hash) {
+    if (!exists) return '<span class="subtle">absent</span>';
+    if (!hash) return '<span class="subtle">present</span>';
+    return `<span class="cell-mono">${escapeHtml(hash.slice(0, 12))}</span>`;
+}
+
+function openVaultActivityDetails(vaultName, activityId) {
+    if (!vaultName || !activityId) return;
+    const activity = state.vaultActivity[vaultName];
+    const group = (activity?.groups || []).find(item => (item.activity_id || item.task_id) === activityId);
+    if (!group) {
+        console.warn('Vault activity group not found', { vaultName, activityId });
+        return;
+    }
+    closeVaultActivityDetails();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'vault-activity-modal';
+    overlay.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    overlay.innerHTML = `
+        <div class="absolute inset-0" data-vault-activity-close="true"></div>
+        <section class="relative h-full w-full max-w-3xl bg-app-card border-l border-border-primary shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="vault-activity-modal-title">
+            <div class="sticky top-0 bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3">
+                <div>
+                    <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${escapeHtml(renderActivityTaskTitle(group))}</h2>
+                    <div class="text-xs text-txt-secondary cell-mono mt-1">${escapeHtml(group.activity_id || group.task_id)}</div>
+                    <div class="text-xs text-txt-secondary cell-mono mt-1">${escapeHtml(group.vault_id)}</div>
+                </div>
+                <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
+                    Close
+                </button>
+            </div>
+            <div class="p-4">
+                <div class="text-sm text-txt-secondary mb-3">
+                    Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
+                </div>
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Path</th>
+                            <th>Run</th>
+                            <th>Operation</th>
+                            <th>Before</th>
+                            <th>After</th>
+                            <th>Event</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${(group.mutations || []).map(mutation => `
+                            <tr>
+                                <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
+                                <td class="cell-xs">${escapeHtml(renderMutationRunLabel(group, mutation))}</td>
+                                <td>${escapeHtml(mutation.operation)}</td>
+                                <td class="cell-xs">${renderMutationHash(mutation.before_exists, mutation.before_hash)}</td>
+                                <td class="cell-xs">${renderMutationHash(mutation.after_exists, mutation.after_hash)}</td>
+                                <td class="cell-xs">${mutation.event_sequence || '—'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    `;
+    overlay.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement && target.dataset.vaultActivityClose === 'true') {
+            closeVaultActivityDetails();
+        }
+    });
+    document.body.appendChild(overlay);
+}
+
+function handleVaultActivityClick(target) {
+    const activityButton = target.closest('[data-vault-activity-id]');
+    if (!(activityButton instanceof HTMLElement)) return;
+    const vaultName = activityButton.getAttribute('data-vault-activity-vault') || state.selectedActivityVault;
+    const activityId = activityButton.getAttribute('data-vault-activity-id') || '';
+    openVaultActivityDetails(vaultName, activityId);
+}
+
+function renderMutationRunLabel(group, mutation) {
+    if (group.activity_kind === 'chat') {
+        return formatShortDate(mutation.created_at);
+    }
+    return mutation.task_label || mutation.task_id || 'run';
+}
+
+function closeVaultActivityDetails() {
+    document.getElementById('vault-activity-modal')?.remove();
+}
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeVaultActivityDetails();
+    }
+});
+
+function formatShortDate(value) {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+async function loadVaultActivity(vaultName) {
+    if (!vaultName) return;
+    state.vaultActivity[vaultName] = { loading: true };
+    updateVaultActivityContainer(vaultName);
+    try {
+        const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/task-mutations?limit=25`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        state.vaultActivity[vaultName] = { groups: data.groups || [] };
+    } catch (error) {
+        console.error('Error loading vault activity:', error);
+        state.vaultActivity[vaultName] = { error: `Failed to load vault activity: ${error.message}` };
+    }
+    updateVaultActivityContainer(vaultName);
+}
+
+function updateVaultActivityContainer(vaultName) {
+    const container = document.getElementById('vault-activity-result');
+    if (!container || state.selectedActivityVault !== vaultName) return;
+    container.innerHTML = renderVaultActivityResult(vaultName);
 }
 
 // Populate workflow selector
@@ -1238,6 +1456,25 @@ function setupEventListeners() {
 
     if (dashElements.executeWorkflowBtn) {
         dashElements.executeWorkflowBtn.addEventListener('click', executeWorkflow);
+    }
+
+    if (dashElements.systemStatus) {
+        dashElements.systemStatus.addEventListener('change', (event) => {
+            if (event.target?.id !== 'vault-activity-selector') return;
+            state.selectedActivityVault = event.target.value || '';
+            loadVaultActivity(state.selectedActivityVault);
+        });
+        dashElements.systemStatus.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            if (target.id === 'vault-activity-refresh') {
+                if (state.selectedActivityVault) {
+                    loadVaultActivity(state.selectedActivityVault);
+                }
+                return;
+            }
+            handleVaultActivityClick(target);
+        });
     }
 
     if (chatElements.chatMessages) {
@@ -1652,10 +1889,12 @@ function restoreLatexPlaceholders(html, segments) {
 
 function escapeHtml(value) {
     if (!value) return '';
-    return value
+    return String(value)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function getMathJax() {

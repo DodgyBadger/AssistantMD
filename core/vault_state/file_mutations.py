@@ -139,6 +139,10 @@ def write_vault_file(
         session.add(
             TaskFileMutation(
                 task_id=task.task_id,
+                task_kind=task.kind,
+                task_source=task.source,
+                task_scope=task.scope,
+                task_label=task.label,
                 vault_id=result.vault_id,
                 vault_name=result.vault_name,
                 path=result.path,
@@ -160,6 +164,10 @@ def write_vault_file(
         data={
             "event": "task_file_mutation_recorded",
             "task_id": task.task_id,
+            "task_kind": task.kind,
+            "task_source": task.source,
+            "task_scope": task.scope,
+            "task_label": task.label,
             "vault_id": result.vault_id,
             "vault_name": result.vault_name,
             "path": result.path,

@@ -363,6 +363,40 @@ Feedback checkpoint:
 - Confirm task association works for workflow and chat before expanding to more
   operations.
 
+## Slice 3A: Mutation Observability
+
+Expose the durable task mutation log in the app UI before adding rollback
+controls.
+
+Behavior:
+
+- Persist task kind, source, scope, and label on `task_file_mutations` because
+  the execution task coordinator is process-local.
+- Add a read-only API for recent activity mutation groups by vault.
+- Group direct chat mutations by chat session scope so one chat session shows a
+  history of all retained file changes from that session.
+- Keep workflow mutations grouped by individual workflow execution task, including
+  workflows launched from chat.
+- Show recent file mutation activity in the Workflows tab under the Vaults
+  section.
+- Keep this surface read-only: no rollback, diff viewer, or cleanup controls in
+  this slice.
+- Existing `vault_state.db` files should receive additive schema updates for
+  task mutation metadata.
+
+Validation target:
+
+- Extend the mutation recorder scenario to call the task mutation API.
+- Assert the response groups workflow mutations by task and direct chat
+  mutations by chat session, including task metadata, operation, path, event
+  sequence, and hashes.
+
+Feedback checkpoint:
+
+- Review whether the UI grouping and fields answer "what did this chat session
+  or workflow run change?" before wiring additional mutators through the shared
+  mutation API.
+
 ## Slice 4: Snapshot Capture
 
 Create pre-mutation snapshots for supported mutations.
@@ -618,17 +652,6 @@ Feedback checkpoint:
 
 ## Recommended Next Step
 
-Start with Slice 1 only:
-
-1. Add the `vault_state` system database declaration.
-2. Implement local vault identity resolution with `AssistantMD/vault.yaml`.
-3. Implement manifest refresh for one vault, including artifact classification
-   and monotonic change sequencing.
-4. Add the first change-feed query for changes since a sequence cursor.
-5. Add `validation/scenarios/integration/core/vault_state_manifest.py`.
-6. Emit clear validation/activity events for changed, deleted, classified, and
-   completed refresh results.
-
-Do not start rollback until the vault identity contract, manifest contract,
-classification rules, change-feed cursor shape, and event payloads have been
-reviewed.
+Finish Slice 3A, then review the Vault Activity UI with real chat and workflow
+runs. After that, continue routing the remaining vault mutators through
+`core.vault_state.file_mutations` before adding rollback controls.

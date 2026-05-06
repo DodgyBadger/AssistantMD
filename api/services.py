@@ -56,6 +56,7 @@ from core.runtime.execution_tasks import (
     compaction_task_label,
     workflow_vault_scope,
 )
+from core.vault_state.service import VaultStateService
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -91,6 +92,9 @@ from .models import (
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
+    VaultTaskMutationGroupInfo,
+    VaultTaskMutationInfo,
+    VaultTaskMutationsResponse,
 )
 from .exceptions import APIException, SystemConfigurationError
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
@@ -202,6 +206,81 @@ async def list_workflow_tasks(vault_name: str | None = None) -> ExecutionTaskLis
     """List process-local workflow task snapshots."""
     scope = workflow_vault_scope(vault_name) if vault_name else None
     return await list_execution_tasks(kind=ExecutionTaskKind.WORKFLOW.value, scope=scope)
+
+
+def get_vault_task_mutations(
+    *,
+    vault_name: str,
+    limit: int = 50,
+    task_id: str | None = None,
+    include_expired: bool = False,
+    operation: str | None = None,
+) -> VaultTaskMutationsResponse:
+    """Return durable file mutation activity for one vault."""
+    _get_vault_path(vault_name)
+    groups = VaultStateService().list_task_mutations(
+        vault_name=vault_name,
+        limit=limit,
+        task_id=task_id,
+        include_expired=include_expired,
+        operation=operation,
+    )
+    return VaultTaskMutationsResponse(
+        vault_name=vault_name,
+        groups=[
+            _vault_task_mutation_group_info(group)
+            for group in groups
+        ],
+    )
+
+
+def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
+    chat_session = None
+    if group.activity_kind == "chat" and group.chat_session_id:
+        chat_session = _chat_store.get_session(group.chat_session_id, group.vault_name)
+    return VaultTaskMutationGroupInfo(
+        activity_id=group.activity_id,
+        activity_kind=group.activity_kind,
+        activity_label=group.activity_label,
+        chat_session_id=group.chat_session_id,
+        chat_session_title=chat_session.title if chat_session else group.chat_session_title,
+        chat_session_created_at=chat_session.created_at if chat_session else group.chat_session_created_at,
+        chat_session_last_activity_at=(
+            chat_session.last_activity_at if chat_session else group.chat_session_last_activity_at
+        ),
+        task_id=group.task_id,
+        task_kind=group.task_kind,
+        task_source=group.task_source,
+        task_scope=group.task_scope,
+        task_label=group.task_label,
+        vault_id=group.vault_id,
+        vault_name=group.vault_name,
+        mutation_count=group.mutation_count,
+        first_mutation_at=group.first_mutation_at,
+        last_mutation_at=group.last_mutation_at,
+        expires_at=group.expires_at,
+        mutations=[
+            VaultTaskMutationInfo(
+                id=mutation.id,
+                task_id=mutation.task_id,
+                task_kind=mutation.task_kind,
+                task_source=mutation.task_source,
+                task_scope=mutation.task_scope,
+                task_label=mutation.task_label,
+                path=mutation.path,
+                operation=mutation.operation,
+                event_sequence=mutation.event_sequence,
+                before_exists=mutation.before_exists,
+                before_hash=mutation.before_hash,
+                after_exists=mutation.after_exists,
+                after_hash=mutation.after_hash,
+                snapshot_ref=mutation.snapshot_ref,
+                created_at=mutation.created_at,
+                expires_at=mutation.expires_at,
+            )
+            for mutation in group.mutations
+        ],
+    )
 
 
 def purge_expired_cache() -> CachePurgeResponse:

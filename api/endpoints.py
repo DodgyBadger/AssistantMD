@@ -26,6 +26,7 @@ from .models import (
     CachePurgeResponse,
     VaultRescanRequest,
     VaultRescanResponse,
+    VaultTaskMutationsResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
     ExecutionTaskCancelResponse,
@@ -100,6 +101,7 @@ from .services import (
     get_execution_task,
     list_execution_tasks,
     list_workflow_tasks,
+    get_vault_task_mutations,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -664,6 +666,27 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
             metadata=metadata,
         )
         
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/vaults/{vault_name}/task-mutations", response_model=VaultTaskMutationsResponse)
+async def vault_task_mutations(
+    vault_name: str,
+    limit: int = 50,
+    task_id: str | None = None,
+    include_expired: bool = False,
+    operation: str | None = None,
+):
+    """Return recent durable task file mutations for one vault."""
+    try:
+        return get_vault_task_mutations(
+            vault_name=vault_name,
+            limit=limit,
+            task_id=task_id,
+            include_expired=include_expired,
+            operation=operation,
+        )
     except Exception as e:
         return create_error_response(e)
 
