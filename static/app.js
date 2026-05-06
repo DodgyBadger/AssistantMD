@@ -1201,6 +1201,7 @@ function openVaultActivityDetails(vaultName, activityId) {
                     <thead>
                         <tr>
                             <th>Path</th>
+                            <th>Related</th>
                             <th>Run</th>
                             <th>Operation</th>
                             <th>Before</th>
@@ -1212,6 +1213,7 @@ function openVaultActivityDetails(vaultName, activityId) {
                         ${(group.mutations || []).map(mutation => `
                             <tr>
                                 <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
+                                <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
                                 <td class="cell-xs">${escapeHtml(renderMutationRunLabel(group, mutation))}</td>
                                 <td>${escapeHtml(mutation.operation)}</td>
                                 <td class="cell-xs">${renderMutationHash(mutation.before_exists, mutation.before_hash)}</td>

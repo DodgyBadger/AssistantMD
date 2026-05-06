@@ -417,6 +417,10 @@ Behavior:
   later rollback design needs directory-level records.
 - For overwrite moves, record both source and destination paths so later rollback
   design can reason about both affected files.
+- Move and move-overwrite rows should carry `related_path` so the source row
+  points at the destination and the destination row points back at the source.
+  This preserves the simple two-row mutation model while making paired move
+  rows explicit for the UI and future rollback logic.
 
 Validation target:
 
@@ -424,12 +428,13 @@ Validation target:
   safe move, unsafe edit, replace, truncate, delete, and move-overwrite.
 - Assert all routed operations appear in the task mutation API group with event
   sequences and pre-mutation snapshot references where applicable.
+- Assert move and move-overwrite rows expose their paired `related_path` values
+  in both persisted rows and the API response.
 
 Feedback checkpoint:
 
-- Review whether move rows should gain an explicit `destination_path` field
-  before rollback APIs are added, or whether source/destination file rows are
-  sufficient.
+- Review whether paired move rows plus `related_path` are sufficient before
+  rollback APIs are added.
 
 ## Slice 4: Snapshot Capture
 

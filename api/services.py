@@ -289,6 +289,7 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
                 task_scope=mutation.task_scope,
                 task_label=mutation.task_label,
                 path=mutation.path,
+                related_path=mutation.related_path,
                 operation=mutation.operation,
                 event_sequence=mutation.event_sequence,
                 before_exists=mutation.before_exists,

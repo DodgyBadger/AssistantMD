@@ -62,6 +62,7 @@ class VaultTaskMutationItem:
     task_scope: str | None
     task_label: str | None
     path: str
+    related_path: str | None
     operation: str
     event_sequence: int | None
     before_exists: bool
@@ -422,6 +423,7 @@ class VaultStateService:
                             task_scope=row.task_scope,
                             task_label=row.task_label,
                             path=row.path,
+                            related_path=row.related_path,
                             operation=row.operation,
                             event_sequence=row.event_sequence,
                             before_exists=bool(row.before_exists),
@@ -550,6 +552,7 @@ class VaultStateService:
             "task_source": "VARCHAR",
             "task_scope": "VARCHAR",
             "task_label": "VARCHAR",
+            "related_path": "VARCHAR",
             "event_sequence": "INTEGER",
             "expires_at": "DATETIME",
         }

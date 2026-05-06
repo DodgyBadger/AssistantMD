@@ -69,6 +69,7 @@ class TaskFileMutation(Base):
     vault_id = Column(String, nullable=False)
     vault_name = Column(String, nullable=False)
     path = Column(String, nullable=False)
+    related_path = Column(String, nullable=True)
     operation = Column(String, nullable=False)
     event_sequence = Column(Integer, nullable=True)
     before_exists = Column(Boolean, nullable=False)

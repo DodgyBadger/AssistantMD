@@ -107,6 +107,29 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         if delete_row is not None:
             self.soft_assert_equal(delete_row["after_exists"], 0, "Delete should record missing after state")
             self.soft_assert(delete_row["snapshot_ref"], "Delete should retain pre-mutation snapshot ref")
+        expected_move_related_paths = {
+            "notes/move-source.md": "notes/move-destination.md",
+            "notes/move-destination.md": "notes/move-source.md",
+            "notes/overwrite-source.md": "notes/overwrite-destination.md",
+            "notes/overwrite-destination.md": "notes/overwrite-source.md",
+        }
+        for path, related_path in expected_move_related_paths.items():
+            move_row = next((item for item in rows if item["operation"] == "move" and item["path"] == path), None)
+            if move_row is not None:
+                self.soft_assert_equal(
+                    move_row["related_path"],
+                    related_path,
+                    f"Move row for {path} should point at paired path",
+                )
+        non_move_related_paths = [
+            item["related_path"]
+            for item in rows
+            if item["operation"] != "move"
+        ]
+        self.soft_assert(
+            all(related_path is None for related_path in non_move_related_paths),
+            "Non-move mutations should not carry related paths",
+        )
 
         response = self.call_api(
             f"/api/vaults/{vault.name}/task-mutations",
@@ -143,6 +166,16 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 self.soft_assert(
                     all(mutation.get("event_sequence") is not None for mutation in mutations),
                     "API mutations should include event sequences",
+                )
+                api_related_paths = {
+                    mutation.get("path"): mutation.get("related_path")
+                    for mutation in mutations
+                    if mutation.get("operation") == "move"
+                }
+                self.soft_assert_equal(
+                    api_related_paths,
+                    expected_move_related_paths,
+                    "API move mutations should expose paired related paths",
                 )
 
         self._insert_chat_session(vault_name=vault.name)
@@ -204,7 +237,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 """
                 SELECT task_id, task_kind, task_source, task_scope, task_label,
                        vault_id, vault_name, path, operation,
-                       event_sequence, before_exists, before_hash,
+                       related_path, event_sequence, before_exists, before_hash,
                        after_exists, after_hash, snapshot_ref, expires_at
                 FROM task_file_mutations
                 WHERE task_id = ?

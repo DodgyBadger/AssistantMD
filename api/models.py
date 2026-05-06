@@ -141,6 +141,7 @@ class VaultTaskMutationInfo(BaseModel):
     task_scope: Optional[str] = Field(None, description="Task scope")
     task_label: Optional[str] = Field(None, description="User-readable task label")
     path: str = Field(..., description="Vault-relative mutated path")
+    related_path: Optional[str] = Field(None, description="Related vault-relative path for paired mutations")
     operation: str = Field(..., description="Mutation operation")
     event_sequence: Optional[int] = Field(None, description="Linked vault file event sequence")
     before_exists: bool = Field(..., description="Whether the file existed before mutation")

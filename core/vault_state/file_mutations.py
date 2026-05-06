@@ -36,6 +36,7 @@ class RecordedMutationResult:
     vault_id: str
     vault_name: str
     path: str
+    related_path: str | None
     operation: str
     before_exists: bool
     before_hash: str | None
@@ -217,6 +218,7 @@ def move_vault_file(
         vault_id=identity.vault_id,
         vault_name=vault_name,
         path=source_relative,
+        related_path=destination_relative,
         operation="move",
         before_exists=True,
         before_hash=source_before_hash,
@@ -230,6 +232,7 @@ def move_vault_file(
         vault_id=identity.vault_id,
         vault_name=vault_name,
         path=destination_relative,
+        related_path=source_relative,
         operation="move",
         before_exists=destination_before_exists,
         before_hash=destination_before_hash,
@@ -325,6 +328,7 @@ def mutate_vault_file(
         vault_id=identity.vault_id,
         vault_name=vault_name,
         path=relative_path,
+        related_path=None,
         operation=operation,
         before_exists=before_exists,
         before_hash=before_hash,
@@ -372,6 +376,7 @@ def _persist_or_log_mutation(
                 "vault_id": result.vault_id,
                 "vault_name": result.vault_name,
                 "path": result.path,
+                "related_path": result.related_path,
                 "operation": result.operation,
                 "reason": "missing_execution_task_context",
             },
@@ -389,6 +394,7 @@ def _persist_or_log_mutation(
                 vault_id=result.vault_id,
                 vault_name=result.vault_name,
                 path=result.path,
+                related_path=result.related_path,
                 operation=result.operation,
                 event_sequence=result.event_sequence,
                 before_exists=result.before_exists,
@@ -414,6 +420,7 @@ def _persist_or_log_mutation(
             "vault_id": result.vault_id,
             "vault_name": result.vault_name,
             "path": result.path,
+            "related_path": result.related_path,
             "operation": result.operation,
             "before_exists": result.before_exists,
             "after_exists": result.after_exists,
