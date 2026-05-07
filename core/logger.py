@@ -36,12 +36,13 @@ _warning_dedupe_keys: set[tuple[str, str, Optional[str]]] = set()
 _logfire_config_state: Optional[Tuple[bool, Optional[str]]] = None
 _logfire_instrumented = False
 _logger_internal = logging.getLogger(__name__)
-_NOISY_LOGFIRE_SPAN_NAMES = frozenset(
+_NOISY_LOGFIRE_MESSAGES = frozenset(
     {
         "Pydantic nullable validate_python",
         "Pydantic union validate_python",
     }
 )
+_NOISY_PYDANTIC_SCHEMAS = frozenset({"nullable", "union"})
 
 
 class _LogfireNoiseFilteringSampler(Sampler):
@@ -60,7 +61,20 @@ class _LogfireNoiseFilteringSampler(Sampler):
         links=None,
         trace_state=None,
     ) -> SamplingResult:
-        if str(name).strip() in _NOISY_LOGFIRE_SPAN_NAMES:
+        span_message = ""
+        schema_name = ""
+        validation_method = ""
+        if attributes:
+            span_message = str(attributes.get("logfire.msg") or "").strip()
+            schema_name = str(attributes.get("schema_name") or "").strip()
+            validation_method = str(attributes.get("validation_method") or "").strip()
+        if span_message in _NOISY_LOGFIRE_MESSAGES:
+            return SamplingResult(Decision.DROP, trace_state=trace_state)
+        if (
+            str(name).strip() == "pydantic.validate_python"
+            and schema_name in _NOISY_PYDANTIC_SCHEMAS
+            and validation_method == "validate_python"
+        ):
             return SamplingResult(Decision.DROP, trace_state=trace_state)
         return self._delegate.should_sample(
             parent_context=parent_context,
