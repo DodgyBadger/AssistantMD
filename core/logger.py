@@ -15,6 +15,8 @@ from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import logfire
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON, Decision, Sampler, SamplingResult
+from logfire.sampling import SamplingOptions
 import yaml
 from core.settings.secrets_store import get_secret_value
 from core.settings.store import get_general_settings
@@ -34,6 +36,44 @@ _warning_dedupe_keys: set[tuple[str, str, Optional[str]]] = set()
 _logfire_config_state: Optional[Tuple[bool, Optional[str]]] = None
 _logfire_instrumented = False
 _logger_internal = logging.getLogger(__name__)
+_NOISY_LOGFIRE_SPAN_NAMES = frozenset(
+    {
+        "Pydantic nullable validate_python",
+        "Pydantic union validate_python",
+    }
+)
+
+
+class _LogfireNoiseFilteringSampler(Sampler):
+    """Drop high-volume dependency spans before console or remote export."""
+
+    def __init__(self, delegate: Sampler = ALWAYS_ON) -> None:
+        self._delegate = delegate
+
+    def should_sample(
+        self,
+        parent_context,
+        trace_id,
+        name,
+        kind=None,
+        attributes=None,
+        links=None,
+        trace_state=None,
+    ) -> SamplingResult:
+        if str(name).strip() in _NOISY_LOGFIRE_SPAN_NAMES:
+            return SamplingResult(Decision.DROP, trace_state=trace_state)
+        return self._delegate.should_sample(
+            parent_context=parent_context,
+            trace_id=trace_id,
+            name=name,
+            kind=kind,
+            attributes=attributes,
+            links=links,
+            trace_state=trace_state,
+        )
+
+    def get_description(self) -> str:
+        return "LogfireNoiseFilteringSampler"
 
 
 def _token_fingerprint(token: Optional[str]) -> Optional[str]:
@@ -79,6 +119,7 @@ def refresh_logfire_configuration(force: bool = False) -> None:
 
     logfire.configure(
         send_to_logfire=send_option,
+        sampling=SamplingOptions(head=_LogfireNoiseFilteringSampler()),
         scrubbing=False,
     )
 
