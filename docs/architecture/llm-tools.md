@@ -10,7 +10,7 @@ This subsystem builds agents, resolves model aliases, binds settings-backed tool
 - `core/authoring/shared/tool_binding.py`
 - `core/tools/`
 
-Configured built-in tools include vault file access (`file_ops_safe`, `file_ops_unsafe`), retained-snapshot file diffs (`diff_file`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), and web search/extraction (`web_search_*`, `tavily_extract`, `tavily_crawl`, `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
+Configured built-in tools include vault file access (`file_ops_safe`, `file_ops_unsafe`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), and web search/extraction (`web_search_*`, `tavily_extract`, `tavily_crawl`, `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
 
 ## Responsibilities
 
@@ -60,7 +60,5 @@ agent behavior toward Pydantic AI's composable capability model.
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 
 `workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API and scheduled runs.
-
-`diff_file` compares a vault file's current raw contents with the latest retained pre-mutation snapshot recorded by vault state. It is a normal settings-backed tool, so chat can call it directly and Monty-authored workflows or code_execution snippets can call it as a direct tool function.
 
 `chat_history_compact` checks or compacts the active chat session after explicit user approval. Compaction rewrites canonical provider-native history to a summary plus recent raw messages and records a process-local history-compaction task.

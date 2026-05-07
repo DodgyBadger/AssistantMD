@@ -27,8 +27,8 @@ class VaultStateCleanupScenario(BaseScenario):
         expired_at = now - timedelta(days=1)
         retained_at = now + timedelta(days=1)
         system_root = self._get_system_controller()._system_root
-        expired_snapshot_root = system_root / "task_snapshots" / "expired-task"
-        retained_snapshot_root = system_root / "task_snapshots" / "retained-task"
+        expired_snapshot_root = system_root / "task_snapshots" / "9001"
+        retained_snapshot_root = system_root / "task_snapshots" / "9002"
         expired_file = expired_snapshot_root / "files" / "notes" / "expired.md"
         retained_file = retained_snapshot_root / "files" / "notes" / "retained.md"
         expired_file.parent.mkdir(parents=True, exist_ok=True)
@@ -188,17 +188,26 @@ class VaultStateCleanupScenario(BaseScenario):
             )
             conn.executemany(
                 """
-                INSERT INTO task_snapshots (
-                    task_id, vault_id, vault_name, snapshot_root, status,
-                    created_at, expires_at, rolled_back_at
+                INSERT INTO snapshot_sets (
+                    id, task_id, task_kind, task_source, task_scope, task_label,
+                    vault_id, vault_name, purpose, scope_kind, scope_id, snapshot_root,
+                    status, created_at, expires_at, rolled_back_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
+                        9001,
                         "expired-task",
+                        "workflow",
+                        "api",
+                        "workflow_vault:" + vault_name,
+                        vault_name + "/expired",
                         vault_id,
                         vault_name,
+                        "rollback",
+                        "task",
+                        "expired-task",
                         str(expired_snapshot_root),
                         "active",
                         expired_at.isoformat(),
@@ -206,14 +215,61 @@ class VaultStateCleanupScenario(BaseScenario):
                         None,
                     ),
                     (
+                        9002,
                         "retained-task",
+                        "workflow",
+                        "api",
+                        "workflow_vault:" + vault_name,
+                        vault_name + "/retained",
                         vault_id,
                         vault_name,
+                        "rollback",
+                        "task",
+                        "retained-task",
                         str(retained_snapshot_root),
                         "active",
                         retained_at.isoformat(),
                         retained_at.isoformat(),
                         None,
+                    ),
+                ],
+            )
+            conn.executemany(
+                """
+                INSERT INTO file_snapshots (
+                    id, snapshot_set_id, task_id, vault_id, vault_name, path, source,
+                    file_exists, content_hash, snapshot_ref, created_at, expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        9101,
+                        9001,
+                        "expired-task",
+                        vault_id,
+                        vault_name,
+                        "notes/expired.md",
+                        "task_mutation_before",
+                        1,
+                        "expired-hash",
+                        "files/notes/expired.md",
+                        expired_at.isoformat(),
+                        expired_at.isoformat(),
+                    ),
+                    (
+                        9102,
+                        9002,
+                        "retained-task",
+                        vault_id,
+                        vault_name,
+                        "notes/retained.md",
+                        "task_mutation_before",
+                        1,
+                        "retained-hash",
+                        "files/notes/retained.md",
+                        retained_at.isoformat(),
+                        retained_at.isoformat(),
                     ),
                 ],
             )
@@ -234,7 +290,7 @@ class VaultStateCleanupScenario(BaseScenario):
         db_path = self._get_system_controller()._system_root / "vault_state.db"
         conn = sqlite3.connect(db_path)
         try:
-            rows = conn.execute("SELECT task_id FROM task_snapshots").fetchall()
+            rows = conn.execute("SELECT task_id FROM snapshot_sets").fetchall()
             return {str(row[0]) for row in rows}
         finally:
             conn.close()

@@ -56,7 +56,7 @@ class VaultFileEvent(Base):
 
 
 class TaskFileMutation(Base):
-    """Task-scoped mutation audit row reserved for later rollback slices."""
+    """Task-scoped vault file mutation audit row."""
 
     __tablename__ = "task_file_mutations"
 
@@ -74,23 +74,52 @@ class TaskFileMutation(Base):
     event_sequence = Column(Integer, nullable=True)
     before_exists = Column(Boolean, nullable=False)
     before_hash = Column(String, nullable=True)
+    before_snapshot_id = Column(Integer, nullable=True)
     after_exists = Column(Boolean, nullable=False)
     after_hash = Column(String, nullable=True)
+    after_snapshot_id = Column(Integer, nullable=True)
     snapshot_ref = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
-class TaskSnapshot(Base):
-    """Task snapshot metadata reserved for later rollback slices."""
+class SnapshotSet(Base):
+    """A task-scoped moment when one or more file snapshots were captured."""
 
-    __tablename__ = "task_snapshots"
+    __tablename__ = "snapshot_sets"
 
-    task_id = Column(String, primary_key=True, nullable=False)
-    vault_id = Column(String, primary_key=True, nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    task_id = Column(String, nullable=False)
+    task_kind = Column(String, nullable=True)
+    task_source = Column(String, nullable=True)
+    task_scope = Column(String, nullable=True)
+    task_label = Column(String, nullable=True)
+    vault_id = Column(String, nullable=False)
     vault_name = Column(String, nullable=False)
+    purpose = Column(String, nullable=False)
+    scope_kind = Column(String, nullable=True)
+    scope_id = Column(String, nullable=True)
     snapshot_root = Column(String, nullable=False)
     status = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     rolled_back_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class FileSnapshot(Base):
+    """One captured file state within a snapshot set."""
+
+    __tablename__ = "file_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    snapshot_set_id = Column(Integer, nullable=False)
+    task_id = Column(String, nullable=False)
+    vault_id = Column(String, nullable=False)
+    vault_name = Column(String, nullable=False)
+    path = Column(String, nullable=False)
+    source = Column(String, nullable=False)
+    exists = Column("file_exists", Boolean, nullable=False)
+    content_hash = Column(String, nullable=True)
+    snapshot_ref = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)

@@ -22,7 +22,6 @@ settings:
       - browser
       - file_ops_safe
       - file_ops_unsafe
-      - diff_file
       - tavily_extract
       - tavily_crawl
       - code_execution
@@ -328,12 +327,6 @@ tools:
     description: "Edit, delete, move/overwrite (use with caution)"
     requires_secrets: []
     user_editable: false
-  diff_file:
-    module: core.tools.diff_file
-    description: "Compare a vault file against its latest retained previous snapshot"
-    requires_secrets: []
-    user_editable: false
-    chat_visible: true
   tavily_extract:
     module: core.tools.tavily_extract
     description: "Extract content from specific URLs. API key required."

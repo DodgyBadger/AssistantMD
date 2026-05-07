@@ -150,24 +150,46 @@ Initial tables:
   - `event_sequence`
   - `before_exists`
   - `before_hash`
+  - `before_snapshot_id`
   - `after_exists`
   - `after_hash`
+  - `after_snapshot_id`
   - `snapshot_ref`
   - `created_at`
   - `expires_at`
-- `task_snapshots`
+- `snapshot_sets`
+  - `id`
   - `task_id`
+  - task identity fields (`task_kind`, `task_source`, `task_scope`, `task_label`)
   - `vault_id`
   - `vault_name`
+  - `purpose`
+  - scope fields (`scope_kind`, `scope_id`)
   - `snapshot_root`
   - `status`
   - `created_at`
   - `expires_at`
   - `rolled_back_at`
+- `file_snapshots`
+  - `id`
+  - `snapshot_set_id`
+  - `task_id`
+  - `vault_id`
+  - `vault_name`
+  - `path`
+  - `source`
+  - `exists`
+  - `content_hash`
+  - `snapshot_ref`
+  - `created_at`
+  - `expires_at`
 
-Snapshot files should live under `system/task_snapshots/<task_id>/`, not inside
-the vault. Snapshot metadata should be enough to restore existing files, delete
-new files, and restore deleted files.
+Snapshot files should live under `system/task_snapshots/<snapshot_set_id>/`,
+not inside the vault. Snapshot metadata should be explicit:
+`snapshot_sets` records the moment/context that caused capture, and
+`file_snapshots` records each file state captured at that moment. This should be
+enough to restore existing files, delete new files, restore deleted files, and
+support pending-diff baselines without pretending read baselines are mutations.
 
 Task mutation rows are retention-bound task safety/audit state, not permanent
 vault history. They should be retained long enough for rollback, conflict
@@ -624,7 +646,7 @@ POST /api/vault-state/cleanup
 Behavior:
 
 - Delete expired `task_file_mutations` rows.
-- Delete expired `task_snapshots` metadata and snapshot files.
+- Delete expired `snapshot_sets`, `file_snapshots`, and snapshot files.
 - Never delete vault files.
 - Return counts for deleted mutation rows, snapshot rows, and snapshot files.
 - Surface the action as a small manual maintenance button in the system/admin UI
@@ -660,38 +682,34 @@ Possible later direction:
 Use vault manifest and optional snapshots to support "what changed since this
 workflow processed the file?"
 
-Initial composable tool:
-
-- Add `diff_file(path=...)` as a settings-backed tool available to chat,
-  authored workflows, and chat-side `code_execution`.
-- Public contract takes only a vault-relative `path`.
-- It compares the current file against the latest retained pre-mutation
-  snapshot for that path.
-- It returns `available=false` with reason `previous_snapshot_unavailable` when
-  no retained snapshot can be resolved, including guidance to increase
-  `task_snapshot_retention_days`.
-- Do not expose arbitrary selectors or `last_processed` coupling in the first
-  slice.
-
 Behavior:
 
-- Extend processed-file state to store last processed hash per workflow/path.
-- Optionally store a compact prior snapshot for processed markdown files.
-- Add either:
-  - `pending_files(operation="diff", items=...)`, or
-  - a new helper such as `file_changes_since_processed(...)`.
-- Return structured changed hunks or markdown-aware additions.
+- Extend processed-file state to store a processed baseline per
+  workflow/path.
+- When `pending_files(operation="complete", items=...)` marks a file complete,
+  retain the file state needed to compare the next run against that completion
+  point.
+- Add `pending_files(operation="diff", items=...)` so workflows can request the
+  exact changes for pending items without introducing a separate helper/tool.
+- Diff baseline is the workflow's last completed state for that path, not the
+  latest AssistantMD mutation snapshot.
+- Return structured changed hunks plus enough metadata to identify unavailable
+  baselines cleanly.
+- Keep retained task mutation snapshots scoped to rollback and mutation audit;
+  they are not the pending diff baseline.
 
 Validation target:
 
 - Workflow processes a markdown checklist.
 - User adds new checklist items.
 - Pending diff returns only new entries or changed hunks.
+- Read-only workflow completion creates a processed baseline that later detects
+  external edits from Obsidian/manual file changes.
 
 Feedback checkpoint:
 
-- Decide whether markdown-aware parsing is worth adding before generic line diff
-  is expanded.
+- Decide the initial return shape for generic line hunks before adding any
+  markdown-aware interpretation.
 
 ## Slice 11: Scheduled Refresh And Downstream Index Consumers
 

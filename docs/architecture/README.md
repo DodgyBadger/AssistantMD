@@ -34,7 +34,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Runtime](runtime.md) | Bootstrap, global context, path roots, config reload | `core/runtime/` |
 | [API + UI](api-ui.md) | Endpoints, static UI, exception and lifecycle wiring | `api/`, `main.py`, `static/` |
 | [Execution Tasks](execution-tasks.md) | Process-local task snapshots, cancellation, and task lifecycle events | `core/runtime/execution_tasks.py`, `core/runtime/workflow_governor.py` |
-| [Vault State](vault-state.md) | Vault manifest, change feed, task mutation audit, snapshots, rollback, and diff support | `core/vault_state/`, `core/tools/diff_file.py` |
+| [Vault State](vault-state.md) | Vault manifest, change feed, task mutation audit, snapshots, and rollback | `core/vault_state/` |
 | [Authoring](authoring-engine.md) | Discover/parse/execute workflows and context templates in the Monty sandbox, including script helpers | `core/authoring/` |
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
 | [Chat Sessions](chat-sessions.md) | SQLite session store and markdown transcript rendering | `core/chat/` |

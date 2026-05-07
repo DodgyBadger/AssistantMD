@@ -22,8 +22,9 @@ from core.settings import (
 from core.utils.hash import hash_file_bytes
 from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import (
+    FileSnapshot,
     TaskFileMutation,
-    TaskSnapshot,
+    SnapshotSet,
     VaultFile,
     VaultFileEvent,
     VaultRecord,
@@ -67,8 +68,10 @@ class VaultTaskMutationItem:
     event_sequence: int | None
     before_exists: bool
     before_hash: str | None
+    before_snapshot_id: int | None
     after_exists: bool
     after_hash: str | None
+    after_snapshot_id: int | None
     snapshot_ref: str | None
     created_at: datetime
     expires_at: datetime | None
@@ -428,8 +431,10 @@ class VaultStateService:
                             event_sequence=row.event_sequence,
                             before_exists=bool(row.before_exists),
                             before_hash=row.before_hash,
+                            before_snapshot_id=row.before_snapshot_id,
                             after_exists=bool(row.after_exists),
                             after_hash=row.after_hash,
+                            after_snapshot_id=row.after_snapshot_id,
                             snapshot_ref=row.snapshot_ref,
                             created_at=row.created_at,
                             expires_at=row.expires_at,
@@ -535,7 +540,8 @@ class VaultStateService:
             VaultFile.__table__,
             VaultFileEvent.__table__,
             TaskFileMutation.__table__,
-            TaskSnapshot.__table__,
+            SnapshotSet.__table__,
+            FileSnapshot.__table__,
         )
         self._ensure_task_mutation_columns()
 
@@ -554,6 +560,8 @@ class VaultStateService:
             "task_label": "VARCHAR",
             "related_path": "VARCHAR",
             "event_sequence": "INTEGER",
+            "before_snapshot_id": "INTEGER",
+            "after_snapshot_id": "INTEGER",
             "expires_at": "DATETIME",
         }
         missing_columns = {

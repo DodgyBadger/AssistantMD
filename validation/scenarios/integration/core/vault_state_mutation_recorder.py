@@ -42,11 +42,12 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         vault_id = mutation_event["data"]["vault_id"]
         self.assert_event_contains(
             events,
-            name="task_snapshot_created",
+            name="snapshot_set_created",
             expected={
                 "task_id": task_id,
                 "vault_id": vault_id,
                 "vault_name": vault.name,
+                "purpose": "rollback",
             },
         )
         self.assert_event_contains(
@@ -93,6 +94,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             self.soft_assert(row["after_hash"], "Mutation should capture after hash")
             self.soft_assert(row["event_sequence"] is not None, "Mutation should link vault event")
             self.soft_assert(row["expires_at"], "Mutation should have retention expiration")
+            self.soft_assert(row["before_snapshot_id"], "Create-file absence should have a file snapshot row")
             self.soft_assert_equal(
                 row["snapshot_ref"],
                 None,
@@ -102,6 +104,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         append_row = next((item for item in rows if item["operation"] == "append"), None)
         if append_row is not None:
             self.soft_assert_equal(append_row["before_exists"], 1, "Append should capture existing before state")
+            self.soft_assert(append_row["before_snapshot_id"], "Append should retain file snapshot id")
             self.soft_assert(append_row["snapshot_ref"], "Append should retain pre-mutation snapshot ref")
         delete_row = next((item for item in rows if item["operation"] == "delete"), None)
         if delete_row is not None:
@@ -238,7 +241,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 SELECT task_id, task_kind, task_source, task_scope, task_label,
                        vault_id, vault_name, path, operation,
                        related_path, event_sequence, before_exists, before_hash,
-                       after_exists, after_hash, snapshot_ref, expires_at
+                       before_snapshot_id, after_exists, after_hash, snapshot_ref, expires_at
                 FROM task_file_mutations
                 WHERE task_id = ?
                 ORDER BY id ASC

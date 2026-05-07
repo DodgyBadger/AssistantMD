@@ -114,7 +114,7 @@ class VaultStateRollbackScenario(BaseScenario):
         conn = sqlite3.connect(db_path)
         try:
             row = conn.execute(
-                "SELECT status FROM task_snapshots WHERE task_id = ?",
+                "SELECT status FROM snapshot_sets WHERE task_id = ? AND purpose = 'rollback'",
                 (task_id,),
             ).fetchone()
             return row[0] if row is not None else None

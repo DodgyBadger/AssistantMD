@@ -9,7 +9,7 @@ from pathlib import Path
 
 from core.database import get_system_database_path
 from core.logger import UnifiedLogger
-from core.vault_state.models import TaskFileMutation, TaskSnapshot
+from core.vault_state.models import FileSnapshot, SnapshotSet, TaskFileMutation
 from core.vault_state.service import VaultStateService
 
 
@@ -48,7 +48,7 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
 
         expired_snapshots = [
             row
-            for row in session.query(TaskSnapshot).all()
+            for row in session.query(SnapshotSet).all()
             if _is_expired(row.expires_at, cleanup_time)
         ]
         for row in expired_snapshots:
@@ -58,6 +58,12 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
             )
             snapshot_files_deleted += files_deleted
             snapshot_dirs_deleted += dirs_deleted
+            for file_snapshot in (
+                session.query(FileSnapshot)
+                .filter(FileSnapshot.snapshot_set_id == row.id)
+                .all()
+            ):
+                session.delete(file_snapshot)
             session.delete(row)
         expired_snapshot_rows_deleted = len(expired_snapshots)
         session.commit()

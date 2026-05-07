@@ -44,6 +44,7 @@ class RecordedMutationResult:
     after_hash: str | None
     task_id: str | None
     event_sequence: int | None
+    before_snapshot_id: int | None
     snapshot_ref: str | None
 
 
@@ -175,36 +176,56 @@ def move_vault_file(
     created_at = datetime.now(UTC)
     expires_at = compute_snapshot_expiration(created_at)
     source_snapshot_ref = None
+    source_snapshot_id = None
     destination_snapshot_ref = None
+    destination_snapshot_id = None
 
     if task is not None:
         with service.SessionFactory() as session:
             source_snapshot = ensure_task_file_snapshot(
                 session=session,
                 task_id=task.task_id,
+                task_kind=task.kind,
+                task_source=task.source,
+                task_scope=task.scope,
+                task_label=task.label,
                 vault_id=identity.vault_id,
                 vault_name=vault_name,
                 vault_root=vault_root,
                 relative_path=source_relative,
                 before_exists=True,
                 source_path=source_path,
+                purpose="rollback",
+                source="task_mutation_before",
+                scope_kind="task",
+                scope_id=task.task_id,
                 created_at=created_at,
                 expires_at=expires_at,
             )
             source_snapshot_ref = source_snapshot.snapshot_ref
+            source_snapshot_id = source_snapshot.file_snapshot_id
             destination_snapshot = ensure_task_file_snapshot(
                 session=session,
                 task_id=task.task_id,
+                task_kind=task.kind,
+                task_source=task.source,
+                task_scope=task.scope,
+                task_label=task.label,
                 vault_id=identity.vault_id,
                 vault_name=vault_name,
                 vault_root=vault_root,
                 relative_path=destination_relative,
                 before_exists=destination_before_exists,
                 source_path=destination_path,
+                purpose="rollback",
+                source="task_mutation_before",
+                scope_kind="task",
+                scope_id=task.task_id,
                 created_at=created_at,
                 expires_at=expires_at,
             )
             destination_snapshot_ref = destination_snapshot.snapshot_ref
+            destination_snapshot_id = destination_snapshot.file_snapshot_id
             session.commit()
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -226,6 +247,7 @@ def move_vault_file(
         after_hash=hash_file_bytes(source_path, length=None) if source_path.exists() else None,
         task_id=task.task_id if task is not None else None,
         event_sequence=event_sequence,
+        before_snapshot_id=source_snapshot_id,
         snapshot_ref=source_snapshot_ref,
     )
     destination_result = RecordedMutationResult(
@@ -240,6 +262,7 @@ def move_vault_file(
         after_hash=destination_after_hash,
         task_id=task.task_id if task is not None else None,
         event_sequence=event_sequence,
+        before_snapshot_id=destination_snapshot_id,
         snapshot_ref=destination_snapshot_ref,
     )
     _persist_or_log_mutation(
@@ -295,6 +318,7 @@ def mutate_vault_file(
     task = get_current_execution_task()
     service = VaultStateService()
     snapshot_ref = None
+    before_snapshot_id = None
     created_at = datetime.now(UTC)
     expires_at = compute_snapshot_expiration(created_at)
 
@@ -303,16 +327,25 @@ def mutate_vault_file(
             snapshot = ensure_task_file_snapshot(
                 session=session,
                 task_id=task.task_id,
+                task_kind=task.kind,
+                task_source=task.source,
+                task_scope=task.scope,
+                task_label=task.label,
                 vault_id=identity.vault_id,
                 vault_name=vault_name,
                 vault_root=vault_root,
                 relative_path=relative_path,
                 before_exists=before_exists,
                 source_path=full_path,
+                purpose="rollback",
+                source="task_mutation_before",
+                scope_kind="task",
+                scope_id=task.task_id,
                 created_at=created_at,
                 expires_at=expires_at,
             )
             snapshot_ref = snapshot.snapshot_ref
+            before_snapshot_id = snapshot.file_snapshot_id
             session.commit()
 
     if create_parent:
@@ -336,6 +369,7 @@ def mutate_vault_file(
         after_hash=after_hash,
         task_id=task.task_id if task is not None else None,
         event_sequence=event_sequence,
+        before_snapshot_id=before_snapshot_id,
         snapshot_ref=snapshot_ref,
     )
 
@@ -399,8 +433,10 @@ def _persist_or_log_mutation(
                 event_sequence=result.event_sequence,
                 before_exists=result.before_exists,
                 before_hash=result.before_hash,
+                before_snapshot_id=result.before_snapshot_id,
                 after_exists=result.after_exists,
                 after_hash=result.after_hash,
+                after_snapshot_id=None,
                 snapshot_ref=result.snapshot_ref,
                 created_at=created_at,
                 expires_at=expires_at,
@@ -426,6 +462,7 @@ def _persist_or_log_mutation(
             "after_exists": result.after_exists,
             "before_hash": result.before_hash,
             "after_hash": result.after_hash,
+            "before_snapshot_id": result.before_snapshot_id,
             "event_sequence": result.event_sequence,
             "expires_at": expires_at.isoformat() if expires_at else None,
             "snapshot_ref": result.snapshot_ref,

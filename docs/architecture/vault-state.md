@@ -11,8 +11,6 @@ Vault state maintains a durable, rebuildable view of vault files and a retained 
 - `core/vault_state/snapshots.py` — pre-mutation task snapshot capture
 - `core/vault_state/rollback.py` — automatic rollback for failed, cancelled, and timed-out tasks
 - `core/vault_state/cleanup.py` — retained snapshot and mutation cleanup
-- `core/vault_state/diff.py` — retained snapshot diff support
-- `core/tools/diff_file.py` — chat and authoring tool for current-vs-previous file diffs
 
 ## Storage Model
 
@@ -25,10 +23,11 @@ The database tables have distinct roles:
 | `vaults` | Stable vault id registry and current vault name |
 | `vault_files` | Current observed file state per vault-relative path, including rows marked deleted |
 | `vault_file_events` | Monotonic change feed of created, changed, classified, and deleted file observations |
+| `snapshot_sets` | Task-scoped moments when one or more file snapshots were captured |
+| `file_snapshots` | Per-file snapshot records inside a snapshot set |
 | `task_file_mutations` | Task-scoped audit rows for attempted vault file mutations |
-| `task_snapshots` | Retained pre-mutation snapshot roots and rollback status per task/vault |
 
-`vault_files` is the current manifest. `vault_file_events` is append-only change history. `task_file_mutations` records what a chat, workflow, or code_execution task attempted to change, including before/after hashes and any pre-mutation snapshot reference.
+`vault_files` is the current manifest. `vault_file_events` is append-only change history. `snapshot_sets` records why and when AssistantMD captured one or more file states. `file_snapshots` records the actual per-file state captured in that set. `task_file_mutations` records what a chat, workflow, or code_execution task attempted to change, including before/after hashes and a pointer to the relevant pre-mutation file snapshot.
 
 ## Vault Identity
 
@@ -72,13 +71,15 @@ When a mutation runs inside an active execution task, vault state captures the o
 
 Snapshot behavior:
 
-- existing files are copied under `system/task_snapshots/<task_id>/files/<vault-relative-path>`
-- new files have no file snapshot because no prior content exists
-- the first `task_file_mutations` row for a task/path carries the retained `snapshot_ref`
-- later mutations to the same path in the same task reuse the first snapshot reference
+- one `snapshot_sets` row represents the rollback capture point for the task/vault
+- one `file_snapshots` row represents each captured path in that set
+- existing files are copied under `system/task_snapshots/<snapshot_set_id>/task_mutation_before/files/<vault-relative-path>`
+- new files record a `file_snapshots` row with `exists=false` and no file payload
+- the first `task_file_mutations` row for a task/path carries `before_snapshot_id` and the retained `snapshot_ref`
+- later mutations to the same path in the same task reuse the first file snapshot
 - expiration is computed from `task_snapshot_retention_days`
 
-Snapshots support automatic rollback and the `diff_file` tool. They are not a full version-control system.
+Snapshots support automatic rollback. They are not a full version-control system.
 
 ## Automatic Rollback
 
@@ -97,7 +98,7 @@ Rollback behavior:
 - restores the retained pre-mutation snapshot when the file existed before the task
 - deletes files that were created by the task
 - refreshes each affected vault after rollback
-- marks task snapshots as `rolled_back`
+- marks rollback snapshot sets as `rolled_back`
 - treats repeated rollback attempts as skipped with `already_rolled_back`
 
 Rollback failures are logged as `task_rollback_failed`; they do not replace the original task terminal status.
@@ -114,18 +115,7 @@ The Configuration / Misc cleanup button calls:
 
 - `POST /api/vault-state/cleanup`
 
-Cleanup deletes expired `task_file_mutations`, expired `task_snapshots`, and managed snapshot files under `system/task_snapshots/`. It does not delete vault files.
-
-## Diff Tool
-
-`diff_file(path=...)` is a settings-backed tool available to chat, delegate child agents when enabled, and authored scripts as a direct tool callable.
-
-The tool compares:
-
-- baseline: the latest retained pre-mutation snapshot for the vault-relative path
-- current: the raw current file contents on disk
-
-It returns unified diff text when a retained baseline exists. If no retained snapshot can be resolved, it returns `metadata.status="unavailable"` and `metadata.reason="previous_snapshot_unavailable"` with guidance to increase `task_snapshot_retention_days`.
+Cleanup deletes expired `task_file_mutations`, expired `snapshot_sets`, expired `file_snapshots`, and managed snapshot files under `system/task_snapshots/`. It does not delete vault files.
 
 ## Settings
 
