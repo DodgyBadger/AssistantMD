@@ -85,6 +85,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `pending_files`
 
 - `operation="get"` filters a `file_ops_safe` result down to the pending subset
+- pending items include `item.metadata["pending_diff"]`; it is available when the workflow has previously completed that file and the retained baseline can be read
 - `operation="complete"` marks only the items you actually finished processing
 
 ### Direct Tool Calls
@@ -225,10 +226,12 @@ if not pending.items:
 results = []
 selected = pending.items[:5]
 for item in selected:
+    diff = item.metadata.get("pending_diff", {})
     doc = await file_ops_safe(operation="read", path=item.ref)
     parsed = await parse_markdown(value=doc.return_value)
     results.append({
         "ref": item.ref,
+        "changed_since_last_complete": diff.get("available") and diff.get("has_changes"),
         "title": parsed.frontmatter.get("title", item.ref),
         "sections": [s.heading for s in parsed.sections],
     })

@@ -184,7 +184,7 @@ Initial tables:
   - `created_at`
   - `expires_at`
 
-Snapshot files should live under `system/task_snapshots/<snapshot_set_id>/`,
+Snapshot files should live under `system/vault_snapshots/<snapshot_set_id>/`,
 not inside the vault. Snapshot metadata should be explicit:
 `snapshot_sets` records the moment/context that caused capture, and
 `file_snapshots` records each file state captured at that moment. This should be
@@ -679,37 +679,38 @@ Possible later direction:
 
 ## Slice 10: Pending Diff Without Git
 
-Use vault manifest and optional snapshots to support "what changed since this
+Use vault manifest and retained snapshots to support "what changed since this
 workflow processed the file?"
 
 Behavior:
 
-- Extend processed-file state to store a processed baseline per
-  workflow/path.
 - When `pending_files(operation="complete", items=...)` marks a file complete,
-  retain the file state needed to compare the next run against that completion
-  point.
-- Add `pending_files(operation="diff", items=...)` so workflows can request the
-  exact changes for pending items without introducing a separate helper/tool.
+  capture the current file state in a `snapshot_sets` row with
+  `purpose="pending_complete"` and per-file `file_snapshots` rows with
+  `source="pending_files.complete"`.
+- Keep the `pending_files` interface unchanged. `pending_files(operation="get",
+  items=...)` attaches per-item `metadata["pending_diff"]` when a retained
+  processed baseline is available.
 - Diff baseline is the workflow's last completed state for that path, not the
   latest AssistantMD mutation snapshot.
-- Return structured changed hunks plus enough metadata to identify unavailable
-  baselines cleanly.
-- Keep retained task mutation snapshots scoped to rollback and mutation audit;
-  they are not the pending diff baseline.
+- Return a unified text diff plus enough metadata to identify unavailable
+  baselines cleanly, including `snapshot_set_id`, `file_snapshot_id`,
+  baseline hash, and current hash.
+- Use the stable `vault_id` plus workflow id and vault-relative path when
+  resolving the last completed baseline.
 
 Validation target:
 
 - Workflow processes a markdown checklist.
 - User adds new checklist items.
-- Pending diff returns only new entries or changed hunks.
+- `pending_files(operation="get", ...)` returns diff metadata for pending items.
 - Read-only workflow completion creates a processed baseline that later detects
   external edits from Obsidian/manual file changes.
 
 Feedback checkpoint:
 
-- Decide the initial return shape for generic line hunks before adding any
-  markdown-aware interpretation.
+- Review whether unified diff text is sufficient before adding markdown-aware
+  interpretation or selector options.
 
 ## Slice 11: Scheduled Refresh And Downstream Index Consumers
 

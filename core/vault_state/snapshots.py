@@ -179,7 +179,7 @@ def compute_snapshot_expiration(created_at: datetime) -> datetime | None:
 
 def _snapshot_root(snapshot_set_id: int) -> Path:
     system_root = Path(get_system_database_path("vault_state")).parent
-    return system_root / "task_snapshots" / str(snapshot_set_id)
+    return system_root / "vault_snapshots" / str(snapshot_set_id)
 
 
 def _snapshot_ref(source: str, relative_path: str) -> str:

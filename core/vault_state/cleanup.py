@@ -138,4 +138,4 @@ def _delete_snapshot_root(*, snapshot_root: Path, snapshot_base: Path) -> tuple[
 
 def _snapshot_base_root() -> Path:
     system_root = Path(get_system_database_path("vault_state")).parent
-    return system_root / "task_snapshots"
+    return system_root / "vault_snapshots"

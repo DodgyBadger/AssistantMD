@@ -27,8 +27,8 @@ class VaultStateCleanupScenario(BaseScenario):
         expired_at = now - timedelta(days=1)
         retained_at = now + timedelta(days=1)
         system_root = self._get_system_controller()._system_root
-        expired_snapshot_root = system_root / "task_snapshots" / "9001"
-        retained_snapshot_root = system_root / "task_snapshots" / "9002"
+        expired_snapshot_root = system_root / "vault_snapshots" / "9001"
+        retained_snapshot_root = system_root / "vault_snapshots" / "9002"
         expired_file = expired_snapshot_root / "files" / "notes" / "expired.md"
         retained_file = retained_snapshot_root / "files" / "notes" / "retained.md"
         expired_file.parent.mkdir(parents=True, exist_ok=True)
