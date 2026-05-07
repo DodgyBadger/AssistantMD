@@ -125,10 +125,6 @@ settings:
     value: false
     description: "Enable Logfire telemetry when LOGFIRE_TOKEN is set."
     restart_required: false
-  piston_base_url:
-    value: "https://emkc.org/api/v2/piston"
-    description: "Piston API base URL. Default value is the free public endpoint. Override for self-hosted or proxied endpoints."
-    restart_required: false
   ingestion_pdf_default_strategies:
     value:
       - pdf_text

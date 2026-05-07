@@ -712,6 +712,15 @@ Feedback checkpoint:
 - Review whether unified diff text is sufficient before adding markdown-aware
   interpretation or selector options.
 
+Possible future extension:
+
+- Add read-only scope selection so chat or another workflow can inspect pending
+  items and diffs for a named workflow/consumer without running that workflow's
+  side effects.
+- Keep `pending_files(operation="complete", ...)` current-scope by default so
+  one chat session or workflow does not accidentally advance another consumer's
+  processed baseline.
+
 ## Slice 11: Scheduled Refresh And Downstream Index Consumers
 
 Add periodic reconciliation and prepare a neutral change feed for retrieval,
