@@ -21,6 +21,8 @@ When writing authoring scripts:
 
 - Keep user-editable constants such as paths, prompts, model aliases, and thinking settings near the top.
 - Use direct tool calls and helper functions exactly as documented.
+- For incremental file processing, first use `file_ops_safe(...)` to list, search, or otherwise select candidate files, then pass that result to `pending_files(operation="get", items=...)`. `pending_files` does not accept `path`, `pattern`, `glob`, or `search_term` directly. Inspect each returned item's `metadata["pending_diff"]` before writing custom diff or regex comparison logic. When available, `pending_diff["text"]` is the built-in unified diff since this workflow or chat scope last completed that file.
+- When the script could use either deterministic parsing or `delegate(...)`, present both options to the user and ask for their preference. Parsing is cheaper and repeatable; delegation is often better for ambiguous extraction, summarization, classification, or judgment.
 - Use `delegate(...)` only when the script needs model judgment, and pass explicit instructions and tool access.
 - Make one small change at a time.
 

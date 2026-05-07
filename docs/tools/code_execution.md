@@ -85,7 +85,11 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `pending_files`
 
 - `operation="get"` filters a `file_ops_safe` result down to the pending subset
-- pending items include `item.metadata["pending_diff"]`; it is available when the workflow has previously completed that file and the retained baseline can be read
+- `pending_files` does not accept `path`, `pattern`, `glob`, or `search_term`; first call `file_ops_safe(...)` to list/search/select candidate files, then pass that result as `items`
+- always inspect `item.metadata["pending_diff"]` before computing your own diff; it is the built-in "changed since this workflow/chat scope last completed this file" signal
+- `pending_diff["available"]` is true when the current scope has previously completed that file and the retained baseline can be read
+- when available, `pending_diff["text"]` contains a unified diff from the last completed baseline to the current file, and `pending_diff["has_changes"]` indicates whether the diff has content
+- when unavailable, `pending_diff["reason"]` explains why, such as `processed_baseline_unavailable` on the first run
 - `operation="complete"` marks only the items you actually finished processing
 
 ### Direct Tool Calls
@@ -208,8 +212,9 @@ target = next(
 
 ### Process a batch of pending vault files
 
-Lists a directory, filters to the pending subset, reads and parses each file, then marks the
-processed items complete. Batches to a small slice to stay within a single execution.
+Lists a directory, filters to the pending subset, uses built-in pending diff metadata when
+available, then marks the processed items complete. Batches to a small slice to stay within a
+single execution.
 
 ```python
 code_execution(
@@ -227,11 +232,18 @@ results = []
 selected = pending.items[:5]
 for item in selected:
     diff = item.metadata.get("pending_diff", {})
+    if diff.get("available") and diff.get("has_changes"):
+        # Prefer this built-in diff over ad hoc regex comparison against saved copies.
+        changes_since_last_complete = diff["text"]
+    else:
+        changes_since_last_complete = ""
+
     doc = await file_ops_safe(operation="read", path=item.ref)
     parsed = await parse_markdown(value=doc.return_value)
     results.append({
         "ref": item.ref,
-        "changed_since_last_complete": diff.get("available") and diff.get("has_changes"),
+        "changed_since_last_complete": bool(changes_since_last_complete),
+        "diff": changes_since_last_complete,
         "title": parsed.frontmatter.get("title", item.ref),
         "sections": [s.heading for s in parsed.sections],
     })
