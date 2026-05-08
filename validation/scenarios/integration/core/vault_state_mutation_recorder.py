@@ -9,6 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from validation.core.base_scenario import BaseScenario
 from core.chat.schema import ensure_chat_sessions_schema
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    workflow_vault_scope,
+)
+from core.runtime.state import get_runtime_context
+from core.vault_state.file_mutations import mutate_vault_file
 
 
 class VaultStateMutationRecorderScenario(BaseScenario):
@@ -227,6 +234,42 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             self.soft_assert_equal(manifest["deleted_at"], None, "Created file should be active")
             self.soft_assert_equal(manifest["artifact_class"], "user_content", "Created note class")
 
+        failure_checkpoint = self.event_checkpoint()
+        caught = None
+        runtime = get_runtime_context()
+        async with runtime.task_coordinator.track_current_task(
+            kind=ExecutionTaskKind.WORKFLOW.value,
+            scope=workflow_vault_scope(vault.name),
+            source=ExecutionTaskSource.API.value,
+            label=f"{vault.name}/mutation_failure_probe",
+            metadata={"vault": vault.name},
+        ):
+            try:
+                mutate_vault_file(
+                    vault_path=vault,
+                    path="notes/failing-write.md",
+                    operation="write",
+                    mutator=_raise_forced_mutation_failure,
+                    create_parent=True,
+                )
+            except RuntimeError as exc:
+                caught = exc
+        self.soft_assert(caught is not None, "Forced mutation failure should propagate")
+        failure_events = self.events_since(failure_checkpoint)
+        self.assert_event_contains(
+            failure_events,
+            name="vault_state_mutation_failed",
+            expected={
+                "vault_id": vault_id,
+                "vault_name": vault.name,
+                "path": "notes/failing-write.md",
+                "operation": "write",
+                "stage": "mutate",
+                "before_exists": False,
+                "error_type": "RuntimeError",
+            },
+        )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
@@ -443,3 +486,7 @@ await file_ops_unsafe(
 await finish(status="completed", reason="write-probe-done")
 ```
 """
+
+
+def _raise_forced_mutation_failure(_path: Path) -> None:
+    raise RuntimeError("forced mutation failure")

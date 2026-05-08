@@ -842,6 +842,12 @@ Feedback checkpoint:
 
 ## Recommended Next Step
 
-Finish Slice 3A, then review the Vault Activity UI with real chat and workflow
-runs. After that, continue routing the remaining vault mutators through
-`core.vault_state.file_mutations` before adding rollback controls.
+Prepare the branch for maintainer review:
+
+- Confirm the release notes describe the user-facing behavior.
+- Keep full validation maintainer-owned; agents should provide targeted scenario
+  results and identify any residual risk.
+- Review scan performance on a realistic vault before enabling a short scheduled
+  refresh interval in production.
+- Treat derived memory/retrieval indexes as downstream consumers of
+  `vault_file_events` in a later branch.

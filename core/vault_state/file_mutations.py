@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
+from typing import Any
 
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import get_current_execution_task
@@ -204,105 +205,125 @@ def move_vault_file(
     destination_snapshot_ref = None
     destination_snapshot_id = None
 
-    if task is not None:
-        with service.SessionFactory() as session:
-            source_snapshot = ensure_task_file_snapshot(
-                session=session,
-                task_id=task.task_id,
-                task_kind=task.kind,
-                task_source=task.source,
-                task_scope=task.scope,
-                task_label=task.label,
-                vault_id=identity.vault_id,
-                vault_name=vault_name,
-                vault_root=vault_root,
-                relative_path=source_relative,
-                before_exists=True,
-                source_path=source_path,
-                purpose="rollback",
-                source="task_mutation_before",
-                scope_kind="task",
-                scope_id=task.task_id,
-                created_at=created_at,
-                expires_at=expires_at,
-            )
-            source_snapshot_ref = source_snapshot.snapshot_ref
-            source_snapshot_id = source_snapshot.file_snapshot_id
-            destination_snapshot = ensure_task_file_snapshot(
-                session=session,
-                task_id=task.task_id,
-                task_kind=task.kind,
-                task_source=task.source,
-                task_scope=task.scope,
-                task_label=task.label,
-                vault_id=identity.vault_id,
-                vault_name=vault_name,
-                vault_root=vault_root,
-                relative_path=destination_relative,
-                before_exists=destination_before_exists,
-                source_path=destination_path,
-                purpose="rollback",
-                source="task_mutation_before",
-                scope_kind="task",
-                scope_id=task.task_id,
-                created_at=created_at,
-                expires_at=expires_at,
-            )
-            destination_snapshot_ref = destination_snapshot.snapshot_ref
-            destination_snapshot_id = destination_snapshot.file_snapshot_id
-            session.commit()
+    stage = "snapshot"
+    try:
+        if task is not None:
+            with service.SessionFactory() as session:
+                source_snapshot = ensure_task_file_snapshot(
+                    session=session,
+                    task_id=task.task_id,
+                    task_kind=task.kind,
+                    task_source=task.source,
+                    task_scope=task.scope,
+                    task_label=task.label,
+                    vault_id=identity.vault_id,
+                    vault_name=vault_name,
+                    vault_root=vault_root,
+                    relative_path=source_relative,
+                    before_exists=True,
+                    source_path=source_path,
+                    purpose="rollback",
+                    source="task_mutation_before",
+                    scope_kind="task",
+                    scope_id=task.task_id,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                )
+                source_snapshot_ref = source_snapshot.snapshot_ref
+                source_snapshot_id = source_snapshot.file_snapshot_id
+                destination_snapshot = ensure_task_file_snapshot(
+                    session=session,
+                    task_id=task.task_id,
+                    task_kind=task.kind,
+                    task_source=task.source,
+                    task_scope=task.scope,
+                    task_label=task.label,
+                    vault_id=identity.vault_id,
+                    vault_name=vault_name,
+                    vault_root=vault_root,
+                    relative_path=destination_relative,
+                    before_exists=destination_before_exists,
+                    source_path=destination_path,
+                    purpose="rollback",
+                    source="task_mutation_before",
+                    scope_kind="task",
+                    scope_id=task.task_id,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                )
+                destination_snapshot_ref = destination_snapshot.snapshot_ref
+                destination_snapshot_id = destination_snapshot.file_snapshot_id
+                session.commit()
 
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(source_path, destination_path)
+        stage = "mutate"
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source_path, destination_path)
 
-    destination_after_hash = hash_file_bytes(destination_path, length=None)
-    refresh = service.refresh_vault(vault_root, vault_name=vault_name)
-    event_sequence = refresh.latest_sequence
+        destination_after_hash = hash_file_bytes(destination_path, length=None)
+        stage = "refresh"
+        refresh = service.refresh_vault(vault_root, vault_name=vault_name)
+        event_sequence = refresh.latest_sequence
 
-    source_result = RecordedMutationResult(
-        vault_id=identity.vault_id,
-        vault_name=vault_name,
-        path=source_relative,
-        related_path=destination_relative,
-        operation="move",
-        before_exists=True,
-        before_hash=source_before_hash,
-        after_exists=source_path.exists(),
-        after_hash=hash_file_bytes(source_path, length=None) if source_path.exists() else None,
-        task_id=task.task_id if task is not None else None,
-        event_sequence=event_sequence,
-        before_snapshot_id=source_snapshot_id,
-        snapshot_ref=source_snapshot_ref,
-    )
-    destination_result = RecordedMutationResult(
-        vault_id=identity.vault_id,
-        vault_name=vault_name,
-        path=destination_relative,
-        related_path=source_relative,
-        operation="move",
-        before_exists=destination_before_exists,
-        before_hash=destination_before_hash,
-        after_exists=True,
-        after_hash=destination_after_hash,
-        task_id=task.task_id if task is not None else None,
-        event_sequence=event_sequence,
-        before_snapshot_id=destination_snapshot_id,
-        snapshot_ref=destination_snapshot_ref,
-    )
-    _persist_or_log_mutation(
-        service=service,
-        task=task,
-        result=source_result,
-        created_at=created_at,
-        expires_at=expires_at,
-    )
-    _persist_or_log_mutation(
-        service=service,
-        task=task,
-        result=destination_result,
-        created_at=created_at,
-        expires_at=expires_at,
-    )
+        source_result = RecordedMutationResult(
+            vault_id=identity.vault_id,
+            vault_name=vault_name,
+            path=source_relative,
+            related_path=destination_relative,
+            operation="move",
+            before_exists=True,
+            before_hash=source_before_hash,
+            after_exists=source_path.exists(),
+            after_hash=hash_file_bytes(source_path, length=None) if source_path.exists() else None,
+            task_id=task.task_id if task is not None else None,
+            event_sequence=event_sequence,
+            before_snapshot_id=source_snapshot_id,
+            snapshot_ref=source_snapshot_ref,
+        )
+        destination_result = RecordedMutationResult(
+            vault_id=identity.vault_id,
+            vault_name=vault_name,
+            path=destination_relative,
+            related_path=source_relative,
+            operation="move",
+            before_exists=destination_before_exists,
+            before_hash=destination_before_hash,
+            after_exists=True,
+            after_hash=destination_after_hash,
+            task_id=task.task_id if task is not None else None,
+            event_sequence=event_sequence,
+            before_snapshot_id=destination_snapshot_id,
+            snapshot_ref=destination_snapshot_ref,
+        )
+        stage = "persist"
+        _persist_or_log_mutation(
+            service=service,
+            task=task,
+            result=source_result,
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        _persist_or_log_mutation(
+            service=service,
+            task=task,
+            result=destination_result,
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+    except Exception as exc:
+        _log_mutation_failed(
+            task=task,
+            vault_id=identity.vault_id,
+            vault_name=vault_name,
+            path=source_relative,
+            related_path=destination_relative,
+            operation="move",
+            stage=stage,
+            before_exists=True,
+            before_hash=source_before_hash,
+            before_snapshot_id=source_snapshot_id,
+            error=exc,
+        )
+        raise
     return source_result, destination_result
 
 
@@ -347,58 +368,62 @@ def mutate_vault_file(
     created_at = datetime.now(UTC)
     expires_at = compute_snapshot_expiration(created_at)
 
-    if task is not None:
-        with service.SessionFactory() as session:
-            snapshot = ensure_task_file_snapshot(
-                session=session,
-                task_id=task.task_id,
-                task_kind=task.kind,
-                task_source=task.source,
-                task_scope=task.scope,
-                task_label=task.label,
-                vault_id=identity.vault_id,
-                vault_name=vault_name,
-                vault_root=vault_root,
-                relative_path=relative_path,
-                before_exists=before_exists,
-                source_path=full_path,
-                purpose="rollback",
-                source="task_mutation_before",
-                scope_kind="task",
-                scope_id=task.task_id,
-                created_at=created_at,
-                expires_at=expires_at,
-            )
-            snapshot_ref = snapshot.snapshot_ref
-            before_snapshot_id = snapshot.file_snapshot_id
-            session.commit()
+    stage = "snapshot"
+    try:
+        if task is not None:
+            with service.SessionFactory() as session:
+                snapshot = ensure_task_file_snapshot(
+                    session=session,
+                    task_id=task.task_id,
+                    task_kind=task.kind,
+                    task_source=task.source,
+                    task_scope=task.scope,
+                    task_label=task.label,
+                    vault_id=identity.vault_id,
+                    vault_name=vault_name,
+                    vault_root=vault_root,
+                    relative_path=relative_path,
+                    before_exists=before_exists,
+                    source_path=full_path,
+                    purpose="rollback",
+                    source="task_mutation_before",
+                    scope_kind="task",
+                    scope_id=task.task_id,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                )
+                snapshot_ref = snapshot.snapshot_ref
+                before_snapshot_id = snapshot.file_snapshot_id
+                session.commit()
 
-    if create_parent:
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-    mutator(full_path)
+        stage = "mutate"
+        if create_parent:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+        mutator(full_path)
 
-    after_exists = full_path.exists()
-    after_hash = hash_file_bytes(full_path, length=None) if after_exists else None
+        after_exists = full_path.exists()
+        after_hash = hash_file_bytes(full_path, length=None) if after_exists else None
 
-    refresh = service.refresh_vault(vault_root, vault_name=vault_name)
-    event_sequence = refresh.latest_sequence
-    result = RecordedMutationResult(
-        vault_id=identity.vault_id,
-        vault_name=vault_name,
-        path=relative_path,
-        related_path=None,
-        operation=operation,
-        before_exists=before_exists,
-        before_hash=before_hash,
-        after_exists=after_exists,
-        after_hash=after_hash,
-        task_id=task.task_id if task is not None else None,
-        event_sequence=event_sequence,
-        before_snapshot_id=before_snapshot_id,
-        snapshot_ref=snapshot_ref,
-    )
+        stage = "refresh"
+        refresh = service.refresh_vault(vault_root, vault_name=vault_name)
+        event_sequence = refresh.latest_sequence
+        result = RecordedMutationResult(
+            vault_id=identity.vault_id,
+            vault_name=vault_name,
+            path=relative_path,
+            related_path=None,
+            operation=operation,
+            before_exists=before_exists,
+            before_hash=before_hash,
+            after_exists=after_exists,
+            after_hash=after_hash,
+            task_id=task.task_id if task is not None else None,
+            event_sequence=event_sequence,
+            before_snapshot_id=before_snapshot_id,
+            snapshot_ref=snapshot_ref,
+        )
 
-    if task is None:
+        stage = "persist"
         _persist_or_log_mutation(
             service=service,
             task=task,
@@ -407,17 +432,61 @@ def mutate_vault_file(
             expires_at=expires_at,
             warn_without_task=warn_without_task,
         )
-        return result
-
-    _persist_or_log_mutation(
-        service=service,
-        task=task,
-        result=result,
-        created_at=created_at,
-        expires_at=expires_at,
-        warn_without_task=warn_without_task,
-    )
+    except Exception as exc:
+        _log_mutation_failed(
+            task=task,
+            vault_id=identity.vault_id,
+            vault_name=vault_name,
+            path=relative_path,
+            related_path=None,
+            operation=operation,
+            stage=stage,
+            before_exists=before_exists,
+            before_hash=before_hash,
+            before_snapshot_id=before_snapshot_id,
+            error=exc,
+        )
+        raise
     return result
+
+
+def _log_mutation_failed(
+    *,
+    task: Any,
+    vault_id: str,
+    vault_name: str,
+    path: str,
+    related_path: str | None,
+    operation: str,
+    stage: str,
+    before_exists: bool,
+    before_hash: str | None,
+    before_snapshot_id: int | None,
+    error: Exception,
+) -> None:
+    """Log an unexpected failure in the shared vault mutation path."""
+    logger.add_sink("validation").warning(
+        "vault_state_mutation_failed",
+        data={
+            "event": "vault_state_mutation_failed",
+            "task_id": task.task_id if task is not None else None,
+            "task_kind": task.kind if task is not None else None,
+            "task_source": task.source if task is not None else None,
+            "task_scope": task.scope if task is not None else None,
+            "task_label": task.label if task is not None else None,
+            "vault_id": vault_id,
+            "vault_name": vault_name,
+            "path": path,
+            "related_path": related_path,
+            "operation": operation,
+            "stage": stage,
+            "before_exists": before_exists,
+            "before_hash": before_hash,
+            "before_snapshot_id": before_snapshot_id,
+            "error_type": type(error).__name__,
+            "error": str(error),
+        },
+    )
 
 
 def _persist_or_log_mutation(

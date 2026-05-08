@@ -1,5 +1,19 @@
 # Release Notes
 
+## 2026-05-08 - v0.6.2
+
+### Vault state, rollback, and incremental processing
+
+AssistantMD now keeps a rebuildable vault-state index for every mounted vault, giving the app a clearer view of current files, recent changes, and AssistantMD-managed file mutations.
+
+- Added stable vault identities, current file manifests, and change history in `system/vault_state.db`.
+- Added scheduled whole-vault observation with the reserved `vault-state-refresh` system job, controlled by `vault_scan_interval_seconds`.
+- File writes and deletes from chat, workflows, code execution tools, and ingestion now route through the vault-state mutation path where supported.
+- Failed, cancelled, and timed-out chat/workflow tasks can automatically roll back supported file mutations.
+- `pending_files(...)` now attaches diff metadata when a retained completion baseline is available, so incremental workflows can see what changed since the current scope last processed a file.
+- The Workflows and Configuration UI now surface vault-state activity, tracked file counts, latest vault changes, system jobs, and manual cleanup for expired snapshot artifacts.
+- Removed obsolete `code_execution_piston` and `internal_api` tool implementations.
+
 ## 2026-05-05 - v0.6.1
 
 ### Chat cancellation

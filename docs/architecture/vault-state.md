@@ -79,6 +79,10 @@ Currently tracked mutation helpers include:
 
 If no execution task is active, the mutation still performs the file operation and refreshes vault state. Task-less calls log `vault_state_mutation_untracked` unless the caller marks the write as an intentional system-service mutation, such as ingestion storage.
 
+Unexpected failures in the shared mutation path emit `vault_state_mutation_failed`
+with task context, vault identity, path, operation, stage, before-state metadata,
+and error details before the exception propagates to the caller.
+
 ## Snapshot Sets
 
 When a mutation runs inside an active execution task, vault state captures the original file state once per task/vault/path before the first mutation to that path.

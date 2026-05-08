@@ -675,8 +675,15 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
 
         return scheduler_info
 
-    except Exception:
-        # Return safe defaults on error
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to collect scheduler status",
+            data={
+                "event": "scheduler_status_collection_failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         return SchedulerInfo(
             running=False,
             total_jobs=0,

@@ -21,10 +21,12 @@ SHARED_MUTATION_API_FILES = {
 
 ALLOWED_DIRECT_MUTATION_FILES = {
     Path("core/tools/workflow_run.py"),
-    Path("api/services.py"),
 }
 
 ALLOWED_DIRECT_MUTATION_CALLS = {
+    (Path("api/services.py"), "scan_import_folder", "import_root.mkdir"),
+    (Path("api/services.py"), "update_system_settings", "path.write_text"),
+    (Path("api/services.py"), "repair_settings_from_template", "active_path.write_text"),
     (Path("core/tools/file_ops_safe.py"), "_make_directory", "os.makedirs"),
     (Path("core/ingestion/service.py"), "process_job", "import_root.mkdir"),
 }
