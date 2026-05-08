@@ -717,6 +717,42 @@
         .state-info {
             color: rgb(var(--state-info));
         }
+        .dashboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: rgb(var(--bg-card));
+            font-size: 13px;
+            margin-top: 8px;
+            color: rgb(var(--text-primary));
+        }
+        .dashboard-table th {
+            background: rgb(var(--bg-elevated));
+            padding: 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid rgb(var(--border-primary));
+            color: rgb(var(--text-primary));
+        }
+        .dashboard-table td {
+            padding: 8px;
+            border-bottom: 1px solid rgb(var(--border-primary));
+            color: rgb(var(--text-primary));
+        }
+        .dashboard-table tr:hover {
+            background: rgb(var(--bg-elevated));
+        }
+        .dashboard-table .subtle {
+            color: rgb(var(--text-secondary));
+        }
+        .dashboard-table .cell-center {
+            text-align: center;
+        }
+        .dashboard-table .cell-xs {
+            font-size: 11px;
+        }
+        .dashboard-table .cell-mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
         .state-surface-success {
             background: rgb(var(--state-success) / 0.12);
             border-color: rgb(var(--state-success) / 0.35);
@@ -1413,6 +1449,22 @@
                         <p class="text-sm text-txt-secondary">
                             Manual maintenance actions that do not fit elsewhere.
                         </p>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 space-y-3">
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                <div>
+                                    <div class="text-sm font-medium text-txt-primary">System Jobs</div>
+                                    <div class="text-xs text-txt-secondary">
+                                        Built-in scheduler jobs managed by AssistantMD.
+                                    </div>
+                                </div>
+                                <button id="refresh-system-jobs" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                    Refresh
+                                </button>
+                            </div>
+                            <div id="system-jobs-list" class="text-sm text-txt-secondary">
+                                Loading system jobs…
+                            </div>
+                        </div>
                         <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                             <div class="space-y-1">
                                 <div class="text-sm font-medium text-txt-primary">Purge Expired Cache</div>

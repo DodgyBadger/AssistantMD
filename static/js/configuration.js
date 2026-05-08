@@ -20,6 +20,7 @@
         isSavingSecret: false,
         isPurgingCache: false,
         isCleaningVaultState: false,
+        isLoadingSystemJobs: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
         isImportingUrl: false,
@@ -30,6 +31,7 @@
         importVaults: [],
         importResults: null,
         importUrlResult: null,
+        systemJobs: [],
         settingEditKey: null,
         settingDraftValue: '',
         modelEdit: null,
@@ -89,6 +91,8 @@
         purgeExpiredCacheBtn: null,
         cleanupVaultStateBtn: null,
         cleanupVaultStateFeedback: null,
+        systemJobsList: null,
+        refreshSystemJobsBtn: null,
         purgeSessionsVault: null,
         purgeSessionsAge: null,
         purgeSessionsBtn: null,
@@ -146,6 +150,8 @@
         elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
         elements.cleanupVaultStateBtn = document.getElementById('cleanup-vault-state');
         elements.cleanupVaultStateFeedback = document.getElementById('cleanup-vault-state-feedback');
+        elements.systemJobsList = document.getElementById('system-jobs-list');
+        elements.refreshSystemJobsBtn = document.getElementById('refresh-system-jobs');
         elements.purgeSessionsVault = document.getElementById('purge-sessions-vault');
         elements.purgeSessionsAge = document.getElementById('purge-sessions-age');
         elements.purgeSessionsBtn = document.getElementById('purge-sessions-btn');
@@ -184,6 +190,7 @@
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
         elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
+        elements.refreshSystemJobsBtn?.addEventListener('click', loadSystemJobs);
         elements.purgeSessionsBtn?.addEventListener('click', handlePurgeSessions);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
@@ -1558,6 +1565,97 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    async function loadSystemJobs() {
+        if (!elements.systemJobsList || state.isLoadingSystemJobs) return;
+
+        state.isLoadingSystemJobs = true;
+        const button = elements.refreshSystemJobsBtn;
+        const originalLabel = button ? button.textContent : '';
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Refreshing…';
+        }
+
+        try {
+            const response = await fetch('api/status');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const payload = await response.json();
+            const jobs = payload?.scheduler?.job_details || [];
+            state.systemJobs = jobs.filter((job) => job.job_type === 'system');
+            renderSystemJobs();
+        } catch (error) {
+            elements.systemJobsList.innerHTML = `
+                <div class="state-error">Failed to load system jobs: ${escapeHtml(error.message)}</div>
+            `;
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalLabel;
+            }
+            state.isLoadingSystemJobs = false;
+        }
+    }
+
+    function renderSystemJobs() {
+        if (!elements.systemJobsList) return;
+
+        if (!state.systemJobs.length) {
+            elements.systemJobsList.innerHTML = `
+                <div class="text-sm text-txt-secondary">No system scheduler jobs are currently registered.</div>
+            `;
+            return;
+        }
+
+        const rows = state.systemJobs.map((job) => {
+            const lastRun = formatDateTime(job.last_run_time);
+            const nextRun = formatDateTime(job.next_run_time);
+            const status = job.last_status || 'not run';
+            const error = job.last_error
+                ? `<div class="state-error text-xs mt-1">${escapeHtml(job.last_error)}</div>`
+                : '';
+            return `
+                <tr>
+                    <td>
+                        <strong>${escapeHtml(job.name || job.id)}</strong>
+                        <div class="cell-xs cell-mono subtle">${escapeHtml(job.id)}</div>
+                    </td>
+                    <td class="cell-xs">${escapeHtml(status)}${error}</td>
+                    <td class="cell-xs">${escapeHtml(lastRun)}</td>
+                    <td class="cell-xs">${escapeHtml(nextRun)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        elements.systemJobsList.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Job</th>
+                            <th>Status</th>
+                            <th>Last Run</th>
+                            <th>Next Run</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function formatDateTime(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '—';
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
     async function notifyConfigChanged() {
         if (typeof callbacks.refreshMetadata === 'function') {
             try {
@@ -1590,6 +1688,7 @@ async function saveModelRow(rowKey) {
         await loadGeneralSettings();
         await loadModels();
         await loadSecrets();
+        await loadSystemJobs();
         await loadImportVaults();
         await loadPurgeSessionsVaults();
         state.hasLoadedOnce = true;

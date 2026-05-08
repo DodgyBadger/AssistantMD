@@ -47,7 +47,20 @@ Refresh behavior:
 - classifies files as `user_content`, `assistant_authoring`, or `assistant_generated`
 - emits validation events for refresh start/completion and per-file changes
 
-Runtime bootstrap calls `refresh_all_vaults(...)` for discovered vaults. File mutations routed through the shared mutation API also refresh the affected vault after the write.
+Runtime bootstrap starts a background `refresh_all_vaults(...)` for discovered
+vaults after the web runtime is available. File mutations routed through the
+shared mutation API refresh the affected vault after the write.
+
+When `vault_scan_interval_seconds` is positive, runtime registers a reserved
+APScheduler system job:
+
+- job id: `vault-state-refresh`
+- name: `Vault state refresh`
+
+The job periodically calls `refresh_all_vaults(...)` so external vault edits
+from Obsidian or other tools are observed without requiring app restart or
+manual rescan. Setting `vault_scan_interval_seconds` to `0` disables and removes
+the scheduled job.
 
 ## Mutation Routing
 
@@ -129,4 +142,5 @@ Vault-state behavior is controlled by general settings in `system/settings.yaml`
 - `task_rollback_enabled`
 - `task_snapshot_retention_days`
 
-Bootstrap and mutation-triggered refreshes are active paths. `vault_scan_interval_seconds` is present in settings; scheduled refresh is not wired.
+Startup background refresh, mutation-triggered refresh, manual rescan, and
+scheduled refresh are active observation paths.

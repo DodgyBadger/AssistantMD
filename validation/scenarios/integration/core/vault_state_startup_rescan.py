@@ -2,6 +2,7 @@
 
 import sqlite3
 import sys
+import asyncio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
@@ -18,7 +19,11 @@ class VaultStateStartupRescanScenario(BaseScenario):
 
         checkpoint = self.event_checkpoint()
         await self.start_system()
-        startup_events = self.events_since(checkpoint)
+        startup_events = await self._wait_for_event(
+            checkpoint,
+            name="vault_state_refresh_all_completed",
+            expected={"vaults_refreshed": 1, "vaults_failed": 0},
+        )
 
         completed = self.assert_event_contains(
             startup_events,
@@ -31,8 +36,8 @@ class VaultStateStartupRescanScenario(BaseScenario):
         vault_id = completed["data"]["vault_id"]
         self.assert_event_contains(
             startup_events,
-            name="vault_state_refresh_all_completed",
-            expected={"vaults_refreshed": 1, "vaults_failed": 0},
+            name="vault_state_background_refresh_completed",
+            expected={"reason": "startup", "vault_state_refreshed": 1},
         )
         self.soft_assert(
             self._manifest_row_exists(vault_id, "notes/startup.md", deleted=False),
@@ -66,7 +71,15 @@ class VaultStateStartupRescanScenario(BaseScenario):
 
         checkpoint = self.event_checkpoint()
         await self.restart_system()
-        restart_events = self.events_since(checkpoint)
+        restart_events = await self._wait_for_event(
+            checkpoint,
+            name="vault_state_refresh_completed",
+            expected={
+                "vault_id": vault_id,
+                "vault_name": vault.name,
+                "files_deleted": 1,
+            },
+        )
 
         self.assert_event_contains(
             restart_events,
@@ -85,6 +98,23 @@ class VaultStateStartupRescanScenario(BaseScenario):
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
+
+    async def _wait_for_event(
+        self,
+        checkpoint: int,
+        *,
+        name: str,
+        expected: dict,
+        timeout_seconds: float = 5.0,
+    ) -> list[dict]:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        while True:
+            events = self.events_since(checkpoint)
+            if self.find_events(events, name=name, data=expected):
+                return events
+            if asyncio.get_running_loop().time() >= deadline:
+                return events
+            await asyncio.sleep(0.05)
 
     def _manifest_row_exists(self, vault_id: str, path: str, *, deleted: bool) -> bool:
         db_path = self._get_system_controller()._system_root / "vault_state.db"

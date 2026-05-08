@@ -62,6 +62,8 @@ class VaultInfo(BaseModel):
     path: str = Field(..., description="Full path to vault directory")
     workflow_count: int = Field(..., description="Number of workflows in this vault")
     workflows: List[str] = Field(default_factory=list, description="List of workflow names")
+    tracked_files: Optional[int] = Field(None, description="Current files tracked by vault state")
+    latest_vault_change_at: Optional[datetime] = Field(None, description="Latest vault-state change observation")
 
 
 class SchedulerInfo(BaseModel):

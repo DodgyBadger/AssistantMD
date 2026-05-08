@@ -977,14 +977,6 @@ function displaySystemStatus() {
 
     let html = `
         <style>
-            .dashboard-table { width: 100%; border-collapse: collapse; background: rgb(var(--bg-card)); font-size: 13px; margin-top: 8px; color: rgb(var(--text-primary)); }
-            .dashboard-table th { background: rgb(var(--bg-elevated)); padding: 8px; text-align: left; font-weight: 600; border-bottom: 2px solid rgb(var(--border-primary)); color: rgb(var(--text-primary)); }
-            .dashboard-table td { padding: 8px; border-bottom: 1px solid rgb(var(--border-primary)); color: rgb(var(--text-primary)); }
-            .dashboard-table tr:hover { background: rgb(var(--bg-elevated)); }
-            .dashboard-table .subtle { color: rgb(var(--text-secondary)); }
-            .dashboard-table .cell-center { text-align: center; }
-            .dashboard-table .cell-xs { font-size: 11px; }
-            .dashboard-table .cell-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
             .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
             .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
             .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
@@ -999,6 +991,8 @@ function displaySystemStatus() {
                     <th>Name</th>
                     <th>Path inside container</th>
                     <th class="cell-center">Workflows</th>
+                    <th class="cell-center">Files</th>
+                    <th>Latest Change</th>
                 </tr>
             </thead>
             <tbody>
@@ -1007,6 +1001,8 @@ function displaySystemStatus() {
                         <td><strong>${v.name}</strong></td>
                         <td class="cell-mono cell-xs subtle">${v.path}</td>
                         <td class="cell-center">${v.workflow_count}</td>
+                        <td class="cell-center">${v.tracked_files ?? '—'}</td>
+                        <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -1025,7 +1021,7 @@ function displaySystemStatus() {
                     <tr>
                         <th>ID</th>
                         <th>Status</th>
-                        <th>Schedule</th>
+                        <th>Last Run</th>
                         <th>Next Run</th>
                         <th>Description</th>
                     </tr>
@@ -1033,9 +1029,16 @@ function displaySystemStatus() {
                 <tbody>
                     ${combinedWorkflows.map(workflow => {
                         const job = jobByWorkflowId.get(workflow.global_id);
-                        const schedule = workflow.schedule_cron || '—';
                         const nextRun = job?.next_run_time
                             ? new Date(job.next_run_time).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit'
+                            })
+                            : '—';
+                        const lastRun = job?.last_run_time
+                            ? new Date(job.last_run_time).toLocaleString('en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: 'numeric',
@@ -1057,7 +1060,7 @@ function displaySystemStatus() {
                             <tr>
                                 <td><strong>${workflow.global_id}</strong></td>
                                 <td><span class="badge ${statusClass}">${statusLabel}</span></td>
-                                <td class="cell-xs">${schedule}</td>
+                                <td class="cell-xs">${lastRun}</td>
                                 <td class="cell-xs">${nextRun}</td>
                                 <td class="cell-xs subtle">${description}</td>
                             </tr>

@@ -54,6 +54,17 @@ def reload_configuration(restart_required: bool = False) -> ConfigurationReloadR
     if has_runtime_context():
         runtime = get_runtime_context()
         runtime.last_config_reload = performed_at
+        try:
+            runtime.sync_system_scheduler_jobs()
+        except Exception as exc:  # noqa: BLE001
+            runtime.logger.warning(
+                "Failed to sync system scheduler jobs during configuration reload",
+                data={
+                    "event": "system_scheduler_jobs_reload_sync_failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
 
     return ConfigurationReloadResult(
         performed_at=performed_at,

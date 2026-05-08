@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import yaml
+from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
+from core.scheduling.job_history import get_scheduler_job_history
+from core.scheduling.system_jobs import SYSTEM_JOB_IDS
 from core.settings.store import (
     get_models_config,
     get_tools_config,
@@ -58,6 +61,7 @@ from core.runtime.execution_tasks import (
 )
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
+from core.vault_state.models import VaultFile, VaultFileEvent
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -546,15 +550,19 @@ async def collect_vault_status() -> List[VaultInfo]:
     try:
         # Use cached vault info from workflow loader
         vault_data = _get_workflow_loader().get_vault_info()
+        vault_state_summary = _collect_vault_state_summary()
 
         # Create VaultInfo objects from cached data
         vault_infos = []
         for vault_name, data in vault_data.items():
+            state_summary = vault_state_summary.get(vault_name, {})
             vault_info = VaultInfo(
                 name=vault_name,
                 path=data['path'],
                 workflow_count=len(data['workflows']),
-                workflows=data['workflows']
+                workflows=data['workflows'],
+                tracked_files=state_summary.get("tracked_files"),
+                latest_vault_change_at=state_summary.get("latest_vault_change_at"),
             )
             vault_infos.append(vault_info)
 
@@ -563,6 +571,40 @@ async def collect_vault_status() -> List[VaultInfo]:
     except Exception as e:
         error_msg = f"Failed to collect vault status: {str(e)}"
         raise SystemConfigurationError(error_msg) from e
+
+
+def _collect_vault_state_summary() -> Dict[str, Dict[str, Any]]:
+    """Return cheap vault-state summary fields keyed by current vault name."""
+    summary: Dict[str, Dict[str, Any]] = {}
+    try:
+        service = VaultStateService()
+        with service.SessionFactory() as session:
+            file_rows = session.execute(
+                select(VaultFile.vault_name, func.count())
+                .where(VaultFile.deleted_at.is_(None))
+                .group_by(VaultFile.vault_name)
+            ).all()
+            for vault_name, count in file_rows:
+                summary.setdefault(vault_name, {})["tracked_files"] = int(count)
+
+            change_rows = session.execute(
+                select(VaultFileEvent.vault_name, func.max(VaultFileEvent.observed_at))
+                .group_by(VaultFileEvent.vault_name)
+            ).all()
+            for vault_name, latest_change in change_rows:
+                summary.setdefault(vault_name, {})[
+                    "latest_vault_change_at"
+                ] = latest_change
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to collect vault-state status summary",
+            data={
+                "event": "vault_state_status_summary_failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+    return summary
 
 
 def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
@@ -603,10 +645,15 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         # Extract job details from APScheduler
         job_summaries = []
         for job in jobs:
+            history = get_scheduler_job_history(job.id) or {}
             job_summary = {
                 'id': job.id,
                 'name': job.name,
+                'job_type': 'system' if job.id in SYSTEM_JOB_IDS else 'workflow',
                 'next_run_time': job.next_run_time,
+                'last_run_time': history.get('last_run_time'),
+                'last_status': history.get('last_status'),
+                'last_error': history.get('last_error'),
                 'trigger_type': type(job.trigger).__name__,
                 'trigger_description': str(job.trigger),
                 'max_instances': job.max_instances,

@@ -30,7 +30,7 @@ Runtime-relevant general settings include:
 - `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the governor timeout.
 - `vault_state_enabled`: enable vault-state manifest refresh and change-feed maintenance.
 - `vault_state_excluded_patterns`: gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds.
-- `vault_scan_interval_seconds`: reserved interval setting for scheduled vault-state refresh; bootstrap and mutation-triggered refreshes are the active paths.
+- `vault_scan_interval_seconds`: interval in seconds for the reserved `vault-state-refresh` scheduler job; `0` disables scheduled vault-state refresh.
 - `task_rollback_enabled`: enable automatic rollback for failed, cancelled, or timed-out task file mutations.
 - `task_snapshot_retention_days`: days to retain task mutation rows and snapshot files before cleanup.
 - `compaction_type`: chat history compaction policy (`none`, `suggested`, or `auto`).

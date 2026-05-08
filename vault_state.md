@@ -721,27 +721,108 @@ Possible future extension:
   one chat session or workflow does not accidentally advance another consumer's
   processed baseline.
 
-## Slice 11: Scheduled Refresh And Downstream Index Consumers
+## Slice 11: Scheduled Whole-Vault Observation
 
-Add periodic reconciliation and prepare a neutral change feed for retrieval,
-memory, and other indexing consumers.
+Turn vault state from startup/manual/mutation-triggered observation into a
+durable whole-vault observation service that can notice external edits from
+Obsidian and provide a cursorable feed for future memory indexes.
+
+Current state:
+
+- `VaultStateService.refresh_vault(...)` already walks an entire vault, applies
+  `vault_state_excluded_patterns`, updates `vault_files`, and appends
+  `vault_file_events`.
+- `VaultStateService.refresh_all_vaults(...)` already refreshes all discovered
+  vaults. Runtime startup launches it in the background; manual reload waits
+  for it and returns the refresh result.
+- AssistantMD file mutations refresh the affected vault after writes because
+  they route through `core.vault_state.file_mutations`.
+- External edits are only observed on startup, manual rescan, or another
+  refresh trigger. The existing `vault_scan_interval_seconds` setting is
+  documented as reserved and is not wired.
+- `VaultStateService.changes_since(sequence, vault_id=...)` already exposes the
+  basic downstream cursor feed.
 
 Behavior:
 
-- Add low-priority scheduled scan controlled by `vault_scan_interval_seconds`.
-- Scan compares mtime/size first and hashes only candidates.
-- Emit summary events, not per-file events unless validation or `debug` asks for
-  detail.
-- Expose changed-file records by `change_sequence` so downstream consumers can
-  process changes since their last cursor.
-- Downstream embedding, retrieval, or memory workers consume vault-state changes
-  by hash/sequence. They do not live inside `core.vault_state`.
+- Register a system-level APScheduler interval job when:
+  - `vault_state_enabled` is true
+  - `vault_scan_interval_seconds` is a positive integer
+- Use job id `vault-state-refresh` and display name `Vault state refresh`.
+- Add `vault-state-refresh` to the reserved scheduler job ids so workflow sync
+  cannot remove it.
+- Run `VaultStateService().refresh_all_vaults(data_root)` from the scheduled job.
+- Use `max_instances=1`, `coalesce=True`, and `replace_existing=True` so slow
+  scans do not overlap and persisted jobs update cleanly after setting changes.
+- If the setting is disabled or set to `0`, remove any persisted
+  `vault-state-refresh` job from `scheduler_jobs.db`.
+- Keep manual rescan refresh behavior synchronous so callers receive completed
+  refresh results.
+- Run startup refresh in the background so web availability is not blocked by a
+  full vault scan.
+- Keep mutation-triggered refresh behavior unchanged for immediate mutation
+  audit linkage.
+- Emit compact scheduled-refresh summary logs. Per-file events should remain
+  controlled by the existing validation/debug behavior in the vault-state
+  service.
+- Keep downstream embedding, retrieval, graph, or memory index workers out of
+  `core.vault_state`. They will consume `vault_file_events` by sequence in a
+  later branch.
+
+Implementation shape:
+
+- Add a small system scheduler job module or helper, owned outside workflow
+  synchronization, that registers built-in scheduler jobs.
+- Move ingestion job registration into that helper or call the helper from
+  bootstrap so built-in jobs are managed consistently.
+- Preserve the current `ingestion-worker` id and display name.
+- Define system job ids as constants:
+  - `ingestion-worker`
+  - `vault-state-refresh`
+- Keep `setup_scheduler_jobs(...)` focused on user workflow jobs. It should only
+  know enough about system jobs to preserve reserved ids during workflow
+  reconciliation.
+- Add a settings helper for `vault_scan_interval_seconds` that returns `0` for
+  invalid, missing, or non-positive values.
+- Make the scheduled refresh callable picklable and stable for the persisted
+  APScheduler job store. Avoid closures/lambdas and prefer a module-level
+  function with serializable args, for example `data_root`.
+
+Persistence and settings implications:
+
+- `scheduler_jobs.db` will contain a system job row named
+  `vault-state-refresh` when scheduled refresh is enabled.
+- Setting `vault_scan_interval_seconds` back to `0` should remove the persisted
+  system job on the next bootstrap/reload path that syncs system jobs.
+- Changing the interval should replace/update the existing persisted system job.
+- `system/settings.yaml` already contains `vault_scan_interval_seconds`; no
+  schema migration is needed.
 
 Validation target:
 
-- Scenario or smoke test triggers the scanner manually rather than waiting for
-  wall-clock schedule.
-- Assert changed files are visible through the change-feed cursor API.
+- Extend or add a targeted scenario for scheduler registration without waiting
+  for wall-clock execution.
+- In the scenario, set `vault_scan_interval_seconds` to a small positive value
+  before startup, start the system, and assert:
+  - scheduler has a job id `vault-state-refresh`
+  - the job name is `Vault state refresh`
+  - workflow sync does not remove `vault-state-refresh`
+  - the job has `max_instances=1`
+- Trigger the scheduled job function directly or call the same refresh callable
+  from the scenario after editing a vault file externally.
+- Assert the edit appears in `VaultStateService.changes_since(...)`.
+- Add a complementary assertion that setting `vault_scan_interval_seconds` to
+  `0` removes or omits `vault-state-refresh` while preserving `ingestion-worker`.
+
+Documentation updates:
+
+- Update `docs/architecture/scheduler.md` to list both reserved system jobs and
+  describe the naming convention for built-in jobs.
+- Update `docs/architecture/vault-state.md` so
+  `vault_scan_interval_seconds` is described as active scheduled refresh rather
+  than reserved.
+- Update `docs/architecture/settings-secrets.md` to describe the runtime effect
+  of `vault_scan_interval_seconds`.
 
 Feedback checkpoint:
 

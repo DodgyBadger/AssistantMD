@@ -7,14 +7,12 @@ from typing import Dict, Any
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context
+from core.scheduling.system_jobs import SYSTEM_JOB_IDS
 
 # Create scheduler job management logger
 logger = UnifiedLogger(tag="scheduler-jobs")
 
-RESERVED_JOB_IDS = {
-    # Non-workflow jobs scheduled elsewhere (e.g., ingestion worker) must be preserved
-    "ingestion-worker",
-}
+RESERVED_JOB_IDS = SYSTEM_JOB_IDS
 
 def _get_job_snapshot(scheduler, job_id: str) -> Dict[str, Any]:
     """Capture job metadata for validation events."""

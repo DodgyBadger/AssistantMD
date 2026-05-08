@@ -507,6 +507,17 @@ def get_vault_state_enabled() -> bool:
     return True
 
 
+def get_vault_scan_interval_seconds() -> int:
+    """Return scheduled vault-state refresh interval seconds; 0 disables it."""
+    entry = get_general_settings().get("vault_scan_interval_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
 def get_task_rollback_enabled() -> bool:
     """Return whether task failure/cancellation rollback behavior is enabled."""
     entry = get_general_settings().get("task_rollback_enabled")

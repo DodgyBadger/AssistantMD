@@ -15,7 +15,7 @@ Scheduler keeps workflow execution aligned with current workflow templates while
 - Persist APScheduler jobs in system DB-backed job store.
 - Reconcile loaded workflows to scheduler jobs (create/update/replace/remove).
 - Preserve timing state when only lightweight args change.
-- Protect reserved non-workflow jobs (e.g. `ingestion-worker`).
+- Protect reserved system jobs.
 - Dispatch workflow jobs through the runtime workflow governor.
 
 ## Sync behavior
@@ -49,3 +49,31 @@ The governor:
 - emits workflow lifecycle validation events
 
 APScheduler remains responsible for schedule timing and persistence. The governor owns in-process concurrency and lifecycle policy for the actual workflow run.
+
+## System Jobs
+
+Built-in runtime jobs use explicit ids so they are distinguishable from
+user-authored workflow jobs in `scheduler_jobs.db`:
+
+| Job id | Name | Purpose |
+| --- | --- | --- |
+| `ingestion-worker` | `Ingestion worker` | Drains queued ingestion jobs. |
+| `vault-state-refresh` | `Vault state refresh` | Periodically refreshes vault-state manifests when `vault_scan_interval_seconds` is positive. |
+
+System job ids are reserved during workflow reconciliation. Workflow sync must
+not remove them when user workflows are disabled, deleted, or rescheduled.
+
+## Status Metadata
+
+`GET /api/status` includes scheduler job details for both workflow jobs and
+system jobs. Each job entry includes:
+
+- `job_type` (`workflow` or `system`)
+- `last_run_time`
+- `last_status`
+- `last_error`
+- `next_run_time`
+
+Last-run fields are process-local and are populated from APScheduler execution
+events after the current app process starts. They are not persisted across
+container restarts.

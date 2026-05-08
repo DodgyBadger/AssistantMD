@@ -16,10 +16,12 @@ from core.authoring.template_discovery import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
+from core.ingestion.worker import IngestionWorker
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.vault_state import VaultStateService
+from core.scheduling.system_jobs import sync_system_scheduler_jobs
 from . import state as runtime_state
 from .config import RuntimeConfig
 
@@ -40,6 +42,7 @@ class RuntimeContext:
         logger: Unified logger for runtime operations
         last_config_reload: Timestamp of most recent configuration reload (if any)
         ingestion: IngestionService
+        ingestion_worker: IngestionWorker
         task_coordinator: Process-local execution task tracker
         workflow_governor: Workflow execution policy layer
     """
@@ -49,12 +52,15 @@ class RuntimeContext:
     workflow_loader: WorkflowLoader
     logger: UnifiedLogger
     ingestion: IngestionService
+    ingestion_worker: IngestionWorker
+    ingestion_interval: int
     task_coordinator: TaskCoordinator
     workflow_governor: WorkflowGovernor
     boot_id: int
     started_at: datetime
     last_config_reload: Optional[datetime] = None
     session_buffers: dict[str, BufferStore] = field(default_factory=dict)
+    background_tasks: set[asyncio.Task] = field(default_factory=set)
 
     async def start(self):
         """
@@ -70,6 +76,12 @@ class RuntimeContext:
         self.logger.info("Shutting down runtime context")
 
         await self.task_coordinator.shutdown(reason="runtime_shutdown")
+
+        if self.background_tasks:
+            for task in list(self.background_tasks):
+                task.cancel()
+            await asyncio.gather(*self.background_tasks, return_exceptions=True)
+            self.background_tasks.clear()
 
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=True)
@@ -96,7 +108,12 @@ class RuntimeContext:
             # No event loop running, safe to use asyncio.run
             asyncio.run(self.shutdown())
 
-    async def reload_workflows(self, manual: bool = True):
+    async def reload_workflows(
+        self,
+        manual: bool = True,
+        *,
+        refresh_vault_state: bool = True,
+    ):
         """
         Convenience method to reload workflow configurations.
 
@@ -109,6 +126,9 @@ class RuntimeContext:
         if manual:
             self.logger.info("Reloading workflows (manual=True)")
         results = await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        results.update(self.sync_system_scheduler_jobs())
+        if not refresh_vault_state:
+            return results
         try:
             vault_state_results = VaultStateService().refresh_all_vaults(self.config.data_root)
         except Exception as exc:  # noqa: BLE001
@@ -128,6 +148,62 @@ class RuntimeContext:
             }
         results.update(vault_state_results)
         return results
+
+    def start_background_vault_state_refresh(self, *, reason: str) -> asyncio.Task:
+        """Start a non-blocking refresh of all vault-state manifests."""
+        task = asyncio.create_task(
+            self._refresh_vault_state_in_background(reason=reason)
+        )
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task
+
+    async def _refresh_vault_state_in_background(self, *, reason: str) -> None:
+        self.logger.add_sink("validation").info(
+            "Starting background vault-state refresh",
+            data={
+                "event": "vault_state_background_refresh_started",
+                "reason": reason,
+            },
+        )
+        try:
+            result = await asyncio.to_thread(
+                VaultStateService().refresh_all_vaults,
+                self.config.data_root,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.logger.add_sink("validation").warning(
+                "vault_state_background_refresh_failed",
+                data={
+                    "event": "vault_state_background_refresh_failed",
+                    "reason": reason,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return
+        self.logger.add_sink("validation").info(
+            "Background vault-state refresh completed",
+            data={
+                "event": "vault_state_background_refresh_completed",
+                "reason": reason,
+                "vault_state_enabled": result.get("vault_state_enabled"),
+                "vault_state_refreshed": result.get("vault_state_refreshed"),
+                "vault_state_failed": result.get("vault_state_failed"),
+                "vault_state_latest_sequence": result.get("vault_state_latest_sequence"),
+            },
+        )
+
+    def sync_system_scheduler_jobs(self) -> dict[str, int]:
+        """Synchronize built-in scheduler jobs with current settings."""
+        return sync_system_scheduler_jobs(
+            scheduler=self.scheduler,
+            data_root=self.config.data_root,
+            ingestion_worker=self.ingestion_worker,
+            ingestion_interval=self.ingestion_interval,
+        )
 
     def get_runtime_summary(self) -> dict:
         """
