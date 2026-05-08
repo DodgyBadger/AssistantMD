@@ -20,14 +20,13 @@ SHARED_MUTATION_API_FILES = {
 }
 
 ALLOWED_DIRECT_MUTATION_FILES = {
-    Path("core/ingestion/storage.py"),
-    Path("core/ingestion/service.py"),
     Path("core/tools/workflow_run.py"),
     Path("api/services.py"),
 }
 
 ALLOWED_DIRECT_MUTATION_CALLS = {
     (Path("core/tools/file_ops_safe.py"), "_make_directory", "os.makedirs"),
+    (Path("core/ingestion/service.py"), "process_job", "import_root.mkdir"),
 }
 
 MUTATING_METHODS = {

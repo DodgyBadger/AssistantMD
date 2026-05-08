@@ -23,6 +23,11 @@ from core.ingestion.models import (
 from core.settings.secrets_store import secret_has_value
 from core.settings.store import get_general_settings
 from core.runtime.paths import get_data_root
+from core.vault_state.file_mutations import (
+    delete_vault_file,
+    write_vault_file,
+    write_vault_file_bytes,
+)
 
 from core.ingestion.jobs import (
     create_job,
@@ -216,8 +221,16 @@ class IngestionService:
             data_root = Path(get_data_root())
             vault_root = (data_root / vault).resolve()
             resolved_source = source_path.resolve()
-            if str(resolved_source).startswith(str(vault_root)) and resolved_source.is_file():
-                resolved_source.unlink(missing_ok=True)
+            try:
+                relative_source = resolved_source.relative_to(vault_root).as_posix()
+            except ValueError:
+                return
+            if resolved_source.is_file():
+                delete_vault_file(
+                    vault_path=vault_root,
+                    path=relative_source,
+                    warn_without_task=False,
+                )
         except Exception:
             pass
 
@@ -250,9 +263,6 @@ class IngestionService:
 
         data_root = Path(get_data_root())
         vault_root = data_root / vault
-        pages_dir_abs = vault_root / pages_dir_rel
-        manifest_abs = vault_root / manifest_rel
-        pages_dir_abs.mkdir(parents=True, exist_ok=True)
 
         payload = raw_doc.payload if isinstance(raw_doc.payload, (bytes, bytearray)) else raw_doc.payload.encode("utf-8")
         doc = fitz.open(stream=payload, filetype="pdf")
@@ -263,9 +273,14 @@ class IngestionService:
         for idx, page in enumerate(doc, start=1):
             pix = page.get_pixmap(matrix=matrix, alpha=False)
             filename = f"page_{idx:04d}.png"
-            full_path = pages_dir_abs / filename
-            pix.save(str(full_path))
-            page_paths.append((pages_dir_rel / filename).as_posix())
+            page_path = (pages_dir_rel / filename).as_posix()
+            write_vault_file_bytes(
+                vault_path=vault_root,
+                path=page_path,
+                content=pix.tobytes("png"),
+                warn_without_task=False,
+            )
+            page_paths.append(page_path)
 
         source_hash = hashlib.sha256(payload).hexdigest()
         source_mtime = None
@@ -294,8 +309,12 @@ class IngestionService:
                 for idx, page_path in enumerate(page_paths)
             ],
         }
-        manifest_abs.parent.mkdir(parents=True, exist_ok=True)
-        manifest_abs.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        write_vault_file(
+            vault_path=vault_root,
+            path=manifest_rel.as_posix(),
+            content=json.dumps(manifest, indent=2),
+            warn_without_task=False,
+        )
 
         return [manifest_rel.as_posix(), *page_paths]
 

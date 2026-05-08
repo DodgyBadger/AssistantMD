@@ -69,14 +69,15 @@ Vault file writes should route through `core.vault_state.file_mutations` so they
 Currently tracked mutation helpers include:
 
 - `write_vault_file(...)`
+- `write_vault_file_bytes(...)`
 - `append_vault_file(...)`
 - `replace_vault_file_content(...)`
 - `delete_vault_file(...)`
 - `move_vault_file(...)`
 
-`file_ops_safe` and `file_ops_unsafe` use this shared API for supported file mutations. The CI guard `scripts/check_vault_mutation_routing.py` scans core tool/helper/API/ingestion code for direct mutation primitives and fails when new writable paths bypass the shared mutation API, except for explicit allowlisted cases.
+`file_ops_safe`, `file_ops_unsafe`, and ingestion output storage use this shared API for supported file mutations. The CI guard `scripts/check_vault_mutation_routing.py` scans core tool/helper/API/ingestion code for direct mutation primitives and fails when new writable paths bypass the shared mutation API, except for explicit allowlisted cases.
 
-If no execution task is active, the mutation still performs the file operation and refreshes vault state, but logs `vault_state_mutation_untracked` instead of inserting a `task_file_mutations` row.
+If no execution task is active, the mutation still performs the file operation and refreshes vault state. Task-less calls log `vault_state_mutation_untracked` unless the caller marks the write as an intentional system-service mutation, such as ingestion storage.
 
 ## Snapshot Sets
 

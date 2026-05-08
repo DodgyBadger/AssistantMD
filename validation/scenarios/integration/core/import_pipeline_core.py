@@ -6,6 +6,7 @@ and asserts the rendered markdown output exists while the source file is removed
 """
 
 import sys
+import sqlite3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -55,5 +56,46 @@ class ImportPipelineScenario(BaseScenario):
         assert "Import validation" in sample_content
         assert "mime: application/pdf" in sample_content
 
+        vault_id = self._vault_id(vault.name)
+        assert self._manifest_row(vault_id, sample_rel_path, deleted=False), (
+            "Imported file should be tracked in vault state"
+        )
+        assert self._manifest_row(
+            vault_id,
+            "AssistantMD/Import/sample.pdf",
+            deleted=True,
+        ), "Cleaned-up source file should be marked deleted in vault state"
+
         await self.stop_system()
         self.teardown_scenario()
+
+    def _vault_id(self, vault_name: str) -> str:
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT vault_id FROM vaults WHERE current_name = ?",
+                (vault_name,),
+            ).fetchone()
+            assert row is not None, f"Expected vault-state row for {vault_name}"
+            return row[0]
+        finally:
+            conn.close()
+
+    def _manifest_row(self, vault_id: str, path: str, *, deleted: bool) -> bool:
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT deleted_at
+                FROM vault_files
+                WHERE vault_id = ? AND path = ?
+                """,
+                (vault_id, path),
+            ).fetchone()
+            if row is None:
+                return False
+            return (row[0] is not None) is deleted
+        finally:
+            conn.close()

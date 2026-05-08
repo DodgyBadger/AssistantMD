@@ -55,6 +55,7 @@ def write_vault_file(
     content: str,
     fail_if_exists: bool = True,
     markdown_only: bool = False,
+    warn_without_task: bool = True,
 ) -> RecordedMutationResult:
     """Create or overwrite a vault file while recording task mutation metadata."""
     return mutate_vault_file(
@@ -65,6 +66,27 @@ def write_vault_file(
         fail_if_exists=fail_if_exists,
         markdown_only=markdown_only,
         create_parent=True,
+        warn_without_task=warn_without_task,
+    )
+
+
+def write_vault_file_bytes(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: bytes,
+    fail_if_exists: bool = True,
+    warn_without_task: bool = True,
+) -> RecordedMutationResult:
+    """Create or overwrite a binary vault file while recording mutation metadata."""
+    return mutate_vault_file(
+        vault_path=vault_path,
+        path=path,
+        operation="write",
+        mutator=lambda full_path: full_path.write_bytes(content),
+        fail_if_exists=fail_if_exists,
+        create_parent=True,
+        warn_without_task=warn_without_task,
     )
 
 
@@ -119,6 +141,7 @@ def delete_vault_file(
     vault_path: str | Path,
     path: str,
     markdown_only: bool = False,
+    warn_without_task: bool = True,
 ) -> RecordedMutationResult:
     """Delete an existing vault file while recording mutation metadata."""
     return mutate_vault_file(
@@ -128,6 +151,7 @@ def delete_vault_file(
         mutator=lambda full_path: os.remove(full_path),
         require_exists=True,
         markdown_only=markdown_only,
+        warn_without_task=warn_without_task,
     )
 
 
@@ -292,6 +316,7 @@ def mutate_vault_file(
     fail_if_exists: bool = False,
     markdown_only: bool = False,
     create_parent: bool = False,
+    warn_without_task: bool = True,
 ) -> RecordedMutationResult:
     """Mutate one vault file while recording task-scoped mutation metadata."""
     vault_root = Path(vault_path).resolve()
@@ -380,6 +405,7 @@ def mutate_vault_file(
             result=result,
             created_at=created_at,
             expires_at=expires_at,
+            warn_without_task=warn_without_task,
         )
         return result
 
@@ -389,6 +415,7 @@ def mutate_vault_file(
         result=result,
         created_at=created_at,
         expires_at=expires_at,
+        warn_without_task=warn_without_task,
     )
     return result
 
@@ -400,9 +427,12 @@ def _persist_or_log_mutation(
     result: RecordedMutationResult,
     created_at: datetime,
     expires_at: datetime | None,
+    warn_without_task: bool = True,
 ) -> None:
     """Persist a mutation row when task context exists, otherwise log it as untracked."""
     if task is None:
+        if not warn_without_task:
+            return
         logger.add_sink("validation").warning(
             "vault_state_mutation_untracked",
             data={
