@@ -11,7 +11,7 @@ AssistantMD now keeps a rebuildable vault-state index for every mounted vault, g
 - File writes and deletes from chat, workflows, code execution tools, and ingestion now route through the vault-state mutation path where supported.
 - Failed, cancelled, and timed-out chat/workflow tasks can automatically roll back supported file mutations.
 - `pending_files(...)` now attaches diff metadata when a retained completion baseline is available, so incremental workflows can see what changed since the current scope last processed a file.
-- The Workflows and Configuration UI now surface vault-state activity, tracked file counts, latest vault changes, system jobs, and manual cleanup for expired snapshot artifacts.
+- Renamed the Workflows and Configuration tabs to Dashboard and System, with Dashboard UI improvements for vault activity, task mutation inspection, sortable workflow/activity tables, tracked file counts, latest vault changes, and retained snapshot links.
 - Removed obsolete `code_execution_piston` and `internal_api` tool implementations.
 
 ## 2026-05-05 - v0.6.1
