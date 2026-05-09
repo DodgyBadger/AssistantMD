@@ -31,9 +31,11 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - Endpoint logic is intentionally thin; most behavior should live in services/core modules.
 - Config and secret updates trigger reload through runtime reload service.
 - Ingestion and workflow manual runs are surfaced via API services.
+- The Dashboard tab hosts vault overview, workflow controls, import controls, and vault activity.
+- The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, and system jobs.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
-- `/api/vaults/{vault_name}/task-mutations` exposes grouped task file mutation activity for the Workflows tab.
+- `/api/vaults/{vault_name}/task-mutations` exposes grouped task file mutation activity for the Dashboard tab.
 - `/api/vault-state/cleanup` deletes expired vault-state mutation rows and retained task snapshot artifacts.
 - `/api/chat/sessions/{session_id}/active-task` and `/api/chat/sessions/{session_id}/cancel` expose chat-session-scoped task lookup and cancellation.
 - `/api/chat/sessions/{session_id}/compaction-status` and `/api/chat/sessions/{session_id}/compact` expose chat history compaction status and execution.

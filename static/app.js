@@ -382,13 +382,14 @@ function formatSessionOptionLabel(session) {
     if (!session || !session.session_id) {
         return 'New session';
     }
+    const title = String(session.title || '').trim();
     const rawDate = session.last_activity_at || session.created_at || '';
     const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
     const timeStr = parsed && !Number.isNaN(parsed.getTime())
         ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
         : rawDate;
-    const base = timeStr ? `${session.session_id} (last activity: ${timeStr})` : session.session_id;
-    return session.title ? `${base}: ${session.title}` : base;
+    const base = title || session.session_id;
+    return timeStr ? `${base} (last activity: ${timeStr})` : base;
 }
 
 function renderSessionSelector() {
@@ -755,6 +756,9 @@ function switchTab(tabName) {
 
     if (tabName === 'dashboard') {
         fetchSystemStatus();
+        if (window.ConfigurationPanel) {
+            window.ConfigurationPanel.onDashboardActivated();
+        }
     } else if (tabName === 'configuration') {
         fetchSystemStatus();
         if (window.ConfigurationPanel) {
@@ -985,28 +989,30 @@ function displaySystemStatus() {
             .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
         </style>
 
-        <table class="dashboard-table">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Path inside container</th>
-                    <th class="cell-center">Workflows</th>
-                    <th class="cell-center">Files</th>
-                    <th>Latest Change</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${status.vaults.map(v => `
+        <div class="dashboard-table-wrap" role="region" aria-label="Vaults" tabindex="0">
+            <table class="dashboard-table">
+                <thead>
                     <tr>
-                        <td><strong>${v.name}</strong></td>
-                        <td class="cell-mono cell-xs subtle">${v.path}</td>
-                        <td class="cell-center">${v.workflow_count}</td>
-                        <td class="cell-center">${v.tracked_files ?? '—'}</td>
-                        <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
+                        <th>Name</th>
+                        <th>Path inside container</th>
+                        <th class="cell-center">Workflows</th>
+                        <th class="cell-center">Files</th>
+                        <th>Latest Change</th>
                     </tr>
-                `).join('')}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    ${status.vaults.map(v => `
+                        <tr>
+                            <td><strong>${v.name}</strong></td>
+                            <td class="cell-mono cell-xs subtle">${v.path}</td>
+                            <td class="cell-center">${v.workflow_count}</td>
+                            <td class="cell-center">${v.tracked_files ?? '—'}</td>
+                            <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
     `;
 
     if (combinedWorkflows.length > 0) {
@@ -1015,59 +1021,61 @@ function displaySystemStatus() {
             : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
 
         html += `
-            <h3 class="text-lg font-semibold mb-2 mt-6">Workflows ${schedulerBadge}</h3>
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Status</th>
-                        <th>Last Run</th>
-                        <th>Next Run</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${combinedWorkflows.map(workflow => {
-                        const job = jobByWorkflowId.get(workflow.global_id);
-                        const nextRun = job?.next_run_time
-                            ? new Date(job.next_run_time).toLocaleString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            })
-                            : '—';
-                        const lastRun = job?.last_run_time
-                            ? new Date(job.last_run_time).toLocaleString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            })
-                            : '—';
-                        const description = workflow.description || '—';
-                        const statusLabel = !workflow.enabled
-                            ? 'disabled'
-                            : job
-                                ? 'scheduled'
-                                : 'enabled';
-                        const statusClass = !workflow.enabled
-                            ? 'badge-disabled'
-                            : job
-                                ? 'badge-scheduled'
-                                : 'badge-enabled';
-                        return `
-                            <tr>
-                                <td><strong>${workflow.global_id}</strong></td>
-                                <td><span class="badge ${statusClass}">${statusLabel}</span></td>
-                                <td class="cell-xs">${lastRun}</td>
-                                <td class="cell-xs">${nextRun}</td>
-                                <td class="cell-xs subtle">${description}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
+            <div class="text-sm font-medium text-txt-primary mb-2 mt-6">Workflows ${schedulerBadge}</div>
+            <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Status</th>
+                            <th>Last Run</th>
+                            <th>Next Run</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${combinedWorkflows.map(workflow => {
+                            const job = jobByWorkflowId.get(workflow.global_id);
+                            const nextRun = job?.next_run_time
+                                ? new Date(job.next_run_time).toLocaleString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit'
+                                })
+                                : '—';
+                            const lastRun = job?.last_run_time
+                                ? new Date(job.last_run_time).toLocaleString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit'
+                                })
+                                : '—';
+                            const description = workflow.description || '—';
+                            const statusLabel = !workflow.enabled
+                                ? 'disabled'
+                                : job
+                                    ? 'scheduled'
+                                    : 'enabled';
+                            const statusClass = !workflow.enabled
+                                ? 'badge-disabled'
+                                : job
+                                    ? 'badge-scheduled'
+                                    : 'badge-enabled';
+                            return `
+                                <tr>
+                                    <td><strong>${workflow.global_id}</strong></td>
+                                    <td><span class="badge ${statusClass}">${statusLabel}</span></td>
+                                    <td class="cell-xs">${lastRun}</td>
+                                    <td class="cell-xs">${nextRun}</td>
+                                    <td class="cell-xs subtle">${description}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
         `;
     }
 
@@ -1079,7 +1087,7 @@ function displaySystemStatus() {
     html += `
         <div class="mt-6 border-t border-border-primary pt-4">
             <div class="flex flex-col md:flex-row md:items-end gap-3">
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                     <label class="block text-sm font-medium text-txt-primary mb-1">Vault Activity</label>
                     <select id="vault-activity-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
                         ${activityVaults.length ? activityVaults.map(v => `
@@ -1087,7 +1095,7 @@ function displaySystemStatus() {
                         `).join('') : '<option value="">No vaults detected</option>'}
                     </select>
                 </div>
-                <button id="vault-activity-refresh" type="button" class="px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
+                <button id="vault-activity-refresh" type="button" class="w-full md:w-auto px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
                     Refresh Activity
                 </button>
             </div>
@@ -1119,49 +1127,95 @@ function renderVaultActivityResult(vaultName) {
         return '<p class="text-sm text-txt-secondary">No retained task file mutations for this vault.</p>';
     }
     return `
-        <table class="dashboard-table">
-            <thead>
-                <tr>
-                    <th>Task</th>
-                    <th>Last Run</th>
-                    <th>Files Mutated</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${groups.map(group => `
+        <div class="dashboard-table-wrap" role="region" aria-label="Vault activity" tabindex="0">
+            <table class="dashboard-table">
+                <thead>
                     <tr>
-                        <td>
-                            <strong>${escapeHtml(renderActivityTaskTitle(group))}</strong>
-                            <div class="cell-xs subtle cell-mono">${escapeHtml(group.vault_id)}</div>
-                        </td>
-                        <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
-                        <td>
-                            <button
-                                type="button"
-                                class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                                data-vault-activity-vault="${escapeHtml(vaultName)}"
-                                data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
-                            >
-                                ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
-                            </button>
-                        </td>
+                        <th>Task</th>
+                        <th>Last Run</th>
+                        <th>Files Mutated</th>
                     </tr>
-                `).join('')}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    ${groups.map(group => `
+                        <tr>
+                            <td>
+                                <span class="mr-1" title="${escapeHtml(renderActivityKindLabel(group))}" aria-label="${escapeHtml(renderActivityKindLabel(group))}">${renderActivityKindEmoji(group)}</span>
+                                <span>${escapeHtml(renderActivityTaskTitle(group))}</span>
+                            </td>
+                            <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
+                            <td>
+                                <button
+                                    type="button"
+                                    class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                                    data-vault-activity-vault="${escapeHtml(vaultName)}"
+                                    data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
+                                >
+                                    ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
 function renderActivityTaskTitle(group) {
     if (group.activity_kind === 'chat' && group.chat_session_id) {
-        return formatSessionOptionLabel({
+        return formatActivityChatSessionLabel({
             session_id: group.chat_session_id,
             created_at: group.chat_session_created_at,
             last_activity_at: group.chat_session_last_activity_at,
             title: group.chat_session_title
         });
     }
-    return group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`;
+    return stripActivityKindPrefix(
+        group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
+    );
+}
+
+function renderActivityKindEmoji(group) {
+    const kind = normalizedActivityKind(group);
+    if (kind === 'chat') return '💬';
+    if (kind === 'workflow') return '⚙️';
+    if (kind === 'context') return '🧩';
+    return '•';
+}
+
+function formatActivityChatSessionLabel(session) {
+    const title = String(session?.title || '').trim();
+    if (title) {
+        return title;
+    }
+    return formatSessionOptionLabel(session);
+}
+
+function renderActivityKindLabel(group) {
+    const kind = normalizedActivityKind(group);
+    if (kind === 'chat') return 'Chat';
+    if (kind === 'workflow') return 'Workflow';
+    if (kind === 'context') return 'Context assembly';
+    return 'Task';
+}
+
+function normalizedActivityKind(group) {
+    const rawKind = String(group.activity_kind || group.task_kind || '').trim().toLowerCase();
+    if (rawKind === 'chat') return 'chat';
+    if (rawKind === 'workflow') return 'workflow';
+    if (rawKind === 'context' || rawKind === 'context_assembly' || rawKind === 'context assembly') {
+        return 'context';
+    }
+    const label = String(group.activity_label || '').trim().toLowerCase();
+    if (label.startsWith('chat:')) return 'chat';
+    if (label.startsWith('workflow:')) return 'workflow';
+    if (label.startsWith('context:') || label.startsWith('context assembly:')) return 'context';
+    return rawKind || 'task';
+}
+
+function stripActivityKindPrefix(label) {
+    return String(label || '').replace(/^(chat|workflow|context|context assembly|context_assembly):\s*/i, '');
 }
 
 function renderMutationHash(exists, hash) {
@@ -1200,32 +1254,34 @@ function openVaultActivityDetails(vaultName, activityId) {
                 <div class="text-sm text-txt-secondary mb-3">
                     Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
                 </div>
-                <table class="dashboard-table">
-                    <thead>
-                        <tr>
-                            <th>Path</th>
-                            <th>Related</th>
-                            <th>Run</th>
-                            <th>Operation</th>
-                            <th>Before</th>
-                            <th>After</th>
-                            <th>Event</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${(group.mutations || []).map(mutation => `
+                <div class="dashboard-table-wrap" role="region" aria-label="Vault activity files" tabindex="0">
+                    <table class="dashboard-table">
+                        <thead>
                             <tr>
-                                <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
-                                <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
-                                <td class="cell-xs">${escapeHtml(renderMutationRunLabel(group, mutation))}</td>
-                                <td>${escapeHtml(mutation.operation)}</td>
-                                <td class="cell-xs">${renderMutationHash(mutation.before_exists, mutation.before_hash)}</td>
-                                <td class="cell-xs">${renderMutationHash(mutation.after_exists, mutation.after_hash)}</td>
-                                <td class="cell-xs">${mutation.event_sequence || '—'}</td>
+                                <th>Path</th>
+                                <th>Related</th>
+                                <th>Run</th>
+                                <th>Operation</th>
+                                <th>Before</th>
+                                <th>After</th>
+                                <th>Event</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            ${(group.mutations || []).map(mutation => `
+                                <tr>
+                                    <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
+                                    <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
+                                    <td class="cell-xs">${escapeHtml(renderMutationRunLabel(group, mutation))}</td>
+                                    <td>${escapeHtml(mutation.operation)}</td>
+                                    <td class="cell-xs">${renderMutationHash(mutation.before_exists, mutation.before_hash)}</td>
+                                    <td class="cell-xs">${renderMutationHash(mutation.after_exists, mutation.after_hash)}</td>
+                                    <td class="cell-xs">${mutation.event_sequence || '—'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
     `;
@@ -2740,7 +2796,7 @@ function updateStatus(message) {
         noticeLines.push('No vaults found. Review installation instructions.');
     }
 
-    // Update Configuration tab and banner
+    // Update System tab and banner
     if (noticeLines.length === 0) {
         // No warnings - hide banner and remove tab highlight
         configElements.statusBanner.classList.add('hidden');
@@ -2748,7 +2804,7 @@ function updateStatus(message) {
         configElements.configTab.classList.remove('font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md', 'text-accent');
         configElements.configTab.classList.add('text-txt-secondary');
         configElements.configTab.style.borderColor = '';
-        configElements.configTab.textContent = 'Configuration';
+        configElements.configTab.textContent = 'System';
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
@@ -2766,7 +2822,7 @@ function updateStatus(message) {
         configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
         configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
         configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
-        configElements.configTab.textContent = 'Configuration ⚠️';
+        configElements.configTab.textContent = 'System ⚠️';
         const repairBtn = document.getElementById('repair-settings-btn');
         if (repairBtn) {
             repairBtn.addEventListener('click', async () => {

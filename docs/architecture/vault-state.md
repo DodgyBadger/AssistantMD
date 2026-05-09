@@ -125,13 +125,13 @@ Rollback failures are logged as `task_rollback_failed`; they do not replace the 
 
 ## Observability
 
-The Workflows tab shows recent task file mutation activity per vault through:
+The Dashboard tab shows recent task file mutation activity per vault through:
 
 - `GET /api/vaults/{vault_name}/task-mutations`
 
 The API groups chat mutations by chat session scope so multiple file writes in the same chat session appear as one user-facing activity. Workflow runs remain separate activities. The UI lists activity summaries first and opens the file-level mutations on demand.
 
-The Configuration / Misc cleanup button calls:
+The System / Misc cleanup button calls:
 
 - `POST /api/vault-state/cleanup`
 

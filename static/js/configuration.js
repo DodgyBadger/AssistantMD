@@ -1,5 +1,5 @@
 /**
- * Configuration tab logic.
+ * System and dashboard maintenance panel logic.
  *
  * Provides a structured interface for activity logs, model mappings,
  * provider settings, and secrets management without polluting app.js.
@@ -1715,6 +1715,12 @@ async function saveModelRow(rowKey) {
         refreshAll();
     }
 
+    async function onDashboardActivated() {
+        if (!state.initialized) return;
+        await loadSecrets();
+        await loadImportVaults();
+    }
+
     function renderImportVaults() {
         const select = elements.importVaultSelect;
         if (!select) return;
@@ -2046,6 +2052,7 @@ async function saveModelRow(rowKey) {
     window.ConfigurationPanel = {
         init,
         onTabActivated,
+        onDashboardActivated,
         refreshActivityLog,
         setRestartRequired: externalSetRestartRequired
     };
