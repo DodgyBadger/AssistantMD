@@ -1115,7 +1115,7 @@ function renderDashboardWorkflowSortHeader(column, label) {
         <th aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
             <button
                 type="button"
-                class="inline-flex items-center gap-1 text-left font-semibold hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                class="inline-flex items-center gap-1 text-left font-semibold whitespace-nowrap hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
                 data-dashboard-workflow-sort="${column}"
                 data-dashboard-workflow-sort-next="${nextDirection}"
             >
@@ -1365,8 +1365,7 @@ function openVaultActivityDetails(vaultName, activityId) {
         <section class="relative h-full w-full max-w-3xl bg-app-card border-l border-border-primary shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="vault-activity-modal-title">
             <div class="sticky top-0 bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3">
                 <div>
-                    <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${escapeHtml(renderActivityTaskTitle(group))}</h2>
-                    <div class="text-xs text-txt-secondary cell-mono mt-1">${escapeHtml(group.activity_id || group.task_id)}</div>
+                    <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${renderActivityKindEmoji(group)} ${escapeHtml(renderActivityTaskTitle(group))}</h2>
                 </div>
                 <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
                     Close
