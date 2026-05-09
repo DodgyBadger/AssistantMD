@@ -89,6 +89,80 @@ def ensure_chat_sessions_schema(system_root: str | None = None) -> None:
             ON chat_tool_events(session_id, vault_name, tool_call_id)
             """
         )
+        _deduplicate_session_ids(conn)
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_sessions_session_id_unique
+            ON chat_sessions(session_id)
+            """
+        )
         conn.commit()
     finally:
         conn.close()
+
+
+def _deduplicate_session_ids(conn) -> None:
+    """Ensure historical composite-key sessions have globally unique IDs."""
+    duplicate_rows = conn.execute(
+        """
+        SELECT session_id
+        FROM chat_sessions
+        GROUP BY session_id
+        HAVING COUNT(*) > 1
+        """
+    ).fetchall()
+    for (session_id,) in duplicate_rows:
+        sessions = conn.execute(
+            """
+            SELECT rowid, vault_name
+            FROM chat_sessions
+            WHERE session_id = ?
+            ORDER BY created_at ASC, rowid ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        for index, (rowid, vault_name) in enumerate(sessions[1:], start=1):
+            new_session_id = _deduplicated_session_id(
+                conn,
+                session_id=str(session_id),
+                vault_name=str(vault_name),
+                index=index,
+            )
+            conn.execute(
+                """
+                UPDATE chat_messages
+                SET session_id = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (new_session_id, session_id, vault_name),
+            )
+            conn.execute(
+                """
+                UPDATE chat_tool_events
+                SET session_id = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (new_session_id, session_id, vault_name),
+            )
+            conn.execute(
+                """
+                UPDATE chat_sessions
+                SET session_id = ?
+                WHERE rowid = ?
+                """,
+                (new_session_id, rowid),
+            )
+
+
+def _deduplicated_session_id(conn, *, session_id: str, vault_name: str, index: int) -> str:
+    vault_part = vault_name.strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    base = f"{session_id}__{vault_part or 'vault'}"
+    candidate = base if index == 1 else f"{base}_{index}"
+    suffix = index
+    while conn.execute(
+        "SELECT 1 FROM chat_sessions WHERE session_id = ? LIMIT 1",
+        (candidate,),
+    ).fetchone():
+        suffix += 1
+        candidate = f"{base}_{suffix}"
+    return candidate

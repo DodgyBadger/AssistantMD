@@ -146,6 +146,19 @@ class ChatStore:
         finally:
             conn.close()
 
+    def ensure_session(self, session_id: str, vault_name: str) -> StoredChatSession:
+        """Create or touch a session bound to one vault, returning its summary."""
+        conn = self._connect()
+        try:
+            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            conn.commit()
+        finally:
+            conn.close()
+        session = self.get_session(session_id=session_id, vault_name=vault_name)
+        if session is None:  # pragma: no cover - defensive consistency check
+            raise RuntimeError(f"Failed to create chat session '{session_id}'.")
+        return session
+
     def replace_session_messages(
         self,
         session_id: str,
@@ -515,6 +528,32 @@ class ChatStore:
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        session_id_value, session_vault_name, created_at, last_activity_at, title, metadata_json = row
+        return StoredChatSession(
+            session_id=str(session_id_value),
+            vault_name=str(session_vault_name),
+            created_at=str(created_at or ""),
+            last_activity_at=str(last_activity_at or ""),
+            title=None if title is None else str(title),
+            metadata_json=None if metadata_json is None else str(metadata_json),
+        )
+
+    def get_session_by_id(self, session_id: str) -> StoredChatSession | None:
+        """Return one stored chat session by globally unique session ID."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                FROM chat_sessions
+                WHERE session_id = ?
+                """,
+                (session_id,),
             ).fetchone()
         finally:
             conn.close()

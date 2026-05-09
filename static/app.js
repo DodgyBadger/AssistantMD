@@ -310,10 +310,10 @@ function syncSendButtonState() {
 function syncChatControlLocks() {
     if (!chatElements.vaultSelector) return;
 
-    const lockVaultSelector = state.isLoading || Boolean(state.sessionId);
+    const lockVaultSelector = state.isLoading;
     chatElements.vaultSelector.disabled = lockVaultSelector;
     chatElements.vaultSelector.title = lockVaultSelector
-        ? 'Vault is locked for this chat session. Start a new session (+) to switch vaults.'
+        ? 'Vault is locked while a response is running.'
         : '';
 
     if (chatElements.toolDropdownTrigger) {

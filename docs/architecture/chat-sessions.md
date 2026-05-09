@@ -12,7 +12,9 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 
 ## SQLite store
 
-`system/chat_sessions.db` is the canonical record. It has three tables:
+`system/chat_sessions.db` is the canonical record. A `session_id` is globally unique and is permanently bound to the `vault_name` recorded on the session row. Chat execution resolves this binding before running the model; reusing an existing `session_id` with another vault returns `ChatSessionVaultMismatch`.
+
+It has three tables:
 
 - **`chat_sessions`** — one row per session: `session_id`, `vault_name`, `created_at`, `last_activity_at`, `title`
 - **`chat_messages`** — full provider-native message objects stored as JSON, plus extracted `content_text`, `role`, `direction`, and `sequence_index` for querying
@@ -35,6 +37,7 @@ Canonical history contains completed prior turns plus the accepted user request 
 Chat execution registers a process-local task scoped to `chat_session:<session_id>`.
 
 - Non-streaming and streaming chat runs both use the same task kind (`chat`) and API source (`api`).
+- `chat_tool_calls_limit` applies Pydantic AI `UsageLimits(tool_calls_limit=...)` to chat runs when the setting is positive; `0` disables this guard.
 - `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.
 - `/api/chat/sessions/{session_id}/cancel` requests cancellation for the active chat task.
 - A cancelled chat task reaches terminal status `cancelled`; the session remains queryable through normal session detail endpoints.

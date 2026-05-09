@@ -15,6 +15,7 @@ from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
+    ChatToolCallLimitError,
     UploadedImageAttachment,
     execute_chat_prompt,
     execute_chat_prompt_stream,
@@ -61,9 +62,16 @@ from .models import (
     ChatSessionsPurgeResponse,
     ChatSessionTitleRequest,
 )
-from .exceptions import APIException, ChatCapabilityMismatchError, ChatContextTemplateFailureError
-from .utils import create_error_response, generate_session_id, serialize_exception
+from .exceptions import (
+    APIException,
+    ChatCapabilityMismatchError,
+    ChatContextTemplateFailureError,
+    ChatSessionVaultMismatchError,
+    ChatToolCallLimitExceededError,
+)
+from .utils import create_error_response, serialize_exception
 from .services import (
+    ChatSessionVaultMismatch,
     rescan_vaults_and_update_scheduler,
     get_system_status,
     execute_workflow_manually,
@@ -104,6 +112,7 @@ from .services import (
     list_workflow_tasks,
     get_vault_task_mutations,
     cleanup_vault_state,
+    resolve_chat_session_for_request,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -212,7 +221,17 @@ async def _execute_chat_request(
     """Execute chat request in streaming or non-streaming mode."""
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
-    session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
+    try:
+        session_id = resolve_chat_session_for_request(
+            requested_session_id=chat_request.session_id,
+            vault_name=chat_request.vault_name,
+        )
+    except ChatSessionVaultMismatch as exc:
+        raise ChatSessionVaultMismatchError(
+            session_id=exc.session_id,
+            requested_vault=exc.requested_vault,
+            bound_vault=exc.bound_vault,
+        ) from exc
     resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
     logger.info(
         "Chat request accepted",
@@ -298,6 +317,20 @@ async def _execute_chat_request(
             },
         )
         raise ChatContextTemplateFailureError(str(exc), details=exc.details) from exc
+    except ChatToolCallLimitError as exc:
+        logger.warning(
+            "Chat request exceeded tool-call limit",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
+        raise ChatToolCallLimitExceededError(str(exc), details=exc.details) from exc
     except Exception as exc:
         logger.error(
             "Chat request failed before response",
@@ -774,6 +807,18 @@ async def chat_execute(request: Request):
         chat_request, image_uploads = await _parse_chat_execute_payload(request)
         return await _execute_chat_request(chat_request, image_uploads)
     except Exception as e:
+        if isinstance(e, APIException):
+            logger.warning(
+                "Chat endpoint request rejected",
+                data={
+                    "path": str(request.url.path),
+                    "method": request.method,
+                    "error_type": e.error_type,
+                    "message": str(e.detail),
+                    "details": e.details,
+                },
+            )
+            return create_error_response(e)
         logger.error(
             "Chat endpoint request failed",
             data={

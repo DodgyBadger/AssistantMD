@@ -291,6 +291,61 @@ class ApiEndpointsScenario(BaseScenario):
         assert '"event": "done"' in chat_stream.text, "Streaming chat returns a terminal SSE event"
         assert '"event": "error"' not in chat_stream.text, "Streaming chat completes without an error event"
 
+        tool_limit_update = self.call_api(
+            "/api/system/settings/general/chat_tool_calls_limit",
+            method="PUT",
+            data={"value": "1"},
+        )
+        assert tool_limit_update.status_code == 200, "Chat tool-call limit setting updates"
+
+        import core.chat.executor as chat_executor
+        from pydantic_ai.models.test import TestModel
+
+        async def first_limited_tool() -> str:
+            return "FIRST"
+
+        async def second_limited_tool() -> str:
+            return "SECOND"
+
+        def _limited_tool_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            del vault_name, vault_path, tools, model, thinking
+            return (
+                "Use the available tools before answering.",
+                "",
+                TestModel(),
+                [first_limited_tool, second_limited_tool],
+            )
+
+        original_prepare_agent_config = chat_executor._prepare_agent_config
+        chat_executor._prepare_agent_config = _limited_tool_agent_config
+        try:
+            limited_chat = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    **chat_payload,
+                    "prompt": "This run should hit the configured tool-call limit.",
+                    "tools": ["first_limited_tool", "second_limited_tool"],
+                },
+            )
+        finally:
+            chat_executor._prepare_agent_config = original_prepare_agent_config
+            reset_limit = self.call_api(
+                "/api/system/settings/general/chat_tool_calls_limit",
+                method="PUT",
+                data={"value": "0"},
+            )
+            assert reset_limit.status_code == 200, "Chat tool-call limit setting resets"
+
+        assert limited_chat.status_code == 400, "Chat tool-call limit returns client error"
+        limited_payload = limited_chat.json()
+        assert limited_payload.get("error") == "ChatToolCallLimitExceeded", (
+            "Tool-call limit error type is explicit"
+        )
+        assert limited_payload.get("details", {}).get("setting") == "chat_tool_calls_limit", (
+            "Tool-call limit response identifies the controlling setting"
+        )
+
         image_path = vault / "tiny.png"
         image_path.write_bytes(
             base64.b64decode(

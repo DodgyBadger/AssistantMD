@@ -413,6 +413,17 @@ def get_auto_cache_max_tokens() -> int:
         return 0
 
 
+def get_chat_tool_calls_limit() -> int:
+    """Return the max tool calls per chat response; 0 disables the limit."""
+    entry = get_general_settings().get("chat_tool_calls_limit")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
 def get_compaction_type() -> str:
     """Return the configured chat-history compaction policy."""
     entry = get_general_settings().get("compaction_type")

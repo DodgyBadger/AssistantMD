@@ -27,6 +27,7 @@ Sections:
 
 Runtime-relevant general settings include:
 
+- `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
 - `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the governor timeout.
 - `vault_state_enabled`: enable vault-state manifest refresh and change-feed maintenance.
 - `vault_state_excluded_patterns`: gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds.

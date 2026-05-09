@@ -103,6 +103,7 @@ from .models import (
     VaultStateCleanupResponse,
 )
 from .exceptions import APIException, SystemConfigurationError
+from .utils import generate_session_id
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
@@ -116,6 +117,54 @@ _chat_store = ChatStore()
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
+
+
+class ChatSessionVaultMismatch(ValueError):
+    """Raised when an existing chat session is requested under another vault."""
+
+    def __init__(self, *, session_id: str, requested_vault: str, bound_vault: str):
+        self.session_id = session_id
+        self.requested_vault = requested_vault
+        self.bound_vault = bound_vault
+        super().__init__(
+            f"Chat session '{session_id}' belongs to vault '{bound_vault}', "
+            f"not vault '{requested_vault}'."
+        )
+
+
+def resolve_chat_session_for_request(*, requested_session_id: str | None, vault_name: str) -> str:
+    """Return a session ID that is durably bound to the requested vault."""
+    session_id = (requested_session_id or "").strip()
+    if session_id:
+        existing_session = _chat_store.get_session_by_id(session_id)
+        if existing_session is not None:
+            if existing_session.vault_name != vault_name:
+                logger.warning(
+                    "Rejected chat session vault mismatch",
+                    data={
+                        "session_id": session_id,
+                        "requested_vault": vault_name,
+                        "bound_vault": existing_session.vault_name,
+                    },
+                )
+                raise ChatSessionVaultMismatch(
+                    session_id=session_id,
+                    requested_vault=vault_name,
+                    bound_vault=existing_session.vault_name,
+                )
+            _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+            return session_id
+        _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+        return session_id
+
+    base_session_id = generate_session_id(vault_name)
+    generated_session_id = base_session_id
+    suffix = 1
+    while _chat_store.get_session_by_id(generated_session_id) is not None:
+        suffix += 1
+        generated_session_id = f"{base_session_id}_{suffix}"
+    _chat_store.ensure_session(session_id=generated_session_id, vault_name=vault_name)
+    return generated_session_id
 
 
 def _execution_task_info(snapshot) -> ExecutionTaskInfo:
