@@ -4,9 +4,10 @@ Handles business logic for status reporting, vault management, etc.
 """
 
 import json
+import mimetypes
 import re
 import shutil
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -130,6 +131,15 @@ class ChatSessionVaultMismatch(ValueError):
             f"Chat session '{session_id}' belongs to vault '{bound_vault}', "
             f"not vault '{requested_vault}'."
         )
+
+
+@dataclass(frozen=True)
+class SnapshotFileResponse:
+    """Resolved snapshot artifact for HTTP serving."""
+
+    path: Path
+    filename: str
+    media_type: str
 
 
 def resolve_chat_session_for_request(*, requested_session_id: str | None, vault_name: str) -> str:
@@ -305,6 +315,32 @@ def cleanup_vault_state() -> VaultStateCleanupResponse:
             f"{result.snapshot_files_deleted} snapshot file(s), "
             f"{result.snapshot_dirs_deleted} snapshot directory/directories deleted."
         ),
+    )
+
+
+def get_vault_snapshot_file(snapshot_id: int) -> SnapshotFileResponse:
+    """Resolve a retained vault snapshot file for inline display."""
+    if snapshot_id <= 0:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidSnapshotId",
+            message="Snapshot id must be a positive integer.",
+            details={"snapshot_id": snapshot_id},
+        )
+
+    snapshot = VaultStateService().resolve_snapshot_file(snapshot_id)
+    if snapshot is None:
+        raise APIException(
+            status_code=404,
+            error_type="VaultSnapshotNotFound",
+            message=f"Vault snapshot not found or no longer retained: {snapshot_id}",
+            details={"snapshot_id": snapshot_id},
+        )
+
+    return SnapshotFileResponse(
+        path=snapshot.path,
+        filename=Path(snapshot.vault_path).name or f"snapshot-{snapshot_id}",
+        media_type=mimetypes.guess_type(snapshot.vault_path)[0] or "text/plain",
     )
 
 

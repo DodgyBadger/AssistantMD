@@ -7,7 +7,7 @@ import json
 from typing import List
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
@@ -111,6 +111,7 @@ from .services import (
     list_execution_tasks,
     list_workflow_tasks,
     get_vault_task_mutations,
+    get_vault_snapshot_file,
     cleanup_vault_state,
     resolve_chat_session_for_request,
 )
@@ -730,6 +731,21 @@ async def vault_task_mutations(
             task_id=task_id,
             include_expired=include_expired,
             operation=operation,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/vault-state/snapshots/{snapshot_id}/content")
+async def vault_snapshot_content(snapshot_id: int):
+    """Serve one retained vault-state file snapshot inline."""
+    try:
+        snapshot = get_vault_snapshot_file(snapshot_id)
+        return FileResponse(
+            snapshot.path,
+            media_type=snapshot.media_type,
+            filename=snapshot.filename,
+            content_disposition_type="inline",
         )
     except Exception as e:
         return create_error_response(e)

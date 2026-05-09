@@ -12,7 +12,12 @@ from sqlalchemy import inspect, or_, select, text
 
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.authoring.template_discovery import discover_vaults
-from core.database import create_engine_from_system_db, create_session_factory, create_tables
+from core.database import (
+    create_engine_from_system_db,
+    create_session_factory,
+    create_tables,
+    get_system_database_path,
+)
 from core.logger import UnifiedLogger
 from core.settings import (
     get_debug_enabled,
@@ -100,6 +105,16 @@ class VaultTaskMutationGroup:
     last_mutation_at: datetime
     expires_at: datetime | None
     mutations: tuple[VaultTaskMutationItem, ...]
+
+
+@dataclass(frozen=True)
+class VaultSnapshotFile:
+    """Resolved retained snapshot file safe for API serving."""
+
+    snapshot_id: int
+    path: Path
+    vault_path: str
+    content_hash: str | None
 
 
 class VaultStateService:
@@ -445,6 +460,42 @@ class VaultStateService:
             )
         return groups
 
+    def resolve_snapshot_file(self, snapshot_id: int) -> VaultSnapshotFile | None:
+        """Resolve one retained file snapshot to an on-disk path under the managed snapshot root."""
+        with self.SessionFactory() as session:
+            file_snapshot = session.get(FileSnapshot, snapshot_id)
+            if file_snapshot is None:
+                return None
+            snapshot_set = session.get(SnapshotSet, file_snapshot.snapshot_set_id)
+            if snapshot_set is None or not file_snapshot.snapshot_ref:
+                return None
+
+            snapshot_path = (Path(snapshot_set.snapshot_root) / file_snapshot.snapshot_ref).resolve()
+            snapshot_base = _snapshot_base_root().resolve()
+            try:
+                snapshot_path.relative_to(snapshot_base)
+            except ValueError:
+                logger.warning(
+                    "Refusing to serve snapshot outside managed root",
+                    data={
+                        "event": "snapshot_serve_rejected",
+                        "snapshot_id": snapshot_id,
+                        "snapshot_path": str(snapshot_path),
+                        "snapshot_base": str(snapshot_base),
+                    },
+                )
+                return None
+
+            if not snapshot_path.is_file():
+                return None
+
+            return VaultSnapshotFile(
+                snapshot_id=snapshot_id,
+                path=snapshot_path,
+                vault_path=file_snapshot.path,
+                content_hash=file_snapshot.content_hash,
+            )
+
     @staticmethod
     def _activity_group_id(row: TaskFileMutation) -> str:
         """Return the user-facing activity grouping key for a mutation row."""
@@ -678,3 +729,7 @@ class VaultStateService:
             logger.add_sink("validation").info(event_name, data=data)
         else:
             logger.set_sinks(["validation"]).info(event_name, data=data)
+
+
+def _snapshot_base_root() -> Path:
+    return Path(get_system_database_path("vault_state")).parent / "vault_snapshots"

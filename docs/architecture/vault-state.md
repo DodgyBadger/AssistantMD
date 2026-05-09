@@ -131,6 +131,12 @@ The Dashboard tab shows recent task file mutation activity per vault through:
 
 The API groups chat mutations by chat session scope so multiple file writes in the same chat session appear as one user-facing activity. Workflow runs remain separate activities. The UI lists activity summaries first and opens the file-level mutations on demand.
 
+The activity detail modal links retained pre-mutation snapshots through:
+
+- `GET /api/vault-state/snapshots/{snapshot_id}/content`
+
+The endpoint resolves `file_snapshots.snapshot_ref` under the owning `snapshot_sets.snapshot_root` and only serves files inside the managed `system/vault_snapshots/` root.
+
 The System / Misc cleanup button calls:
 
 - `POST /api/vault-state/cleanup`
