@@ -757,14 +757,10 @@ async def vault_snapshot_content(snapshot_id: int):
 async def execute_workflow(request: ExecuteWorkflowRequest):
     """
     Execute a specific workflow manually.
-    
-    Args:
-        request: ExecuteWorkflowRequest with global_id and optional step selection
     """
     try:
         result = await execute_workflow_manually(
             request.global_id,
-            request.step_name,
             request.expect_failure,
         )
         response = ExecuteWorkflowResponse(**result)

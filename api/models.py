@@ -26,7 +26,6 @@ class VaultRescanRequest(BaseModel):
 class ExecuteWorkflowRequest(BaseModel):
     """Request model for manually executing a workflow."""
     global_id: str = Field(..., description="Workflow global ID (vault/name format)")
-    step_name: Optional[str] = Field(None, description="Execute only specified step (e.g. 'STEP1')")
     expect_failure: bool = Field(
         False,
         description="Validation/testing hint: marks execution failures as expected in workflow logs.",

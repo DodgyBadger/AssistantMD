@@ -1207,43 +1207,8 @@
                 </div>
             </details>
 
-            <!-- Execute Workflow -->
-            <details id="dashboard-execute-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
-                <summary class="collapsible-summary">
-                    <div class="summary-text">
-                        <span class="summary-title">Execute Workflow</span>
-                    </div>
-                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                </summary>
-                <div class="p-4 pt-0 space-y-3">
-                    <div>
-                        <label class="block text-sm font-medium text-txt-primary mb-1">Workflow ID</label>
-                        <select id="workflow-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
-                            <option value="">Select workflow...</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-txt-primary mb-1">Step (optional - blank for all steps)</label>
-                        <input
-                            id="step-name-input"
-                            type="text"
-                            placeholder="Leave blank to run all steps"
-                            class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary"
-                        />
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button id="execute-workflow-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent self-start">
-                            Execute Workflow
-                        </button>
-                    </div>
-                    <div id="execute-workflow-result" class="text-sm"></div>
-                </div>
-            </details>
-
             <!-- Vaults -->
-            <details id="dashboard-vaults-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+            <details id="dashboard-vaults-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
                 <summary class="collapsible-summary">
                     <div class="summary-text">
                         <span class="summary-title">Vaults</span>
@@ -1254,6 +1219,41 @@
                 </summary>
                 <div class="p-4 pt-0">
                     <div id="system-status" class="space-y-2 text-sm text-txt-primary">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+            </details>
+
+            <!-- Workflows -->
+            <details id="dashboard-workflows-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
+                <summary class="collapsible-summary">
+                    <div class="summary-text">
+                        <span class="summary-title">Workflows <span id="dashboard-workflows-scheduler-badge"></span></span>
+                    </div>
+                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </summary>
+                <div class="p-4 pt-0">
+                    <div id="execute-workflow-result" class="text-sm mb-3"></div>
+                    <div id="dashboard-workflows-status" class="space-y-2 text-sm text-txt-primary">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+            </details>
+
+            <!-- Vault Activity -->
+            <details id="dashboard-vault-activity-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                <summary class="collapsible-summary">
+                    <div class="summary-text">
+                        <span class="summary-title">Vault Activity</span>
+                    </div>
+                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </summary>
+                <div class="p-4 pt-0">
+                    <div id="dashboard-vault-activity-status" class="space-y-2 text-sm text-txt-primary">
                         <p>Loading...</p>
                     </div>
                 </div>

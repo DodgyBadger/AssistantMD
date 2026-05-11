@@ -35,6 +35,7 @@ const state = {
     systemStatus: null,
     vaultActivity: {},
     selectedActivityVault: '',
+    dashboardVaultSort: { column: 'name', direction: 'asc' },
     dashboardWorkflowSort: { column: 'id', direction: 'asc' },
     vaultActivitySort: { column: 'last_run', direction: 'desc' },
     vaultActivityMutationSort: { column: 'time', direction: 'desc' },
@@ -81,11 +82,11 @@ const chatElements = {
 // DOM elements - Dashboard
 const dashElements = {
     systemStatus: document.getElementById('system-status'),
+    workflowsStatus: document.getElementById('dashboard-workflows-status'),
+    workflowSchedulerBadge: document.getElementById('dashboard-workflows-scheduler-badge'),
+    vaultActivityStatus: document.getElementById('dashboard-vault-activity-status'),
     rescanBtn: document.getElementById('rescan-btn'),
     rescanResult: document.getElementById('rescan-result'),
-    workflowSelector: document.getElementById('workflow-selector'),
-    stepNameInput: document.getElementById('step-name-input'),
-    executeWorkflowBtn: document.getElementById('execute-workflow-btn'),
     executeWorkflowResult: document.getElementById('execute-workflow-result')
 };
 
@@ -962,52 +963,49 @@ async function fetchSystemStatus() {
         }
         syncRestartFlagWithStorage();
         displaySystemStatus();
-        populateWorkflowSelector();
         updateStatus();
     } catch (error) {
         console.error('Error fetching status:', error);
         dashElements.systemStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch system status</p>';
+        if (dashElements.workflowsStatus) {
+            dashElements.workflowsStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch workflow status</p>';
+        }
+        if (dashElements.vaultActivityStatus) {
+            dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch vault activity</p>';
+        }
     }
 }
 
 // Display system status information
 function displaySystemStatus() {
     const status = state.systemStatus;
-    const enabledWorkflows = status.enabled_workflows || [];
-    const disabledWorkflows = status.disabled_workflows || [];
-    const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows];
-    const schedulerJobs = status.scheduler?.job_details || [];
-    const schedulerRunning = Boolean(status.scheduler?.running);
-    const jobByWorkflowId = new Map(
-        schedulerJobs.map(job => [job.id.replace('__', '/'), job])
-    );
+    if (!status) return;
+    renderDashboardVaults(status);
+    renderDashboardWorkflows(status);
+    renderDashboardVaultActivity(status);
+}
 
-    let html = `
-        <style>
-            .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-            .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
-            .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
-            .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
-            .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
-            .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
-        </style>
+function renderDashboardVaults(status) {
+    if (!dashElements.systemStatus) return;
+    const sortedVaults = sortDashboardVaults(status.vaults || []);
 
+    dashElements.systemStatus.innerHTML = `
         <div class="dashboard-table-wrap" role="region" aria-label="Vaults" tabindex="0">
             <table class="dashboard-table">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Path inside container</th>
-                        <th class="cell-center">Workflows</th>
-                        <th class="cell-center">Files</th>
-                        <th>Latest Change</th>
+                        ${renderDashboardVaultSortHeader('name', 'Name')}
+                        ${renderDashboardVaultSortHeader('path', 'Path inside container')}
+                        ${renderDashboardVaultSortHeader('workflows', 'Workflows', 'cell-center')}
+                        ${renderDashboardVaultSortHeader('files', 'Files', 'cell-center')}
+                        ${renderDashboardVaultSortHeader('latest_change', 'Latest Change')}
                     </tr>
                 </thead>
                 <tbody>
-                    ${status.vaults.map(v => `
+                    ${sortedVaults.map(v => `
                         <tr>
-                            <td><strong>${v.name}</strong></td>
-                            <td class="cell-mono cell-xs subtle">${v.path}</td>
+                            <td><strong>${escapeHtml(v.name)}</strong></td>
+                            <td class="cell-mono cell-xs subtle">${escapeHtml(v.path)}</td>
                             <td class="cell-center">${v.workflow_count}</td>
                             <td class="cell-center">${v.tracked_files ?? '—'}</td>
                             <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
@@ -1017,93 +1015,155 @@ function displaySystemStatus() {
             </table>
         </div>
     `;
+}
 
-    if (combinedWorkflows.length > 0) {
-        const sortedWorkflows = sortDashboardWorkflows(combinedWorkflows, jobByWorkflowId);
-        const schedulerBadge = schedulerRunning
-            ? '<span class="badge badge-scheduler-running">SCHEDULER RUNNING</span>'
-            : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
-
-        html += `
-            <div class="text-sm font-medium text-txt-primary mb-2 mt-6">Workflows ${schedulerBadge}</div>
-            <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
-                <table class="dashboard-table">
-                    <thead>
-                        <tr>
-                            ${renderDashboardWorkflowSortHeader('id', 'ID')}
-                            ${renderDashboardWorkflowSortHeader('status', 'Status')}
-                            ${renderDashboardWorkflowSortHeader('last_run', 'Last Run')}
-                            ${renderDashboardWorkflowSortHeader('next_run', 'Next Run')}
-                            <th>Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${sortedWorkflows.map(workflow => {
-                            const job = jobByWorkflowId.get(workflow.global_id);
-                            const nextRun = job?.next_run_time
-                                ? new Date(job.next_run_time).toLocaleString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: 'numeric',
-                                    minute: '2-digit'
-                                })
-                                : '—';
-                            const lastRun = job?.last_run_time
-                                ? new Date(job.last_run_time).toLocaleString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: 'numeric',
-                                    minute: '2-digit'
-                                })
-                                : '—';
-                            const description = workflow.description || '—';
-                            const { statusLabel, statusClass } = dashboardWorkflowStatus(workflow, job);
-                            return `
-                                <tr>
-                                    <td><strong>${workflow.global_id}</strong></td>
-                                    <td><span class="badge ${statusClass}">${statusLabel}</span></td>
-                                    <td class="cell-xs">${lastRun}</td>
-                                    <td class="cell-xs">${nextRun}</td>
-                                    <td class="cell-xs subtle">${description}</td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+function renderDashboardWorkflows(status) {
+    if (!dashElements.workflowsStatus) return;
+    const enabledWorkflows = status.enabled_workflows || [];
+    const disabledWorkflows = status.disabled_workflows || [];
+    const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows];
+    const schedulerJobs = status.scheduler?.job_details || [];
+    const schedulerRunning = Boolean(status.scheduler?.running);
+    const jobByWorkflowId = new Map(
+        schedulerJobs.map(job => [job.id.replace('__', '/'), job])
+    );
+    const schedulerBadge = schedulerRunning
+        ? '<span class="badge badge-scheduler-running">SCHEDULER RUNNING</span>'
+        : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
+    if (dashElements.workflowSchedulerBadge) {
+        dashElements.workflowSchedulerBadge.innerHTML = schedulerBadge;
     }
+    if (combinedWorkflows.length === 0) {
+        dashElements.workflowsStatus.innerHTML = `
+            ${renderDashboardBadgeStyles()}
+            <p class="text-sm text-txt-secondary">No workflows loaded.</p>
+        `;
+        return;
+    }
+    const sortedWorkflows = sortDashboardWorkflows(combinedWorkflows, jobByWorkflowId);
 
+    dashElements.workflowsStatus.innerHTML = `
+        ${renderDashboardBadgeStyles()}
+        <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
+            <table class="dashboard-table">
+                <thead>
+                    <tr>
+                        ${renderDashboardWorkflowSortHeader('id', 'ID')}
+                        ${renderDashboardWorkflowSortHeader('status', 'Status')}
+                        ${renderDashboardWorkflowSortHeader('last_run', 'Last Run')}
+                        ${renderDashboardWorkflowSortHeader('next_run', 'Next Run')}
+                        <th>Description</th>
+                        <th class="cell-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedWorkflows.map(workflow => {
+                        const job = jobByWorkflowId.get(workflow.global_id);
+                        const nextRun = job?.next_run_time
+                            ? new Date(job.next_run_time).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit'
+                            })
+                            : '—';
+                        const lastRun = job?.last_run_time
+                            ? new Date(job.last_run_time).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit'
+                            })
+                            : '—';
+                        const description = workflow.description || '—';
+                        const { statusLabel, statusClass } = dashboardWorkflowStatus(workflow, job);
+                        return `
+                            <tr>
+                                <td><strong>${escapeHtml(workflow.global_id)}</strong></td>
+                                <td><span class="badge ${statusClass}">${statusLabel}</span></td>
+                                <td class="cell-xs">${lastRun}</td>
+                                <td class="cell-xs">${nextRun}</td>
+                                <td class="cell-xs subtle">${escapeHtml(description)}</td>
+                                <td class="cell-center">
+                                    <button
+                                        type="button"
+                                        class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
+                                        data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
+                                    >
+                                        Run
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderDashboardVaultActivity(status) {
+    if (!dashElements.vaultActivityStatus) return;
     const activityVaults = status.vaults || [];
     const selectedActivityVault = state.selectedActivityVault && activityVaults.some(v => v.name === state.selectedActivityVault)
         ? state.selectedActivityVault
         : activityVaults[0]?.name || '';
     state.selectedActivityVault = selectedActivityVault;
-    html += `
-        <div class="mt-6 border-t border-border-primary pt-4">
-            <div class="flex flex-col md:flex-row md:items-end gap-3">
-                <div class="flex-1 min-w-0">
-                    <label class="block text-sm font-medium text-txt-primary mb-1">Vault Activity</label>
-                    <select id="vault-activity-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
-                        ${activityVaults.length ? activityVaults.map(v => `
-                            <option value="${escapeHtml(v.name)}" ${v.name === selectedActivityVault ? 'selected' : ''}>${escapeHtml(v.name)}</option>
-                        `).join('') : '<option value="">No vaults detected</option>'}
-                    </select>
-                </div>
-                <button id="vault-activity-refresh" type="button" class="w-full md:w-auto px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
-                    Refresh Activity
-                </button>
+
+    dashElements.vaultActivityStatus.innerHTML = `
+        <div class="flex flex-col md:flex-row md:items-end gap-3">
+            <div class="flex-1 min-w-0">
+                <select id="vault-activity-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
+                    ${activityVaults.length ? activityVaults.map(v => `
+                        <option value="${escapeHtml(v.name)}" ${v.name === selectedActivityVault ? 'selected' : ''}>${escapeHtml(v.name)}</option>
+                    `).join('') : '<option value="">No vaults detected</option>'}
+                </select>
             </div>
-            <div id="vault-activity-result" class="mt-3">
-                ${renderVaultActivityResult(selectedActivityVault)}
-            </div>
+            <button id="vault-activity-refresh" type="button" class="w-full md:w-auto px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
+                Refresh Activity
+            </button>
+        </div>
+        <div id="vault-activity-result" class="mt-3">
+            ${renderVaultActivityResult(selectedActivityVault)}
         </div>
     `;
 
-    dashElements.systemStatus.innerHTML = html;
     if (selectedActivityVault && !state.vaultActivity[selectedActivityVault]) {
         loadVaultActivity(selectedActivityVault);
     }
+}
+
+function renderDashboardBadgeStyles() {
+    return `
+        <style>
+            .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+            .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
+            .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
+            .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
+            .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
+            .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
+        </style>
+    `;
+}
+
+function renderDashboardVaultSortHeader(column, label, className = '') {
+    const sort = state.dashboardVaultSort || { column: 'name', direction: 'asc' };
+    const active = sort.column === column;
+    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
+    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
+    return `
+        <th class="${className}" aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
+            <button
+                type="button"
+                class="inline-flex items-center gap-1 text-left font-semibold whitespace-nowrap hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                data-dashboard-vault-sort="${column}"
+                data-dashboard-vault-sort-next="${nextDirection}"
+            >
+                <span>${escapeHtml(label)}</span>
+                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
+            </button>
+        </th>
+    `;
 }
 
 function renderDashboardWorkflowSortHeader(column, label) {
@@ -1124,6 +1184,41 @@ function renderDashboardWorkflowSortHeader(column, label) {
             </button>
         </th>
     `;
+}
+
+function sortDashboardVaults(vaults) {
+    const sort = state.dashboardVaultSort || { column: 'name', direction: 'asc' };
+    const direction = sort.direction === 'asc' ? 1 : -1;
+    return [...vaults].sort((a, b) => {
+        const compared = compareDashboardVaults(a, b, sort.column);
+        if (compared !== 0) return compared * direction;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}
+
+function compareDashboardVaults(a, b, column) {
+    if (column === 'path') {
+        return String(a.path || '').localeCompare(String(b.path || ''));
+    }
+    if (column === 'workflows') {
+        return (Number(a.workflow_count) || 0) - (Number(b.workflow_count) || 0);
+    }
+    if (column === 'files') {
+        return compareNullableNumbers(a.tracked_files, b.tracked_files);
+    }
+    if (column === 'latest_change') {
+        return compareOptionalDates(a.latest_vault_change_at, b.latest_vault_change_at);
+    }
+    return String(a.name || '').localeCompare(String(b.name || ''));
+}
+
+function compareNullableNumbers(a, b) {
+    const aMissing = a === null || a === undefined || Number.isNaN(Number(a));
+    const bMissing = b === null || b === undefined || Number.isNaN(Number(b));
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    return Number(a) - Number(b);
 }
 
 function sortDashboardWorkflows(workflows, jobByWorkflowId) {
@@ -1521,25 +1616,6 @@ function updateVaultActivityContainer(vaultName) {
     container.innerHTML = renderVaultActivityResult(vaultName);
 }
 
-// Populate workflow selector
-function populateWorkflowSelector() {
-    if (!dashElements.workflowSelector) return;
-
-    dashElements.workflowSelector.innerHTML = '<option value="">Select workflow...</option>';
-
-    const allWorkflows = [
-        ...(state.systemStatus?.enabled_workflows || []),
-        ...(state.systemStatus?.disabled_workflows || [])
-    ];
-
-    allWorkflows.forEach(workflow => {
-        const option = document.createElement('option');
-        option.value = workflow.global_id;
-        option.textContent = `${workflow.global_id} (${workflow.run_type})`;
-        dashElements.workflowSelector.appendChild(option);
-    });
-}
-
 // Setup event listeners
 function setupEventListeners() {
     if (chatElements.sendBtn) {
@@ -1688,19 +1764,31 @@ function setupEventListeners() {
         dashElements.rescanBtn.addEventListener('click', rescanVaults);
     }
 
-    if (dashElements.executeWorkflowBtn) {
-        dashElements.executeWorkflowBtn.addEventListener('click', executeWorkflow);
-    }
-
     if (dashElements.systemStatus) {
-        dashElements.systemStatus.addEventListener('change', (event) => {
-            if (event.target?.id !== 'vault-activity-selector') return;
-            state.selectedActivityVault = event.target.value || '';
-            loadVaultActivity(state.selectedActivityVault);
-        });
         dashElements.systemStatus.addEventListener('click', (event) => {
             const target = event.target;
             if (!(target instanceof HTMLElement)) return;
+            const vaultSortButton = target.closest('[data-dashboard-vault-sort]');
+            if (vaultSortButton instanceof HTMLElement) {
+                state.dashboardVaultSort = {
+                    column: vaultSortButton.getAttribute('data-dashboard-vault-sort') || 'name',
+                    direction: vaultSortButton.getAttribute('data-dashboard-vault-sort-next') || 'asc'
+                };
+                displaySystemStatus();
+                return;
+            }
+        });
+    }
+
+    if (dashElements.workflowsStatus) {
+        dashElements.workflowsStatus.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const runButton = target.closest('[data-dashboard-workflow-run]');
+            if (runButton instanceof HTMLElement) {
+                executeWorkflow(runButton.getAttribute('data-dashboard-workflow-run') || '', runButton);
+                return;
+            }
             const workflowSortButton = target.closest('[data-dashboard-workflow-sort]');
             if (workflowSortButton instanceof HTMLElement) {
                 state.dashboardWorkflowSort = {
@@ -1710,6 +1798,18 @@ function setupEventListeners() {
                 displaySystemStatus();
                 return;
             }
+        });
+    }
+
+    if (dashElements.vaultActivityStatus) {
+        dashElements.vaultActivityStatus.addEventListener('change', (event) => {
+            if (event.target?.id !== 'vault-activity-selector') return;
+            state.selectedActivityVault = event.target.value || '';
+            loadVaultActivity(state.selectedActivityVault);
+        });
+        dashElements.vaultActivityStatus.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
             const sortButton = target.closest('[data-vault-activity-sort]');
             if (sortButton instanceof HTMLElement) {
                 state.vaultActivitySort = {
@@ -2911,21 +3011,18 @@ function renderRescanResult(data) {
 }
 
 // Execute workflow manually
-async function executeWorkflow() {
-    const globalId = dashElements.workflowSelector.value;
-    const stepName = dashElements.stepNameInput.value.trim() || null;
-
+async function executeWorkflow(globalId, triggerButton = null) {
     if (!globalId) {
-        alert('Please select a workflow');
         return;
     }
 
     dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Executing...</p>';
-    dashElements.executeWorkflowBtn.disabled = true;
+    if (triggerButton) {
+        triggerButton.disabled = true;
+    }
 
     try {
         const payload = { global_id: globalId };
-        if (stepName) payload.step_name = stepName;
 
         const response = await fetch('api/workflows/execute', {
             method: 'POST',
@@ -2960,7 +3057,9 @@ async function executeWorkflow() {
         console.error('Error executing workflow:', error);
         dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
     } finally {
-        dashElements.executeWorkflowBtn.disabled = false;
+        if (triggerButton) {
+            triggerButton.disabled = false;
+        }
     }
 }
 

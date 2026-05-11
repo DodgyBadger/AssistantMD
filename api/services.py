@@ -1714,7 +1714,6 @@ def delete_secret_entry(name: str) -> OperationResult:
 
 async def execute_workflow_manually(
     global_id: str,
-    step_name: str = None,
     expect_failure: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -1722,7 +1721,6 @@ async def execute_workflow_manually(
     
     Args:
         global_id: Workflow global ID in format "vault/name"
-        step_name: If provided, execute only the specified step (e.g. 'STEP1')
         expect_failure: Whether workflow-level failures are expected (validation hint)
         
     Returns:
@@ -1730,14 +1728,13 @@ async def execute_workflow_manually(
         
     Raises:
         SystemConfigurationError: If workflow not found or execution fails
-        ValueError: If global_id format is invalid or step_name not found
+        ValueError: If global_id format is invalid
     """
     try:
         logger.info(
             "Workflow execution started",
             data={
                 "global_id": global_id,
-                "step_name": step_name,
             },
         )
 
@@ -1746,7 +1743,6 @@ async def execute_workflow_manually(
             execution_result = await runtime.workflow_governor.execute_workflow(
                 global_id=global_id,
                 source=ExecutionTaskSource.API,
-                step_name=step_name,
                 expect_failure=expect_failure,
             )
         except Exception as workflow_error:
