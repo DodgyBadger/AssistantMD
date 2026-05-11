@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from core.scheduling.system_jobs import (
     INGESTION_WORKER_JOB_ID,
     VAULT_STATE_REFRESH_JOB_ID,
+    run_scheduled_ingestion_worker,
     run_scheduled_vault_state_refresh,
 )
 from core.settings.store import SETTINGS_TEMPLATE
@@ -31,6 +32,7 @@ class VaultStateScheduledRefreshScenario(BaseScenario):
         controller = self._get_system_controller()
         scheduler = controller._runtime.scheduler
         job = scheduler.get_job(VAULT_STATE_REFRESH_JOB_ID)
+        ingestion_job = scheduler.get_job(INGESTION_WORKER_JOB_ID)
         self.soft_assert(
             job is not None,
             "Vault-state refresh system job should be registered",
@@ -46,6 +48,16 @@ class VaultStateScheduledRefreshScenario(BaseScenario):
                 1,
                 "Vault-state refresh job should not overlap",
             )
+        self.soft_assert(
+            ingestion_job is not None,
+            "Ingestion worker system job should be registered",
+        )
+        if ingestion_job is not None:
+            self.soft_assert_equal(
+                ingestion_job.func,
+                run_scheduled_ingestion_worker,
+                "Ingestion worker job should use a serializable module-level function",
+            )
 
         await controller.trigger_vault_rescan()
         self.soft_assert(
@@ -56,6 +68,13 @@ class VaultStateScheduledRefreshScenario(BaseScenario):
             scheduler.get_job(INGESTION_WORKER_JOB_ID) is not None,
             "Workflow reload should preserve the ingestion system job",
         )
+        ingestion_job = scheduler.get_job(INGESTION_WORKER_JOB_ID)
+        if ingestion_job is not None:
+            self.soft_assert_equal(
+                ingestion_job.func,
+                run_scheduled_ingestion_worker,
+                "Workflow reload should keep ingestion worker job serializable",
+            )
 
         service = VaultStateService()
         initial_events = service.changes_since(0)

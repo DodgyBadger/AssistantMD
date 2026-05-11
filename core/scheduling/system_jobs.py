@@ -18,6 +18,36 @@ SYSTEM_JOB_IDS = frozenset({INGESTION_WORKER_JOB_ID, VAULT_STATE_REFRESH_JOB_ID}
 logger = UnifiedLogger(tag="system-scheduler-jobs")
 
 
+async def run_scheduled_ingestion_worker() -> None:
+    """Drain queued ingestion jobs using the active runtime worker."""
+    from core.runtime.state import RuntimeStateError, get_runtime_context
+
+    try:
+        runtime = get_runtime_context()
+    except RuntimeStateError as exc:
+        logger.warning(
+            "Scheduled ingestion worker skipped because runtime is unavailable",
+            data={
+                "event": "ingestion_worker_scheduled_skipped",
+                "reason": "runtime_unavailable",
+                "error": str(exc),
+            },
+        )
+        return
+
+    if runtime.ingestion_worker is None:
+        logger.warning(
+            "Scheduled ingestion worker skipped because no worker is configured",
+            data={
+                "event": "ingestion_worker_scheduled_skipped",
+                "reason": "worker_unavailable",
+            },
+        )
+        return
+
+    await runtime.ingestion_worker.run_once()
+
+
 def run_scheduled_vault_state_refresh(data_root: str) -> dict[str, Any]:
     """Refresh all vault-state manifests for the scheduler job store."""
     result = VaultStateService().refresh_all_vaults(Path(data_root))
@@ -51,7 +81,7 @@ def sync_system_scheduler_jobs(
 
     if ingestion_worker is not None:
         scheduler.add_job(
-            ingestion_worker.run_once,
+            run_scheduled_ingestion_worker,
             "interval",
             seconds=max(int(ingestion_interval), 1),
             id=INGESTION_WORKER_JOB_ID,
