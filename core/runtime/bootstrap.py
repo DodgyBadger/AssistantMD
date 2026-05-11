@@ -108,9 +108,13 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         except Exception:
             pass
 
+        task_coordinator = TaskCoordinator(
+            terminal_observers=[handle_task_terminal_for_rollback],
+        )
         ingestion_worker = IngestionWorker(
             process_job_fn=ingestion_service.process_job,
             max_concurrent=ingestion_max_concurrent,
+            task_coordinator=task_coordinator,
         )
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
@@ -151,9 +155,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
-        task_coordinator = TaskCoordinator(
-            terminal_observers=[handle_task_terminal_for_rollback],
-        )
         workflow_governor = WorkflowGovernor(task_coordinator=task_coordinator)
         runtime_context = RuntimeContext(
             config=config,

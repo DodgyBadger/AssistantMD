@@ -32,6 +32,7 @@ class ExecutionTaskKind(StrEnum):
     CHAT = "chat"
     WORKFLOW = "workflow"
     HISTORY_COMPACTION = "history_compaction"
+    INGESTION = "ingestion"
 
 
 class ExecutionTaskSource(StrEnum):
@@ -71,9 +72,19 @@ def workflow_vault_scope(vault_name: str) -> str:
     return f"workflow_vault:{vault_name}"
 
 
+def ingestion_vault_scope(vault_name: str) -> str:
+    """Return the stable task scope for ingestion work in one vault."""
+    return f"ingestion_vault:{vault_name}"
+
+
 def chat_task_label(session_id: str) -> str:
     """Return the stable label for chat execution tasks."""
     return f"chat:{session_id}"
+
+
+def ingestion_task_label(job_id: int) -> str:
+    """Return the stable label for one ingestion job task."""
+    return f"ingestion:{job_id}"
 
 
 def compaction_task_label(session_id: str) -> str:

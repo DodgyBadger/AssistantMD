@@ -66,6 +66,34 @@ class ImportPipelineScenario(BaseScenario):
             deleted=True,
         ), "Cleaned-up source file should be marked deleted in vault state"
 
+        activity_response = self.call_api(f"/api/vaults/{vault.name}/task-mutations")
+        assert activity_response.status_code == 200, "Vault Activity mutation API should respond"
+        groups = activity_response.json().get("groups") or []
+        ingestion_group = next(
+            (
+                group
+                for group in groups
+                if group.get("task_kind") == "ingestion"
+                and group.get("task_source") == "api"
+            ),
+            None,
+        )
+        assert ingestion_group is not None, "Import should be visible as API ingestion Vault Activity"
+        mutations = ingestion_group.get("mutations") or []
+        observed = {
+            (mutation.get("operation"), mutation.get("path"))
+            for mutation in mutations
+        }
+        assert ("write", sample_rel_path) in observed, "Imported file write should be recorded"
+        assert (
+            "delete",
+            "AssistantMD/Import/sample.pdf",
+        ) in observed, "Source cleanup delete should be recorded"
+        assert all(
+            mutation.get("event_sequence") is not None
+            for mutation in mutations
+        ), "Import mutations should link to vault-state events"
+
         await self.stop_system()
         self.teardown_scenario()
 

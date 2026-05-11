@@ -531,7 +531,7 @@ async def update_general_setting(setting_key: str, request: SettingUpdateRequest
 @router.post("/import/scan", response_model=ImportScanResponse)
 async def import_scan(request: ImportScanRequest):
     try:
-        jobs, skipped = scan_import_folder(
+        jobs, skipped = await scan_import_folder(
             vault=request.vault,
             queue_only=request.queue_only,
             strategies=request.strategies,
@@ -557,7 +557,7 @@ async def import_scan(request: ImportScanRequest):
 @router.post("/import/url", response_model=ImportUrlResponse)
 async def import_url(request: ImportUrlRequest):
     try:
-        job = import_url_direct(
+        job = await import_url_direct(
             vault=request.vault,
             url=request.url,
             clean_html=request.clean_html,

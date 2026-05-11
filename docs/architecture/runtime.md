@@ -17,7 +17,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Bootstrap app services from `RuntimeConfig`.
 - Create and register global `RuntimeContext`.
 - Manage scheduler lifecycle and workflow reload delegation.
-- Track process-local execution tasks for chat, workflows, and history compaction.
+- Track process-local execution tasks for chat, workflows, ingestion, and history compaction.
 - Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
 - Track reload metadata (`last_config_reload`).

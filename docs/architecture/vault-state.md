@@ -27,7 +27,7 @@ The database tables have distinct roles:
 | `file_snapshots` | Per-file snapshot records inside a snapshot set |
 | `task_file_mutations` | Task-scoped audit rows for attempted vault file mutations |
 
-`vault_files` is the current manifest. `vault_file_events` is append-only change history. `snapshot_sets` records why and when AssistantMD captured one or more file states. `file_snapshots` records the actual per-file state captured in that set. `task_file_mutations` records what a chat, workflow, or code_execution task attempted to change, including before/after hashes and a pointer to the relevant pre-mutation file snapshot.
+`vault_files` is the current manifest. `vault_file_events` is append-only change history. `snapshot_sets` records why and when AssistantMD captured one or more file states. `file_snapshots` records the actual per-file state captured in that set. `task_file_mutations` records what a chat, workflow, ingestion, or code_execution task attempted to change, including before/after hashes and a pointer to the relevant pre-mutation file snapshot.
 
 ## Vault Identity
 

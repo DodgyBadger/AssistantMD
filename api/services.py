@@ -110,6 +110,7 @@ from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
+from core.ingestion.task_execution import process_ingestion_job_in_task
 from core.authoring.template_discovery import list_templates
 
 # Create API services logger
@@ -778,7 +779,7 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         )
 
 
-def scan_import_folder(
+async def scan_import_folder(
     vault: str,
     queue_only: bool = False,
     strategies: list[str] | None = None,
@@ -786,8 +787,43 @@ def scan_import_folder(
     pdf_mode: str | None = None,
 ):
     """
-    Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
+    Enqueue ingestion jobs and process inline jobs under execution task context.
     """
+    runtime, ingest_service, jobs_created, skipped = _enqueue_import_scan_jobs(
+        vault=vault,
+        strategies=strategies,
+        capture_ocr_images=capture_ocr_images,
+        pdf_mode=pdf_mode,
+    )
+
+    if not queue_only and jobs_created:
+        refreshed_jobs = []
+        for job in jobs_created:
+            await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
+            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
+        jobs_created = refreshed_jobs
+
+    logger.info(
+        "Import scan completed",
+        data={
+            "vault": vault,
+            "jobs_created": len(jobs_created),
+            "skipped": len(skipped),
+            "queue_only": queue_only,
+        },
+    )
+
+    return jobs_created, skipped
+
+
+def _enqueue_import_scan_jobs(
+    *,
+    vault: str,
+    strategies: list[str] | None,
+    capture_ocr_images: bool | None,
+    pdf_mode: str | None,
+):
+    """Create ingestion jobs for supported files in a vault import folder."""
     runtime = get_runtime_context()
     import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
     legacy_import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
@@ -797,7 +833,6 @@ def scan_import_folder(
 
     jobs_created = []
     skipped = []
-    # Registry-backed filter for supported types
     supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
 
     search_roots = [import_root]
@@ -848,34 +883,12 @@ def scan_import_folder(
             )
             jobs_created.append(job)
 
-    # If not queuing, process immediately for fast-path UX
-    if not queue_only and jobs_created:
-        refreshed_jobs = []
-        for job in jobs_created:
-            try:
-                ingest_service.process_job(job.id)
-            except Exception:
-                # process_job updates status/error; continue to next job
-                pass
-            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
-        jobs_created = refreshed_jobs
-
-    logger.info(
-        "Import scan completed",
-        data={
-            "vault": vault,
-            "jobs_created": len(jobs_created),
-            "skipped": len(skipped),
-            "queue_only": queue_only,
-        },
-    )
-
-    return jobs_created, skipped
+    return runtime, ingest_service, jobs_created, skipped
 
 
-def import_url_direct(vault: str, url: str, clean_html: bool = True):
+async def import_url_direct(vault: str, url: str, clean_html: bool = True):
     """
-    Synchronously import a single URL and return the job record after processing.
+    Import a single URL immediately with vault mutations grouped as API ingestion.
     """
     runtime = get_runtime_context()
     ingest_service: IngestionService = runtime.ingestion
@@ -887,11 +900,7 @@ def import_url_direct(vault: str, url: str, clean_html: bool = True):
         mime_hint="text/html",
         options={"extractor_options": {"clean_html": clean_html}},
     )
-    try:
-        ingest_service.process_job(job.id)
-    except Exception:
-        # process_job records failure status; propagate via job state
-        pass
+    await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
     job = ingest_service.get_job(job.id)
     outputs = job.outputs if job else None
     logger.info(
@@ -904,6 +913,26 @@ def import_url_direct(vault: str, url: str, clean_html: bool = True):
         },
     )
     return job
+
+
+async def _process_ingestion_job_for_api(
+    runtime,
+    ingest_service: IngestionService,
+    job_id: int,
+    vault: str,
+) -> None:
+    """Process one API-triggered ingestion job under execution task context."""
+    try:
+        await process_ingestion_job_in_task(
+            task_coordinator=runtime.task_coordinator,
+            process_job_fn=ingest_service.process_job,
+            job_id=job_id,
+            vault=vault,
+            source=ExecutionTaskSource.API,
+        )
+    except Exception:
+        # process_job updates status/error; callers inspect refreshed job state.
+        pass
 
 
 def collect_system_health() -> SystemInfo:

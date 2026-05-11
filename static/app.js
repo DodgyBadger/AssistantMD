@@ -1291,6 +1291,7 @@ function renderActivityKindEmoji(group) {
     if (kind === 'chat') return '💬';
     if (kind === 'workflow') return '⚙️';
     if (kind === 'context') return '🧩';
+    if (kind === 'ingestion') return '📥';
     return '•';
 }
 
@@ -1307,6 +1308,7 @@ function renderActivityKindLabel(group) {
     if (kind === 'chat') return 'Chat';
     if (kind === 'workflow') return 'Workflow';
     if (kind === 'context') return 'Context assembly';
+    if (kind === 'ingestion') return 'Ingestion';
     return 'Task';
 }
 
@@ -1314,18 +1316,20 @@ function normalizedActivityKind(group) {
     const rawKind = String(group.activity_kind || group.task_kind || '').trim().toLowerCase();
     if (rawKind === 'chat') return 'chat';
     if (rawKind === 'workflow') return 'workflow';
+    if (rawKind === 'ingestion') return 'ingestion';
     if (rawKind === 'context' || rawKind === 'context_assembly' || rawKind === 'context assembly') {
         return 'context';
     }
     const label = String(group.activity_label || '').trim().toLowerCase();
     if (label.startsWith('chat:')) return 'chat';
     if (label.startsWith('workflow:')) return 'workflow';
+    if (label.startsWith('ingestion:')) return 'ingestion';
     if (label.startsWith('context:') || label.startsWith('context assembly:')) return 'context';
     return rawKind || 'task';
 }
 
 function stripActivityKindPrefix(label) {
-    return String(label || '').replace(/^(chat|workflow|context|context assembly|context_assembly):\s*/i, '');
+    return String(label || '').replace(/^(chat|workflow|ingestion|context|context assembly|context_assembly):\s*/i, '');
 }
 
 function renderMutationSnapshotLink(mutation) {
