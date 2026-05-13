@@ -1,6 +1,6 @@
 # Release Notes
 
-## 2026-05-08 - v0.6.2
+## 2026-05-12 - v0.6.2
 
 ### Vault state, rollback, and incremental processing
 
