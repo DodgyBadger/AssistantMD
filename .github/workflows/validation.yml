@@ -183,6 +183,10 @@ jobs:
           print("System secrets keys:", sorted(keys))
           PY
 
+      - name: Check vault mutation routing
+        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
+        run: python scripts/check_vault_mutation_routing.py
+
       - name: Install uv
         if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         uses: astral-sh/setup-uv@v2

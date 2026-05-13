@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/python:3.13-bookworm
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates gnupg build-essential python3-dev sudo && \
+    apt-get install -y --no-install-recommends curl ca-certificates gnupg build-essential python3-dev ripgrep sudo && \
     mkdir -p -m 755 /etc/apt/keyrings && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/etc/apt/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \

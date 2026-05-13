@@ -9,6 +9,11 @@ from typing import Dict, List
 
 from core.ingestion.models import RenderOptions
 from core.runtime.paths import get_data_root
+from core.vault_state.file_mutations import (
+    delete_vault_file,
+    write_vault_file,
+    write_vault_file_bytes,
+)
 
 
 def default_storage(rendered: List[Dict], options: RenderOptions) -> List[str]:
@@ -38,15 +43,24 @@ def default_storage(rendered: List[Dict], options: RenderOptions) -> List[str]:
                     rel_path = Path(*candidate.relative_to(vault_root).parts)
                     break
                 counter += 1
-        full_path.parent.mkdir(parents=True, exist_ok=True)
         if "content_bytes" in artifact:
             content_bytes = artifact["content_bytes"]
             if not isinstance(content_bytes, (bytes, bytearray)):
                 raise ValueError(f"Binary artifact content_bytes must be bytes for {rel_path.as_posix()}")
-            full_path.write_bytes(bytes(content_bytes))
+            write_vault_file_bytes(
+                vault_path=vault_root,
+                path=rel_path.as_posix(),
+                content=bytes(content_bytes),
+                warn_without_task=False,
+            )
         else:
             content = artifact["content"]
-            full_path.write_text(content, encoding="utf-8")
+            write_vault_file(
+                vault_path=vault_root,
+                path=rel_path.as_posix(),
+                content=content,
+                warn_without_task=False,
+            )
         # Return vault-relative path for API/status reporting
         outputs.append(rel_path.as_posix())
 
@@ -55,8 +69,16 @@ def default_storage(rendered: List[Dict], options: RenderOptions) -> List[str]:
         try:
             source_path = Path(options.source_filename).resolve()
             # Only delete files under the current vault to avoid unintended removals
-            if str(source_path).startswith(str(vault_root.resolve())) and source_path.is_file():
-                source_path.unlink(missing_ok=True)
+            try:
+                relative_source = source_path.relative_to(vault_root.resolve()).as_posix()
+            except ValueError:
+                relative_source = None
+            if relative_source and source_path.is_file():
+                delete_vault_file(
+                    vault_path=vault_root,
+                    path=relative_source,
+                    warn_without_task=False,
+                )
         except Exception:
             # Swallow cleanup errors; ingestion output already written
             pass

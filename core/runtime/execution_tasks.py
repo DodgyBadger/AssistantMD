@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextvars import ContextVar
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from core.logger import UnifiedLogger
 
@@ -31,6 +32,7 @@ class ExecutionTaskKind(StrEnum):
     CHAT = "chat"
     WORKFLOW = "workflow"
     HISTORY_COMPACTION = "history_compaction"
+    INGESTION = "ingestion"
 
 
 class ExecutionTaskSource(StrEnum):
@@ -54,6 +56,12 @@ TERMINAL_STATUSES = {
 TERMINAL_STATUS_VALUES = {status.value for status in TERMINAL_STATUSES}
 
 
+_CURRENT_EXECUTION_TASK: ContextVar[ExecutionTaskSnapshot | None] = ContextVar(
+    "current_execution_task",
+    default=None,
+)
+
+
 def chat_session_scope(session_id: str) -> str:
     """Return the stable task scope for a chat session."""
     return f"chat_session:{session_id}"
@@ -64,14 +72,29 @@ def workflow_vault_scope(vault_name: str) -> str:
     return f"workflow_vault:{vault_name}"
 
 
+def ingestion_vault_scope(vault_name: str) -> str:
+    """Return the stable task scope for ingestion work in one vault."""
+    return f"ingestion_vault:{vault_name}"
+
+
 def chat_task_label(session_id: str) -> str:
     """Return the stable label for chat execution tasks."""
     return f"chat:{session_id}"
 
 
+def ingestion_task_label(job_id: int) -> str:
+    """Return the stable label for one ingestion job task."""
+    return f"ingestion:{job_id}"
+
+
 def compaction_task_label(session_id: str) -> str:
     """Return the stable label for chat history compaction tasks."""
     return f"compact:{session_id}"
+
+
+def get_current_execution_task() -> ExecutionTaskSnapshot | None:
+    """Return the execution task associated with the current context, if any."""
+    return _CURRENT_EXECUTION_TASK.get()
 
 
 @dataclass(frozen=True)
@@ -150,9 +173,11 @@ class TaskCoordinator:
         *,
         logger: UnifiedLogger | None = None,
         terminal_history_limit: int = 100,
+        terminal_observers: list[Callable[[ExecutionTaskSnapshot], None]] | None = None,
     ) -> None:
         self._logger = logger or UnifiedLogger(tag="execution-tasks")
         self._terminal_history_limit = max(1, terminal_history_limit)
+        self._terminal_observers = list(terminal_observers or [])
         self._records: dict[str, _ExecutionTaskRecord] = {}
         self._terminal_order: list[str] = []
         self._lock = asyncio.Lock()
@@ -184,10 +209,11 @@ class TaskCoordinator:
         )
         await self._mark_started(task_id)
 
+        snapshot = await self.get_task(task_id)
+        if snapshot is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"Execution task disappeared: {task_id}")
+        token = _CURRENT_EXECUTION_TASK.set(snapshot)
         try:
-            snapshot = await self.get_task(task_id)
-            if snapshot is None:  # pragma: no cover - defensive
-                raise RuntimeError(f"Execution task disappeared: {task_id}")
             yield snapshot
         except asyncio.CancelledError:
             await self.mark_cancelled(task_id, reason="cancelled")
@@ -197,6 +223,8 @@ class TaskCoordinator:
             raise
         else:
             await self.mark_completed(task_id)
+        finally:
+            _CURRENT_EXECUTION_TASK.reset(token)
 
     async def get_task(self, task_id: str) -> ExecutionTaskSnapshot | None:
         """Return one task snapshot by id."""
@@ -388,6 +416,7 @@ class TaskCoordinator:
             self._remember_terminal(task_id)
 
         self._log_event(event, snapshot)
+        self._notify_terminal_observers(snapshot)
 
     def _remember_terminal(self, task_id: str) -> None:
         if task_id in self._terminal_order:
@@ -425,6 +454,25 @@ class TaskCoordinator:
             event,
             data=data,
         )
+
+    def _notify_terminal_observers(self, snapshot: ExecutionTaskSnapshot) -> None:
+        """Notify process-local observers after a task reaches a terminal state."""
+        for observer in self._terminal_observers:
+            try:
+                observer(snapshot)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.add_sink("validation").error(
+                    "execution_task_terminal_observer_failed",
+                    data={
+                        "event": "execution_task_terminal_observer_failed",
+                        "task_id": snapshot.task_id,
+                        "kind": snapshot.kind,
+                        "status": snapshot.status,
+                        "observer": getattr(observer, "__name__", observer.__class__.__name__),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
 
     @staticmethod
     def _new_task_id() -> str:

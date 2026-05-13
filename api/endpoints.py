@@ -7,7 +7,7 @@ import json
 from typing import List
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
@@ -15,6 +15,7 @@ from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
+    ChatToolCallLimitError,
     UploadedImageAttachment,
     execute_chat_prompt,
     execute_chat_prompt_stream,
@@ -26,6 +27,8 @@ from .models import (
     CachePurgeResponse,
     VaultRescanRequest,
     VaultRescanResponse,
+    VaultTaskMutationsResponse,
+    VaultStateCleanupResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
     ExecutionTaskCancelResponse,
@@ -59,9 +62,16 @@ from .models import (
     ChatSessionsPurgeResponse,
     ChatSessionTitleRequest,
 )
-from .exceptions import APIException, ChatCapabilityMismatchError, ChatContextTemplateFailureError
-from .utils import create_error_response, generate_session_id, serialize_exception
+from .exceptions import (
+    APIException,
+    ChatCapabilityMismatchError,
+    ChatContextTemplateFailureError,
+    ChatSessionVaultMismatchError,
+    ChatToolCallLimitExceededError,
+)
+from .utils import create_error_response, serialize_exception
 from .services import (
+    ChatSessionVaultMismatch,
     rescan_vaults_and_update_scheduler,
     get_system_status,
     execute_workflow_manually,
@@ -100,6 +110,10 @@ from .services import (
     get_execution_task,
     list_execution_tasks,
     list_workflow_tasks,
+    get_vault_task_mutations,
+    get_vault_snapshot_file,
+    cleanup_vault_state,
+    resolve_chat_session_for_request,
 )
 from api.import_models import (
     ImportScanRequest,
@@ -208,7 +222,17 @@ async def _execute_chat_request(
     """Execute chat request in streaming or non-streaming mode."""
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
-    session_id = chat_request.session_id or generate_session_id(chat_request.vault_name)
+    try:
+        session_id = resolve_chat_session_for_request(
+            requested_session_id=chat_request.session_id,
+            vault_name=chat_request.vault_name,
+        )
+    except ChatSessionVaultMismatch as exc:
+        raise ChatSessionVaultMismatchError(
+            session_id=exc.session_id,
+            requested_vault=exc.requested_vault,
+            bound_vault=exc.bound_vault,
+        ) from exc
     resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
     logger.info(
         "Chat request accepted",
@@ -294,6 +318,20 @@ async def _execute_chat_request(
             },
         )
         raise ChatContextTemplateFailureError(str(exc), details=exc.details) from exc
+    except ChatToolCallLimitError as exc:
+        logger.warning(
+            "Chat request exceeded tool-call limit",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
+        raise ChatToolCallLimitExceededError(str(exc), details=exc.details) from exc
     except Exception as exc:
         logger.error(
             "Chat request failed before response",
@@ -493,7 +531,7 @@ async def update_general_setting(setting_key: str, request: SettingUpdateRequest
 @router.post("/import/scan", response_model=ImportScanResponse)
 async def import_scan(request: ImportScanRequest):
     try:
-        jobs, skipped = scan_import_folder(
+        jobs, skipped = await scan_import_folder(
             vault=request.vault,
             queue_only=request.queue_only,
             strategies=request.strategies,
@@ -519,7 +557,7 @@ async def import_scan(request: ImportScanRequest):
 @router.post("/import/url", response_model=ImportUrlResponse)
 async def import_url(request: ImportUrlRequest):
     try:
-        job = import_url_direct(
+        job = await import_url_direct(
             vault=request.vault,
             url=request.url,
             clean_html=request.clean_html,
@@ -626,6 +664,15 @@ async def purge_expired_cache_endpoint():
         return create_error_response(e)
 
 
+@router.post("/vault-state/cleanup", response_model=VaultStateCleanupResponse)
+async def cleanup_vault_state_endpoint():
+    """Manually delete expired vault-state task safety artifacts."""
+    try:
+        return cleanup_vault_state()
+    except Exception as e:
+        return create_error_response(e)
+
+
 #######################################################################
 ## Vault Management Endpoints  
 #######################################################################
@@ -668,20 +715,52 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
         return create_error_response(e)
 
 
+@router.get("/vaults/{vault_name}/task-mutations", response_model=VaultTaskMutationsResponse)
+async def vault_task_mutations(
+    vault_name: str,
+    limit: int = 50,
+    task_id: str | None = None,
+    include_expired: bool = False,
+    operation: str | None = None,
+):
+    """Return recent durable task file mutations for one vault."""
+    try:
+        return get_vault_task_mutations(
+            vault_name=vault_name,
+            limit=limit,
+            task_id=task_id,
+            include_expired=include_expired,
+            operation=operation,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/vault-state/snapshots/{snapshot_id}/content")
+async def vault_snapshot_content(snapshot_id: int):
+    """Serve one retained vault-state file snapshot inline."""
+    try:
+        snapshot = get_vault_snapshot_file(snapshot_id)
+        return FileResponse(
+            snapshot.path,
+            media_type=snapshot.media_type,
+            filename=snapshot.filename,
+            content_disposition_type="inline",
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
 
 
 @router.post("/workflows/execute", response_model=ExecuteWorkflowResponse)
 async def execute_workflow(request: ExecuteWorkflowRequest):
     """
     Execute a specific workflow manually.
-    
-    Args:
-        request: ExecuteWorkflowRequest with global_id and optional step selection
     """
     try:
         result = await execute_workflow_manually(
             request.global_id,
-            request.step_name,
             request.expect_failure,
         )
         response = ExecuteWorkflowResponse(**result)
@@ -740,6 +819,18 @@ async def chat_execute(request: Request):
         chat_request, image_uploads = await _parse_chat_execute_payload(request)
         return await _execute_chat_request(chat_request, image_uploads)
     except Exception as e:
+        if isinstance(e, APIException):
+            logger.warning(
+                "Chat endpoint request rejected",
+                data={
+                    "path": str(request.url.path),
+                    "method": request.method,
+                    "error_type": e.error_type,
+                    "message": str(e.detail),
+                    "details": e.details,
+                },
+            )
+            return create_error_response(e)
         logger.error(
             "Chat endpoint request failed",
             data={

@@ -115,3 +115,34 @@ class ChatContextTemplateFailureError(APIException):
             message=message,
             details=details,
         )
+
+
+class ChatSessionVaultMismatchError(APIException):
+    """Raised when a chat session is reused with a different vault."""
+
+    def __init__(self, session_id: str, requested_vault: str, bound_vault: str):
+        super().__init__(
+            status_code=409,
+            error_type="ChatSessionVaultMismatch",
+            message=(
+                f"Chat session '{session_id}' belongs to vault '{bound_vault}' "
+                f"and cannot be used with vault '{requested_vault}'."
+            ),
+            details={
+                "session_id": session_id,
+                "requested_vault": requested_vault,
+                "bound_vault": bound_vault,
+            },
+        )
+
+
+class ChatToolCallLimitExceededError(APIException):
+    """Raised when chat exceeds the configured tool-call limit."""
+
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            status_code=400,
+            error_type="ChatToolCallLimitExceeded",
+            message=message,
+            details=details,
+        )

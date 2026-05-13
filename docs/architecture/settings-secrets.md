@@ -27,7 +27,13 @@ Sections:
 
 Runtime-relevant general settings include:
 
+- `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
 - `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the governor timeout.
+- `vault_state_enabled`: enable vault-state manifest refresh and change-feed maintenance.
+- `vault_state_excluded_patterns`: gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds.
+- `vault_scan_interval_seconds`: interval in seconds for the reserved `vault-state-refresh` scheduler job; `0` disables scheduled vault-state refresh.
+- `task_rollback_enabled`: enable automatic rollback for failed, cancelled, or timed-out task file mutations.
+- `task_snapshot_retention_days`: days to retain task mutation rows and snapshot files before cleanup.
 - `compaction_type`: chat history compaction policy (`none`, `suggested`, or `auto`).
 - `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.
 - `compaction_token_threshold`: estimated-token threshold for suggesting or automatically running compaction.

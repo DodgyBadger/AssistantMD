@@ -26,7 +26,6 @@ class VaultRescanRequest(BaseModel):
 class ExecuteWorkflowRequest(BaseModel):
     """Request model for manually executing a workflow."""
     global_id: str = Field(..., description="Workflow global ID (vault/name format)")
-    step_name: Optional[str] = Field(None, description="Execute only specified step (e.g. 'STEP1')")
     expect_failure: bool = Field(
         False,
         description="Validation/testing hint: marks execution failures as expected in workflow logs.",
@@ -62,6 +61,10 @@ class VaultInfo(BaseModel):
     path: str = Field(..., description="Full path to vault directory")
     workflow_count: int = Field(..., description="Number of workflows in this vault")
     workflows: List[str] = Field(default_factory=list, description="List of workflow names")
+    tracked_files: Optional[int] = Field(None, description="Current files tracked by vault state")
+    files_created_recent: Optional[int] = Field(None, description="Files created in the recent vault-state change window")
+    files_deleted_recent: Optional[int] = Field(None, description="Files deleted in the recent vault-state change window")
+    latest_vault_change_at: Optional[datetime] = Field(None, description="Latest vault-state change observation")
 
 
 class SchedulerInfo(BaseModel):
@@ -129,6 +132,75 @@ class VaultRescanResponse(BaseModel):
     scheduler_jobs_synced: int = Field(..., description="Number of scheduler jobs synchronized")
     message: str = Field(..., description="Human-readable success message")
     metadata: Optional["MetadataResponse"] = Field(None, description="Updated metadata after rescan")
+
+
+class VaultTaskMutationInfo(BaseModel):
+    """One recorded file mutation for a vault task."""
+
+    id: int = Field(..., description="Mutation row id")
+    task_id: str = Field(..., description="Execution task id that recorded this mutation")
+    task_kind: Optional[str] = Field(None, description="Task kind such as chat or workflow")
+    task_source: Optional[str] = Field(None, description="Task source such as api or scheduler")
+    task_scope: Optional[str] = Field(None, description="Task scope")
+    task_label: Optional[str] = Field(None, description="User-readable task label")
+    path: str = Field(..., description="Vault-relative mutated path")
+    related_path: Optional[str] = Field(None, description="Related vault-relative path for paired mutations")
+    operation: str = Field(..., description="Mutation operation")
+    event_sequence: Optional[int] = Field(None, description="Linked vault file event sequence")
+    before_exists: bool = Field(..., description="Whether the file existed before mutation")
+    before_hash: Optional[str] = Field(None, description="Content hash before mutation")
+    before_snapshot_id: Optional[int] = Field(None, description="Retained pre-mutation file snapshot id")
+    after_exists: bool = Field(..., description="Whether the file existed after mutation")
+    after_hash: Optional[str] = Field(None, description="Content hash after mutation")
+    after_snapshot_id: Optional[int] = Field(None, description="Retained post-mutation file snapshot id")
+    snapshot_ref: Optional[str] = Field(None, description="Retained pre-mutation snapshot reference")
+    created_at: datetime = Field(..., description="Mutation timestamp")
+    expires_at: Optional[datetime] = Field(None, description="Snapshot retention expiration")
+
+
+class VaultTaskMutationGroupInfo(BaseModel):
+    """File mutations grouped by user-facing activity."""
+
+    activity_id: str = Field(..., description="Activity group id")
+    activity_kind: str = Field(..., description="Activity kind such as chat or workflow")
+    activity_label: str = Field(..., description="User-facing activity label")
+    chat_session_id: Optional[str] = Field(None, description="Chat session id for chat activity groups")
+    chat_session_title: Optional[str] = Field(None, description="User-defined chat session title")
+    chat_session_created_at: Optional[str] = Field(None, description="Chat session creation timestamp")
+    chat_session_last_activity_at: Optional[str] = Field(None, description="Chat session last activity timestamp")
+    task_id: str = Field(..., description="Primary task id or chat session scope for this group")
+    task_kind: Optional[str] = Field(None, description="Task kind such as chat or workflow")
+    task_source: Optional[str] = Field(None, description="Task source such as api or scheduler")
+    task_scope: Optional[str] = Field(None, description="Task scope")
+    task_label: Optional[str] = Field(None, description="User-readable task label")
+    vault_id: str = Field(..., description="Stable vault id")
+    vault_name: str = Field(..., description="Vault name at mutation time")
+    mutation_count: int = Field(..., description="Number of returned mutations for the task")
+    first_mutation_at: datetime = Field(..., description="First returned mutation timestamp")
+    last_mutation_at: datetime = Field(..., description="Last returned mutation timestamp")
+    expires_at: Optional[datetime] = Field(None, description="Earliest snapshot retention expiration")
+    mutations: List[VaultTaskMutationInfo] = Field(default_factory=list, description="Returned mutations")
+
+
+class VaultTaskMutationsResponse(BaseModel):
+    """Response for recent vault file mutation activity."""
+
+    vault_name: str = Field(..., description="Requested vault name")
+    groups: List[VaultTaskMutationGroupInfo] = Field(
+        default_factory=list,
+        description="Recent task mutation groups",
+    )
+
+
+class VaultStateCleanupResponse(BaseModel):
+    """Response for manual vault-state cleanup."""
+
+    success: bool = Field(..., description="Whether cleanup completed")
+    expired_mutation_rows_deleted: int = Field(..., description="Deleted expired mutation rows")
+    expired_snapshot_rows_deleted: int = Field(..., description="Deleted expired snapshot rows")
+    snapshot_files_deleted: int = Field(..., description="Deleted snapshot files")
+    snapshot_dirs_deleted: int = Field(..., description="Deleted snapshot directories")
+    message: str = Field(..., description="Human-readable cleanup summary")
 
 
 class ExecuteWorkflowResponse(BaseModel):

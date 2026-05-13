@@ -19,6 +19,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
     async def test_scenario(self):
         vault = self.create_vault("ChatSessionPersistenceContractVault")
+        other_vault = self.create_vault("ChatSessionPersistenceOtherVault")
 
         await self.start_system()
 
@@ -63,6 +64,39 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             self.soft_assert(
                 "SESSION_PROBE_RESULT" in payload["response"],
                 "Expected assistant response to reflect the tool result",
+            )
+
+            mismatch_response = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": other_vault.name,
+                    "prompt": "This should not run against a different vault.",
+                    "session_id": session_id,
+                    "tools": ["session_probe"],
+                    "model": "test",
+                },
+            )
+            self.soft_assert_equal(
+                mismatch_response.status_code,
+                409,
+                "Reusing a chat session ID with another vault should be rejected",
+            )
+            mismatch_payload = mismatch_response.json()
+            self.soft_assert_equal(
+                mismatch_payload.get("error"),
+                "ChatSessionVaultMismatch",
+                "Vault/session mismatch should return a stable error type",
+            )
+            self.soft_assert_equal(
+                mismatch_payload.get("details", {}).get("bound_vault"),
+                vault.name,
+                "Mismatch response should identify the session's bound vault",
+            )
+            self.soft_assert_equal(
+                mismatch_payload.get("details", {}).get("requested_vault"),
+                other_vault.name,
+                "Mismatch response should identify the rejected requested vault",
             )
 
             runtime = get_runtime_context()

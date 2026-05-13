@@ -4,18 +4,22 @@ Handles business logic for status reporting, vault management, etc.
 """
 
 import json
+import mimetypes
 import re
 import shutil
-from dataclasses import asdict
-from datetime import datetime
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import yaml
+from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
+from core.scheduling.job_history import get_scheduler_job_history
+from core.scheduling.system_jobs import SYSTEM_JOB_IDS
 from core.settings.store import (
     get_models_config,
     get_tools_config,
@@ -56,6 +60,9 @@ from core.runtime.execution_tasks import (
     compaction_task_label,
     workflow_vault_scope,
 )
+from core.vault_state.service import VaultStateService
+from core.vault_state.cleanup import cleanup_expired_vault_state
+from core.vault_state.models import VaultFile, VaultFileEvent
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -91,13 +98,19 @@ from .models import (
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
+    VaultTaskMutationGroupInfo,
+    VaultTaskMutationInfo,
+    VaultTaskMutationsResponse,
+    VaultStateCleanupResponse,
 )
 from .exceptions import APIException, SystemConfigurationError
+from .utils import generate_session_id
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.models import SourceKind, JobStatus
 from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
+from core.ingestion.task_execution import process_ingestion_job_in_task
 from core.authoring.template_discovery import list_templates
 
 # Create API services logger
@@ -106,6 +119,63 @@ _chat_store = ChatStore()
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
+
+
+class ChatSessionVaultMismatch(ValueError):
+    """Raised when an existing chat session is requested under another vault."""
+
+    def __init__(self, *, session_id: str, requested_vault: str, bound_vault: str):
+        self.session_id = session_id
+        self.requested_vault = requested_vault
+        self.bound_vault = bound_vault
+        super().__init__(
+            f"Chat session '{session_id}' belongs to vault '{bound_vault}', "
+            f"not vault '{requested_vault}'."
+        )
+
+
+@dataclass(frozen=True)
+class SnapshotFileResponse:
+    """Resolved snapshot artifact for HTTP serving."""
+
+    path: Path
+    filename: str
+    media_type: str
+
+
+def resolve_chat_session_for_request(*, requested_session_id: str | None, vault_name: str) -> str:
+    """Return a session ID that is durably bound to the requested vault."""
+    session_id = (requested_session_id or "").strip()
+    if session_id:
+        existing_session = _chat_store.get_session_by_id(session_id)
+        if existing_session is not None:
+            if existing_session.vault_name != vault_name:
+                logger.warning(
+                    "Rejected chat session vault mismatch",
+                    data={
+                        "session_id": session_id,
+                        "requested_vault": vault_name,
+                        "bound_vault": existing_session.vault_name,
+                    },
+                )
+                raise ChatSessionVaultMismatch(
+                    session_id=session_id,
+                    requested_vault=vault_name,
+                    bound_vault=existing_session.vault_name,
+                )
+            _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+            return session_id
+        _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+        return session_id
+
+    base_session_id = generate_session_id(vault_name)
+    generated_session_id = base_session_id
+    suffix = 1
+    while _chat_store.get_session_by_id(generated_session_id) is not None:
+        suffix += 1
+        generated_session_id = f"{base_session_id}_{suffix}"
+    _chat_store.ensure_session(session_id=generated_session_id, vault_name=vault_name)
+    return generated_session_id
 
 
 def _execution_task_info(snapshot) -> ExecutionTaskInfo:
@@ -202,6 +272,129 @@ async def list_workflow_tasks(vault_name: str | None = None) -> ExecutionTaskLis
     """List process-local workflow task snapshots."""
     scope = workflow_vault_scope(vault_name) if vault_name else None
     return await list_execution_tasks(kind=ExecutionTaskKind.WORKFLOW.value, scope=scope)
+
+
+def get_vault_task_mutations(
+    *,
+    vault_name: str,
+    limit: int = 50,
+    task_id: str | None = None,
+    include_expired: bool = False,
+    operation: str | None = None,
+) -> VaultTaskMutationsResponse:
+    """Return durable file mutation activity for one vault."""
+    _get_vault_path(vault_name)
+    groups = VaultStateService().list_task_mutations(
+        vault_name=vault_name,
+        limit=limit,
+        task_id=task_id,
+        include_expired=include_expired,
+        operation=operation,
+    )
+    return VaultTaskMutationsResponse(
+        vault_name=vault_name,
+        groups=[
+            _vault_task_mutation_group_info(group)
+            for group in groups
+        ],
+    )
+
+
+def cleanup_vault_state() -> VaultStateCleanupResponse:
+    """Manually delete expired vault-state safety artifacts."""
+    result = cleanup_expired_vault_state()
+    return VaultStateCleanupResponse(
+        success=True,
+        expired_mutation_rows_deleted=result.expired_mutation_rows_deleted,
+        expired_snapshot_rows_deleted=result.expired_snapshot_rows_deleted,
+        snapshot_files_deleted=result.snapshot_files_deleted,
+        snapshot_dirs_deleted=result.snapshot_dirs_deleted,
+        message=(
+            "Vault-state cleanup completed: "
+            f"{result.expired_mutation_rows_deleted} mutation row(s), "
+            f"{result.expired_snapshot_rows_deleted} snapshot row(s), "
+            f"{result.snapshot_files_deleted} snapshot file(s), "
+            f"{result.snapshot_dirs_deleted} snapshot directory/directories deleted."
+        ),
+    )
+
+
+def get_vault_snapshot_file(snapshot_id: int) -> SnapshotFileResponse:
+    """Resolve a retained vault snapshot file for inline display."""
+    if snapshot_id <= 0:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidSnapshotId",
+            message="Snapshot id must be a positive integer.",
+            details={"snapshot_id": snapshot_id},
+        )
+
+    snapshot = VaultStateService().resolve_snapshot_file(snapshot_id)
+    if snapshot is None:
+        raise APIException(
+            status_code=404,
+            error_type="VaultSnapshotNotFound",
+            message=f"Vault snapshot not found or no longer retained: {snapshot_id}",
+            details={"snapshot_id": snapshot_id},
+        )
+
+    return SnapshotFileResponse(
+        path=snapshot.path,
+        filename=Path(snapshot.vault_path).name or f"snapshot-{snapshot_id}",
+        media_type=mimetypes.guess_type(snapshot.vault_path)[0] or "text/plain",
+    )
+
+
+def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
+    chat_session = None
+    if group.activity_kind == "chat" and group.chat_session_id:
+        chat_session = _chat_store.get_session(group.chat_session_id, group.vault_name)
+    return VaultTaskMutationGroupInfo(
+        activity_id=group.activity_id,
+        activity_kind=group.activity_kind,
+        activity_label=group.activity_label,
+        chat_session_id=group.chat_session_id,
+        chat_session_title=chat_session.title if chat_session else group.chat_session_title,
+        chat_session_created_at=chat_session.created_at if chat_session else group.chat_session_created_at,
+        chat_session_last_activity_at=(
+            chat_session.last_activity_at if chat_session else group.chat_session_last_activity_at
+        ),
+        task_id=group.task_id,
+        task_kind=group.task_kind,
+        task_source=group.task_source,
+        task_scope=group.task_scope,
+        task_label=group.task_label,
+        vault_id=group.vault_id,
+        vault_name=group.vault_name,
+        mutation_count=group.mutation_count,
+        first_mutation_at=group.first_mutation_at,
+        last_mutation_at=group.last_mutation_at,
+        expires_at=group.expires_at,
+        mutations=[
+            VaultTaskMutationInfo(
+                id=mutation.id,
+                task_id=mutation.task_id,
+                task_kind=mutation.task_kind,
+                task_source=mutation.task_source,
+                task_scope=mutation.task_scope,
+                task_label=mutation.task_label,
+                path=mutation.path,
+                related_path=mutation.related_path,
+                operation=mutation.operation,
+                event_sequence=mutation.event_sequence,
+                before_exists=mutation.before_exists,
+                before_hash=mutation.before_hash,
+                before_snapshot_id=mutation.before_snapshot_id,
+                after_exists=mutation.after_exists,
+                after_hash=mutation.after_hash,
+                after_snapshot_id=mutation.after_snapshot_id,
+                snapshot_ref=mutation.snapshot_ref,
+                created_at=mutation.created_at,
+                expires_at=mutation.expires_at,
+            )
+            for mutation in group.mutations
+        ],
+    )
 
 
 def purge_expired_cache() -> CachePurgeResponse:
@@ -443,15 +636,21 @@ async def collect_vault_status() -> List[VaultInfo]:
     try:
         # Use cached vault info from workflow loader
         vault_data = _get_workflow_loader().get_vault_info()
+        vault_state_summary = _collect_vault_state_summary()
 
         # Create VaultInfo objects from cached data
         vault_infos = []
         for vault_name, data in vault_data.items():
+            state_summary = vault_state_summary.get(vault_name, {})
             vault_info = VaultInfo(
                 name=vault_name,
                 path=data['path'],
                 workflow_count=len(data['workflows']),
-                workflows=data['workflows']
+                workflows=data['workflows'],
+                tracked_files=state_summary.get("tracked_files"),
+                files_created_recent=state_summary.get("files_created_recent"),
+                files_deleted_recent=state_summary.get("files_deleted_recent"),
+                latest_vault_change_at=state_summary.get("latest_vault_change_at"),
             )
             vault_infos.append(vault_info)
 
@@ -460,6 +659,53 @@ async def collect_vault_status() -> List[VaultInfo]:
     except Exception as e:
         error_msg = f"Failed to collect vault status: {str(e)}"
         raise SystemConfigurationError(error_msg) from e
+
+
+def _collect_vault_state_summary() -> Dict[str, Dict[str, Any]]:
+    """Return cheap vault-state summary fields keyed by current vault name."""
+    summary: Dict[str, Dict[str, Any]] = {}
+    recent_change_cutoff = datetime.now(UTC) - timedelta(days=7)
+    try:
+        service = VaultStateService()
+        with service.SessionFactory() as session:
+            file_rows = session.execute(
+                select(VaultFile.vault_name, func.count())
+                .where(VaultFile.deleted_at.is_(None))
+                .group_by(VaultFile.vault_name)
+            ).all()
+            for vault_name, count in file_rows:
+                summary.setdefault(vault_name, {})["tracked_files"] = int(count)
+
+            change_rows = session.execute(
+                select(VaultFileEvent.vault_name, func.max(VaultFileEvent.observed_at))
+                .group_by(VaultFileEvent.vault_name)
+            ).all()
+            for vault_name, latest_change in change_rows:
+                summary.setdefault(vault_name, {})[
+                    "latest_vault_change_at"
+                ] = latest_change
+
+            recent_change_rows = session.execute(
+                select(VaultFileEvent.vault_name, VaultFileEvent.event_type, func.count())
+                .where(
+                    VaultFileEvent.observed_at >= recent_change_cutoff,
+                    VaultFileEvent.event_type.in_(("created", "deleted")),
+                )
+                .group_by(VaultFileEvent.vault_name, VaultFileEvent.event_type)
+            ).all()
+            for vault_name, event_type, count in recent_change_rows:
+                key = "files_created_recent" if event_type == "created" else "files_deleted_recent"
+                summary.setdefault(vault_name, {})[key] = int(count)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to collect vault-state status summary",
+            data={
+                "event": "vault_state_status_summary_failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+    return summary
 
 
 def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
@@ -500,10 +746,15 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         # Extract job details from APScheduler
         job_summaries = []
         for job in jobs:
+            history = get_scheduler_job_history(job.id) or {}
             job_summary = {
                 'id': job.id,
                 'name': job.name,
+                'job_type': 'system' if job.id in SYSTEM_JOB_IDS else 'workflow',
                 'next_run_time': job.next_run_time,
+                'last_run_time': history.get('last_run_time'),
+                'last_status': history.get('last_status'),
+                'last_error': history.get('last_error'),
                 'trigger_type': type(job.trigger).__name__,
                 'trigger_description': str(job.trigger),
                 'max_instances': job.max_instances,
@@ -525,8 +776,15 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
 
         return scheduler_info
 
-    except Exception:
-        # Return safe defaults on error
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to collect scheduler status",
+            data={
+                "event": "scheduler_status_collection_failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         return SchedulerInfo(
             running=False,
             total_jobs=0,
@@ -536,7 +794,7 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         )
 
 
-def scan_import_folder(
+async def scan_import_folder(
     vault: str,
     queue_only: bool = False,
     strategies: list[str] | None = None,
@@ -544,8 +802,43 @@ def scan_import_folder(
     pdf_mode: str | None = None,
 ):
     """
-    Enqueue ingestion jobs for files in AssistantMD/Import for a vault.
+    Enqueue ingestion jobs and process inline jobs under execution task context.
     """
+    runtime, ingest_service, jobs_created, skipped = _enqueue_import_scan_jobs(
+        vault=vault,
+        strategies=strategies,
+        capture_ocr_images=capture_ocr_images,
+        pdf_mode=pdf_mode,
+    )
+
+    if not queue_only and jobs_created:
+        refreshed_jobs = []
+        for job in jobs_created:
+            await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
+            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
+        jobs_created = refreshed_jobs
+
+    logger.info(
+        "Import scan completed",
+        data={
+            "vault": vault,
+            "jobs_created": len(jobs_created),
+            "skipped": len(skipped),
+            "queue_only": queue_only,
+        },
+    )
+
+    return jobs_created, skipped
+
+
+def _enqueue_import_scan_jobs(
+    *,
+    vault: str,
+    strategies: list[str] | None,
+    capture_ocr_images: bool | None,
+    pdf_mode: str | None,
+):
+    """Create ingestion jobs for supported files in a vault import folder."""
     runtime = get_runtime_context()
     import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
     legacy_import_root = Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
@@ -555,7 +848,6 @@ def scan_import_folder(
 
     jobs_created = []
     skipped = []
-    # Registry-backed filter for supported types
     supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
 
     search_roots = [import_root]
@@ -606,34 +898,12 @@ def scan_import_folder(
             )
             jobs_created.append(job)
 
-    # If not queuing, process immediately for fast-path UX
-    if not queue_only and jobs_created:
-        refreshed_jobs = []
-        for job in jobs_created:
-            try:
-                ingest_service.process_job(job.id)
-            except Exception:
-                # process_job updates status/error; continue to next job
-                pass
-            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
-        jobs_created = refreshed_jobs
-
-    logger.info(
-        "Import scan completed",
-        data={
-            "vault": vault,
-            "jobs_created": len(jobs_created),
-            "skipped": len(skipped),
-            "queue_only": queue_only,
-        },
-    )
-
-    return jobs_created, skipped
+    return runtime, ingest_service, jobs_created, skipped
 
 
-def import_url_direct(vault: str, url: str, clean_html: bool = True):
+async def import_url_direct(vault: str, url: str, clean_html: bool = True):
     """
-    Synchronously import a single URL and return the job record after processing.
+    Import a single URL immediately with vault mutations grouped as API ingestion.
     """
     runtime = get_runtime_context()
     ingest_service: IngestionService = runtime.ingestion
@@ -645,11 +915,7 @@ def import_url_direct(vault: str, url: str, clean_html: bool = True):
         mime_hint="text/html",
         options={"extractor_options": {"clean_html": clean_html}},
     )
-    try:
-        ingest_service.process_job(job.id)
-    except Exception:
-        # process_job records failure status; propagate via job state
-        pass
+    await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
     job = ingest_service.get_job(job.id)
     outputs = job.outputs if job else None
     logger.info(
@@ -662,6 +928,26 @@ def import_url_direct(vault: str, url: str, clean_html: bool = True):
         },
     )
     return job
+
+
+async def _process_ingestion_job_for_api(
+    runtime,
+    ingest_service: IngestionService,
+    job_id: int,
+    vault: str,
+) -> None:
+    """Process one API-triggered ingestion job under execution task context."""
+    try:
+        await process_ingestion_job_in_task(
+            task_coordinator=runtime.task_coordinator,
+            process_job_fn=ingest_service.process_job,
+            job_id=job_id,
+            vault=vault,
+            source=ExecutionTaskSource.API,
+        )
+    except Exception:
+        # process_job updates status/error; callers inspect refreshed job state.
+        pass
 
 
 def collect_system_health() -> SystemInfo:
@@ -844,16 +1130,15 @@ async def rescan_vaults_and_update_scheduler(scheduler=None) -> Dict[str, Any]:
         SystemConfigurationError: If rescan or scheduler update fails
     """
     try:
-        # Get scheduler if not provided
-        if scheduler is None:
-            try:
-                runtime = get_runtime_context()
-                scheduler = runtime.scheduler
-            except RuntimeStateError:
+        # Prefer the runtime reload path so workflow and vault-state refresh
+        # behavior stays centralized.
+        try:
+            runtime = get_runtime_context()
+            results = await runtime.reload_workflows(manual=True)
+        except RuntimeStateError:
+            if scheduler is None:
                 scheduler = None
-        
-        # Use the shared scheduler utilities for the rescan
-        results = await setup_scheduler_jobs(scheduler, manual_reload=True)
+            results = await setup_scheduler_jobs(scheduler, manual_reload=True)
 
         logger.info(
             "Vault rescan completed",
@@ -1444,7 +1729,6 @@ def delete_secret_entry(name: str) -> OperationResult:
 
 async def execute_workflow_manually(
     global_id: str,
-    step_name: str = None,
     expect_failure: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -1452,7 +1736,6 @@ async def execute_workflow_manually(
     
     Args:
         global_id: Workflow global ID in format "vault/name"
-        step_name: If provided, execute only the specified step (e.g. 'STEP1')
         expect_failure: Whether workflow-level failures are expected (validation hint)
         
     Returns:
@@ -1460,14 +1743,13 @@ async def execute_workflow_manually(
         
     Raises:
         SystemConfigurationError: If workflow not found or execution fails
-        ValueError: If global_id format is invalid or step_name not found
+        ValueError: If global_id format is invalid
     """
     try:
         logger.info(
             "Workflow execution started",
             data={
                 "global_id": global_id,
-                "step_name": step_name,
             },
         )
 
@@ -1476,7 +1758,6 @@ async def execute_workflow_manually(
             execution_result = await runtime.workflow_governor.execute_workflow(
                 global_id=global_id,
                 source=ExecutionTaskSource.API,
-                step_name=step_name,
                 expect_failure=expect_failure,
             )
         except Exception as workflow_error:

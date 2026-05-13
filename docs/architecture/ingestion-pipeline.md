@@ -26,7 +26,13 @@ API entrypoints call service helpers in `api/services.py`:
 
 `scan_import_folder` walks `AssistantMD/Import` (and legacy `AssistantMD/import`), enqueues supported files, and can process immediately or queue only.
 
-`import_url_direct` enqueues a URL job and processes it synchronously for fast feedback.
+`import_url_direct` enqueues a URL job and processes it immediately for fast feedback.
+
+Immediate API processing runs ingestion jobs inside an execution task with
+`task_kind="ingestion"` and `task_source="api"`. Queued worker processing uses
+the same execution-task wrapper with `task_source="scheduler"`. Vault writes and
+source cleanup therefore flow through the shared vault mutation recorder and
+appear in Vault Activity.
 
 ## Job Model and Persistence
 
@@ -56,6 +62,10 @@ Worker scheduling is driven by settings:
 
 - `ingestion_worker_interval_seconds`
 - `ingestion_worker_batch_size` (mapped to worker max concurrent jobs)
+
+The shared wrapper lives in `core/ingestion/task_execution.py`; new ingestion
+execution paths should use it rather than calling `IngestionService.process_job`
+directly from API or scheduler code.
 
 ## Service Flow
 
@@ -132,11 +142,14 @@ Behavior:
 - Duplicate queued/processing jobs for the same source are skipped during folder scan.
 - URL ingestion logs backend/timeouts and records detailed failure metadata.
 - Worker executes ingestion pipeline via `asyncio.to_thread(...)` to avoid blocking the event loop.
+- Ingestion output writes and source cleanup are audited as task file mutations
+  when the job runs through the API or scheduler worker.
 
 ## Primary Code
 
 - `api/services.py`
 - `core/ingestion/service.py`
+- `core/ingestion/task_execution.py`
 - `core/ingestion/worker.py`
 - `core/ingestion/jobs.py`
 - `core/ingestion/registry.py`

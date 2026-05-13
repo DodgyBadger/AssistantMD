@@ -1,5 +1,5 @@
 /**
- * Configuration tab logic.
+ * System and dashboard maintenance panel logic.
  *
  * Provides a structured interface for activity logs, model mappings,
  * provider settings, and secrets management without polluting app.js.
@@ -19,6 +19,8 @@
         isLoadingSecrets: false,
         isSavingSecret: false,
         isPurgingCache: false,
+        isCleaningVaultState: false,
+        isLoadingSystemJobs: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
         isImportingUrl: false,
@@ -29,6 +31,7 @@
         importVaults: [],
         importResults: null,
         importUrlResult: null,
+        systemJobs: [],
         settingEditKey: null,
         settingDraftValue: '',
         modelEdit: null,
@@ -43,7 +46,6 @@
         GROK_API_KEY: { label: 'Grok API Key', description: 'Required for Grok model aliases' },
         MISTRAL_API_KEY: { label: 'Mistral API Key', description: 'Required for Mistral model aliases' },
         TAVILY_API_KEY: { label: 'Tavily API Key', description: 'Required for Tavily search/crawl tools' },
-        PISTON_API_KEY: { label: 'Piston API Key', description: 'Optional; only needed if your Piston endpoint requires auth' },
         LOGFIRE_TOKEN: { label: 'Logfire Token', description: 'Enables cloud telemetry when set' },
         LM_STUDIO_API_KEY: { label: 'LM Studio API Key', description: 'Optional key for LM Studio endpoints' },
         LM_STUDIO_BASE_URL: { label: 'LM Studio Base URL', description: 'Custom endpoint for LM Studio (http://host:port)' },
@@ -87,6 +89,10 @@
 
         miscFeedback: null,
         purgeExpiredCacheBtn: null,
+        cleanupVaultStateBtn: null,
+        cleanupVaultStateFeedback: null,
+        systemJobsList: null,
+        refreshSystemJobsBtn: null,
         purgeSessionsVault: null,
         purgeSessionsAge: null,
         purgeSessionsBtn: null,
@@ -142,6 +148,10 @@
 
         elements.miscFeedback = document.getElementById('misc-feedback');
         elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
+        elements.cleanupVaultStateBtn = document.getElementById('cleanup-vault-state');
+        elements.cleanupVaultStateFeedback = document.getElementById('cleanup-vault-state-feedback');
+        elements.systemJobsList = document.getElementById('system-jobs-list');
+        elements.refreshSystemJobsBtn = document.getElementById('refresh-system-jobs');
         elements.purgeSessionsVault = document.getElementById('purge-sessions-vault');
         elements.purgeSessionsAge = document.getElementById('purge-sessions-age');
         elements.purgeSessionsBtn = document.getElementById('purge-sessions-btn');
@@ -179,6 +189,8 @@
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
+        elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
+        elements.refreshSystemJobsBtn?.addEventListener('click', loadSystemJobs);
         elements.purgeSessionsBtn?.addEventListener('click', handlePurgeSessions);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
@@ -1513,6 +1525,137 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    async function handleCleanupVaultState() {
+        if (!elements.cleanupVaultStateBtn || state.isCleaningVaultState) return;
+
+        state.isCleaningVaultState = true;
+        const button = elements.cleanupVaultStateBtn;
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Cleaning…';
+        setStatus(elements.cleanupVaultStateFeedback, 'Cleaning expired vault-state artifacts…', 'info');
+
+        try {
+            const response = await fetch('api/vault-state/cleanup', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            const message = result?.message || (
+                `Deleted ${result?.expired_mutation_rows_deleted ?? 0} mutation row(s), `
+                + `${result?.expired_snapshot_rows_deleted ?? 0} snapshot row(s), `
+                + `${result?.snapshot_files_deleted ?? 0} snapshot file(s).`
+            );
+            setStatus(elements.cleanupVaultStateFeedback, message, 'success');
+        } catch (error) {
+            setStatus(
+                elements.cleanupVaultStateFeedback,
+                `Failed to clean vault state: ${error.message}`,
+                'error'
+            );
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
+            state.isCleaningVaultState = false;
+        }
+    }
+
+    async function loadSystemJobs() {
+        if (!elements.systemJobsList || state.isLoadingSystemJobs) return;
+
+        state.isLoadingSystemJobs = true;
+        const button = elements.refreshSystemJobsBtn;
+        const originalLabel = button ? button.textContent : '';
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Refreshing…';
+        }
+
+        try {
+            const response = await fetch('api/status');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const payload = await response.json();
+            const jobs = payload?.scheduler?.job_details || [];
+            state.systemJobs = jobs.filter((job) => job.job_type === 'system');
+            renderSystemJobs();
+        } catch (error) {
+            elements.systemJobsList.innerHTML = `
+                <div class="state-error">Failed to load system jobs: ${escapeHtml(error.message)}</div>
+            `;
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalLabel;
+            }
+            state.isLoadingSystemJobs = false;
+        }
+    }
+
+    function renderSystemJobs() {
+        if (!elements.systemJobsList) return;
+
+        if (!state.systemJobs.length) {
+            elements.systemJobsList.innerHTML = `
+                <div class="text-sm text-txt-secondary">No system scheduler jobs are currently registered.</div>
+            `;
+            return;
+        }
+
+        const rows = state.systemJobs.map((job) => {
+            const lastRun = formatDateTime(job.last_run_time);
+            const nextRun = formatDateTime(job.next_run_time);
+            const status = job.last_status || 'not run';
+            const error = job.last_error
+                ? `<div class="state-error text-xs mt-1">${escapeHtml(job.last_error)}</div>`
+                : '';
+            return `
+                <tr>
+                    <td>
+                        <strong>${escapeHtml(job.name || job.id)}</strong>
+                        <div class="cell-xs cell-mono subtle">${escapeHtml(job.id)}</div>
+                    </td>
+                    <td class="cell-xs">${escapeHtml(status)}${error}</td>
+                    <td class="cell-xs">${escapeHtml(lastRun)}</td>
+                    <td class="cell-xs">${escapeHtml(nextRun)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        elements.systemJobsList.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Job</th>
+                            <th>Status</th>
+                            <th>Last Run</th>
+                            <th>Next Run</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function formatDateTime(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '—';
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
     async function notifyConfigChanged() {
         if (typeof callbacks.refreshMetadata === 'function') {
             try {
@@ -1545,6 +1688,7 @@ async function saveModelRow(rowKey) {
         await loadGeneralSettings();
         await loadModels();
         await loadSecrets();
+        await loadSystemJobs();
         await loadImportVaults();
         await loadPurgeSessionsVaults();
         state.hasLoadedOnce = true;
@@ -1569,6 +1713,12 @@ async function saveModelRow(rowKey) {
     function onTabActivated() {
         if (!state.initialized) return;
         refreshAll();
+    }
+
+    async function onDashboardActivated() {
+        if (!state.initialized) return;
+        await loadSecrets();
+        await loadImportVaults();
     }
 
     function renderImportVaults() {
@@ -1902,6 +2052,7 @@ async function saveModelRow(rowKey) {
     window.ConfigurationPanel = {
         init,
         onTabActivated,
+        onDashboardActivated,
         refreshActivityLog,
         setRestartRequired: externalSetRestartRequired
     };

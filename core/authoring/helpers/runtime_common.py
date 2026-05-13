@@ -331,7 +331,6 @@ def _project_tool_items(
         "web_search_tavily",
         "tavily_extract",
         "tavily_crawl",
-        "internal_api",
     } and return_value_text.strip():
         return (
             RetrievedItem(

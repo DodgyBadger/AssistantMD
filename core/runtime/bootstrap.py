@@ -13,8 +13,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.authoring.template_discovery import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
+from core.scheduling.job_history import attach_scheduler_history_listener
 from core.settings import validate_settings
 from core.settings.store import get_general_settings
+from core.vault_state.rollback import handle_task_terminal_for_rollback
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.authoring.template_discovery import seed_system_templates
@@ -106,9 +108,13 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         except Exception:
             pass
 
+        task_coordinator = TaskCoordinator(
+            terminal_observers=[handle_task_terminal_for_rollback],
+        )
         ingestion_worker = IngestionWorker(
             process_job_fn=ingestion_service.process_job,
             max_concurrent=ingestion_max_concurrent,
+            task_coordinator=task_coordinator,
         )
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
@@ -125,6 +131,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # wipe it and retry with a clean store so startup isn't blocked.
         try:
             scheduler.start(paused=True)
+            attach_scheduler_history_listener(scheduler)
         except Exception as start_err:
             logger.warning(
                 "Scheduler failed to start — job store may contain stale references. "
@@ -143,11 +150,11 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 max_workers=config.max_scheduler_workers,
             )
             scheduler.start(paused=True)
+            attach_scheduler_history_listener(scheduler)
 
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
-        task_coordinator = TaskCoordinator()
         workflow_governor = WorkflowGovernor(task_coordinator=task_coordinator)
         runtime_context = RuntimeContext(
             config=config,
@@ -155,6 +162,8 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             workflow_loader=workflow_loader,
             logger=logger,
             ingestion=ingestion_service,
+            ingestion_worker=ingestion_worker,
+            ingestion_interval=ingestion_interval,
             task_coordinator=task_coordinator,
             workflow_governor=workflow_governor,
             boot_id=boot_id,
@@ -166,21 +175,14 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         try:
             # Load workflow configurations and synchronize jobs using runtime context
-            await runtime_context.reload_workflows(manual=False)
-
-            # Schedule ingestion worker
-            scheduler.add_job(
-                ingestion_worker.run_once,
-                "interval",
-                seconds=ingestion_interval,
-                id="ingestion-worker",
-                name="Ingestion worker",
-                max_instances=1,
-                replace_existing=True,
+            await runtime_context.reload_workflows(
+                manual=False,
+                refresh_vault_state=False,
             )
 
             # Resume scheduler after successful synchronization
             scheduler.resume()
+            runtime_context.start_background_vault_state_refresh(reason="startup")
 
         except Exception:
             # If job synchronization fails, clean up and rethrow

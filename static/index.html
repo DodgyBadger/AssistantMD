@@ -717,6 +717,51 @@
         .state-info {
             color: rgb(var(--state-info));
         }
+        .dashboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: rgb(var(--bg-card));
+            font-size: 13px;
+            margin-top: 8px;
+            color: rgb(var(--text-primary));
+        }
+        .dashboard-table-wrap {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .dashboard-table-wrap .dashboard-table {
+            min-width: 560px;
+        }
+        .dashboard-table th {
+            background: rgb(var(--bg-elevated));
+            padding: 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid rgb(var(--border-primary));
+            color: rgb(var(--text-primary));
+        }
+        .dashboard-table td {
+            padding: 8px;
+            border-bottom: 1px solid rgb(var(--border-primary));
+            color: rgb(var(--text-primary));
+        }
+        .dashboard-table tr:hover {
+            background: rgb(var(--bg-elevated));
+        }
+        .dashboard-table .subtle {
+            color: rgb(var(--text-secondary));
+        }
+        .dashboard-table .cell-center {
+            text-align: center;
+        }
+        .dashboard-table .cell-xs {
+            font-size: 11px;
+        }
+        .dashboard-table .cell-mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
         .state-surface-success {
             background: rgb(var(--state-success) / 0.12);
             border-color: rgb(var(--state-success) / 0.35);
@@ -929,10 +974,10 @@
                             Chat
                         </button>
                         <button id="dashboard-tab" class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-txt-secondary hover:border-border-secondary hover:text-txt-primary">
-                            Workflows
+                            Dashboard
                         </button>
                         <button id="configuration-tab" class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-txt-secondary hover:border-border-secondary hover:text-txt-primary">
-                            Configuration
+                            System
                         </button>
                     </nav>
                     <div class="flex items-center gap-3 flex-shrink-0 relative z-10">
@@ -1083,43 +1128,87 @@
                 <div id="rescan-result" class="mt-2 text-sm"></div>
             </div>
 
-            <!-- Execute Workflow -->
-            <details id="dashboard-execute-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
+            <!-- Import -->
+            <details id="dashboard-import-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
                 <summary class="collapsible-summary">
                     <div class="summary-text">
-                        <span class="summary-title">Execute Workflow</span>
+                        <span class="summary-title">Import</span>
                     </div>
                     <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                         <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                 </summary>
-                <div class="p-4 pt-0 space-y-3">
-                    <div>
-                        <label class="block text-sm font-medium text-txt-primary mb-1">Workflow ID</label>
-                        <select id="workflow-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
-                            <option value="">Select workflow...</option>
-                        </select>
+                <div class="p-4 pt-0 space-y-4">
+                    <p class="text-sm text-txt-secondary">
+                        Drop files into AssistantMD/Import/ inside your vault, then click Import Files to import them immediately. Files are removed after successful import.
+                    </p>
+                    <div class="space-y-3 border border-border-primary rounded-md p-4">
+                        <div class="flex flex-col md:flex-row md:items-center gap-3">
+                            <div class="md:flex-1 md:max-w-xl">
+                                <select id="import-vault-select" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <option value="">Select vault…</option>
+                                </select>
+                            </div>
+                            <div class="flex items-end">
+                                <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent h-10">
+                                    Refresh Vaults
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+                            <div class="flex items-center gap-4 flex-wrap">
+                                <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                    <span>PDF Mode</span>
+                                    <select id="import-pdf-mode" class="px-2 py-1 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="markdown">Markdown</option>
+                                        <option value="page_images">Page Images</option>
+                                    </select>
+                                </label>
+                                <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                    <input id="import-use-ocr" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                    <span>Use OCR (PDF)</span>
+                                </label>
+                                <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                    <input id="import-capture-ocr-images" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                    <span>Capture OCR images</span>
+                                </label>
+                                <label class="flex items-center gap-2 text-sm text-txt-primary">
+                                    <input id="import-queue" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
+                                    <span>Large job (queue)</span>
+                                </label>
+                            </div>
+                            <div class="flex items-end justify-end">
+                                <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
+                                    Import Files
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col md:flex-row gap-4 items-end">
+                            <div class="md:flex-1">
+                                <input id="import-url-input" type="text" placeholder="https://example.com/article" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                            </div>
+                            <div class="flex items-end justify-end">
+                                <button id="import-url-submit" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
+                                    Import URL
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="text-sm text-txt-secondary">
+                            <span id="import-status"></span>
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-txt-primary mb-1">Step (optional - blank for all steps)</label>
-                        <input
-                            id="step-name-input"
-                            type="text"
-                            placeholder="Leave blank to run all steps"
-                            class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary"
-                        />
+
+                    <div id="import-results" class="border border-border-primary rounded-md bg-app-elevated p-4 text-sm text-txt-secondary">
+                        No imports yet.
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button id="execute-workflow-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent self-start">
-                            Execute Workflow
-                        </button>
-                    </div>
-                    <div id="execute-workflow-result" class="text-sm"></div>
                 </div>
             </details>
 
             <!-- Vaults -->
-            <details id="dashboard-vaults-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+            <details id="dashboard-vaults-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
                 <summary class="collapsible-summary">
                     <div class="summary-text">
                         <span class="summary-title">Vaults</span>
@@ -1134,9 +1223,44 @@
                     </div>
                 </div>
             </details>
+
+            <!-- Workflows -->
+            <details id="dashboard-workflows-section" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm">
+                <summary class="collapsible-summary">
+                    <div class="summary-text">
+                        <span class="summary-title">Workflows <span id="dashboard-workflows-scheduler-badge"></span></span>
+                    </div>
+                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </summary>
+                <div class="p-4 pt-0">
+                    <div id="execute-workflow-result" class="text-sm mb-3"></div>
+                    <div id="dashboard-workflows-status" class="space-y-2 text-sm text-txt-primary">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+            </details>
+
+            <!-- AssistantMD Activity -->
+            <details id="dashboard-vault-activity-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                <summary class="collapsible-summary">
+                    <div class="summary-text">
+                        <span class="summary-title">AssistantMD Activity</span>
+                    </div>
+                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </summary>
+                <div class="p-4 pt-0">
+                    <div id="dashboard-vault-activity-status" class="space-y-2 text-sm text-txt-primary">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+            </details>
         </div>
 
-        <!-- Configuration Tab Content -->
+        <!-- System Tab Content -->
         <div id="configuration-content" class="tab-content hidden">
             <!-- Status/Warning Banner -->
             <div id="config-status-banner" class="mb-4 p-4 bg-app-elevated border border-border-primary rounded-lg shadow-sm hidden transition-colors">
@@ -1322,84 +1446,6 @@
                     </div>
                 </details>
 
-                <details id="config-import-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
-                    <summary class="collapsible-summary">
-                        <div class="summary-text">
-                            <span class="summary-title">Import</span>
-                        </div>
-                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                    </summary>
-                    <div class="p-4 pt-0 space-y-4">
-                        <p class="text-sm text-txt-secondary">
-                            Drop files into AssistantMD/Import/ inside your vault, then click Import Files to import them immediately. Files are removed after successful import.
-                        </p>
-                        <div class="space-y-3 border border-border-primary rounded-md p-4">
-                            <div class="flex flex-col md:flex-row md:items-center gap-3">
-                                <div class="md:flex-1 md:max-w-xl">
-                                    <select id="import-vault-select" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
-                                        <option value="">Select vault…</option>
-                                    </select>
-                                </div>
-                                <div class="flex items-end">
-                                    <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent h-10">
-                                        Refresh Vaults
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                                <div class="flex items-center gap-4 flex-wrap">
-                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
-                                        <span>PDF Mode</span>
-                                        <select id="import-pdf-mode" class="px-2 py-1 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
-                                            <option value="markdown">Markdown</option>
-                                            <option value="page_images">Page Images</option>
-                                        </select>
-                                    </label>
-                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
-                                        <input id="import-use-ocr" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
-                                        <span>Use OCR (PDF)</span>
-                                    </label>
-                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
-                                        <input id="import-capture-ocr-images" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
-                                        <span>Capture OCR images</span>
-                                    </label>
-                                    <label class="flex items-center gap-2 text-sm text-txt-primary">
-                                        <input id="import-queue" type="checkbox" class="h-4 w-4 text-accent border-border-secondary rounded focus:ring-accent">
-                                        <span>Large job (queue)</span>
-                                    </label>
-                                </div>
-                                <div class="flex items-end justify-end">
-                                    <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
-                                        Import Files
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="flex flex-col md:flex-row gap-4 items-end">
-                                <div class="md:flex-1">
-                                    <input id="import-url-input" type="text" placeholder="https://example.com/article" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
-                                </div>
-                                <div class="flex items-end justify-end">
-                                    <button id="import-url-submit" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
-                                        Import URL
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="text-sm text-txt-secondary">
-                                <span id="import-status"></span>
-                            </div>
-                        </div>
-
-                        <div id="import-results" class="border border-border-primary rounded-md bg-app-elevated p-4 text-sm text-txt-secondary">
-                            No imports yet.
-                        </div>
-                    </div>
-                </details>
-
                 <details id="config-misc-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
                     <summary class="collapsible-summary">
                         <div class="summary-text">
@@ -1413,6 +1459,22 @@
                         <p class="text-sm text-txt-secondary">
                             Manual maintenance actions that do not fit elsewhere.
                         </p>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 space-y-3">
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                <div>
+                                    <div class="text-sm font-medium text-txt-primary">System Jobs</div>
+                                    <div class="text-xs text-txt-secondary">
+                                        Built-in scheduler jobs managed by AssistantMD.
+                                    </div>
+                                </div>
+                                <button id="refresh-system-jobs" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                    Refresh
+                                </button>
+                            </div>
+                            <div id="system-jobs-list" class="text-sm text-txt-secondary">
+                                Loading system jobs…
+                            </div>
+                        </div>
                         <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                             <div class="space-y-1">
                                 <div class="text-sm font-medium text-txt-primary">Purge Expired Cache</div>
@@ -1425,6 +1487,20 @@
                                     Purge Expired Cache
                                 </button>
                                 <div id="misc-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
+                        </div>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Clean Up Vault State</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Deletes expired vault-state task mutation rows and retained task snapshot files. Vault files are preserved.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <button id="cleanup-vault-state" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                    Clean Up Vault State
+                                </button>
+                                <div id="cleanup-vault-state-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
                         <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">

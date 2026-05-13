@@ -44,6 +44,11 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.utils.file_state",
         description="Processed file tracking for pending workflow inputs.",
     ),
+    "vault_state": SystemDatabaseDefinition(
+        name="vault_state",
+        owner="core.vault_state",
+        description="Rebuildable vault file manifest, change feed, and task audit metadata.",
+    ),
     "ingestion_jobs": SystemDatabaseDefinition(
         name="ingestion_jobs",
         owner="core.ingestion.jobs",

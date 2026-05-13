@@ -29,6 +29,10 @@ settings:
       - chat_history_compact
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
+  chat_tool_calls_limit:
+    value: 0
+    description: "Maximum tool calls allowed in one chat response. 0 disables the limit. Set a low value to force tighter tool use or encourage code_execution for batch work."
+    restart_required: false
   default_api_timeout:
     value: 120
     description: "Default timeout in seconds for external API calls."
@@ -77,6 +81,30 @@ settings:
     value: 200
     description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
     restart_required: false
+  vault_state_enabled:
+    value: true
+    description: "Enable vault-state manifest refresh and change-feed maintenance."
+    restart_required: false
+  vault_state_excluded_patterns:
+    value:
+      - ".git/"
+      - "**/.DS_Store"
+      - "**/__pycache__/"
+      - "AssistantMD/Chat_Sessions/"
+    description: "Gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds."
+    restart_required: false
+  vault_scan_interval_seconds:
+    value: 0
+    description: "Interval in seconds for scheduled vault-state refresh. 0 disables scheduled refresh."
+    restart_required: false
+  task_rollback_enabled:
+    value: true
+    description: "Enable task-scoped mutation snapshots for supported rollback operations."
+    restart_required: false
+  task_snapshot_retention_days:
+    value: 7
+    description: "Days to retain task snapshot metadata and files before cleanup."
+    restart_required: false
   chunking_max_images_per_prompt:
     value: 20
     description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt. 0 = disabled."
@@ -95,15 +123,11 @@ settings:
     restart_required: false
   debug:
     value: false
-    description: "Enable verbose API error responses. Restart required."
+    description: "Enable verbose API error responses and diagnostic detail logging. Restart required."
     restart_required: true
   logfire:
     value: false
     description: "Enable Logfire telemetry when LOGFIRE_TOKEN is set."
-    restart_required: false
-  piston_base_url:
-    value: "https://emkc.org/api/v2/piston"
-    description: "Piston API base URL. Default value is the free public endpoint. Override for self-hosted or proxied endpoints."
     restart_required: false
   ingestion_pdf_default_strategies:
     value:

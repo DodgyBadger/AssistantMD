@@ -12,6 +12,7 @@ from core.settings import get_workflow_task_timeout_seconds
 from .execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSource,
+    ExecutionTaskStatus,
     TaskCoordinator,
     workflow_vault_scope,
 )
@@ -144,6 +145,7 @@ class WorkflowGovernor:
                     status=result.status,
                     reason=result.reason,
                 )
+                await self._mark_task_terminal_from_result(task_id, result)
                 return result
         except asyncio.CancelledError:
             self._log_workflow_event(
@@ -157,6 +159,7 @@ class WorkflowGovernor:
             )
             raise
         except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
             self._log_workflow_event(
                 "workflow_task_failed",
                 global_id=global_id,
@@ -164,7 +167,7 @@ class WorkflowGovernor:
                 source=source_value,
                 task_id=task_id,
                 status="failed",
-                reason=f"{type(exc).__name__}: {exc}",
+                reason=reason,
             )
             raise
         finally:
@@ -201,6 +204,28 @@ class WorkflowGovernor:
                 "reason": reason,
             },
         )
+
+    async def _mark_task_terminal_from_result(
+        self,
+        task_id: str,
+        result: WorkflowExecutionResult,
+    ) -> None:
+        """Mirror a returned workflow status onto the execution task record."""
+        status = str(result.status or "").strip().lower()
+        reason = result.reason
+        if status == ExecutionTaskStatus.SKIPPED.value:
+            await self._task_coordinator.mark_skipped(task_id, reason=reason)
+            return
+        if status == ExecutionTaskStatus.FAILED.value:
+            await self._task_coordinator.mark_failed(task_id, reason=reason)
+            return
+        if status == ExecutionTaskStatus.CANCELLED.value:
+            await self._task_coordinator.mark_cancelled(task_id, reason=reason)
+            return
+        if status == ExecutionTaskStatus.TIMED_OUT.value:
+            await self._task_coordinator.mark_timed_out(task_id, reason=reason)
+            return
+        await self._task_coordinator.mark_completed(task_id, reason=reason)
 
     @staticmethod
     def _split_vault_name(global_id: str) -> str:

@@ -1,11 +1,12 @@
 # Execution Tasks Subsystem
 
-Execution tasks are process-local runtime records for long-running or cancellable work. They provide API/UI visibility, cancellation handles, and validation events for chat execution, workflow execution, and chat history compaction.
+Execution tasks are process-local runtime records for long-running or cancellable work. They provide API/UI visibility, cancellation handles, validation events, and task identity for vault mutation tracking across chat execution, workflow execution, ingestion jobs, code_execution, and chat history compaction.
 
 ## Primary code
 
 - `core/runtime/execution_tasks.py` — task lifecycle model, scope helpers, cancellation results
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
+- `core/ingestion/task_execution.py` — ingestion job task wrapper for API and scheduler paths
 - `core/chat/executor.py` — chat task registration for streaming and non-streaming runs
 - `core/chat/compaction.py` — automatic compaction task registration
 - `api/services.py` — API adapters for task listing, detail, and cancellation
@@ -13,19 +14,22 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 ## Task model
 
 `TaskCoordinator` stores active and recently terminal tasks in memory. It is part of `RuntimeContext` and is not a persistent job store.
+Runtime bootstrap may attach terminal observers to the coordinator. Observers run after terminal lifecycle events and are used for process-local follow-up work such as vault mutation rollback.
+
+Vault-state mutation rows store the task id, kind, source, scope, and label from the active execution task. Chat mutations are grouped by chat-session scope for user-facing activity views; workflow and ingestion mutations remain grouped by individual task run.
 
 Each task snapshot includes:
 
 - `task_id`
-- `kind` (`chat`, `workflow`, `history_compaction`)
-- `scope` (`chat_session:<session_id>` or `workflow_vault:<vault_name>`)
+- `kind` (`chat`, `workflow`, `ingestion`, `history_compaction`)
+- `scope` (`chat_session:<session_id>`, `workflow_vault:<vault_name>`, or `ingestion_vault:<vault_name>`)
 - `source` (`api`, `scheduler`, `tool`, `system`)
 - `label`
 - lifecycle timestamps
 - status, cancel flag, terminal reason, latest event
 - task metadata
 
-Task kind, source, scope, and label values are centralized in `core/runtime/execution_tasks.py`. Callers should use `ExecutionTaskKind`, `ExecutionTaskSource`, `chat_session_scope(...)`, `workflow_vault_scope(...)`, `chat_task_label(...)`, and `compaction_task_label(...)` rather than constructing those strings inline.
+Task kind, source, scope, and label values are centralized in `core/runtime/execution_tasks.py`. Callers should use `ExecutionTaskKind`, `ExecutionTaskSource`, `chat_session_scope(...)`, `workflow_vault_scope(...)`, `ingestion_vault_scope(...)`, `chat_task_label(...)`, `ingestion_task_label(...)`, and `compaction_task_label(...)` rather than constructing those strings inline.
 
 ## Lifecycle
 

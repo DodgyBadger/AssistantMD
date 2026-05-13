@@ -17,7 +17,8 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Bootstrap app services from `RuntimeConfig`.
 - Create and register global `RuntimeContext`.
 - Manage scheduler lifecycle and workflow reload delegation.
-- Track process-local execution tasks for chat, workflows, and history compaction.
+- Track process-local execution tasks for chat, workflows, ingestion, and history compaction.
+- Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
 - Track reload metadata (`last_config_reload`).
 - Provide runtime summary/health context to API surfaces.
@@ -28,7 +29,8 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 2. `bootstrap_runtime(...)` seeds bootstrap roots and validates config.
 3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, and workflow governor.
 4. Register global runtime context.
-5. Sync workflows into scheduler jobs and resume scheduler.
+5. Sync workflows and reserved system jobs into the scheduler, then resume scheduler.
+6. Start vault-state manifest refresh in the background so web startup is not blocked by a full vault scan.
 
 ## Runtime Context Access
 
@@ -92,7 +94,7 @@ Reload behavior:
 
 Runtime owns a process-local `TaskCoordinator` and `WorkflowGovernor`.
 
-`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. See [Execution Tasks](execution-tasks.md) for the task contract.
+`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
 `WorkflowGovernor` is the policy layer for workflow runs. It serializes workflow execution per vault, registers workflow tasks, applies the configured workflow task timeout, and logs workflow lifecycle events.
 

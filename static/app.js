@@ -33,6 +33,12 @@ const state = {
     activeChatSessionId: null,
     activeChatAbortController: null,
     systemStatus: null,
+    vaultActivity: {},
+    selectedActivityVault: '',
+    dashboardVaultSort: { column: 'name', direction: 'asc' },
+    dashboardWorkflowSort: { column: 'id', direction: 'asc' },
+    vaultActivitySort: { column: 'last_run', direction: 'desc' },
+    vaultActivityMutationSort: { column: 'time', direction: 'desc' },
     restartRequired: false,
     shouldAutoScroll: true,
     compactionStatusRequestId: 0
@@ -76,11 +82,11 @@ const chatElements = {
 // DOM elements - Dashboard
 const dashElements = {
     systemStatus: document.getElementById('system-status'),
+    workflowsStatus: document.getElementById('dashboard-workflows-status'),
+    workflowSchedulerBadge: document.getElementById('dashboard-workflows-scheduler-badge'),
+    vaultActivityStatus: document.getElementById('dashboard-vault-activity-status'),
     rescanBtn: document.getElementById('rescan-btn'),
     rescanResult: document.getElementById('rescan-result'),
-    workflowSelector: document.getElementById('workflow-selector'),
-    stepNameInput: document.getElementById('step-name-input'),
-    executeWorkflowBtn: document.getElementById('execute-workflow-btn'),
     executeWorkflowResult: document.getElementById('execute-workflow-result')
 };
 
@@ -308,10 +314,10 @@ function syncSendButtonState() {
 function syncChatControlLocks() {
     if (!chatElements.vaultSelector) return;
 
-    const lockVaultSelector = state.isLoading || Boolean(state.sessionId);
+    const lockVaultSelector = state.isLoading;
     chatElements.vaultSelector.disabled = lockVaultSelector;
     chatElements.vaultSelector.title = lockVaultSelector
-        ? 'Vault is locked for this chat session. Start a new session (+) to switch vaults.'
+        ? 'Vault is locked while a response is running.'
         : '';
 
     if (chatElements.toolDropdownTrigger) {
@@ -380,13 +386,14 @@ function formatSessionOptionLabel(session) {
     if (!session || !session.session_id) {
         return 'New session';
     }
+    const title = String(session.title || '').trim();
     const rawDate = session.last_activity_at || session.created_at || '';
     const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
     const timeStr = parsed && !Number.isNaN(parsed.getTime())
         ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
         : rawDate;
-    const base = timeStr ? `${session.session_id} (last activity: ${timeStr})` : session.session_id;
-    return session.title ? `${base}: ${session.title}` : base;
+    const base = title || session.session_id;
+    return timeStr ? `${base} (last activity: ${timeStr})` : base;
 }
 
 function renderSessionSelector() {
@@ -753,6 +760,9 @@ function switchTab(tabName) {
 
     if (tabName === 'dashboard') {
         fetchSystemStatus();
+        if (window.ConfigurationPanel) {
+            window.ConfigurationPanel.onDashboardActivated();
+        }
     } else if (tabName === 'configuration') {
         fetchSystemStatus();
         if (window.ConfigurationPanel) {
@@ -953,17 +963,64 @@ async function fetchSystemStatus() {
         }
         syncRestartFlagWithStorage();
         displaySystemStatus();
-        populateWorkflowSelector();
         updateStatus();
     } catch (error) {
         console.error('Error fetching status:', error);
         dashElements.systemStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch system status</p>';
+        if (dashElements.workflowsStatus) {
+            dashElements.workflowsStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch workflow status</p>';
+        }
+        if (dashElements.vaultActivityStatus) {
+            dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch AssistantMD activity</p>';
+        }
     }
 }
 
 // Display system status information
 function displaySystemStatus() {
     const status = state.systemStatus;
+    if (!status) return;
+    renderDashboardVaults(status);
+    renderDashboardWorkflows(status);
+    renderDashboardVaultActivity(status);
+}
+
+function renderDashboardVaults(status) {
+    if (!dashElements.systemStatus) return;
+    const sortedVaults = sortDashboardVaults(status.vaults || []);
+
+    dashElements.systemStatus.innerHTML = `
+        <div class="dashboard-table-wrap" role="region" aria-label="Vaults" tabindex="0">
+            <table class="dashboard-table">
+                <thead>
+                    <tr>
+                        ${renderDashboardVaultSortHeader('name', 'Name')}
+                        ${renderDashboardVaultSortHeader('path', 'Path inside container')}
+                        ${renderDashboardVaultSortHeader('workflows', 'Workflows', 'cell-center')}
+                        ${renderDashboardVaultSortHeader('files', 'Files', 'cell-center')}
+                        ${renderDashboardVaultSortHeader('file_delta', '+/- 7d', 'cell-center')}
+                        ${renderDashboardVaultSortHeader('latest_change', 'Latest Change')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedVaults.map(v => `
+                        <tr>
+                            <td><strong>${escapeHtml(v.name)}</strong></td>
+                            <td class="cell-mono cell-xs subtle">${escapeHtml(v.path)}</td>
+                            <td class="cell-center">${v.workflow_count}</td>
+                            <td class="cell-center">${v.tracked_files ?? '—'}</td>
+                            <td class="cell-center">${formatVaultFileDelta(v)}</td>
+                            <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderDashboardWorkflows(status) {
+    if (!dashElements.workflowsStatus) return;
     const enabledWorkflows = status.enabled_workflows || [];
     const disabledWorkflows = status.disabled_workflows || [];
     const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows];
@@ -972,66 +1029,38 @@ function displaySystemStatus() {
     const jobByWorkflowId = new Map(
         schedulerJobs.map(job => [job.id.replace('__', '/'), job])
     );
+    const schedulerBadge = schedulerRunning
+        ? '<span class="badge badge-scheduler-running">SCHEDULER RUNNING</span>'
+        : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
+    if (dashElements.workflowSchedulerBadge) {
+        dashElements.workflowSchedulerBadge.innerHTML = schedulerBadge;
+    }
+    if (combinedWorkflows.length === 0) {
+        dashElements.workflowsStatus.innerHTML = `
+            ${renderDashboardBadgeStyles()}
+            <p class="text-sm text-txt-secondary">No workflows loaded.</p>
+        `;
+        return;
+    }
+    const sortedWorkflows = sortDashboardWorkflows(combinedWorkflows, jobByWorkflowId);
 
-    let html = `
-        <style>
-            .dashboard-table { width: 100%; border-collapse: collapse; background: rgb(var(--bg-card)); font-size: 13px; margin-top: 8px; color: rgb(var(--text-primary)); }
-            .dashboard-table th { background: rgb(var(--bg-elevated)); padding: 8px; text-align: left; font-weight: 600; border-bottom: 2px solid rgb(var(--border-primary)); color: rgb(var(--text-primary)); }
-            .dashboard-table td { padding: 8px; border-bottom: 1px solid rgb(var(--border-primary)); color: rgb(var(--text-primary)); }
-            .dashboard-table tr:hover { background: rgb(var(--bg-elevated)); }
-            .dashboard-table .subtle { color: rgb(var(--text-secondary)); }
-            .dashboard-table .cell-center { text-align: center; }
-            .dashboard-table .cell-xs { font-size: 11px; }
-            .dashboard-table .cell-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-            .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-            .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
-            .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
-            .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
-            .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
-            .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
-        </style>
-
-        <table class="dashboard-table">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Path inside container</th>
-                    <th class="cell-center">Workflows</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${status.vaults.map(v => `
-                    <tr>
-                        <td><strong>${v.name}</strong></td>
-                        <td class="cell-mono cell-xs subtle">${v.path}</td>
-                        <td class="cell-center">${v.workflow_count}</td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
-
-    if (combinedWorkflows.length > 0) {
-        const schedulerBadge = schedulerRunning
-            ? '<span class="badge badge-scheduler-running">SCHEDULER RUNNING</span>'
-            : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
-
-        html += `
-            <h3 class="text-lg font-semibold mb-2 mt-6">Workflows ${schedulerBadge}</h3>
+    dashElements.workflowsStatus.innerHTML = `
+        ${renderDashboardBadgeStyles()}
+        <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
             <table class="dashboard-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Status</th>
-                        <th>Schedule</th>
-                        <th>Next Run</th>
+                        ${renderDashboardWorkflowSortHeader('id', 'ID')}
+                        ${renderDashboardWorkflowSortHeader('status', 'Status')}
+                        ${renderDashboardWorkflowSortHeader('last_run', 'Last Run')}
+                        ${renderDashboardWorkflowSortHeader('next_run', 'Next Run')}
                         <th>Description</th>
+                        <th class="cell-center">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${combinedWorkflows.map(workflow => {
+                    ${sortedWorkflows.map(workflow => {
                         const job = jobByWorkflowId.get(workflow.global_id);
-                        const schedule = workflow.schedule_cron || '—';
                         const nextRun = job?.next_run_time
                             ? new Date(job.next_run_time).toLocaleString('en-US', {
                                 month: 'short',
@@ -1040,52 +1069,575 @@ function displaySystemStatus() {
                                 minute: '2-digit'
                             })
                             : '—';
+                        const lastRun = job?.last_run_time
+                            ? new Date(job.last_run_time).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit'
+                            })
+                            : '—';
                         const description = workflow.description || '—';
-                        const statusLabel = !workflow.enabled
-                            ? 'disabled'
-                            : job
-                                ? 'scheduled'
-                                : 'enabled';
-                        const statusClass = !workflow.enabled
-                            ? 'badge-disabled'
-                            : job
-                                ? 'badge-scheduled'
-                                : 'badge-enabled';
+                        const { statusLabel, statusClass } = dashboardWorkflowStatus(workflow, job);
                         return `
                             <tr>
-                                <td><strong>${workflow.global_id}</strong></td>
+                                <td><strong>${escapeHtml(workflow.global_id)}</strong></td>
                                 <td><span class="badge ${statusClass}">${statusLabel}</span></td>
-                                <td class="cell-xs">${schedule}</td>
+                                <td class="cell-xs">${lastRun}</td>
                                 <td class="cell-xs">${nextRun}</td>
-                                <td class="cell-xs subtle">${description}</td>
+                                <td class="cell-xs subtle">${escapeHtml(description)}</td>
+                                <td class="cell-center">
+                                    <button
+                                        type="button"
+                                        class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
+                                        data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
+                                    >
+                                        Run
+                                    </button>
+                                </td>
                             </tr>
                         `;
                     }).join('')}
                 </tbody>
             </table>
-        `;
-    }
-
-    dashElements.systemStatus.innerHTML = html;
+        </div>
+    `;
 }
 
-// Populate workflow selector
-function populateWorkflowSelector() {
-    if (!dashElements.workflowSelector) return;
+function renderDashboardVaultActivity(status) {
+    if (!dashElements.vaultActivityStatus) return;
+    const activityVaults = status.vaults || [];
+    const selectedActivityVault = state.selectedActivityVault && activityVaults.some(v => v.name === state.selectedActivityVault)
+        ? state.selectedActivityVault
+        : activityVaults[0]?.name || '';
+    state.selectedActivityVault = selectedActivityVault;
 
-    dashElements.workflowSelector.innerHTML = '<option value="">Select workflow...</option>';
+    dashElements.vaultActivityStatus.innerHTML = `
+        <div class="flex flex-col md:flex-row md:items-end gap-3">
+            <div class="flex-1 min-w-0">
+                <select id="vault-activity-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
+                    ${activityVaults.length ? activityVaults.map(v => `
+                        <option value="${escapeHtml(v.name)}" ${v.name === selectedActivityVault ? 'selected' : ''}>${escapeHtml(v.name)}</option>
+                    `).join('') : '<option value="">No vaults detected</option>'}
+                </select>
+            </div>
+            <button id="vault-activity-refresh" type="button" class="w-full md:w-auto px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
+                Refresh Activity
+            </button>
+        </div>
+        <div id="vault-activity-result" class="mt-3">
+            ${renderVaultActivityResult(selectedActivityVault)}
+        </div>
+    `;
 
-    const allWorkflows = [
-        ...(state.systemStatus?.enabled_workflows || []),
-        ...(state.systemStatus?.disabled_workflows || [])
-    ];
+    if (selectedActivityVault && !state.vaultActivity[selectedActivityVault]) {
+        loadVaultActivity(selectedActivityVault);
+    }
+}
 
-    allWorkflows.forEach(workflow => {
-        const option = document.createElement('option');
-        option.value = workflow.global_id;
-        option.textContent = `${workflow.global_id} (${workflow.run_type})`;
-        dashElements.workflowSelector.appendChild(option);
+function renderDashboardBadgeStyles() {
+    return `
+        <style>
+            .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+            .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
+            .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
+            .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
+            .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
+            .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
+        </style>
+    `;
+}
+
+function renderDashboardVaultSortHeader(column, label, className = '') {
+    const sort = state.dashboardVaultSort || { column: 'name', direction: 'asc' };
+    const active = sort.column === column;
+    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
+    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
+    return `
+        <th class="${className}" aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
+            <button
+                type="button"
+                class="inline-flex items-center gap-1 text-left font-semibold whitespace-nowrap hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                data-dashboard-vault-sort="${column}"
+                data-dashboard-vault-sort-next="${nextDirection}"
+            >
+                <span>${escapeHtml(label)}</span>
+                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
+            </button>
+        </th>
+    `;
+}
+
+function renderDashboardWorkflowSortHeader(column, label) {
+    const sort = state.dashboardWorkflowSort || { column: 'id', direction: 'asc' };
+    const active = sort.column === column;
+    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
+    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
+    return `
+        <th aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
+            <button
+                type="button"
+                class="inline-flex items-center gap-1 text-left font-semibold whitespace-nowrap hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                data-dashboard-workflow-sort="${column}"
+                data-dashboard-workflow-sort-next="${nextDirection}"
+            >
+                <span>${escapeHtml(label)}</span>
+                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
+            </button>
+        </th>
+    `;
+}
+
+function sortDashboardVaults(vaults) {
+    const sort = state.dashboardVaultSort || { column: 'name', direction: 'asc' };
+    const direction = sort.direction === 'asc' ? 1 : -1;
+    return [...vaults].sort((a, b) => {
+        const compared = compareDashboardVaults(a, b, sort.column);
+        if (compared !== 0) return compared * direction;
+        return String(a.name || '').localeCompare(String(b.name || ''));
     });
+}
+
+function compareDashboardVaults(a, b, column) {
+    if (column === 'path') {
+        return String(a.path || '').localeCompare(String(b.path || ''));
+    }
+    if (column === 'workflows') {
+        return (Number(a.workflow_count) || 0) - (Number(b.workflow_count) || 0);
+    }
+    if (column === 'files') {
+        return compareNullableNumbers(a.tracked_files, b.tracked_files);
+    }
+    if (column === 'file_delta') {
+        return compareVaultFileDelta(a, b);
+    }
+    if (column === 'latest_change') {
+        return compareOptionalDates(a.latest_vault_change_at, b.latest_vault_change_at);
+    }
+    return String(a.name || '').localeCompare(String(b.name || ''));
+}
+
+function formatVaultFileDelta(vault) {
+    const created = Number(vault?.files_created_recent) || 0;
+    const deleted = Number(vault?.files_deleted_recent) || 0;
+    if (created === 0 && deleted === 0) {
+        return '<span class="subtle">0</span>';
+    }
+    return `<span class="text-state-success">+${created}</span> <span class="text-txt-secondary">/</span> <span class="text-state-error">-${deleted}</span>`;
+}
+
+function compareVaultFileDelta(a, b) {
+    const aCreated = Number(a?.files_created_recent) || 0;
+    const aDeleted = Number(a?.files_deleted_recent) || 0;
+    const bCreated = Number(b?.files_created_recent) || 0;
+    const bDeleted = Number(b?.files_deleted_recent) || 0;
+    const netCompared = (aCreated - aDeleted) - (bCreated - bDeleted);
+    if (netCompared !== 0) return netCompared;
+    return (aCreated + aDeleted) - (bCreated + bDeleted);
+}
+
+function compareNullableNumbers(a, b) {
+    const aMissing = a === null || a === undefined || Number.isNaN(Number(a));
+    const bMissing = b === null || b === undefined || Number.isNaN(Number(b));
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    return Number(a) - Number(b);
+}
+
+function sortDashboardWorkflows(workflows, jobByWorkflowId) {
+    const sort = state.dashboardWorkflowSort || { column: 'id', direction: 'asc' };
+    const direction = sort.direction === 'asc' ? 1 : -1;
+    return [...workflows].sort((a, b) => {
+        const compared = compareDashboardWorkflows(a, b, jobByWorkflowId, sort.column);
+        if (compared !== 0) return compared * direction;
+        return String(a.global_id || '').localeCompare(String(b.global_id || ''));
+    });
+}
+
+function compareDashboardWorkflows(a, b, jobByWorkflowId, column) {
+    const aJob = jobByWorkflowId.get(a.global_id);
+    const bJob = jobByWorkflowId.get(b.global_id);
+    if (column === 'status') {
+        return dashboardWorkflowStatus(a, aJob).statusLabel.localeCompare(
+            dashboardWorkflowStatus(b, bJob).statusLabel
+        );
+    }
+    if (column === 'last_run') {
+        return compareOptionalDates(aJob?.last_run_time, bJob?.last_run_time);
+    }
+    if (column === 'next_run') {
+        return compareOptionalDates(aJob?.next_run_time, bJob?.next_run_time);
+    }
+    return String(a.global_id || '').localeCompare(String(b.global_id || ''));
+}
+
+function dashboardWorkflowStatus(workflow, job) {
+    if (!workflow.enabled) {
+        return { statusLabel: 'disabled', statusClass: 'badge-disabled' };
+    }
+    if (job) {
+        return { statusLabel: 'scheduled', statusClass: 'badge-scheduled' };
+    }
+    return { statusLabel: 'enabled', statusClass: 'badge-enabled' };
+}
+
+function compareOptionalDates(a, b) {
+    const aTime = Date.parse(a || '') || 0;
+    const bTime = Date.parse(b || '') || 0;
+    return aTime - bTime;
+}
+
+function renderVaultActivityResult(vaultName) {
+    if (!vaultName) {
+        return '<p class="text-sm text-txt-secondary">No vault selected.</p>';
+    }
+    const activity = state.vaultActivity[vaultName];
+    if (!activity) {
+        return '<p class="text-sm text-txt-secondary">Loading task file mutations...</p>';
+    }
+    if (activity.error) {
+        return `<p class="state-error text-sm">${escapeHtml(activity.error)}</p>`;
+    }
+    const groups = activity.groups || [];
+    if (!groups.length) {
+        return '<p class="text-sm text-txt-secondary">No retained task file mutations for this vault.</p>';
+    }
+    const sortedGroups = sortVaultActivityGroups(groups);
+    return `
+        <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity" tabindex="0">
+            <table class="dashboard-table">
+                <thead>
+                    <tr>
+                        ${renderVaultActivitySortHeader('type', 'Type', 'cell-center')}
+                        ${renderVaultActivitySortHeader('task', 'Task')}
+                        ${renderVaultActivitySortHeader('last_run', 'Last Run')}
+                        ${renderVaultActivitySortHeader('files', 'Files Mutated')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedGroups.map(group => `
+                        <tr>
+                            <td class="cell-center">
+                                <span title="${escapeHtml(renderActivityKindLabel(group))}" aria-label="${escapeHtml(renderActivityKindLabel(group))}">${renderActivityKindEmoji(group)}</span>
+                            </td>
+                            <td>
+                                <span>${escapeHtml(renderActivityTaskTitle(group))}</span>
+                            </td>
+                            <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
+                            <td>
+                                <button
+                                    type="button"
+                                    class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                                    data-vault-activity-vault="${escapeHtml(vaultName)}"
+                                    data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
+                                >
+                                    ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderVaultActivitySortHeader(column, label, className = '') {
+    const sort = state.vaultActivitySort || { column: 'last_run', direction: 'desc' };
+    const active = sort.column === column;
+    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
+    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
+    return `
+        <th class="${className}" aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
+            <button
+                type="button"
+                class="inline-flex items-center gap-1 text-left font-semibold hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                data-vault-activity-sort="${column}"
+                data-vault-activity-sort-next="${nextDirection}"
+            >
+                <span>${escapeHtml(label)}</span>
+                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
+            </button>
+        </th>
+    `;
+}
+
+function sortVaultActivityGroups(groups) {
+    const sort = state.vaultActivitySort || { column: 'last_run', direction: 'desc' };
+    const direction = sort.direction === 'asc' ? 1 : -1;
+    return [...groups].sort((a, b) => {
+        const compared = compareVaultActivityGroups(a, b, sort.column);
+        if (compared !== 0) return compared * direction;
+        const bTime = Date.parse(b.last_mutation_at || '') || 0;
+        const aTime = Date.parse(a.last_mutation_at || '') || 0;
+        if (bTime !== aTime) return bTime - aTime;
+        return String(a.activity_id || a.task_id || '').localeCompare(String(b.activity_id || b.task_id || ''));
+    });
+}
+
+function compareVaultActivityGroups(a, b, column) {
+    if (column === 'type') {
+        return renderActivityKindLabel(a).localeCompare(renderActivityKindLabel(b));
+    }
+    if (column === 'task') {
+        return renderActivityTaskTitle(a).localeCompare(renderActivityTaskTitle(b));
+    }
+    if (column === 'files') {
+        return (a.mutation_count || 0) - (b.mutation_count || 0);
+    }
+    const aTime = Date.parse(a.last_mutation_at || '') || 0;
+    const bTime = Date.parse(b.last_mutation_at || '') || 0;
+    return aTime - bTime;
+}
+
+function renderActivityTaskTitle(group) {
+    if (group.activity_kind === 'chat' && group.chat_session_id) {
+        return formatActivityChatSessionLabel({
+            session_id: group.chat_session_id,
+            created_at: group.chat_session_created_at,
+            last_activity_at: group.chat_session_last_activity_at,
+            title: group.chat_session_title
+        });
+    }
+    return stripActivityKindPrefix(
+        group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
+    );
+}
+
+function renderActivityKindEmoji(group) {
+    const kind = normalizedActivityKind(group);
+    if (kind === 'chat') return '💬';
+    if (kind === 'workflow') return '⚙️';
+    if (kind === 'context') return '🧩';
+    if (kind === 'ingestion') return '📥';
+    return '•';
+}
+
+function formatActivityChatSessionLabel(session) {
+    const title = String(session?.title || '').trim();
+    if (title) {
+        return title;
+    }
+    return formatSessionOptionLabel(session);
+}
+
+function renderActivityKindLabel(group) {
+    const kind = normalizedActivityKind(group);
+    if (kind === 'chat') return 'Chat';
+    if (kind === 'workflow') return 'Workflow';
+    if (kind === 'context') return 'Context assembly';
+    if (kind === 'ingestion') return 'Ingestion';
+    return 'Task';
+}
+
+function normalizedActivityKind(group) {
+    const rawKind = String(group.activity_kind || group.task_kind || '').trim().toLowerCase();
+    if (rawKind === 'chat') return 'chat';
+    if (rawKind === 'workflow') return 'workflow';
+    if (rawKind === 'ingestion') return 'ingestion';
+    if (rawKind === 'context' || rawKind === 'context_assembly' || rawKind === 'context assembly') {
+        return 'context';
+    }
+    const label = String(group.activity_label || '').trim().toLowerCase();
+    if (label.startsWith('chat:')) return 'chat';
+    if (label.startsWith('workflow:')) return 'workflow';
+    if (label.startsWith('ingestion:')) return 'ingestion';
+    if (label.startsWith('context:') || label.startsWith('context assembly:')) return 'context';
+    return rawKind || 'task';
+}
+
+function stripActivityKindPrefix(label) {
+    return String(label || '').replace(/^(chat|workflow|ingestion|context|context assembly|context_assembly):\s*/i, '');
+}
+
+function renderMutationSnapshotLink(mutation) {
+    if (!mutation.before_snapshot_id) {
+        return '<span class="subtle">—</span>';
+    }
+    const snapshotUrl = `api/vault-state/snapshots/${encodeURIComponent(mutation.before_snapshot_id)}/content`;
+    return `
+        <a
+            href="${snapshotUrl}"
+            target="_blank"
+            rel="noopener"
+            class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+        >
+            Open
+        </a>
+    `;
+}
+
+function openVaultActivityDetails(vaultName, activityId) {
+    if (!vaultName || !activityId) return;
+    const activity = state.vaultActivity[vaultName];
+    const group = (activity?.groups || []).find(item => (item.activity_id || item.task_id) === activityId);
+    if (!group) {
+        console.warn('AssistantMD activity group not found', { vaultName, activityId });
+        return;
+    }
+    closeVaultActivityDetails();
+
+    const mutations = sortVaultActivityMutations(group.mutations || []);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'vault-activity-modal';
+    overlay.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    overlay.innerHTML = `
+        <div class="absolute inset-0" data-vault-activity-close="true"></div>
+        <section class="relative h-full w-full max-w-3xl bg-app-card border-l border-border-primary shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="vault-activity-modal-title">
+            <div class="sticky top-0 bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3">
+                <div>
+                    <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${renderActivityKindEmoji(group)} ${escapeHtml(renderActivityTaskTitle(group))}</h2>
+                </div>
+                <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
+                    Close
+                </button>
+            </div>
+            <div class="p-4">
+                <div class="text-sm text-txt-secondary mb-3">
+                    Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
+                </div>
+                <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity files" tabindex="0">
+                    <table class="dashboard-table">
+                        <thead>
+                            <tr>
+                                ${renderVaultActivityMutationSortHeader('path', 'Path')}
+                                ${renderVaultActivityMutationSortHeader('from', 'From')}
+                                ${renderVaultActivityMutationSortHeader('operation', 'Operation')}
+                                ${renderVaultActivityMutationSortHeader('time', 'Time')}
+                                <th>Snapshot</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${mutations.map(mutation => `
+                                <tr>
+                                    <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
+                                    <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
+                                    <td>${escapeHtml(mutation.operation)}</td>
+                                    <td class="cell-xs">${formatShortDate(mutation.created_at)}</td>
+                                    <td>${renderMutationSnapshotLink(mutation)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    `;
+    overlay.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement) {
+            const sortButton = target.closest('[data-vault-activity-mutation-sort]');
+            if (sortButton instanceof HTMLElement) {
+                state.vaultActivityMutationSort = {
+                    column: sortButton.getAttribute('data-vault-activity-mutation-sort') || 'time',
+                    direction: sortButton.getAttribute('data-vault-activity-mutation-sort-next') || 'asc'
+                };
+                openVaultActivityDetails(vaultName, activityId);
+                return;
+            }
+        }
+        if (target instanceof HTMLElement && target.dataset.vaultActivityClose === 'true') {
+            closeVaultActivityDetails();
+        }
+    });
+    document.body.appendChild(overlay);
+}
+
+function renderVaultActivityMutationSortHeader(column, label) {
+    const sort = state.vaultActivityMutationSort || { column: 'time', direction: 'desc' };
+    const active = sort.column === column;
+    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
+    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
+    return `
+        <th aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
+            <button
+                type="button"
+                class="inline-flex items-center gap-1 text-left font-semibold hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                data-vault-activity-mutation-sort="${column}"
+                data-vault-activity-mutation-sort-next="${nextDirection}"
+            >
+                <span>${escapeHtml(label)}</span>
+                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
+            </button>
+        </th>
+    `;
+}
+
+function sortVaultActivityMutations(mutations) {
+    const sort = state.vaultActivityMutationSort || { column: 'time', direction: 'desc' };
+    const direction = sort.direction === 'asc' ? 1 : -1;
+    return [...mutations].sort((a, b) => {
+        const compared = compareVaultActivityMutations(a, b, sort.column);
+        if (compared !== 0) return compared * direction;
+        const bTime = Date.parse(b.created_at || '') || 0;
+        const aTime = Date.parse(a.created_at || '') || 0;
+        if (bTime !== aTime) return bTime - aTime;
+        return (b.id || 0) - (a.id || 0);
+    });
+}
+
+function compareVaultActivityMutations(a, b, column) {
+    if (column === 'path') {
+        return String(a.path || '').localeCompare(String(b.path || ''));
+    }
+    if (column === 'from') {
+        return String(a.related_path || '').localeCompare(String(b.related_path || ''));
+    }
+    if (column === 'operation') {
+        return String(a.operation || '').localeCompare(String(b.operation || ''));
+    }
+    const aTime = Date.parse(a.created_at || '') || 0;
+    const bTime = Date.parse(b.created_at || '') || 0;
+    return aTime - bTime;
+}
+
+function handleVaultActivityClick(target) {
+    const activityButton = target.closest('[data-vault-activity-id]');
+    if (!(activityButton instanceof HTMLElement)) return;
+    const vaultName = activityButton.getAttribute('data-vault-activity-vault') || state.selectedActivityVault;
+    const activityId = activityButton.getAttribute('data-vault-activity-id') || '';
+    openVaultActivityDetails(vaultName, activityId);
+}
+
+function closeVaultActivityDetails() {
+    document.getElementById('vault-activity-modal')?.remove();
+}
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeVaultActivityDetails();
+    }
+});
+
+function formatShortDate(value) {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+async function loadVaultActivity(vaultName) {
+    if (!vaultName) return;
+    state.vaultActivity[vaultName] = { loading: true };
+    updateVaultActivityContainer(vaultName);
+    try {
+        const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/task-mutations?limit=25`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        state.vaultActivity[vaultName] = { groups: data.groups || [] };
+    } catch (error) {
+        console.error('Error loading AssistantMD activity:', error);
+        state.vaultActivity[vaultName] = { error: `Failed to load AssistantMD activity: ${error.message}` };
+    }
+    updateVaultActivityContainer(vaultName);
+}
+
+function updateVaultActivityContainer(vaultName) {
+    const container = document.getElementById('vault-activity-result');
+    if (!container || state.selectedActivityVault !== vaultName) return;
+    container.innerHTML = renderVaultActivityResult(vaultName);
 }
 
 // Setup event listeners
@@ -1236,8 +1788,69 @@ function setupEventListeners() {
         dashElements.rescanBtn.addEventListener('click', rescanVaults);
     }
 
-    if (dashElements.executeWorkflowBtn) {
-        dashElements.executeWorkflowBtn.addEventListener('click', executeWorkflow);
+    if (dashElements.systemStatus) {
+        dashElements.systemStatus.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const vaultSortButton = target.closest('[data-dashboard-vault-sort]');
+            if (vaultSortButton instanceof HTMLElement) {
+                state.dashboardVaultSort = {
+                    column: vaultSortButton.getAttribute('data-dashboard-vault-sort') || 'name',
+                    direction: vaultSortButton.getAttribute('data-dashboard-vault-sort-next') || 'asc'
+                };
+                displaySystemStatus();
+                return;
+            }
+        });
+    }
+
+    if (dashElements.workflowsStatus) {
+        dashElements.workflowsStatus.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const runButton = target.closest('[data-dashboard-workflow-run]');
+            if (runButton instanceof HTMLElement) {
+                executeWorkflow(runButton.getAttribute('data-dashboard-workflow-run') || '', runButton);
+                return;
+            }
+            const workflowSortButton = target.closest('[data-dashboard-workflow-sort]');
+            if (workflowSortButton instanceof HTMLElement) {
+                state.dashboardWorkflowSort = {
+                    column: workflowSortButton.getAttribute('data-dashboard-workflow-sort') || 'id',
+                    direction: workflowSortButton.getAttribute('data-dashboard-workflow-sort-next') || 'asc'
+                };
+                displaySystemStatus();
+                return;
+            }
+        });
+    }
+
+    if (dashElements.vaultActivityStatus) {
+        dashElements.vaultActivityStatus.addEventListener('change', (event) => {
+            if (event.target?.id !== 'vault-activity-selector') return;
+            state.selectedActivityVault = event.target.value || '';
+            loadVaultActivity(state.selectedActivityVault);
+        });
+        dashElements.vaultActivityStatus.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const sortButton = target.closest('[data-vault-activity-sort]');
+            if (sortButton instanceof HTMLElement) {
+                state.vaultActivitySort = {
+                    column: sortButton.getAttribute('data-vault-activity-sort') || 'last_run',
+                    direction: sortButton.getAttribute('data-vault-activity-sort-next') || 'asc'
+                };
+                updateVaultActivityContainer(state.selectedActivityVault);
+                return;
+            }
+            if (target.id === 'vault-activity-refresh') {
+                if (state.selectedActivityVault) {
+                    loadVaultActivity(state.selectedActivityVault);
+                }
+                return;
+            }
+            handleVaultActivityClick(target);
+        });
     }
 
     if (chatElements.chatMessages) {
@@ -1256,6 +1869,7 @@ function handleVaultChange() {
     state.sessions = [];
     clearCompactionProgress();
     renderSessionSelector();
+    updateSessionTitleRow();
     renderChatEmptyState();
     updateStatus();
     populateTemplates([]); // reset while loading
@@ -1652,10 +2266,12 @@ function restoreLatexPlaceholders(html, segments) {
 
 function escapeHtml(value) {
     if (!value) return '';
-    return value
+    return String(value)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function getMathJax() {
@@ -2420,21 +3036,18 @@ function renderRescanResult(data) {
 }
 
 // Execute workflow manually
-async function executeWorkflow() {
-    const globalId = dashElements.workflowSelector.value;
-    const stepName = dashElements.stepNameInput.value.trim() || null;
-
+async function executeWorkflow(globalId, triggerButton = null) {
     if (!globalId) {
-        alert('Please select a workflow');
         return;
     }
 
     dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Executing...</p>';
-    dashElements.executeWorkflowBtn.disabled = true;
+    if (triggerButton) {
+        triggerButton.disabled = true;
+    }
 
     try {
         const payload = { global_id: globalId };
-        if (stepName) payload.step_name = stepName;
 
         const response = await fetch('api/workflows/execute', {
             method: 'POST',
@@ -2469,7 +3082,9 @@ async function executeWorkflow() {
         console.error('Error executing workflow:', error);
         dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
     } finally {
-        dashElements.executeWorkflowBtn.disabled = false;
+        if (triggerButton) {
+            triggerButton.disabled = false;
+        }
     }
 }
 
@@ -2496,7 +3111,7 @@ function updateStatus(message) {
         noticeLines.push('No vaults found. Review installation instructions.');
     }
 
-    // Update Configuration tab and banner
+    // Update System tab and banner
     if (noticeLines.length === 0) {
         // No warnings - hide banner and remove tab highlight
         configElements.statusBanner.classList.add('hidden');
@@ -2504,7 +3119,7 @@ function updateStatus(message) {
         configElements.configTab.classList.remove('font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md', 'text-accent');
         configElements.configTab.classList.add('text-txt-secondary');
         configElements.configTab.style.borderColor = '';
-        configElements.configTab.textContent = 'Configuration';
+        configElements.configTab.textContent = 'System';
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
@@ -2522,7 +3137,7 @@ function updateStatus(message) {
         configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
         configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
         configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
-        configElements.configTab.textContent = 'Configuration ⚠️';
+        configElements.configTab.textContent = 'System ⚠️';
         const repairBtn = document.getElementById('repair-settings-btn');
         if (repairBtn) {
             repairBtn.addEventListener('click', async () => {

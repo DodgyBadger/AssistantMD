@@ -54,7 +54,7 @@ Access the web interface at `http://localhost:8000/` (or whichever host IP/port 
 
 **Browser tool**: The built-in browser tool requires the Playwright Chromium runtime in addition to the Python package. The published container image includes this. If you build your own image from source, rebuild after pulling the latest Dockerfile changes so the image runs `python -m playwright install --no-shell chromium` during the build.
 
-**Logfire**: AssistantMD uses the logfire library for rich console logging (what you see if you run `docker logs assistantmd`). You can add a [Logfire API key](https://pydantic.dev) to get even more data including full details of every LLM call. The free tier will be sufficient for many users and is worth grabbing. Be sure to also set logfire=true in the Configuration tab of the web interface.
+**Logfire**: AssistantMD uses the logfire library for rich console logging (what you see if you run `docker logs assistantmd`). You can add a [Logfire API key](https://pydantic.dev) to get even more data including full details of every LLM call. The free tier will be sufficient for many users and is worth grabbing. Be sure to also set logfire=true in the System tab of the web interface.
 
 
 ### File permission and customizing the runtime user

@@ -24,15 +24,7 @@ Use the DuckDuckGo search tool to find information about "Python programming bas
 
 Use the Tavily search tool to find information about "machine learning fundamentals" and provide a brief summary.
 
-## STEP3_CODE_EXECUTION_PISTON
-@model haiku
-@tools code_execution_piston
-@run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output file: tools/piston-test
-
-Use the Piston code execution tool to create a simple Python list [1, 2, 3, 4, 5] and find its length.
-
-## STEP4_WEB_SEARCH_GENERIC
+## STEP3_WEB_SEARCH_GENERIC
 @model haiku
 @tools web_search
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
@@ -40,7 +32,7 @@ Use the Piston code execution tool to create a simple Python list [1, 2, 3, 4, 5
 
 Use the generic web search tool to find information about "JavaScript basics" and provide a brief summary.
 
-## STEP5_CODE_EXECUTION_GENERIC
+## STEP4_CODE_EXECUTION_GENERIC
 @model haiku
 @tools code_execution
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
@@ -48,7 +40,7 @@ Use the generic web search tool to find information about "JavaScript basics" an
 
 Use the generic code execution tool to calculate 7 * 8 and show the result.
 
-## STEP6_TAVILY_EXTRACT
+## STEP5_TAVILY_EXTRACT
 @model haiku
 @tools tavily_extract
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
@@ -56,7 +48,7 @@ Use the generic code execution tool to calculate 7 * 8 and show the result.
 
 Use the Tavily extract tool to extract content from https://docs.python.org/3/tutorial/introduction.html and provide a summary of the Python introduction.
 
-## STEP7_TAVILY_CRAWL
+## STEP6_TAVILY_CRAWL
 @model haiku
 @tools tavily_crawl
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday

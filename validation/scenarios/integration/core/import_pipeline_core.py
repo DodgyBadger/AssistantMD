@@ -6,6 +6,7 @@ and asserts the rendered markdown output exists while the source file is removed
 """
 
 import sys
+import sqlite3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -55,5 +56,74 @@ class ImportPipelineScenario(BaseScenario):
         assert "Import validation" in sample_content
         assert "mime: application/pdf" in sample_content
 
+        vault_id = self._vault_id(vault.name)
+        assert self._manifest_row(vault_id, sample_rel_path, deleted=False), (
+            "Imported file should be tracked in vault state"
+        )
+        assert self._manifest_row(
+            vault_id,
+            "AssistantMD/Import/sample.pdf",
+            deleted=True,
+        ), "Cleaned-up source file should be marked deleted in vault state"
+
+        activity_response = self.call_api(f"/api/vaults/{vault.name}/task-mutations")
+        assert activity_response.status_code == 200, "Vault Activity mutation API should respond"
+        groups = activity_response.json().get("groups") or []
+        ingestion_group = next(
+            (
+                group
+                for group in groups
+                if group.get("task_kind") == "ingestion"
+                and group.get("task_source") == "api"
+            ),
+            None,
+        )
+        assert ingestion_group is not None, "Import should be visible as API ingestion Vault Activity"
+        mutations = ingestion_group.get("mutations") or []
+        observed = {
+            (mutation.get("operation"), mutation.get("path"))
+            for mutation in mutations
+        }
+        assert ("write", sample_rel_path) in observed, "Imported file write should be recorded"
+        assert (
+            "delete",
+            "AssistantMD/Import/sample.pdf",
+        ) in observed, "Source cleanup delete should be recorded"
+        assert all(
+            mutation.get("event_sequence") is not None
+            for mutation in mutations
+        ), "Import mutations should link to vault-state events"
+
         await self.stop_system()
         self.teardown_scenario()
+
+    def _vault_id(self, vault_name: str) -> str:
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT vault_id FROM vaults WHERE current_name = ?",
+                (vault_name,),
+            ).fetchone()
+            assert row is not None, f"Expected vault-state row for {vault_name}"
+            return row[0]
+        finally:
+            conn.close()
+
+    def _manifest_row(self, vault_id: str, path: str, *, deleted: bool) -> bool:
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT deleted_at
+                FROM vault_files
+                WHERE vault_id = ? AND path = ?
+                """,
+                (vault_id, path),
+            ).fetchone()
+            if row is None:
+                return False
+            return (row[0] is not None) is deleted
+        finally:
+            conn.close()
