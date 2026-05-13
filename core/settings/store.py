@@ -57,13 +57,14 @@ class ModelConfig(BaseModel):
     provider: str
     model_string: str
     capabilities: list[str] = Field(default_factory=lambda: ["text"])
+    dimensions: int | None = None
     description: str | None = None
     user_editable: bool = True
 
     @field_validator("capabilities", mode="before")
     @classmethod
     def _normalize_capabilities(cls, value: Any) -> list[str]:
-        """Normalize capabilities and always include 'text'."""
+        """Normalize capabilities while preserving embedding-only aliases."""
         if value is None:
             return ["text"]
 
@@ -83,7 +84,7 @@ class ModelConfig(BaseModel):
             seen.add(cap)
             normalized.append(cap)
 
-        if "text" not in seen:
+        if "text" not in seen and "embedding" not in seen:
             normalized.insert(0, "text")
         return normalized
 

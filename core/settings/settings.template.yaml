@@ -274,6 +274,13 @@ models:
     capabilities: ["text"]
     description: null
     user_editable: true
+  embeddings:
+    provider: openai
+    model_string: text-embedding-3-small
+    capabilities: ["embedding"]
+    dimensions: 1536
+    description: "Default embedding model for vector search"
+    user_editable: true
 
 providers:
   google:

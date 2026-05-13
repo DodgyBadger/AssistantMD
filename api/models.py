@@ -264,6 +264,10 @@ class ModelInfo(BaseModel):
         default_factory=lambda: ["text"],
         description="Declared model capabilities (e.g. text, vision)",
     )
+    dimensions: Optional[int] = Field(
+        None,
+        description="Embedding vector dimensions when this is an embedding model alias",
+    )
     available: bool = Field(True, description="Whether required credentials are configured")
     user_editable: bool = Field(True, description="If the model mapping is user-editable via UI")
     description: Optional[str] = Field(None, description="Optional human-readable description")
@@ -444,7 +448,11 @@ class ModelConfigRequest(BaseModel):
     model_string: str = Field(..., description="Provider-specific model identifier")
     capabilities: Optional[List[str]] = Field(
         None,
-        description="Optional model capabilities list (e.g. [\"text\", \"vision\"])",
+        description="Optional model capabilities list (e.g. [\"text\", \"vision\"] or [\"embedding\"])",
+    )
+    dimensions: Optional[int] = Field(
+        None,
+        description="Embedding vector dimensions for embedding-capable model aliases",
     )
     description: Optional[str] = Field(None, description="Optional description for UI display")
 
