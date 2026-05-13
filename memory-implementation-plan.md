@@ -394,7 +394,8 @@ Risks:
 ## Slice 2: Refactor `memory_ops` For Episode Operations
 
 Goal: replace the current narrow conversation-history `memory_ops` behavior with
-the work episode operation surface backed by Slice 1 persistence.
+the work episode operation surface backed by Slice 1 persistence. Conversation
+history is not part of this tool contract.
 
 Operations:
 
@@ -432,8 +433,8 @@ Validation:
 
 - Direct Python service tests for each operation.
 - Tool-level test for JSON result shape.
-- Existing conversation-history retrieval behavior remains available either
-  through existing `get_history` compatibility or a documented replacement path.
+- Conversation-history retrieval remains available to context assembly through
+  `retrieve_history(...)`, not through `memory_ops`.
 
 Experiment:
 
@@ -445,8 +446,26 @@ Experiment:
 
 Risks:
 
-- Existing docs say `memory_ops` is for conversation history. This slice changes
-  its scope; docs and tool description must be updated in the same commit.
+- Existing docs said `memory_ops` was for conversation history. This slice
+  changes its scope; docs and tool description must be updated in the same
+  commit.
+
+Progress notes:
+
+- Refactored `core/tools/memory_ops.py` into the work episode operation surface
+  and removed legacy chat-history operations.
+- Added operations for current episode lookup, episode create/get/search,
+  exact related candidates, artifacts, session link/relink/unlink, field update,
+  and relationship feedback.
+- Kept the tool return contract as pretty JSON text with stable `status` and
+  `operation` fields for episode operations.
+- Added `validation/scenarios/experiments/memory_ops_episode_probe.py` to drive
+  the tool directly against the Slice 1 synthetic fixture without registering it
+  in global settings.
+- Updated `docs/tools/memory_ops.md` to describe the expanded contract.
+- Recorded the product decision that memory exposed to agents is mediated
+  through work episodes. Chat history can later feed memory through transcript
+  export or extraction, but it is not directly queryable through `memory_ops`.
 
 ## Slice 3: Register `memory_ops` For Authoring And Optional Chat Use
 
@@ -456,10 +475,12 @@ exists.
 Changes:
 
 - Add `memory_ops` to `core/settings/settings.template.yaml` tools with
-  `chat_visible: false` by default.
+  `chat_visible: true` so it can be selected and tested from chat.
+- Add `memory_ops` to default chat tools during this experimental branch so the
+  UI exposes it without manual settings edits.
 - Ensure settings reload / tool config surfaces handle the tool.
 - Update `docs/tools/memory_ops.md` to clarify that it is callable from authored
-  scripts when configured, and chat exposure is controlled by tool visibility.
+  scripts and chat through the normal configured tool path.
 - Update architecture docs to record that `memory_ops` is the memory operation
   surface for both chat and authoring.
 
@@ -485,6 +506,21 @@ Risks:
 
 - Existing user settings may not include `memory_ops`. Reload/repair behavior
   should be checked so default context scripts do not fail unexpectedly.
+
+Progress notes:
+
+- Registered `memory_ops` in the settings template and added it to default chat
+  tools so it is available for manual chat experiments.
+- Kept `memory_ops` on the normal configured tool path rather than adding a
+  separate helper API.
+- Added `validation/scenarios/integration/core/memory_ops_chat_tool.py` to prove
+  a selected chat agent can call `memory_ops` to link the active session and
+  update a work episode.
+- Updated chat metadata validation to expect `memory_ops` in the exposed tool
+  list.
+- Fixed runtime bootstrap to clear the typed settings cache after bootstrap
+  roots are established, so settings-backed tools are read from the active
+  system root.
 
 ## Slice 4: Context-Controlled Episode Linking
 
@@ -841,17 +877,11 @@ As slices land, update:
 
 ## Next Concrete Step
 
-Start with Slice 0 in feature development:
+Continue with Slice 4 in feature development:
 
-1. Add reusable embedding/vector settings and a service wrapper around Pydantic
-   AI `Embedder`.
-2. Validate the service with `TestEmbeddingModel` and no real provider calls.
-3. Add `memory.db` schema/service for work episodes without changing chat
-   behavior.
-4. Build the isolated synthetic fixture harness for episodes, chat sessions,
-   vault files, and optional mutation rows.
-5. Run exact and vector-backed extraction/query smoke tests against the scenario
-   set and adjust the data model before moving on.
-6. Refactor `memory_ops` against the validated service shape.
-7. Register the refactored `memory_ops` in settings/tool docs and prove direct
-   Monty access.
+1. Build a narrow context-controlled linking experiment.
+2. Let context policy inspect the current episode and decide whether to leave
+   the session unlinked, create/link a new episode, or suggest likely related
+   episodes.
+3. Keep incognito/no-memory behavior as a context policy that does not call
+   memory write operations.

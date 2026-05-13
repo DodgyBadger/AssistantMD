@@ -8,7 +8,7 @@ The memory subsystem is the shared broker for conversation-history access. It ke
 - `core/memory/providers.py` — compatibility re-exports for older provider imports
 - `core/authoring/helpers/history/retrieve.py` — Monty `retrieve_history(...)` adapter
 - `core/authoring/helpers/history/assemble.py` — Monty `assemble_context(...)` adapter
-- `core/tools/memory_ops.py` — optional LLM-facing memory tool adapter
+- `core/tools/memory_ops.py` — LLM-facing memory tool adapter
 - `core/chat/chat_store.py` — persisted SQLite-backed message source
 
 ## Responsibilities
@@ -50,7 +50,16 @@ including after process restart.
 
 ## Tool Contract
 
-`memory_ops` is the optional LLM-facing adapter over the same service when enabled in settings. Its purpose is inspection and retrieval for an agent, not context reassembly. If a lower-level caller needs direct access to individual provider-native parts, it should use a lower-level service/provider interface rather than the general-purpose LLM tool.
+`memory_ops` is the LLM-facing adapter for work episode operations. It is
+available through the normal configured tool path, so chat agents and authored
+scripts use the same operation surface for episode lookup, linking, updates, and
+feedback. Conversation history is not exposed through `memory_ops`; if chat
+history should become memory, it should first be exported or extracted into
+vault artifacts or work episode fields. Context scripts should use
+`retrieve_history(...)` and `assemble_context(...)` for context reassembly. If a
+lower-level caller needs direct access to individual provider-native parts, it
+should use a lower-level service/provider interface rather than the
+general-purpose LLM tool.
 
 ## Design Notes
 

@@ -250,10 +250,10 @@ class ApiEndpointsScenario(BaseScenario):
             tool.get("name") == "workflow_run"
             for tool in metadata_payload.get("tools", [])
         ), "workflow_run tool is exposed in metadata"
-        assert not any(
+        assert any(
             tool.get("name") == "memory_ops"
             for tool in metadata_payload.get("tools", [])
-        ), "Disabled memory_ops tool is not exposed in metadata"
+        ), "memory_ops tool is exposed in metadata"
 
         chat_payload = {
             "vault_name": vault.name,

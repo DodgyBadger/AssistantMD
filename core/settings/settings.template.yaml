@@ -27,6 +27,7 @@ settings:
       - code_execution
       - delegate
       - chat_history_compact
+      - memory_ops
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   chat_tool_calls_limit:
@@ -371,6 +372,12 @@ tools:
   chat_history_compact:
     module: core.tools.chat_history_compact
     description: "Check or compact the current chat session history"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true
+  memory_ops:
+    module: core.tools.memory_ops
+    description: "Manage work episode memory"
     requires_secrets: []
     user_editable: false
     chat_visible: true

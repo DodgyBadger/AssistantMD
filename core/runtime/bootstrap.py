@@ -15,7 +15,7 @@ from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.settings import validate_settings
-from core.settings.store import get_general_settings
+from core.settings.store import get_general_settings, refresh_settings_cache
 from core.vault_state.rollback import handle_task_terminal_for_rollback
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
@@ -58,6 +58,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
     try:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
+        refresh_settings_cache()
 
         # Seed system templates if missing (non-fatal)
         seed_system_templates(config.system_root)

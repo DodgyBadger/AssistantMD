@@ -358,6 +358,36 @@ class WorkEpisodeStore:
         with self._connect() as conn:
             return self._artifacts_for_episode(conn, episode_id)
 
+    def record_feedback(
+        self,
+        *,
+        current_episode_id: str,
+        related_episode_id: str,
+        action: str,
+        reason: str | None = None,
+    ) -> None:
+        """Record user/system feedback on an episode relationship."""
+        with self._connect() as conn:
+            if not self._episode_exists(conn, current_episode_id):
+                raise ValueError(f"Unknown current work episode: {current_episode_id}")
+            if not self._episode_exists(conn, related_episode_id):
+                raise ValueError(f"Unknown related work episode: {related_episode_id}")
+            conn.execute(
+                """
+                INSERT INTO work_episode_feedback (
+                    current_episode_id, related_episode_id, action, reason, created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    current_episode_id,
+                    related_episode_id,
+                    action,
+                    reason,
+                    _utc_now(),
+                ),
+            )
+
     def search_episodes(
         self,
         *,
