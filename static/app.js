@@ -1845,6 +1845,7 @@ function handleVaultChange() {
     state.sessions = [];
     clearCompactionProgress();
     renderSessionSelector();
+    updateSessionTitleRow();
     renderChatEmptyState();
     updateStatus();
     populateTemplates([]); // reset while loading
