@@ -62,6 +62,8 @@ class VaultInfo(BaseModel):
     workflow_count: int = Field(..., description="Number of workflows in this vault")
     workflows: List[str] = Field(default_factory=list, description="List of workflow names")
     tracked_files: Optional[int] = Field(None, description="Current files tracked by vault state")
+    files_created_recent: Optional[int] = Field(None, description="Files created in the recent vault-state change window")
+    files_deleted_recent: Optional[int] = Field(None, description="Files deleted in the recent vault-state change window")
     latest_vault_change_at: Optional[datetime] = Field(None, description="Latest vault-state change observation")
 
 

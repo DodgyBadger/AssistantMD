@@ -8,7 +8,7 @@ import mimetypes
 import re
 import shutil
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -648,6 +648,8 @@ async def collect_vault_status() -> List[VaultInfo]:
                 workflow_count=len(data['workflows']),
                 workflows=data['workflows'],
                 tracked_files=state_summary.get("tracked_files"),
+                files_created_recent=state_summary.get("files_created_recent"),
+                files_deleted_recent=state_summary.get("files_deleted_recent"),
                 latest_vault_change_at=state_summary.get("latest_vault_change_at"),
             )
             vault_infos.append(vault_info)
@@ -662,6 +664,7 @@ async def collect_vault_status() -> List[VaultInfo]:
 def _collect_vault_state_summary() -> Dict[str, Dict[str, Any]]:
     """Return cheap vault-state summary fields keyed by current vault name."""
     summary: Dict[str, Dict[str, Any]] = {}
+    recent_change_cutoff = datetime.now(UTC) - timedelta(days=7)
     try:
         service = VaultStateService()
         with service.SessionFactory() as session:
@@ -681,6 +684,18 @@ def _collect_vault_state_summary() -> Dict[str, Dict[str, Any]]:
                 summary.setdefault(vault_name, {})[
                     "latest_vault_change_at"
                 ] = latest_change
+
+            recent_change_rows = session.execute(
+                select(VaultFileEvent.vault_name, VaultFileEvent.event_type, func.count())
+                .where(
+                    VaultFileEvent.observed_at >= recent_change_cutoff,
+                    VaultFileEvent.event_type.in_(("created", "deleted")),
+                )
+                .group_by(VaultFileEvent.vault_name, VaultFileEvent.event_type)
+            ).all()
+            for vault_name, event_type, count in recent_change_rows:
+                key = "files_created_recent" if event_type == "created" else "files_deleted_recent"
+                summary.setdefault(vault_name, {})[key] = int(count)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Failed to collect vault-state status summary",

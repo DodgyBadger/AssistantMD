@@ -971,7 +971,7 @@ async function fetchSystemStatus() {
             dashElements.workflowsStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch workflow status</p>';
         }
         if (dashElements.vaultActivityStatus) {
-            dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch vault activity</p>';
+            dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch AssistantMD activity</p>';
         }
     }
 }
@@ -998,6 +998,7 @@ function renderDashboardVaults(status) {
                         ${renderDashboardVaultSortHeader('path', 'Path inside container')}
                         ${renderDashboardVaultSortHeader('workflows', 'Workflows', 'cell-center')}
                         ${renderDashboardVaultSortHeader('files', 'Files', 'cell-center')}
+                        ${renderDashboardVaultSortHeader('file_delta', '+/- 7d', 'cell-center')}
                         ${renderDashboardVaultSortHeader('latest_change', 'Latest Change')}
                     </tr>
                 </thead>
@@ -1008,6 +1009,7 @@ function renderDashboardVaults(status) {
                             <td class="cell-mono cell-xs subtle">${escapeHtml(v.path)}</td>
                             <td class="cell-center">${v.workflow_count}</td>
                             <td class="cell-center">${v.tracked_files ?? '—'}</td>
+                            <td class="cell-center">${formatVaultFileDelta(v)}</td>
                             <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
                         </tr>
                     `).join('')}
@@ -1206,10 +1208,32 @@ function compareDashboardVaults(a, b, column) {
     if (column === 'files') {
         return compareNullableNumbers(a.tracked_files, b.tracked_files);
     }
+    if (column === 'file_delta') {
+        return compareVaultFileDelta(a, b);
+    }
     if (column === 'latest_change') {
         return compareOptionalDates(a.latest_vault_change_at, b.latest_vault_change_at);
     }
     return String(a.name || '').localeCompare(String(b.name || ''));
+}
+
+function formatVaultFileDelta(vault) {
+    const created = Number(vault?.files_created_recent) || 0;
+    const deleted = Number(vault?.files_deleted_recent) || 0;
+    if (created === 0 && deleted === 0) {
+        return '<span class="subtle">0</span>';
+    }
+    return `<span class="text-state-success">+${created}</span> <span class="text-txt-secondary">/</span> <span class="text-state-error">-${deleted}</span>`;
+}
+
+function compareVaultFileDelta(a, b) {
+    const aCreated = Number(a?.files_created_recent) || 0;
+    const aDeleted = Number(a?.files_deleted_recent) || 0;
+    const bCreated = Number(b?.files_created_recent) || 0;
+    const bDeleted = Number(b?.files_deleted_recent) || 0;
+    const netCompared = (aCreated - aDeleted) - (bCreated - bDeleted);
+    if (netCompared !== 0) return netCompared;
+    return (aCreated + aDeleted) - (bCreated + bDeleted);
 }
 
 function compareNullableNumbers(a, b) {
@@ -1281,7 +1305,7 @@ function renderVaultActivityResult(vaultName) {
     }
     const sortedGroups = sortVaultActivityGroups(groups);
     return `
-        <div class="dashboard-table-wrap" role="region" aria-label="Vault activity" tabindex="0">
+        <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity" tabindex="0">
             <table class="dashboard-table">
                 <thead>
                     <tr>
@@ -1449,7 +1473,7 @@ function openVaultActivityDetails(vaultName, activityId) {
     const activity = state.vaultActivity[vaultName];
     const group = (activity?.groups || []).find(item => (item.activity_id || item.task_id) === activityId);
     if (!group) {
-        console.warn('Vault activity group not found', { vaultName, activityId });
+        console.warn('AssistantMD activity group not found', { vaultName, activityId });
         return;
     }
     closeVaultActivityDetails();
@@ -1474,7 +1498,7 @@ function openVaultActivityDetails(vaultName, activityId) {
                 <div class="text-sm text-txt-secondary mb-3">
                     Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
                 </div>
-                <div class="dashboard-table-wrap" role="region" aria-label="Vault activity files" tabindex="0">
+                <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity files" tabindex="0">
                     <table class="dashboard-table">
                         <thead>
                             <tr>
@@ -1604,8 +1628,8 @@ async function loadVaultActivity(vaultName) {
         const data = await response.json();
         state.vaultActivity[vaultName] = { groups: data.groups || [] };
     } catch (error) {
-        console.error('Error loading vault activity:', error);
-        state.vaultActivity[vaultName] = { error: `Failed to load vault activity: ${error.message}` };
+        console.error('Error loading AssistantMD activity:', error);
+        state.vaultActivity[vaultName] = { error: `Failed to load AssistantMD activity: ${error.message}` };
     }
     updateVaultActivityContainer(vaultName);
 }
