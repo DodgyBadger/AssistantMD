@@ -86,8 +86,8 @@ workstream.
 
 Workstreams can be small or substantial. Ranking and aging determine whether
 a workstream should influence future retrieval. A short one-file question may
-remain a low-weight workstream. A multi-session report with source files and output
-artifacts becomes a stronger future signal.
+remain a small workstream. A multi-session report with source files and output
+artifacts has stronger concrete activity signals.
 
 ### Adaptive Context Assembly
 
@@ -110,9 +110,9 @@ When a new chat starts, AssistantMD should:
 2. Treat the selected vault as the hard scope for matching. Within that scope,
    use early signals such as user prompt, session title, active files, recent
    files, and explicit user language.
-3. If a high-confidence continuation is found, load a conservative working set
+3. If a clear continuation is found, load a conservative working set
    through default context assembly.
-4. If related but lower-confidence workstreams are found, present them as
+4. If related but ambiguous workstreams are found, present them as
    suggestions rather than silently injecting them.
 
 Example:
@@ -141,7 +141,6 @@ As the user works, AssistantMD should update the current workstream with signals
 - files created or modified
 - output artifacts
 - decisions, constraints, open questions, strategies
-- confidence and source for inferred fields
 
 Updates can be incremental, but v1 may choose a simpler session-end or response
 completion update path if that is more reliable.
@@ -158,8 +157,8 @@ workstreams by relationship type:
 - same output format or artifact pattern
 - related source files
 
-The system should rank candidates using relationship strength, workstream weight,
-recency, user confirmation, reuse, and confidence.
+The system should rank candidates using relationship strength, recency, reuse,
+and concrete activity signals.
 
 ### User Control
 
@@ -181,37 +180,17 @@ Recommended v1 fields:
 ```yaml
 workstream_id:
 vault_name:
-title:
+title: compact human-readable label
 status: active | paused | completed | archived
-weight:
-confidence:
 created_at:
 last_seen_at:
 
-type:
-  label:
-  confidence:
-  source: inferred | user_confirmed
-
-topics:
-  - label:
-    confidence:
-    source:
-
-entities:
-  people: []
-  organizations: []
-  projects: []
-
-objectives:
-  - text:
-    confidence:
-    source:
-
-strategies:
-  - text:
-    confidence:
-    source:
+type: kind of work or deliverable, not the subject matter
+topic: subject/theme of the work; may be a phrase or sentence
+entities: named people, organizations, funders, clients, partners, places
+project: project, program, initiative, client engagement, or internal work area
+objective: outcome the user is trying to accomplish
+strategy: reusable approach, format, style preference, decision, constraint, or tactic
 
 artifacts:
   files_read: []
@@ -228,19 +207,20 @@ signals:
   continuation_count:
   last_reused_at:
 
-related_workstreams:
+candidate_matches:
   - workstream_id:
-    relation: continuation | same_entity | same_topic | same_type | format_reference | source_overlap
-    confidence:
+    matched_fields:
 ```
 
 Field policy:
 
-- Exact-ish fields: people, organizations, projects, paths, vault, status,
-  relation types.
-- Open/fuzzy fields: topics, objectives, strategies, task type labels.
-- Inferred fields should carry confidence/source.
-- User-confirmed fields should outrank inferred fields during retrieval.
+- Exact-ish fields: paths, vault, status, and relation types.
+- Wildcard fields: entities and project.
+- Open/fuzzy fields: topic, objective, strategy, and task type text.
+- Workstream fields should summarize the unit of work, not mirror the latest
+  user prompt. Leave unknown fields empty rather than inventing specificity.
+- Candidate search should expose why a workstream matched rather than attaching
+  durable confidence scores to extracted fields.
 
 ## Ranking And Aging
 
@@ -259,14 +239,13 @@ Ranking signals:
 - repeated continuation
 - reuse by later workstreams
 - relationship type to current work
-- confidence of extracted fields
 
 Aging behavior:
 
 - Workstreams decay over time unless reinforced by reuse, continuation, durable
   outputs, user confirmation, or explicit archival/pinning.
-- Low-weight one-off workstreams should remain searchable but rarely appear as
-  proactive suggestions.
+- Small one-off workstreams should remain searchable but rarely appear as
+  proactive suggestions once ranking policy exists.
 - Completed or archived workstreams may still be useful as format references,
   source references, or historical evidence.
 
@@ -277,9 +256,9 @@ Memory provides recommendations. Context assembly applies policy.
 Default behavior:
 
 - The default context assembly path is memory-aware.
-- It can include high-confidence continuation context automatically.
-- It should suggest lower-confidence related workstreams before pulling them into
-  the working set.
+- It can include clear continuation context automatically.
+- It should suggest ambiguous candidate workstreams before pulling them into the
+  working set.
 - It should explain the route: why prior work was considered relevant.
 
 Custom behavior:
@@ -293,11 +272,10 @@ Custom behavior:
 Candidate `memory_ops` operation surface:
 
 ```python
-await memory_ops(operation="current_workstream")
-await memory_ops(operation="related_workstreams", limit=5, relation_types=["same_topic", "same_type"])
-await memory_ops(operation="workstream_artifacts", workstream_id="...", include=["outputs", "sources"])
-await memory_ops(operation="relink_session", workstream_id="...")
-await memory_ops(operation="update_workstream", topics=["wetlands"], source="user_confirmed")
+await memory_ops(operation="get_workstream")
+await memory_ops(operation="search_workstreams", field_type="topic", value="wetlands", limit=5)
+await memory_ops(operation="link_session", workstream_id="...")
+await memory_ops(operation="update_workstream", topic="Wetlands donor report for Foundation X")
 ```
 
 The default memory behavior should be implemented through the same `memory_ops`
@@ -310,16 +288,19 @@ recreated or modified by a context script using `memory_ops`, it is too hidden.
 
 Recommended v1 persistence:
 
-- Store workstreams and fields in a system database.
+- Store workstreams in a system database with direct text fields on each
+  workstream row.
 - Link workstream records to chat sessions, vault names, file paths, and artifacts.
 - Do not require markdown workstream files in v1.
 - Keep the door open for future markdown export or user-editable workstream notes.
 
 Derived indexes:
 
-- Workstream fields form the first indexing surface.
-- Topic, entity, task-type, artifact, and related-workstream indexes are derived
-  from workstreams.
+- Direct workstream fields form the first indexing surface.
+- Topic, task-type, objective, and strategy vectors are derived from workstream
+  fields. Indexing happens when workstreams are created or updated, and non-vector
+  field search remains available if embedding is unavailable.
+- Entity and artifact indexes are derived from workstream fields/artifacts.
 - The system should not first infer a global vault-wide entity/theme map.
   Information enters memory through observed workstreams and their linked vault
   material.
@@ -388,8 +369,8 @@ Build the smallest useful slice:
    title, type, topics, organizations, objectives, artifacts.
 4. Link workstreams to chat sessions and files modified through existing mutation
    routing.
-5. Add related-workstream retrieval by exact fields and simple lexical matching.
-6. Add conservative default context assembly suggestions for related workstreams.
+5. Add field-aware workstream search by exact fields and simple lexical matching.
+6. Add conservative default context assembly suggestions for candidate workstreams.
 7. Expand `memory_ops` so context scripts and chat tools use the same memory
    operation surface.
 8. Add enough UI/chat messaging to show suggestions and reasons.
@@ -413,9 +394,9 @@ Defer:
 - `core/authoring/`: ensure `memory_ops` is available to context scripts through
   the existing direct tool-call surface where policy allows it.
 - `core/vault_state/`: artifact links from routed mutations and vault paths.
-- `api/models.py` and `api/endpoints.py`: current workstream, related workstream, and
+- `api/models.py` and `api/endpoints.py`: current workstream, workstream search, and
   user action endpoints.
-- `static/`: UI affordances for related-work suggestions or current workstream
+- `static/`: UI affordances for candidate-work suggestions or current workstream
   state.
 - `docs/architecture/memory.md`: architecture contract update.
 
@@ -427,11 +408,11 @@ Recommended validation scenarios:
 - A second chat with matching organization/type retrieves the first workstream as a
   related candidate with reasons.
 - A same-topic but different-type chat is related by topic, not continuation.
-- A short one-file question creates a low-weight workstream that is searchable but
-  not proactively suggested over stronger matches.
+- A short one-file question creates a small workstream that is searchable but not
+  proactively suggested over stronger matches once ranking policy exists.
 - User rejection prevents a suggested workstream from being injected again for the
   same current workstream.
-- A context script can retrieve related workstreams through `memory_ops(...)`.
+- A context script can search for candidate workstreams through `memory_ops(...)`.
 
 ## Open Questions
 
@@ -442,8 +423,10 @@ Recommended validation scenarios:
 - Should workstream state ever be mirrored into markdown by default?
 - What is the first safe source for files read/retrieved, not just modified?
 - What fields should be user-confirmable in v1?
-- How should default context assembly behave when multiple related workstreams are
+- How should default context assembly behave when multiple candidate workstreams are
   plausible but none is clearly a continuation?
+- If a session creates bad or noisy memory, should the correction path hard-delete
+  the workstream, archive it, or suppress it from retrieval/default context?
 
 ## Next Phase
 

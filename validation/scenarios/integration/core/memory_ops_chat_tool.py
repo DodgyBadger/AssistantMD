@@ -35,7 +35,6 @@ class MemoryOpsChatToolScenario(BaseScenario):
             workstream_id=workstream_id,
             vault_name=vault.name,
             title="Chat tool memory probe",
-            confidence=0.9,
             metadata={"origin": "validation"},
         )
 
@@ -52,16 +51,12 @@ class MemoryOpsChatToolScenario(BaseScenario):
                     return {
                         "operation": "link_session",
                         "workstream_id": workstream_id,
-                        "link_source": "validation_chat",
-                        "confidence": 0.93,
                     }
                 if current_case["name"] == "update":
                     return {
                         "operation": "update_workstream",
                         "workstream_id": workstream_id,
-                        "field_type": "topic",
-                        "value": "chat memory testing",
-                        "confidence": 0.71,
+                        "topic": "chat memory testing",
                     }
                 raise AssertionError(f"Unexpected memory_ops case: {current_case['name']}")
 
@@ -112,8 +107,8 @@ class MemoryOpsChatToolScenario(BaseScenario):
             workstream = store.get_workstream(workstream_id)
             self.soft_assert(
                 workstream is not None
-                and _has_field(workstream.fields, "topic", "chat memory testing"),
-                "memory_ops should update workstream fields from chat",
+                and workstream.topic == "chat memory testing",
+                "memory_ops should update direct workstream fields from chat",
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare
@@ -121,11 +116,3 @@ class MemoryOpsChatToolScenario(BaseScenario):
             self.teardown_scenario()
 
         self.assert_no_failures()
-
-
-def _has_field(fields: tuple[object, ...], field_type: str, normalized_value: str) -> bool:
-    return any(
-        getattr(field, "field_type", None) == field_type
-        and getattr(field, "normalized_value", None) == normalized_value
-        for field in fields
-    )

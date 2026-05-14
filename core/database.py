@@ -52,7 +52,7 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
     "memory": SystemDatabaseDefinition(
         name="memory",
         owner="core.memory",
-        description="Workstream memory records, fields, artifacts, and feedback.",
+        description="Workstream memory records, fields, and artifacts.",
     ),
     "ingestion_jobs": SystemDatabaseDefinition(
         name="ingestion_jobs",

@@ -53,9 +53,9 @@ including after process restart.
 `memory_ops` is the LLM-facing adapter for workstream operations. It is
 available through the normal configured tool path, so chat agents and authored
 scripts use the same operation surface for workstream lookup, linking, updates, and
-feedback. Conversation history is not exposed through `memory_ops`; if chat
+field search. Conversation history is not exposed through `memory_ops`; if chat
 history should become memory, it should first be exported or extracted into
-vault artifacts or workstream fields. Context scripts should use
+vault artifacts or direct workstream fields. Context scripts should use
 `retrieve_history(...)` and `assemble_context(...)` for context reassembly. If a
 lower-level caller needs direct access to individual provider-native parts, it
 should use a lower-level service/provider interface rather than the

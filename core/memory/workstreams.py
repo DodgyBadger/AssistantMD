@@ -1,4 +1,4 @@
-"""Workstream memory persistence and deterministic experiment helpers."""
+"""Workstream memory persistence and field-aware retrieval."""
 
 from __future__ import annotations
 
@@ -10,41 +10,23 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from core.chat.schema import DB_NAME as CHAT_DB_NAME
-from core.chat.schema import ensure_chat_sessions_schema
 from core.database import connect_sqlite_from_system_db
 from core.memory.schema import DB_NAME, ensure_memory_schema
 from core.vector import SQLitePythonVectorStore, VectorService, VectorStore
 
 
-FIELD_TYPES = {
+WORKSTREAM_TEXT_FIELDS = (
     "type",
     "topic",
-    "person",
-    "organization",
+    "entities",
     "project",
     "objective",
     "strategy",
-}
+)
 VECTOR_FIELD_TYPES = {"type", "topic", "objective", "strategy"}
+WILDCARD_FIELD_TYPES = {"entities", "project"}
 FIELD_VECTOR_NAMESPACE = "workstream_fields"
 FIELD_VECTOR_TABLE = "workstream_field_vectors"
-
-
-@dataclass(frozen=True)
-class WorkstreamField:
-    """One typed query dimension for a workstream."""
-
-    field_type: str
-    value: str
-    normalized_value: str
-    confidence: float
-    source: str
-    id: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Render as a JSON-compatible dictionary."""
-        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -53,7 +35,6 @@ class WorkstreamArtifact:
 
     path: str
     artifact_role: str
-    source: str
     vault_name: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -64,18 +45,21 @@ class WorkstreamArtifact:
 
 @dataclass(frozen=True)
 class Workstream:
-    """Stored workstream with fields and artifacts."""
+    """Stored workstream with queryable text fields and artifacts."""
 
     workstream_id: str
     vault_name: str
     title: str | None
     status: str
-    weight: float
-    confidence: float
     created_at: str
     last_seen_at: str
+    type: str | None = None
+    topic: str | None = None
+    entities: str | None = None
+    project: str | None = None
+    objective: str | None = None
+    strategy: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    fields: tuple[WorkstreamField, ...] = ()
     artifacts: tuple[WorkstreamArtifact, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,55 +69,42 @@ class Workstream:
             "vault_name": self.vault_name,
             "title": self.title,
             "status": self.status,
-            "weight": self.weight,
-            "confidence": self.confidence,
+            "type": self.type,
+            "topic": self.topic,
+            "entities": self.entities,
+            "project": self.project,
+            "objective": self.objective,
+            "strategy": self.strategy,
             "created_at": self.created_at,
             "last_seen_at": self.last_seen_at,
             "metadata": self.metadata,
-            "fields": [field.to_dict() for field in self.fields],
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
         }
 
-
-@dataclass(frozen=True)
-class RelatedWorkstreamCandidate:
-    """Explainable related workstream candidate."""
-
-    workstream_id: str
-    title: str | None
-    relation_types: tuple[str, ...]
-    reasons: tuple[str, ...]
-    score: float
-
-    def to_dict(self) -> dict[str, Any]:
-        """Render as a JSON-compatible dictionary."""
-        return asdict(self)
+    def field_value(self, field_type: str) -> str | None:
+        """Return a queryable workstream field value by name."""
+        _validate_field_type(field_type)
+        value = getattr(self, field_type)
+        return str(value) if value else None
 
 
 @dataclass(frozen=True)
-class CandidateField:
-    """Deterministically extracted candidate field from chat/session text."""
+class WorkstreamSearchResult:
+    """One field-aware workstream search result."""
 
-    field_type: str
-    value: str
-    normalized_value: str
-    confidence: float
-    source: str
-    reason: str
-
-    def to_workstream_field(self) -> WorkstreamField:
-        """Convert to the storage field shape."""
-        return WorkstreamField(
-            field_type=self.field_type,
-            value=self.value,
-            normalized_value=self.normalized_value,
-            confidence=self.confidence,
-            source=self.source,
-        )
+    workstream: Workstream
+    match_type: str
+    matched_fields: tuple[dict[str, Any], ...]
+    score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Render as a JSON-compatible dictionary."""
-        return asdict(self)
+        return {
+            "workstream": self.workstream.to_dict(),
+            "match_type": self.match_type,
+            "matched_fields": list(self.matched_fields),
+            "score": self.score,
+        }
 
 
 class WorkstreamStore:
@@ -150,33 +121,41 @@ class WorkstreamStore:
         title: str | None = None,
         workstream_id: str | None = None,
         status: str = "active",
-        weight: float = 0,
-        confidence: float = 0,
+        type: str | None = None,
+        topic: str | None = None,
+        entities: str | None = None,
+        project: str | None = None,
+        objective: str | None = None,
+        strategy: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Workstream:
         """Create and return a workstream without linking any session."""
         workstream_id = workstream_id or f"workstream-{uuid4().hex}"
         now = _utc_now()
-        metadata_json = _dump_json(metadata or {})
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO workstreams (
-                    workstream_id, vault_name, title, status, weight, confidence,
+                    workstream_id, vault_name, title, status,
+                    type, topic, entities, project, objective, strategy,
                     created_at, last_seen_at, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workstream_id,
                     vault_name,
-                    title,
+                    _clean_text(title),
                     status,
-                    weight,
-                    confidence,
+                    _clean_text(type),
+                    _clean_text(topic),
+                    _clean_text(entities),
+                    _clean_text(project),
+                    _clean_text(objective),
+                    _clean_text(strategy),
                     now,
                     now,
-                    metadata_json,
+                    _dump_json(metadata or {}),
                 ),
             )
         workstream = self.get_workstream(workstream_id)
@@ -185,12 +164,11 @@ class WorkstreamStore:
         return workstream
 
     def get_workstream(self, workstream_id: str) -> Workstream | None:
-        """Return one workstream by id, including fields and artifacts."""
+        """Return one workstream by id, including artifacts."""
         with self._connect() as conn:
             row = conn.execute(
-                """
-                SELECT workstream_id, vault_name, title, status, weight, confidence,
-                       created_at, last_seen_at, metadata_json
+                f"""
+                SELECT {self._workstream_select_columns()}
                 FROM workstreams
                 WHERE workstream_id = ?
                 """,
@@ -209,9 +187,8 @@ class WorkstreamStore:
         """Return the workstream currently linked to a session, if any."""
         with self._connect() as conn:
             row = conn.execute(
-                """
-                SELECT e.workstream_id, e.vault_name, e.title, e.status, e.weight,
-                       e.confidence, e.created_at, e.last_seen_at, e.metadata_json
+                f"""
+                SELECT {self._workstream_select_columns("e")}
                 FROM workstream_sessions s
                 JOIN workstreams e ON e.workstream_id = s.workstream_id
                 WHERE s.session_id = ? AND s.vault_name = ?
@@ -228,8 +205,6 @@ class WorkstreamStore:
         workstream_id: str,
         vault_name: str,
         session_id: str,
-        link_source: str,
-        confidence: float,
     ) -> Workstream:
         """Link a session to one current workstream in the same vault."""
         with self._connect() as conn:
@@ -239,23 +214,21 @@ class WorkstreamStore:
             ).fetchone()
             if row is None:
                 raise ValueError(f"Unknown workstream: {workstream_id}")
-            workstream_vault = str(row["vault_name"])
-            if workstream_vault != vault_name:
+            if str(row["vault_name"]) != vault_name:
                 raise ValueError("Cannot link a session to a workstream in another vault")
+            now = _utc_now()
             conn.execute(
                 """
                 INSERT INTO workstream_sessions (
-                    workstream_id, session_id, vault_name, linked_at, link_source, confidence
+                    workstream_id, session_id, vault_name, linked_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(session_id, vault_name)
                 DO UPDATE SET
                     workstream_id = excluded.workstream_id,
-                    linked_at = excluded.linked_at,
-                    link_source = excluded.link_source,
-                    confidence = excluded.confidence
+                    linked_at = excluded.linked_at
                 """,
-                (workstream_id, session_id, vault_name, _utc_now(), link_source, confidence),
+                (workstream_id, session_id, vault_name, now),
             )
             conn.execute(
                 """
@@ -263,61 +236,66 @@ class WorkstreamStore:
                 SET last_seen_at = ?
                 WHERE workstream_id = ?
                 """,
-                (_utc_now(), workstream_id),
+                (now, workstream_id),
             )
         workstream = self.get_workstream(workstream_id)
         if workstream is None:
             raise RuntimeError(f"Linked workstream disappeared: {workstream_id}")
         return workstream
 
-    def unlink_session_from_workstream(self, *, vault_name: str, session_id: str) -> None:
-        """Remove the current workstream link for a session."""
-        with self._connect() as conn:
-            conn.execute(
-                """
-                DELETE FROM workstream_sessions
-                WHERE session_id = ? AND vault_name = ?
-                """,
-                (session_id, vault_name),
-            )
-
-    def update_workstream_fields(
+    def update_workstream(
         self,
         *,
         workstream_id: str,
-        fields: list[WorkstreamField] | tuple[WorkstreamField, ...],
-    ) -> None:
-        """Upsert typed fields for a workstream."""
+        title: str | None = None,
+        status: str | None = None,
+        type: str | None = None,
+        topic: str | None = None,
+        entities: str | None = None,
+        project: str | None = None,
+        objective: str | None = None,
+        strategy: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Workstream:
+        """Update provided workstream columns and return the refreshed row."""
+        updates: dict[str, Any] = {
+            "title": title,
+            "status": status,
+            "type": type,
+            "topic": topic,
+            "entities": entities,
+            "project": project,
+            "objective": objective,
+            "strategy": strategy,
+        }
+        set_parts: list[str] = []
+        values: list[Any] = []
+        for column, value in updates.items():
+            if value is None:
+                continue
+            set_parts.append(f"{column} = ?")
+            values.append(_clean_text(value) if column != "status" else value)
+        if metadata is not None:
+            set_parts.append("metadata_json = ?")
+            values.append(_dump_json(metadata))
+        set_parts.append("last_seen_at = ?")
+        values.append(_utc_now())
+        values.append(workstream_id)
         with self._connect() as conn:
             if not self._workstream_exists(conn, workstream_id):
                 raise ValueError(f"Unknown workstream: {workstream_id}")
-            now = _utc_now()
-            for field_value in fields:
-                _validate_field_type(field_value.field_type)
-                conn.execute(
-                    """
-                    INSERT INTO workstream_fields (
-                        workstream_id, field_type, value, normalized_value, confidence,
-                        source, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(workstream_id, field_type, normalized_value, source)
-                    DO UPDATE SET
-                        value = excluded.value,
-                        confidence = MAX(workstream_fields.confidence, excluded.confidence),
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        workstream_id,
-                        field_value.field_type,
-                        field_value.value,
-                        field_value.normalized_value,
-                        field_value.confidence,
-                        field_value.source,
-                        now,
-                        now,
-                    ),
-                )
+            conn.execute(
+                f"""
+                UPDATE workstreams
+                SET {", ".join(set_parts)}
+                WHERE workstream_id = ?
+                """,
+                tuple(values),
+            )
+        workstream = self.get_workstream(workstream_id)
+        if workstream is None:
+            raise RuntimeError(f"Updated workstream disappeared: {workstream_id}")
+        return workstream
 
     def add_workstream_artifacts(
         self,
@@ -334,11 +312,11 @@ class WorkstreamStore:
                 conn.execute(
                     """
                     INSERT INTO workstream_artifacts (
-                        workstream_id, vault_name, path, artifact_role, source,
+                        workstream_id, vault_name, path, artifact_role,
                         created_at, metadata_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(workstream_id, path, artifact_role, source)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(workstream_id, path, artifact_role)
                     DO UPDATE SET
                         metadata_json = excluded.metadata_json
                     """,
@@ -347,7 +325,6 @@ class WorkstreamStore:
                         artifact.vault_name,
                         artifact.path,
                         artifact.artifact_role,
-                        artifact.source,
                         now,
                         _dump_json(artifact.metadata),
                     ),
@@ -358,160 +335,131 @@ class WorkstreamStore:
         with self._connect() as conn:
             return self._artifacts_for_workstream(conn, workstream_id)
 
-    def record_feedback(
-        self,
-        *,
-        current_workstream_id: str,
-        related_workstream_id: str,
-        action: str,
-        reason: str | None = None,
-    ) -> None:
-        """Record user/system feedback on a workstream relationship."""
-        with self._connect() as conn:
-            if not self._workstream_exists(conn, current_workstream_id):
-                raise ValueError(f"Unknown current workstream: {current_workstream_id}")
-            if not self._workstream_exists(conn, related_workstream_id):
-                raise ValueError(f"Unknown related workstream: {related_workstream_id}")
-            conn.execute(
-                """
-                INSERT INTO workstream_feedback (
-                    current_workstream_id, related_workstream_id, action, reason, created_at
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    current_workstream_id,
-                    related_workstream_id,
-                    action,
-                    reason,
-                    _utc_now(),
-                ),
-            )
-
     def search_workstreams(
         self,
         *,
         vault_name: str,
         field_type: str | None = None,
-        normalized_value: str | None = None,
+        value: str | None = None,
         limit: int = 20,
     ) -> tuple[Workstream, ...]:
-        """Search workstreams by vault and optionally a normalized field."""
+        """Search workstreams by vault and optionally one direct field value."""
         with self._connect() as conn:
-            if field_type and normalized_value:
+            if field_type and value:
+                _validate_field_type(field_type)
+                if field_type in WILDCARD_FIELD_TYPES:
+                    where_clause = f"lower({field_type}) LIKE ? ESCAPE '\\'"
+                    field_value = f"%{_escape_like(value.lower())}%"
+                else:
+                    where_clause = f"{field_type} IS NOT NULL AND lower(trim({field_type})) = ?"
+                    field_value = value.lower().strip()
                 rows = conn.execute(
-                    """
-                    SELECT DISTINCT e.workstream_id, e.vault_name, e.title, e.status,
-                           e.weight, e.confidence, e.created_at, e.last_seen_at,
-                           e.metadata_json
-                    FROM workstreams e
-                    JOIN workstream_fields f ON f.workstream_id = e.workstream_id
-                    WHERE e.vault_name = ?
-                      AND f.field_type = ?
-                      AND f.normalized_value = ?
-                    ORDER BY e.weight DESC, e.last_seen_at DESC
+                    f"""
+                    SELECT {self._workstream_select_columns()}
+                    FROM workstreams
+                    WHERE vault_name = ?
+                      AND {where_clause}
+                    ORDER BY last_seen_at DESC
                     LIMIT ?
                     """,
-                    (vault_name, field_type, normalized_value, limit),
+                    (vault_name, field_value, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """
-                    SELECT workstream_id, vault_name, title, status, weight, confidence,
-                           created_at, last_seen_at, metadata_json
+                    f"""
+                    SELECT {self._workstream_select_columns()}
                     FROM workstreams
                     WHERE vault_name = ?
-                    ORDER BY weight DESC, last_seen_at DESC
+                    ORDER BY last_seen_at DESC
                     LIMIT ?
                     """,
                     (vault_name, limit),
                 ).fetchall()
             return tuple(self._workstream_from_row(conn, row) for row in rows)
 
-    def related_workstream_candidates(
+    async def search_workstreams_by_field(
         self,
         *,
         vault_name: str,
-        workstream_id: str,
-        limit: int = 10,
-    ) -> tuple[RelatedWorkstreamCandidate, ...]:
-        """Return explainable related workstream candidates for experiments."""
-        workstream = self.get_workstream(workstream_id)
-        if workstream is None:
-            raise ValueError(f"Unknown workstream: {workstream_id}")
-        if workstream.vault_name != vault_name:
-            raise ValueError("Cannot search related workstreams across vaults")
-
-        candidate_reasons: dict[str, list[str]] = {}
-        candidate_relations: dict[str, set[str]] = {}
-        candidate_scores: dict[str, float] = {}
-
-        field_weights = {
-            "organization": 4.0,
-            "person": 4.0,
-            "project": 3.5,
-            "type": 2.5,
-            "topic": 2.0,
-            "objective": 1.25,
-            "strategy": 1.0,
+        field_type: str,
+        value: str,
+        vector_service: VectorService,
+        vector_store: VectorStore | None = None,
+        limit: int = 20,
+        min_score: float = 0.0,
+        model_alias: str = "embeddings",
+    ) -> tuple[WorkstreamSearchResult, ...]:
+        """Search one direct workstream field using exact/wildcard plus vectors."""
+        _validate_field_type(field_type)
+        exact_matches = self.search_workstreams(
+            vault_name=vault_name,
+            field_type=field_type,
+            value=value,
+            limit=limit,
+        )
+        results: dict[str, WorkstreamSearchResult] = {
+            workstream.workstream_id: WorkstreamSearchResult(
+                workstream=workstream,
+                match_type="exact" if field_type not in WILDCARD_FIELD_TYPES else "wildcard",
+                matched_fields=(
+                    {
+                        "field_type": field_type,
+                        "query_value": value,
+                        "matched_value": workstream.field_value(field_type),
+                        "match_type": "exact"
+                        if field_type not in WILDCARD_FIELD_TYPES
+                        else "wildcard",
+                    },
+                ),
+                score=1.0,
+            )
+            for workstream in exact_matches
         }
-        for field_value in workstream.fields:
-            matches = self.search_workstreams(
-                vault_name=vault_name,
-                field_type=field_value.field_type,
-                normalized_value=field_value.normalized_value,
-                limit=50,
-            )
-            for match in matches:
-                if match.workstream_id == workstream_id:
-                    continue
-                relation = f"same_{field_value.field_type}"
-                reason = f"{field_value.field_type}: {field_value.value}"
-                weight = field_weights.get(field_value.field_type, 1.0)
-                score = weight + field_value.confidence + match.confidence
-                candidate_reasons.setdefault(match.workstream_id, []).append(reason)
-                candidate_relations.setdefault(match.workstream_id, set()).add(relation)
-                candidate_scores[match.workstream_id] = (
-                    candidate_scores.get(match.workstream_id, 0) + score
-                )
 
-        for artifact in workstream.artifacts:
-            folder = artifact.path.rsplit("/", 1)[0] if "/" in artifact.path else ""
-            for match in self._workstreams_with_artifact_context(vault_name, artifact.path, folder):
-                if match.workstream_id == workstream_id:
-                    continue
-                if artifact.path in {item.path for item in match.artifacts}:
-                    relation = "same_artifact_path"
-                    reason = f"artifact path: {artifact.path}"
-                    score = 2.5
-                else:
-                    relation = "same_folder_namespace"
-                    reason = f"folder: {folder}"
-                    score = 1.0
-                candidate_reasons.setdefault(match.workstream_id, []).append(reason)
-                candidate_relations.setdefault(match.workstream_id, set()).add(relation)
-                candidate_scores[match.workstream_id] = (
-                    candidate_scores.get(match.workstream_id, 0) + score
-                )
+        if field_type not in VECTOR_FIELD_TYPES or len(results) >= limit:
+            return tuple(results.values())[:limit]
 
-        candidates: list[RelatedWorkstreamCandidate] = []
-        for candidate_id, score in candidate_scores.items():
-            candidate = self.get_workstream(candidate_id)
-            if candidate is None:
+        store = vector_store or self._field_vector_store()
+        query = await vector_service.embed_query(
+            _field_embedding_text(field_type=field_type, value=value),
+            model_alias=model_alias,
+        )
+        hits = store.search_similar(
+            namespace=FIELD_VECTOR_NAMESPACE,
+            query=query.vectors[0],
+            limit=limit * 4,
+            min_score=min_score,
+        )
+        for hit in hits:
+            metadata = hit.metadata
+            if metadata.get("vault_name") != vault_name:
                 continue
-            candidates.append(
-                RelatedWorkstreamCandidate(
-                    workstream_id=candidate.workstream_id,
-                    title=candidate.title,
-                    relation_types=tuple(sorted(candidate_relations[candidate_id])),
-                    reasons=tuple(dict.fromkeys(candidate_reasons[candidate_id])),
-                    score=round(score + candidate.weight, 3),
-                )
+            if metadata.get("field_type") != field_type:
+                continue
+            workstream_id = str(metadata.get("workstream_id") or "")
+            if not workstream_id or workstream_id in results:
+                continue
+            workstream = self.get_workstream(workstream_id)
+            if workstream is None:
+                continue
+            results[workstream_id] = WorkstreamSearchResult(
+                workstream=workstream,
+                match_type="semantic",
+                matched_fields=(
+                    {
+                        "field_type": field_type,
+                        "query_value": value,
+                        "matched_value": workstream.field_value(field_type),
+                        "match_type": "semantic",
+                    },
+                ),
+                score=round(hit.score, 6),
             )
-        candidates.sort(key=lambda item: item.score, reverse=True)
-        return tuple(candidates[:limit])
+            if len(results) >= limit:
+                break
+        return tuple(results.values())
 
-    async def vectorize_workstream_fields(
+    async def index_workstream_fields(
         self,
         *,
         workstream_id: str,
@@ -519,149 +467,42 @@ class WorkstreamStore:
         vector_store: VectorStore | None = None,
         model_alias: str = "embeddings",
     ) -> int:
-        """Embed vector-searchable fields for one workstream."""
+        """Embed vector-searchable direct fields for one workstream."""
         workstream = self.get_workstream(workstream_id)
         if workstream is None:
             raise ValueError(f"Unknown workstream: {workstream_id}")
         fields = tuple(
-            field_value
-            for field_value in workstream.fields
-            if field_value.id is not None and field_value.field_type in VECTOR_FIELD_TYPES
+            field_type
+            for field_type in WORKSTREAM_TEXT_FIELDS
+            if field_type in VECTOR_FIELD_TYPES and workstream.field_value(field_type)
         )
         if not fields:
             return 0
 
         store = vector_store or self._field_vector_store()
-        inputs = [_field_embedding_text(field_value) for field_value in fields]
+        inputs = [
+            _field_embedding_text(
+                field_type=field_type,
+                value=workstream.field_value(field_type) or "",
+            )
+            for field_type in fields
+        ]
         embedding_result = await vector_service.embed_documents(inputs, model_alias=model_alias)
-        for field_value, embedding in zip(fields, embedding_result.vectors, strict=True):
+        for field_type, embedding in zip(fields, embedding_result.vectors, strict=True):
+            value = workstream.field_value(field_type) or ""
             store.upsert(
                 namespace=FIELD_VECTOR_NAMESPACE,
-                item_id=str(field_value.id),
+                item_id=f"{workstream.workstream_id}:{field_type}",
                 embedding=embedding,
                 metadata={
                     "workstream_id": workstream.workstream_id,
                     "vault_name": workstream.vault_name,
-                    "field_type": field_value.field_type,
-                    "field_value": field_value.value,
-                    "normalized_value": field_value.normalized_value,
-                    "source": field_value.source,
-                    "confidence": field_value.confidence,
+                    "field_type": field_type,
+                    "field_value": value,
+                    "normalized_value": normalize_field_value(value),
                 },
             )
         return len(fields)
-
-    async def semantic_related_workstream_candidates(
-        self,
-        *,
-        vault_name: str,
-        query_fields: tuple[CandidateField | WorkstreamField, ...],
-        vector_service: VectorService,
-        vector_store: VectorStore | None = None,
-        model_alias: str = "embeddings",
-        limit: int = 10,
-        min_score: float = 0.78,
-    ) -> tuple[RelatedWorkstreamCandidate, ...]:
-        """Return vector-backed related workstream candidates from extracted fields."""
-        fields = tuple(
-            field_value
-            for field_value in query_fields
-            if field_value.field_type in VECTOR_FIELD_TYPES
-        )
-        if not fields:
-            return ()
-
-        store = vector_store or self._field_vector_store()
-        candidate_reasons: dict[str, list[str]] = {}
-        candidate_relations: dict[str, set[str]] = {}
-        candidate_scores: dict[str, float] = {}
-
-        for field_value in fields:
-            input_text = _field_embedding_text(field_value)
-            query_embedding = await vector_service.embed_query(
-                input_text,
-                model_alias=model_alias,
-            )
-            hits = store.search_similar(
-                namespace=FIELD_VECTOR_NAMESPACE,
-                query=query_embedding.vectors[0],
-                limit=limit * 4,
-                min_score=min_score,
-            )
-            for hit in hits:
-                metadata = hit.metadata
-                if metadata.get("vault_name") != vault_name:
-                    continue
-                workstream_id = str(metadata.get("workstream_id") or "")
-                if not workstream_id:
-                    continue
-                matched_type = str(metadata.get("field_type") or "")
-                matched_value = str(metadata.get("field_value") or hit.text)
-                relation = f"semantic_{matched_type or field_value.field_type}_similarity"
-                reason = (
-                    f"{relation}: {field_value.value} ~= {matched_value} "
-                    f"({hit.score:.2f})"
-                )
-                confidence = float(metadata.get("confidence") or 0)
-                candidate_reasons.setdefault(workstream_id, []).append(reason)
-                candidate_relations.setdefault(workstream_id, set()).add(relation)
-                candidate_scores[workstream_id] = (
-                    candidate_scores.get(workstream_id, 0) + hit.score + confidence
-                )
-
-        candidates: list[RelatedWorkstreamCandidate] = []
-        for workstream_id, score in candidate_scores.items():
-            workstream = self.get_workstream(workstream_id)
-            if workstream is None:
-                continue
-            candidates.append(
-                RelatedWorkstreamCandidate(
-                    workstream_id=workstream.workstream_id,
-                    title=workstream.title,
-                    relation_types=tuple(sorted(candidate_relations[workstream_id])),
-                    reasons=tuple(dict.fromkeys(candidate_reasons[workstream_id])),
-                    score=round(score + workstream.weight, 3),
-                )
-            )
-        candidates.sort(key=lambda item: item.score, reverse=True)
-        return tuple(candidates[:limit])
-
-    def extract_candidate_fields_from_session(
-        self,
-        *,
-        vault_name: str,
-        session_id: str,
-    ) -> tuple[CandidateField, ...]:
-        """Extract deterministic candidate fields from a stored chat session."""
-        ensure_chat_sessions_schema(self.system_root)
-        conn = connect_sqlite_from_system_db(CHAT_DB_NAME, self.system_root)
-        conn.row_factory = sqlite3.Row
-        try:
-            session = conn.execute(
-                """
-                SELECT title
-                FROM chat_sessions
-                WHERE session_id = ? AND vault_name = ?
-                """,
-                (session_id, vault_name),
-            ).fetchone()
-            if session is None:
-                raise ValueError(f"Unknown chat session: {session_id}")
-            rows = conn.execute(
-                """
-                SELECT content_text
-                FROM chat_messages
-                WHERE session_id = ? AND vault_name = ?
-                ORDER BY sequence_index ASC
-                """,
-                (session_id, vault_name),
-            ).fetchall()
-        finally:
-            conn.close()
-
-        text_parts = [str(session["title"] or "")]
-        text_parts.extend(str(row["content_text"] or "") for row in rows)
-        return extract_candidate_fields("\n".join(text_parts))
 
     def _connect(self) -> sqlite3.Connection:
         ensure_memory_schema(self.system_root)
@@ -682,41 +523,18 @@ class WorkstreamStore:
         return Workstream(
             workstream_id=workstream_id,
             vault_name=str(row["vault_name"]),
-            title=str(row["title"]) if row["title"] is not None else None,
+            title=_optional_text(row["title"]),
             status=str(row["status"]),
-            weight=float(row["weight"] or 0),
-            confidence=float(row["confidence"] or 0),
+            type=_optional_text(row["type"]),
+            topic=_optional_text(row["topic"]),
+            entities=_optional_text(row["entities"]),
+            project=_optional_text(row["project"]),
+            objective=_optional_text(row["objective"]),
+            strategy=_optional_text(row["strategy"]),
             created_at=str(row["created_at"]),
             last_seen_at=str(row["last_seen_at"]),
             metadata=_load_json(row["metadata_json"]),
-            fields=self._fields_for_workstream(conn, workstream_id),
             artifacts=self._artifacts_for_workstream(conn, workstream_id),
-        )
-
-    def _fields_for_workstream(
-        self,
-        conn: sqlite3.Connection,
-        workstream_id: str,
-    ) -> tuple[WorkstreamField, ...]:
-        rows = conn.execute(
-            """
-            SELECT id, field_type, value, normalized_value, confidence, source
-            FROM workstream_fields
-            WHERE workstream_id = ?
-            ORDER BY field_type ASC, normalized_value ASC
-            """,
-            (workstream_id,),
-        ).fetchall()
-        return tuple(
-            WorkstreamField(
-                id=int(row["id"]),
-                field_type=str(row["field_type"]),
-                value=str(row["value"]),
-                normalized_value=str(row["normalized_value"]),
-                confidence=float(row["confidence"] or 0),
-                source=str(row["source"]),
-            )
-            for row in rows
         )
 
     def _artifacts_for_workstream(
@@ -726,7 +544,7 @@ class WorkstreamStore:
     ) -> tuple[WorkstreamArtifact, ...]:
         rows = conn.execute(
             """
-            SELECT vault_name, path, artifact_role, source, metadata_json
+            SELECT vault_name, path, artifact_role, metadata_json
             FROM workstream_artifacts
             WHERE workstream_id = ?
             ORDER BY path ASC, artifact_role ASC
@@ -738,7 +556,6 @@ class WorkstreamStore:
                 vault_name=str(row["vault_name"]),
                 path=str(row["path"]),
                 artifact_role=str(row["artifact_role"]),
-                source=str(row["source"]),
                 metadata=_load_json(row["metadata_json"]),
             )
             for row in rows
@@ -751,162 +568,72 @@ class WorkstreamStore:
         ).fetchone()
         return row is not None
 
-    def _workstreams_with_artifact_context(
-        self,
-        vault_name: str,
-        path: str,
-        folder: str,
-    ) -> tuple[Workstream, ...]:
-        with self._connect() as conn:
-            like_pattern = f"{folder}/%" if folder else "%"
-            rows = conn.execute(
-                """
-                SELECT DISTINCT e.workstream_id, e.vault_name, e.title, e.status,
-                       e.weight, e.confidence, e.created_at, e.last_seen_at,
-                       e.metadata_json
-                FROM workstreams e
-                JOIN workstream_artifacts a ON a.workstream_id = e.workstream_id
-                WHERE e.vault_name = ?
-                  AND (a.path = ? OR a.path LIKE ?)
-                """,
-                (vault_name, path, like_pattern),
-            ).fetchall()
-            return tuple(self._workstream_from_row(conn, row) for row in rows)
-
-
-def extract_candidate_fields(text: str) -> tuple[CandidateField, ...]:
-    """Extract deterministic candidate fields for Slice 1 experiments."""
-    normalized_text = text.lower()
-    candidates: list[CandidateField] = []
-
-    rules = [
-        (r"\bdonor report\b|\bclient report\b", "type", "donor report", 0.78),
-        (r"\bfunding proposal\b|\bgrant proposal\b", "type", "funding proposal", 0.78),
-        (r"\bperformance review\b", "type", "performance review", 0.78),
-        (r"\bweekly plan\b|\bweekly task", "type", "weekly planning", 0.7),
-        (r"\bsnippet\b|\bresearch folder\b|\bclipping", "type", "snippet synthesis", 0.68),
-        (r"\bwhere did i mention\b|\bfind my note\b|\bpure retrieval\b", "type", "retrieval", 0.66),
-        (r"\bwetlands?\b", "topic", "wetlands", 0.8),
-        (r"\briparian\b", "topic", "riparian restoration", 0.72),
-        (r"\bwatershed protection\b|\bwatershed\b", "topic", "watershed protection", 0.72),
-        (r"\bannual goals?\b", "topic", "annual goals", 0.76),
-        (r"\bperformance review\b", "topic", "performance review", 0.72),
-        (r"\bformat\b|\btemplate\b|\bstyle\b", "strategy", "reuse format", 0.58),
-    ]
-    for pattern, field_type, value, confidence in rules:
-        if re.search(pattern, normalized_text):
-            candidates.append(
-                _candidate(
-                    field_type=field_type,
-                    value=value,
-                    confidence=confidence,
-                    reason=f"matched pattern: {pattern}",
-                )
-            )
-
-    for organization in _extract_organizations(text):
-        candidates.append(
-            _candidate(
-                field_type="organization",
-                value=organization,
-                confidence=0.72,
-                reason="matched organization-like phrase",
-            )
+    @staticmethod
+    def _workstream_select_columns(alias: str | None = None) -> str:
+        columns = (
+            "workstream_id",
+            "vault_name",
+            "title",
+            "status",
+            "type",
+            "topic",
+            "entities",
+            "project",
+            "objective",
+            "strategy",
+            "created_at",
+            "last_seen_at",
+            "metadata_json",
         )
-
-    objective = _first_sentence_with_verb(text)
-    if objective:
-        candidates.append(
-            _candidate(
-                field_type="objective",
-                value=objective,
-                confidence=0.52,
-                reason="first short action-oriented sentence",
-            )
-        )
-
-    deduped: dict[tuple[str, str], CandidateField] = {}
-    for candidate in candidates:
-        key = (candidate.field_type, candidate.normalized_value)
-        existing = deduped.get(key)
-        if existing is None or candidate.confidence > existing.confidence:
-            deduped[key] = candidate
-    return tuple(deduped.values())
-
-
-def _candidate(
-    *,
-    field_type: str,
-    value: str,
-    confidence: float,
-    reason: str,
-) -> CandidateField:
-    _validate_field_type(field_type)
-    return CandidateField(
-        field_type=field_type,
-        value=value,
-        normalized_value=normalize_field_value(value),
-        confidence=confidence,
-        source="deterministic_experiment",
-        reason=reason,
-    )
+        if alias:
+            return ", ".join(f"{alias}.{column}" for column in columns)
+        return ", ".join(columns)
 
 
 def normalize_field_value(value: str) -> str:
-    """Normalize a field value for exact lookup experiments."""
+    """Normalize a field value for exact lookup."""
     normalized = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
     return re.sub(r"\s+", " ", normalized)
 
 
-def _field_embedding_text(field_value: CandidateField | WorkstreamField) -> str:
-    return f"{field_value.field_type}: {field_value.value}"
-
-
-def _extract_organizations(text: str) -> tuple[str, ...]:
-    organizations: list[str] = []
-    patterns = [
-        r"\b([A-Z][A-Za-z0-9&]+(?:\s+[A-Z][A-Za-z0-9&]+){0,4}\sFoundation)\b",
-        r"\b([A-Z][A-Za-z0-9&]+(?:\s+[A-Z][A-Za-z0-9&]+){0,4}\sFund)\b",
-        r"\b([A-Z][A-Za-z0-9&]+(?:\s+[A-Z][A-Za-z0-9&]+){0,4}\sClient)\b",
-    ]
-    for pattern in patterns:
-        for match in re.finditer(pattern, text):
-            value = re.sub(r"\s+", " ", match.group(1)).strip()
-            if value and value not in organizations:
-                organizations.append(value)
-    return tuple(organizations)
-
-
-def _first_sentence_with_verb(text: str) -> str | None:
-    for raw_sentence in re.split(r"[\n.!?]+", text):
-        sentence = re.sub(r"\s+", " ", raw_sentence).strip()
-        if not sentence or len(sentence) > 140:
-            continue
-        lowered = sentence.lower()
-        if any(verb in lowered for verb in ("write", "draft", "find", "build", "prepare")):
-            return sentence
-    return None
+def _field_embedding_text(*, field_type: str, value: str) -> str:
+    return f"{field_type}: {value}"
 
 
 def _validate_field_type(field_type: str) -> None:
-    if field_type not in FIELD_TYPES:
-        available = ", ".join(sorted(FIELD_TYPES))
-        raise ValueError(f"Unsupported workstream field type '{field_type}'. Use: {available}")
+    if field_type not in WORKSTREAM_TEXT_FIELDS:
+        allowed = ", ".join(WORKSTREAM_TEXT_FIELDS)
+        raise ValueError(f"Unsupported workstream field_type '{field_type}'. Allowed: {allowed}")
 
 
-def _dump_json(value: dict[str, Any]) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _load_json(value: Any) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(str(value))
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+def _clean_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text or None
 
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _dump_json(value: dict[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True)
+
+
+def _load_json(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    parsed = json.loads(raw)
+    return parsed if isinstance(parsed, dict) else {}
