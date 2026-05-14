@@ -1,5 +1,5 @@
 """
-Experiment scenario for the Slice 1 work episode memory data model.
+Experiment scenario for the Slice 1 workstream memory data model.
 
 This scenario intentionally validates deterministic artifacts from synthetic
 fixtures before default chat behavior is wired into memory.
@@ -16,8 +16,8 @@ from core.vector import VectorService
 from validation.core.base_scenario import BaseScenario
 
 
-class MemoryEpisodeDataModelProbeScenario(BaseScenario):
-    """Probe work episode extraction and related-query shape."""
+class MemoryWorkstreamDataModelProbeScenario(BaseScenario):
+    """Probe workstream extraction and related-query shape."""
 
     async def test_scenario(self):
         controller = self._get_system_controller()
@@ -44,13 +44,13 @@ class MemoryEpisodeDataModelProbeScenario(BaseScenario):
             "fixture": {
                 "vault_name": fixture.vault_name,
                 "session_ids": fixture.session_ids,
-                "episode_ids": fixture.episode_ids,
+                "workstream_ids": fixture.workstream_ids,
             },
             "extraction": extraction,
             "related": related,
             "semantic": semantic,
         }
-        (self.artifacts_dir / "memory_episode_data_model_probe.json").write_text(
+        (self.artifacts_dir / "memory_workstream_data_model_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
@@ -96,9 +96,9 @@ class MemoryEpisodeDataModelProbeScenario(BaseScenario):
             "Riparian grant session should extract watershed protection topic",
         )
 
-        donor_candidates = related["episodes"]["episode-donor-wetlands"]
-        donor_forest = _candidate(donor_candidates, "episode-donor-forest")
-        wetlands_proposal = _candidate(donor_candidates, "episode-wetlands-proposal")
+        donor_candidates = related["workstreams"]["workstream-donor-wetlands"]
+        donor_forest = _candidate(donor_candidates, "workstream-donor-forest")
+        wetlands_proposal = _candidate(donor_candidates, "workstream-wetlands-proposal")
         self.soft_assert(
             donor_forest is not None and "same_type" in donor_forest["relation_types"],
             "Forest donor report should relate by same task type",
@@ -111,20 +111,20 @@ class MemoryEpisodeDataModelProbeScenario(BaseScenario):
 
         semantic_query = semantic["queries"]["riparian-grant-session"]
         self.soft_assert_equal(
-            semantic_query["exact_topic_match_episode_ids"],
+            semantic_query["exact_topic_match_workstream_ids"],
             [],
-            "Riparian query should not have exact topic matches in seeded episodes",
+            "Riparian query should not have exact topic matches in seeded workstreams",
         )
         semantic_ids = [
-            candidate["episode_id"]
+            candidate["workstream_id"]
             for candidate in semantic_query["semantic_candidates"]
         ]
         self.soft_assert(
-            "episode-wetlands-proposal" in semantic_ids,
+            "workstream-wetlands-proposal" in semantic_ids,
             "Riparian query should retrieve wetlands proposal through semantic field vectors",
         )
         self.soft_assert(
-            "episode-donor-wetlands" in semantic_ids,
+            "workstream-donor-wetlands" in semantic_ids,
             "Riparian query should retrieve wetlands donor report through semantic field vectors",
         )
 
@@ -139,8 +139,8 @@ def _has_field(fields: list[dict], field_type: str, normalized_value: str) -> bo
     )
 
 
-def _candidate(candidates: list[dict], episode_id: str) -> dict | None:
+def _candidate(candidates: list[dict], workstream_id: str) -> dict | None:
     for candidate in candidates:
-        if candidate["episode_id"] == episode_id:
+        if candidate["workstream_id"] == workstream_id:
             return candidate
     return None

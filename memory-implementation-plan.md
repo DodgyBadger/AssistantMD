@@ -18,7 +18,7 @@ Relevant existing contracts:
   Monty functions, excluding only `code_execution`. Therefore `memory_ops` can
   be called from context scripts once it is present in tool configuration.
 - `core/memory/service.py` is currently a conversation-history broker. It is the
-  right domain boundary to grow into work episode operations, but existing
+  right domain boundary to grow into workstream operations, but existing
   conversation-history behavior should remain stable.
 - `core/tools/memory_ops.py` exists as an optional tool, but the current settings
   template does not register it. Docs describe it as disabled by default.
@@ -31,12 +31,12 @@ Relevant existing contracts:
 
 Design invariants:
 
-- The selected vault is a hard scope. Episode matching should not cross vaults
+- The selected vault is a hard scope. Workstream matching should not cross vaults
   unless a future feature explicitly opts into cross-vault memory.
-- Session-to-episode linking is context-policy controlled. A chat session may
+- Session-to-workstream linking is context-policy controlled. A chat session may
   be unlinked when memory is disabled, when there is not enough signal yet, or
   when the user chooses an incognito/no-memory context policy.
-- A linked chat session belongs to at most one current work episode. Relinking
+- A linked chat session belongs to at most one current workstream. Relinking
   is explicit, auditable, and vault-scoped.
 - `memory_ops` is the canonical operation surface for chat agents and authored
   scripts. Do not create a second helper API with a separate contract.
@@ -80,7 +80,7 @@ Initial scenario set:
   as source context without pretending every transient note is a durable
   conclusion.
 - Incognito/no-memory: a session should be able to use normal chat/context
-  behavior without linking or writing episode state.
+  behavior without linking or writing workstream state.
 
 Decision checkpoints:
 
@@ -90,7 +90,7 @@ Decision checkpoints:
   for authored scripts before wiring default behavior.
 - After Slice 5: inspect actual captured signals and decide whether the current
   fields are too noisy, too sparse, or missing important dimensions.
-- After Slice 8: test whether related episode suggestions are useful enough to
+- After Slice 8: test whether related workstream suggestions are useful enough to
   justify default memory-aware context assembly.
 - Before Slice 10: decide whether LLM extraction is needed, and if so what it
   should be allowed to infer.
@@ -147,7 +147,7 @@ Storage guidance:
   `search_similar(...)`, so memory does not depend on whether similarity search
   is Python cosine, `sqlite-vec`, or another backend.
 - The first implementation can use ordinary SQLite rows and Python cosine.
-- Memory can then create a namespace for work episode field vectors keyed by
+- Memory can then create a namespace for workstream field vectors keyed by
   field id, model alias, input text fingerprint, dimensions, vector blob/json,
   created_at, and provider metadata.
 - Full vault-level vector indexing remains out of scope.
@@ -175,7 +175,7 @@ Experiment:
   - `topic: riparian restoration`
   - `type: donor report`
   - `type: funding proposal`
-- Confirm the service can support comparing query fields to stored episode
+- Confirm the service can support comparing query fields to stored workstream
   fields before memory owns vector ranking.
 
 Risks:
@@ -204,11 +204,11 @@ Progress notes:
 - Added `validation/scenarios/experiments/vector_embedding_service_probe.py`
   using Pydantic AI `TestEmbeddingModel`, with no network calls.
 
-## Slice 1: Work Episode Data Model And Experiment Harness
+## Slice 1: Work Workstream Data Model And Experiment Harness
 
 Goal: prove the underlying memory shape before building higher-level behavior.
-This slice includes durable episode records, synthetic chat/session fixtures, and
-smoke experiments that test whether useful episode fields can actually be
+This slice includes durable workstream records, synthetic chat/session fixtures, and
+smoke experiments that test whether useful workstream fields can actually be
 extracted and queried.
 
 Storage recommendation:
@@ -218,8 +218,8 @@ Storage recommendation:
 
 Initial tables:
 
-- `work_episodes`
-  - `episode_id`
+- `workstreams`
+  - `workstream_id`
   - `vault_name`
   - `title`
   - `status`
@@ -228,16 +228,16 @@ Initial tables:
   - `created_at`
   - `last_seen_at`
   - `metadata_json`
-- `work_episode_sessions`
-  - `episode_id`
+- `workstream_sessions`
+  - `workstream_id`
   - `session_id`
   - `vault_name`
   - `linked_at`
   - `link_source`
   - `confidence`
-- `work_episode_fields`
+- `workstream_fields`
   - `id`
-  - `episode_id`
+  - `workstream_id`
   - `field_type` (`type`, `topic`, `person`, `organization`, `project`,
     `objective`, `strategy`)
   - `value`
@@ -246,9 +246,9 @@ Initial tables:
   - `source` (`inferred`, `user_confirmed`, `system`)
   - `created_at`
   - `updated_at`
-- `work_episode_artifacts`
+- `workstream_artifacts`
   - `id`
-  - `episode_id`
+  - `workstream_id`
   - `vault_name`
   - `path`
   - `artifact_role` (`file_read`, `file_retrieved`, `file_modified`,
@@ -256,17 +256,17 @@ Initial tables:
   - `source`
   - `created_at`
   - `metadata_json`
-- `work_episode_feedback`
+- `workstream_feedback`
   - `id`
-  - `current_episode_id`
-  - `related_episode_id`
+  - `current_workstream_id`
+  - `related_workstream_id`
   - `action` (`accepted`, `rejected`, `ignored`, `relinked`)
   - `reason`
   - `created_at`
-- `work_episode_field_vectors`
+- `workstream_field_vectors`
   - `id`
   - `field_id`
-  - `episode_id`
+  - `workstream_id`
   - `model_alias`
   - `input_text`
   - `input_fingerprint`
@@ -279,7 +279,7 @@ Initial tables:
 
 Vector policy:
 
-- Store vectors for extracted work episode fields, not whole vault files.
+- Store vectors for extracted workstream fields, not whole vault files.
 - Vectorized fields should include at least `type`, `topic`, `objective`, and
   `strategy`. Exact fields such as people/orgs/projects still need exact
   normalized matching first.
@@ -295,19 +295,19 @@ Vector policy:
 
 Service API:
 
-- `get_current_episode(vault_name, session_id)`
-- `create_episode(vault_name, title=None, metadata=None)`
-- `link_session_to_episode(...)`
-- `unlink_session_from_episode(...)`
-- `update_episode_fields(...)`
-- `list_episode_artifacts(...)`
+- `get_current_workstream(vault_name, session_id)`
+- `create_workstream(vault_name, title=None, metadata=None)`
+- `link_session_to_workstream(...)`
+- `unlink_session_from_workstream(...)`
+- `update_workstream_fields(...)`
+- `list_workstream_artifacts(...)`
 
 Experiment harness:
 
 - Add a small fixture builder for isolated runtime roots that can populate:
   - synthetic vault files
   - `chat_sessions.db` sessions/messages
-  - `memory.db` work episodes/fields/artifacts
+  - `memory.db` workstreams/fields/artifacts
   - optional `task_file_mutations` rows for AssistantMD-created outputs
 - Keep the fixture data close to the initial scenario set:
   - two donor reports with the same format but different subjects
@@ -318,7 +318,7 @@ Experiment harness:
   - an incognito/no-memory session
 - Add smoke commands/tests that can print or snapshot:
   - extracted candidate fields from a chat transcript
-  - linked episode rows
+  - linked workstream rows
   - artifact rows
   - related-query candidates and reasons
 
@@ -336,19 +336,19 @@ Extraction prototype:
 
 Validation:
 
-- Creating an episode does not implicitly link a session.
-- Linking a session to an episode is idempotent.
-- An unlinked session has no current episode.
-- A session cannot link to an episode in another vault.
+- Creating a workstream does not implicitly link a session.
+- Linking a session to a workstream is idempotent.
+- An unlinked session has no current workstream.
+- A session cannot link to a workstream in another vault.
 - Field updates preserve source/confidence and normalize exact fields.
 - Persistence works with runtime `system_root` isolation.
-- Fixture builder can create isolated synthetic chat sessions and work episodes
+- Fixture builder can create isolated synthetic chat sessions and workstreams
   without touching `/app/data` or `/app/system`.
 - Extraction smoke tests produce stable candidate fields for seeded scenarios.
 
 Experiment:
 
-- Populate both synthetic episodes and synthetic chat sessions, then run the
+- Populate both synthetic workstreams and synthetic chat sessions, then run the
   extraction/query smoke tests before finalizing the schema.
 - Check whether the current fields can represent the important distinctions:
   same task type vs same topic, same entity vs different subject, durable work
@@ -365,10 +365,10 @@ Experiment:
 Progress notes:
 
 - Initial implementation added `system/memory.db` schema registration, a
-  `WorkEpisodeStore`, synthetic scenario fixture harness, deterministic
-  extraction prototype, explainable related-episode query, and
-  `scripts/memory_episode_smoke.py`.
-- Added `validation/scenarios/experiments/memory_episode_data_model_probe.py`
+  `WorkstreamStore`, synthetic scenario fixture harness, deterministic
+  extraction prototype, explainable related-workstream query, and
+  `scripts/memory_workstream_smoke.py`.
+- Added `validation/scenarios/experiments/memory_workstream_data_model_probe.py`
   so maintainers have a scenario entry point for the same data-model probe.
 - First smoke run caught an overly broad organization extractor; it was
   tightened to avoid treating an entire prompt prefix as the organization.
@@ -376,10 +376,10 @@ Progress notes:
   (`donor report`) from same topic/different task (`wetlands`) and leaves the
   incognito fixture without extracted fields.
 - Added field-vector storage through the shared `VectorStore` abstraction using
-  the `work_episode_field_vectors` table in `memory.db`.
+  the `workstream_field_vectors` table in `memory.db`.
 - Added a deterministic semantic embedding probe to the Slice 1 harness. The
   riparian/watershed query has no exact topic match, but vector-backed topic
-  search returns wetlands-related episodes with reasons such as
+  search returns wetlands-related workstreams with reasons such as
   `semantic_topic_similarity`.
 - The semantic probe initially pulled in a forest donor report via broad
   semantic type similarity. The experiment now scopes the riparian/watershed
@@ -391,32 +391,32 @@ Risks:
 - A dedicated `memory.db` avoids expanding `chat_sessions.db`, but it creates a
   new system DB to document and maintain.
 
-## Slice 2: Refactor `memory_ops` For Episode Operations
+## Slice 2: Refactor `memory_ops` For Workstream Operations
 
 Goal: replace the current narrow conversation-history `memory_ops` behavior with
-the work episode operation surface backed by Slice 1 persistence. Conversation
+the workstream operation surface backed by Slice 1 persistence. Conversation
 history is not part of this tool contract.
 
 Operations:
 
-- `current_episode`
-- `create_episode`
-- `get_episode`
-- `search_episodes`
-- `related_episodes`
-- `episode_artifacts`
+- `current_workstream`
+- `create_workstream`
+- `get_workstream`
+- `search_workstreams`
+- `related_workstreams`
+- `workstream_artifacts`
 - `link_session`
 - `relink_session`
 - `unlink_session`
-- `update_episode`
+- `update_workstream`
 - `record_feedback`
 
 Contract:
 
 - Return JSON text, matching current `memory_ops` behavior.
-- Include stable `status`, `operation`, and `episode_id` fields in metadata-like
+- Include stable `status`, `operation`, and `workstream_id` fields in metadata-like
   payloads.
-- `current_episode` is read-only and returns an unlinked status when no episode
+- `current_workstream` is read-only and returns an unlinked status when no workstream
   is attached to the session.
 - Write operations must record source and confidence.
 - User-confirmed writes require explicit `source="user_confirmed"` or an
@@ -439,7 +439,7 @@ Validation:
 Experiment:
 
 - Write one throwaway authoring-style script that uses only `memory_ops`
-  operations to create, link, update, and inspect an episode.
+  operations to create, link, update, and inspect a workstream.
 - Evaluate whether the operation names and payloads feel composable enough for a
   real context script.
 - Revise the operation surface before registering it broadly.
@@ -452,19 +452,19 @@ Risks:
 
 Progress notes:
 
-- Refactored `core/tools/memory_ops.py` into the work episode operation surface
+- Refactored `core/tools/memory_ops.py` into the workstream operation surface
   and removed legacy chat-history operations.
-- Added operations for current episode lookup, episode create/get/search,
+- Added operations for current workstream lookup, workstream create/get/search,
   exact related candidates, artifacts, session link/relink/unlink, field update,
   and relationship feedback.
 - Kept the tool return contract as pretty JSON text with stable `status` and
-  `operation` fields for episode operations.
-- Added `validation/scenarios/experiments/memory_ops_episode_probe.py` to drive
+  `operation` fields for workstream operations.
+- Added `validation/scenarios/experiments/memory_ops_workstream_probe.py` to drive
   the tool directly against the Slice 1 synthetic fixture without registering it
   in global settings.
 - Updated `docs/tools/memory_ops.md` to describe the expanded contract.
 - Recorded the product decision that memory exposed to agents is mediated
-  through work episodes. Chat history can later feed memory through transcript
+  through workstreams. Chat history can later feed memory through transcript
   export or extraction, but it is not directly queryable through `memory_ops`.
 
 ## Slice 3: Register `memory_ops` For Authoring And Optional Chat Use
@@ -489,15 +489,15 @@ Validation:
 - Unit or integration check that `resolve_tool_binding(["memory_ops"], ...)`
   returns a callable tool spec.
 - Monty compile/run smoke where an authoring script calls
-  `await memory_ops(operation="current_episode")`.
-- Separate Monty run that creates/links an episode through `memory_ops`.
-- Chat-agent tool call can relink or update the current episode when
+  `await memory_ops(operation="current_workstream")`.
+- Separate Monty run that creates/links a workstream through `memory_ops`.
+- Chat-agent tool call can relink or update the current workstream when
   `memory_ops` is chat-visible in test settings.
 
 Experiment:
 
 - Build two tiny context scripts:
-  - memory-on: reads current episode and links when explicitly told to
+  - memory-on: reads current workstream and links when explicitly told to
   - memory-off/incognito: never writes memory state
 - Confirm the difference is transparent from logs/results and does not require a
   hidden platform mode.
@@ -515,17 +515,17 @@ Progress notes:
   separate helper API.
 - Added `validation/scenarios/integration/core/memory_ops_chat_tool.py` to prove
   a selected chat agent can call `memory_ops` to link the active session and
-  update a work episode.
+  update a workstream.
 - Updated chat metadata validation to expect `memory_ops` in the exposed tool
   list.
 - Fixed runtime bootstrap to clear the typed settings cache after bootstrap
   roots are established, so settings-backed tools are read from the active
   system root.
 
-## Slice 4: Context-Controlled Episode Linking
+## Slice 4: Context-Controlled Workstream Linking
 
 Goal: let context policy decide whether and when a session attaches to a work
-episode.
+workstream.
 
 Integration points:
 
@@ -533,39 +533,39 @@ Integration points:
   prompt, context template, model/tools, and prior persisted history.
 - Accepted user request is persisted later inside streaming/non-streaming
   execution. The platform should make session/vault/latest-message context
-  available to `memory_ops`, but it should not create or link an episode as an
+  available to `memory_ops`, but it should not create or link a workstream as an
   unconditional preflight side effect.
 - Context assembly runs before the chat agent answers and is the right place for
   the default memory policy to inspect early signals and choose whether to link.
 
 Recommended approach:
 
-- Do not add `memory_service.ensure_episode_for_session(...)` to chat preflight.
+- Do not add `memory_service.ensure_workstream_for_session(...)` to chat preflight.
 - Ensure `memory_ops` can resolve the active vault and session from the current
   tool/runtime context.
 - Update the default context template to run an initial memory policy:
-  - call `memory_ops(operation="current_episode")`
-  - if already linked, retrieve current episode state
+  - call `memory_ops(operation="current_workstream")`
+  - if already linked, retrieve current workstream state
   - if unlinked, inspect session title, latest prompt, prior history, and
     working set
-  - either create/link a low-confidence new episode, suggest likely
+  - either create/link a low-confidence new workstream, suggest likely
     continuations, or leave the session unlinked
 - Represent incognito/no-memory behavior as a context policy that never calls
   memory write operations. A later UI toggle can select that policy or pass an
   explicit memory mode into context assembly.
 - Store initial prompt/session title as low-confidence metadata/fields only when
-  a policy chooses to create or link an episode.
+  a policy chooses to create or link a workstream.
 
 Validation:
 
 - Non-streaming and streaming first chats can remain unlinked when the selected
   context policy does not call memory write operations.
-- Default context policy can create and link one episode when confidence/threshold
+- Default context policy can create and link one workstream when confidence/threshold
   conditions are met.
-- Reusing a linked session does not create duplicate episodes.
+- Reusing a linked session does not create duplicate workstreams.
 - Switching vaults starts a different session and cannot reuse the prior vault's
-  episode.
-- Incognito/no-memory context policy leaves no episode link and writes no episode
+  workstream.
+- Incognito/no-memory context policy leaves no workstream link and writes no workstream
   fields/artifacts.
 - Cancellation preserves any explicit link made during context assembly but does
   not fabricate assistant output artifacts.
@@ -582,17 +582,17 @@ Risks:
 
 - If linking happens inside context assembly, a failed context script can leave
   the session unlinked. That is acceptable and should fail closed.
-- Context scripts must be careful not to create noisy low-value episodes too
+- Context scripts must be careful not to create noisy low-value workstreams too
   early. Thresholds belong in the default policy, not in hidden preflight code.
 
-## Slice 5: Capture Basic Episode Signals
+## Slice 5: Capture Basic Workstream Signals
 
-Goal: populate useful low-risk fields for linked episodes without LLM
+Goal: populate useful low-risk fields for linked workstreams without LLM
 extraction.
 
 Signals:
 
-- session title -> episode title candidate
+- session title -> workstream title candidate
 - prompt text -> objective candidate if short enough, source `inferred`
 - chat turn count from stored messages
 - modified/output files from `task_file_mutations` where task scope is
@@ -604,7 +604,7 @@ Implementation:
 
 - Add post-turn update hook after successful chat persistence in both streaming
   and non-streaming paths.
-- If the session is unlinked, skip episode signal capture.
+- If the session is unlinked, skip workstream signal capture.
 - Query `task_file_mutations` for chat session scope to link modified/output
   artifacts.
 - Recalculate simple weight from turns, files modified, outputs, and title.
@@ -614,15 +614,15 @@ Validation:
 
 - A chat that writes a file links that file as `file_modified` or
   `output_created` when the session is linked.
-- An unlinked or incognito chat writes no episode artifacts.
+- An unlinked or incognito chat writes no workstream artifacts.
 - A chat with no file activity still updates turn-count signals.
 - Repeated turns update `last_seen_at` and weight.
 - Failed/cancelled turns do not overstate outputs.
 
 Experiment:
 
-- Review captured episode state after several realistic chats.
-- Check whether the episode rollups tell the user something they would not
+- Review captured workstream state after several realistic chats.
+- Check whether the workstream rollups tell the user something they would not
   already know from the chat title and file list.
 - Decide whether additional instrumentation, such as read/retrieval tracking, is
   required before related search can be useful.
@@ -635,13 +635,13 @@ Risks:
 
 ## Slice 6: Manual Relink And Field Update Through Chat
 
-Goal: make the flexible session-to-episode link usable.
+Goal: make the flexible session-to-workstream link usable.
 
 Behavior:
 
 - User can tell the chat agent:
-  - "This is part of the wetlands proposal episode."
-  - "Start a new episode for this."
+  - "This is part of the wetlands proposal workstream."
+  - "Start a new workstream for this."
   - "Do not remember this session."
   - "Add Foundation X as the organization."
   - "This is not related to the prior donor report."
@@ -655,11 +655,11 @@ UI:
 
 Validation:
 
-- `memory_ops(relink_session)` moves the current session from episode A to B.
+- `memory_ops(relink_session)` moves the current session from workstream A to B.
 - `memory_ops(unlink_session)` removes the current session link and prevents
   later post-turn signal capture unless it is linked again.
 - Rejected relation is recorded and suppresses the same candidate for the same
-  current episode.
+  current workstream.
 - User-confirmed organization/topic outranks inferred values in related search.
 
 Experiment:
@@ -675,9 +675,9 @@ Risks:
 - If `memory_ops` is not chat-visible by default, validation must enable it in
   test settings.
 
-## Slice 7: Related Episode Retrieval
+## Slice 7: Related Workstream Retrieval
 
-Goal: retrieve candidate prior episodes by transparent relationship type.
+Goal: retrieve candidate prior workstreams by transparent relationship type.
 
 Matching v1:
 
@@ -685,12 +685,12 @@ Matching v1:
 - same topic/type lexical normalized match
 - same modified/output artifact path
 - same folder namespace from artifact paths
-- recent active episodes in same vault
+- recent active workstreams in same vault
 - feedback suppression for rejected candidates
 
 Result shape:
 
-- candidate episode id/title
+- candidate workstream id/title
 - relation types
 - reasons
 - confidence
@@ -700,7 +700,7 @@ Result shape:
 Ranking:
 
 - relation strength
-- episode weight
+- workstream weight
 - recency decay
 - user-confirmed fields
 - reuse/continuation count
@@ -710,13 +710,13 @@ Validation:
 
 - Same organization + same type ranks above same topic only.
 - Same topic but different type is returned as related, not continuation.
-- Low-weight one-off episodes are searchable but not high-priority suggestions.
+- Low-weight one-off workstreams are searchable but not high-priority suggestions.
 - Rejected candidates are suppressed.
 - Cross-vault candidates are never returned.
 
 Experiment:
 
-- Create paired scenario episodes:
+- Create paired scenario workstreams:
   - same task type, different subject
   - different task type, same subject
   - same organization, different goal
@@ -730,7 +730,7 @@ Risks:
 
 ## Slice 8: Related Memory-Aware Context Assembly
 
-Goal: after related-episode retrieval exists, extend the default memory policy
+Goal: after related-workstream retrieval exists, extend the default memory policy
 so default chat behavior can use or suggest prior work without requiring custom
 scripts.
 
@@ -738,11 +738,11 @@ Approach:
 
 - Extend the default context template under
   `core/authoring/seed_templates/context/default.md`.
-- It should already call `memory_ops(operation="current_episode")` from Slice 4.
+- It should already call `memory_ops(operation="current_workstream")` from Slice 4.
   Add calls such as
-  `memory_ops(operation="related_episodes", ...)`.
+  `memory_ops(operation="related_workstreams", ...)`.
 - Conservative policy:
-  - include current episode summary/status if compact and high-confidence
+  - include current workstream summary/status if compact and high-confidence
   - do not automatically include loosely related source files
   - emit a short system/context note with suggested related work and reasons
   - leave actual file inclusion to explicit user/agent follow-up in v1
@@ -750,8 +750,8 @@ Approach:
 Validation:
 
 - Default context script compiles and runs when `memory_ops` is registered.
-- Related episode suggestions appear in assembled context with reasons.
-- When no related episodes exist, default behavior remains close to current
+- Related workstream suggestions appear in assembled context with reasons.
+- When no related workstreams exist, default behavior remains close to current
   context assembly.
 - Context history protocol safety remains intact.
 
@@ -760,7 +760,7 @@ Experiment:
 - Compare the same chat prompts with memory-aware default context and
   incognito/no-memory context.
 - Assess whether memory suggestions help the agent answer or merely add noise.
-- Record examples where memory should suggest files, suggest an episode only, or
+- Record examples where memory should suggest files, suggest a workstream only, or
   stay silent.
 
 Risks:
@@ -771,30 +771,30 @@ Risks:
 
 ## Slice 9: API/UI Inspection Surface
 
-Goal: provide basic visibility into current episode state and related
+Goal: provide basic visibility into current workstream state and related
 suggestions.
 
 API:
 
-- `GET /api/chat/sessions/{session_id}/episode`
-- `GET /api/memory/episodes/{episode_id}`
-- `GET /api/memory/episodes/{episode_id}/related`
-- `PATCH /api/memory/episodes/{episode_id}`
-- `POST /api/chat/sessions/{session_id}/episode-link`
-- `DELETE /api/chat/sessions/{session_id}/episode-link`
+- `GET /api/chat/sessions/{session_id}/workstream`
+- `GET /api/memory/workstreams/{workstream_id}`
+- `GET /api/memory/workstreams/{workstream_id}/related`
+- `PATCH /api/memory/workstreams/{workstream_id}`
+- `POST /api/chat/sessions/{session_id}/workstream-link`
+- `DELETE /api/chat/sessions/{session_id}/workstream-link`
 
 UI v1:
 
-- Show current episode title/status near session title or in chat settings.
-- Show an unlinked/incognito state when no episode is attached.
+- Show current workstream title/status near session title or in chat settings.
+- Show an unlinked/incognito state when no workstream is attached.
 - Show a small related-work suggestion panel/message when candidates exist.
 - Allow "use", "ignore", "not related", and "unlink" for suggestions if
   feasible.
 
 Validation:
 
-- API response models serialize stable episode shapes.
-- UI can show current episode without blocking chat.
+- API response models serialize stable workstream shapes.
+- UI can show current workstream without blocking chat.
 - User feedback updates memory state.
 
 Experiment:
@@ -808,11 +808,11 @@ Experiment:
 
 Risks:
 
-- Keep UI small. Do not build a full episode manager in v1.
+- Keep UI small. Do not build a full workstream manager in v1.
 
-## Slice 10: LLM-Assisted Episode Extraction
+## Slice 10: LLM-Assisted Workstream Extraction
 
-Goal: add model judgment only after deterministic episode plumbing works.
+Goal: add model judgment only after deterministic workstream plumbing works.
 
 Approach:
 
@@ -844,7 +844,7 @@ Experiment:
 - Run extraction offline against saved scenario transcripts before enabling it in
   normal chat flow.
 - Compare inferred fields with user-confirmed ground truth.
-- Only promote extraction into default behavior if it improves related episode
+- Only promote extraction into default behavior if it improves related workstream
   retrieval without creating authoritative-looking false memory.
 
 Risks:
@@ -854,11 +854,11 @@ Risks:
 
 ## Deferred Work
 
-- Embeddings over episode summaries/topics/objectives.
+- Embeddings over workstream summaries/topics/objectives.
 - Full vault semantic retrieval.
 - Read/retrieval instrumentation for all tools.
-- Markdown mirrors or editable work episode notes.
-- Full episode management UI.
+- Markdown mirrors or editable workstream notes.
+- Full workstream management UI.
 - Cross-vault memory.
 - Graph/centrality maps.
 - Automatic promotion of inferred decisions to instruction-grade memory.
@@ -880,8 +880,8 @@ As slices land, update:
 Continue with Slice 4 in feature development:
 
 1. Build a narrow context-controlled linking experiment.
-2. Let context policy inspect the current episode and decide whether to leave
-   the session unlinked, create/link a new episode, or suggest likely related
-   episodes.
+2. Let context policy inspect the current workstream and decide whether to leave
+   the session unlinked, create/link a new workstream, or suggest likely related
+   workstreams.
 3. Keep incognito/no-memory behavior as a context policy that does not call
    memory write operations.

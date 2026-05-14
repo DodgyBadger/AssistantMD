@@ -1,5 +1,5 @@
 """
-Experiment scenario for the refactored memory_ops work episode contract.
+Experiment scenario for the refactored memory_ops workstream contract.
 """
 
 import json
@@ -14,8 +14,8 @@ from core.tools.memory_ops import MemoryOps
 from validation.core.base_scenario import BaseScenario
 
 
-class MemoryOpsEpisodeProbeScenario(BaseScenario):
-    """Probe memory_ops work episode operations without chat tool registration."""
+class MemoryOpsWorkstreamProbeScenario(BaseScenario):
+    """Probe memory_ops workstream operations without chat tool registration."""
 
     async def test_scenario(self):
         controller = self._get_system_controller()
@@ -40,7 +40,7 @@ class MemoryOpsEpisodeProbeScenario(BaseScenario):
         created = await _call(
             tool,
             ctx,
-            operation="create_episode",
+            operation="create_workstream",
             title="Riparian restoration grant",
             fields=[
                 {"field_type": "type", "value": "funding proposal", "confidence": 0.8},
@@ -54,21 +54,21 @@ class MemoryOpsEpisodeProbeScenario(BaseScenario):
             ],
             confidence=0.7,
         )
-        created_id = created["episode"]["episode_id"]
+        created_id = created["workstream"]["workstream_id"]
 
         linked = await _call(
             tool,
             ctx,
             operation="link_session",
-            episode_id=created_id,
+            workstream_id=created_id,
             confidence=0.9,
         )
-        current = await _call(tool, ctx, operation="current_episode")
+        current = await _call(tool, ctx, operation="current_workstream")
         updated = await _call(
             tool,
             ctx,
-            operation="update_episode",
-            episode_id=created_id,
+            operation="update_workstream",
+            workstream_id=created_id,
             field_type="strategy",
             value="reuse grant narrative",
             confidence=0.6,
@@ -76,25 +76,25 @@ class MemoryOpsEpisodeProbeScenario(BaseScenario):
         searched = await _call(
             tool,
             ctx,
-            operation="search_episodes",
+            operation="search_workstreams",
             field_type="topic",
             value="riparian restoration",
         )
         artifacts = await _call(
             tool,
             ctx,
-            operation="episode_artifacts",
-            episode_id=created_id,
+            operation="workstream_artifacts",
+            workstream_id=created_id,
         )
         related = await _call(
             tool,
             ctx,
-            operation="related_episodes",
-            episode_id="episode-donor-wetlands",
+            operation="related_workstreams",
+            workstream_id="workstream-donor-wetlands",
             limit=3,
         )
         unlinked = await _call(tool, ctx, operation="unlink_session")
-        current_after_unlink = await _call(tool, ctx, operation="current_episode")
+        current_after_unlink = await _call(tool, ctx, operation="current_workstream")
 
         report = {
             "created": created,
@@ -107,30 +107,30 @@ class MemoryOpsEpisodeProbeScenario(BaseScenario):
             "unlinked": unlinked,
             "current_after_unlink": current_after_unlink,
         }
-        (self.artifacts_dir / "memory_ops_episode_probe.json").write_text(
+        (self.artifacts_dir / "memory_ops_workstream_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
 
-        self.soft_assert_equal(created["status"], "ok", "create_episode should succeed")
-        self.soft_assert_equal(linked["episode"]["episode_id"], created_id)
+        self.soft_assert_equal(created["status"], "ok", "create_workstream should succeed")
+        self.soft_assert_equal(linked["workstream"]["workstream_id"], created_id)
         self.soft_assert_equal(current["status"], "linked")
         self.soft_assert(
             any(
                 field["field_type"] == "strategy"
                 and field["normalized_value"] == "reuse grant narrative"
-                for field in updated["episode"]["fields"]
+                for field in updated["workstream"]["fields"]
             ),
-            "update_episode should add strategy field",
+            "update_workstream should add strategy field",
         )
         self.soft_assert(
-            any(episode["episode_id"] == created_id for episode in searched["episodes"]),
-            "search_episodes should find created topic",
+            any(workstream["workstream_id"] == created_id for workstream in searched["workstreams"]),
+            "search_workstreams should find created topic",
         )
         self.soft_assert_equal(len(artifacts["artifacts"]), 1)
         self.soft_assert(
-            any(candidate["episode_id"] == "episode-wetlands-proposal" for candidate in related["candidates"]),
-            "related_episodes should return exact related candidates",
+            any(candidate["workstream_id"] == "workstream-wetlands-proposal" for candidate in related["candidates"]),
+            "related_workstreams should return exact related candidates",
         )
         self.soft_assert_equal(unlinked["status"], "ok")
         self.soft_assert_equal(current_after_unlink["status"], "unlinked")

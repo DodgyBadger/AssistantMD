@@ -1,4 +1,4 @@
-"""Work episode memory operations tool."""
+"""Workstream memory operations tool."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
 from core.memory import MemoryContext
-from core.memory.work_episodes import (
-    WorkEpisodeArtifact,
-    WorkEpisodeField,
-    WorkEpisodeStore,
+from core.memory.workstreams import (
+    WorkstreamArtifact,
+    WorkstreamField,
+    WorkstreamStore,
     normalize_field_value,
 )
 
@@ -24,7 +24,7 @@ logger = UnifiedLogger(tag="memory-ops-tool")
 
 
 class MemoryOps(BaseTool):
-    """Manage work episode memory."""
+    """Manage workstream memory."""
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None):
@@ -37,8 +37,8 @@ class MemoryOps(BaseTool):
             session_id: str = "",
             vault_name: str = "",
             limit: int | str = "all",
-            episode_id: str = "",
-            related_episode_id: str = "",
+            workstream_id: str = "",
+            related_workstream_id: str = "",
             title: str = "",
             status: str = "active",
             field_type: str = "",
@@ -51,22 +51,22 @@ class MemoryOps(BaseTool):
             action: str = "",
             reason: str = "",
         ) -> str:
-            """Manage work episode memory.
+            """Manage workstream memory.
 
             :param operation: Operation name.
             :param session_id: Optional explicit session id. Defaults to the active session when available.
             :param vault_name: Optional explicit vault name. Defaults to active vault when available.
             :param limit: Positive integer or "all"
-            :param episode_id: Work episode id for episode operations.
-            :param related_episode_id: Related episode id for feedback operations.
-            :param title: Episode title for create/update operations.
-            :param status: Episode status for create operations.
+            :param workstream_id: Workstream id for workstream operations.
+            :param related_workstream_id: Related workstream id for feedback operations.
+            :param title: Workstream title for create/update operations.
+            :param status: Workstream status for create operations.
             :param field_type: Single field type for search/update operations.
             :param value: Single field value for search/update operations.
             :param fields: Optional list of field objects.
             :param artifacts: Optional list of artifact objects.
             :param metadata: Optional object metadata for create operations.
-            :param link_source: Source label for session-episode links.
+            :param link_source: Source label for session-workstream links.
             :param confidence: Confidence for link/field operations.
             :param action: Feedback action.
             :param reason: Optional feedback reason.
@@ -79,7 +79,7 @@ class MemoryOps(BaseTool):
                 memory_context = MemoryContext.from_deps(deps)
                 active_session_id = requested_session_id or memory_context.session_id
                 active_vault_name = requested_vault_name or memory_context.vault_name
-                store = WorkEpisodeStore()
+                store = WorkstreamStore()
 
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
@@ -90,49 +90,49 @@ class MemoryOps(BaseTool):
                 )
 
                 resolved_limit = cls._parse_limit(limit)
-                if op == "current_episode":
+                if op == "current_workstream":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
-                    episode = store.get_current_episode(
+                    workstream = store.get_current_workstream(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
                     result = {
-                        "status": "linked" if episode else "unlinked",
+                        "status": "linked" if workstream else "unlinked",
                         "operation": op,
                         "vault_name": active_vault_name,
                         "session_id": active_session_id,
-                        "episode": episode.to_dict() if episode else None,
+                        "workstream": workstream.to_dict() if workstream else None,
                     }
-                elif op == "create_episode":
+                elif op == "create_workstream":
                     _require(active_vault_name, "vault_name is required")
-                    episode = store.create_episode(
+                    workstream = store.create_workstream(
                         vault_name=active_vault_name,
                         title=title or None,
-                        episode_id=episode_id or None,
+                        workstream_id=workstream_id or None,
                         status=status or "active",
                         confidence=float(confidence),
                         metadata=metadata or {},
                     )
-                    _maybe_update_fields(store, episode.episode_id, fields, field_type, value, confidence)
-                    _maybe_add_artifacts(store, episode.episode_id, active_vault_name, artifacts)
+                    _maybe_update_fields(store, workstream.workstream_id, fields, field_type, value, confidence)
+                    _maybe_add_artifacts(store, workstream.workstream_id, active_vault_name, artifacts)
                     result = {
                         "status": "ok",
                         "operation": op,
-                        "episode": store.get_episode(episode.episode_id).to_dict(),
+                        "workstream": store.get_workstream(workstream.workstream_id).to_dict(),
                     }
-                elif op == "get_episode":
-                    _require(episode_id, "episode_id is required")
-                    episode = store.get_episode(episode_id)
+                elif op == "get_workstream":
+                    _require(workstream_id, "workstream_id is required")
+                    workstream = store.get_workstream(workstream_id)
                     result = {
-                        "status": "found" if episode else "not_found",
+                        "status": "found" if workstream else "not_found",
                         "operation": op,
-                        "episode": episode.to_dict() if episode else None,
+                        "workstream": workstream.to_dict() if workstream else None,
                     }
-                elif op == "search_episodes":
+                elif op == "search_workstreams":
                     _require(active_vault_name, "vault_name is required")
                     normalized_value = normalize_field_value(value) if field_type and value else None
-                    episodes = store.search_episodes(
+                    workstreams = store.search_workstreams(
                         vault_name=active_vault_name,
                         field_type=field_type or None,
                         normalized_value=normalized_value,
@@ -141,47 +141,47 @@ class MemoryOps(BaseTool):
                     result = {
                         "status": "ok",
                         "operation": op,
-                        "episodes": [episode.to_dict() for episode in episodes],
+                        "workstreams": [workstream.to_dict() for workstream in workstreams],
                     }
-                elif op == "related_episodes":
+                elif op == "related_workstreams":
                     _require(active_vault_name, "vault_name is required")
-                    resolved_episode_id = episode_id
-                    if not resolved_episode_id:
-                        _require(active_session_id, "session_id or episode_id is required")
-                        current = store.get_current_episode(
+                    resolved_workstream_id = workstream_id
+                    if not resolved_workstream_id:
+                        _require(active_session_id, "session_id or workstream_id is required")
+                        current = store.get_current_workstream(
                             vault_name=active_vault_name,
                             session_id=active_session_id,
                         )
-                        resolved_episode_id = current.episode_id if current else ""
-                    _require(resolved_episode_id, "episode_id is required")
-                    candidates = store.related_episode_candidates(
+                        resolved_workstream_id = current.workstream_id if current else ""
+                    _require(resolved_workstream_id, "workstream_id is required")
+                    candidates = store.related_workstream_candidates(
                         vault_name=active_vault_name,
-                        episode_id=resolved_episode_id,
+                        workstream_id=resolved_workstream_id,
                         limit=resolved_limit if isinstance(resolved_limit, int) else 10,
                     )
                     result = {
                         "status": "ok",
                         "operation": op,
-                        "episode_id": resolved_episode_id,
+                        "workstream_id": resolved_workstream_id,
                         "candidates": [candidate.to_dict() for candidate in candidates],
                     }
-                elif op == "episode_artifacts":
-                    _require(episode_id, "episode_id is required")
+                elif op == "workstream_artifacts":
+                    _require(workstream_id, "workstream_id is required")
                     result = {
                         "status": "ok",
                         "operation": op,
-                        "episode_id": episode_id,
+                        "workstream_id": workstream_id,
                         "artifacts": [
                             artifact.to_dict()
-                            for artifact in store.list_episode_artifacts(episode_id)
+                            for artifact in store.list_workstream_artifacts(workstream_id)
                         ],
                     }
                 elif op in {"link_session", "relink_session"}:
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
-                    _require(episode_id, "episode_id is required")
-                    episode = store.link_session_to_episode(
-                        episode_id=episode_id,
+                    _require(workstream_id, "workstream_id is required")
+                    workstream = store.link_session_to_workstream(
+                        workstream_id=workstream_id,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                         link_source=link_source or op,
@@ -192,12 +192,12 @@ class MemoryOps(BaseTool):
                         "operation": op,
                         "session_id": active_session_id,
                         "vault_name": active_vault_name,
-                        "episode": episode.to_dict(),
+                        "workstream": workstream.to_dict(),
                     }
                 elif op == "unlink_session":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
-                    store.unlink_session_from_episode(
+                    store.unlink_session_from_workstream(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
@@ -207,38 +207,38 @@ class MemoryOps(BaseTool):
                         "session_id": active_session_id,
                         "vault_name": active_vault_name,
                     }
-                elif op == "update_episode":
-                    _require(episode_id, "episode_id is required")
-                    _maybe_update_fields(store, episode_id, fields, field_type, value, confidence)
-                    episode = store.get_episode(episode_id)
+                elif op == "update_workstream":
+                    _require(workstream_id, "workstream_id is required")
+                    _maybe_update_fields(store, workstream_id, fields, field_type, value, confidence)
+                    workstream = store.get_workstream(workstream_id)
                     result = {
                         "status": "ok",
                         "operation": op,
-                        "episode": episode.to_dict() if episode else None,
+                        "workstream": workstream.to_dict() if workstream else None,
                     }
                 elif op == "record_feedback":
-                    _require(episode_id, "episode_id is required")
-                    _require(related_episode_id, "related_episode_id is required")
+                    _require(workstream_id, "workstream_id is required")
+                    _require(related_workstream_id, "related_workstream_id is required")
                     _require(action, "action is required")
                     store.record_feedback(
-                        current_episode_id=episode_id,
-                        related_episode_id=related_episode_id,
+                        current_workstream_id=workstream_id,
+                        related_workstream_id=related_workstream_id,
                         action=action,
                         reason=reason or None,
                     )
                     result = {
                         "status": "ok",
                         "operation": op,
-                        "episode_id": episode_id,
-                        "related_episode_id": related_episode_id,
+                        "workstream_id": workstream_id,
+                        "related_workstream_id": related_workstream_id,
                         "action": action,
                     }
                 else:
                     return (
-                        "Unknown operation. Available: current_episode, create_episode, "
-                        "get_episode, search_episodes, "
-                        "related_episodes, episode_artifacts, link_session, relink_session, "
-                        "unlink_session, update_episode, record_feedback"
+                        "Unknown operation. Available: current_workstream, create_workstream, "
+                        "get_workstream, search_workstreams, "
+                        "related_workstreams, workstream_artifacts, link_session, relink_session, "
+                        "unlink_session, update_workstream, record_feedback"
                     )
                 if hasattr(result, "to_dict"):
                     result = result.to_dict()
@@ -258,12 +258,12 @@ class MemoryOps(BaseTool):
         return Tool(
             memory_ops,
             name="memory_ops",
-            description="Manage work episode memory.",
+            description="Manage workstream memory.",
         )
 
     @classmethod
     def get_instructions(cls) -> str:
-        """Get usage instructions for work episode memory access."""
+        """Get usage instructions for workstream memory access."""
         return """
 Full documentation:
 - `__virtual_docs__/tools/memory_ops.md`
@@ -294,19 +294,19 @@ def _require(value: object, message: str) -> None:
 
 
 def _maybe_update_fields(
-    store: WorkEpisodeStore,
-    episode_id: str,
+    store: WorkstreamStore,
+    workstream_id: str,
     fields: list[dict[str, Any]] | None,
     field_type: str,
     value: str,
     confidence: float,
 ) -> None:
-    parsed: list[WorkEpisodeField] = []
+    parsed: list[WorkstreamField] = []
     for raw in fields or []:
         parsed.append(_field_from_mapping(raw, fallback_confidence=confidence))
     if field_type and value:
         parsed.append(
-            WorkEpisodeField(
+            WorkstreamField(
                 field_type=field_type,
                 value=value,
                 normalized_value=normalize_field_value(value),
@@ -315,16 +315,16 @@ def _maybe_update_fields(
             )
         )
     if parsed:
-        store.update_episode_fields(episode_id=episode_id, fields=tuple(parsed))
+        store.update_workstream_fields(workstream_id=workstream_id, fields=tuple(parsed))
 
 
-def _field_from_mapping(raw: dict[str, Any], *, fallback_confidence: float) -> WorkEpisodeField:
+def _field_from_mapping(raw: dict[str, Any], *, fallback_confidence: float) -> WorkstreamField:
     field_type = str(raw.get("field_type") or raw.get("type") or "").strip()
     value = str(raw.get("value") or "").strip()
     _require(field_type, "field_type is required for each field")
     _require(value, "value is required for each field")
     normalized_value = str(raw.get("normalized_value") or "").strip() or normalize_field_value(value)
-    return WorkEpisodeField(
+    return WorkstreamField(
         field_type=field_type,
         value=value,
         normalized_value=normalized_value,
@@ -334,17 +334,17 @@ def _field_from_mapping(raw: dict[str, Any], *, fallback_confidence: float) -> W
 
 
 def _maybe_add_artifacts(
-    store: WorkEpisodeStore,
-    episode_id: str,
+    store: WorkstreamStore,
+    workstream_id: str,
     vault_name: str,
     artifacts: list[dict[str, Any]] | None,
 ) -> None:
-    parsed: list[WorkEpisodeArtifact] = []
+    parsed: list[WorkstreamArtifact] = []
     for raw in artifacts or []:
         path = str(raw.get("path") or "").strip()
         _require(path, "path is required for each artifact")
         parsed.append(
-            WorkEpisodeArtifact(
+            WorkstreamArtifact(
                 path=path,
                 artifact_role=str(raw.get("artifact_role") or raw.get("role") or "file_retrieved"),
                 source=str(raw.get("source") or "tool"),
@@ -353,4 +353,4 @@ def _maybe_add_artifacts(
             )
         )
     if parsed:
-        store.add_episode_artifacts(episode_id=episode_id, artifacts=tuple(parsed))
+        store.add_workstream_artifacts(workstream_id=workstream_id, artifacts=tuple(parsed))

@@ -1,4 +1,4 @@
-"""Synthetic fixture harness for work episode memory experiments."""
+"""Synthetic fixture harness for workstream memory experiments."""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ from pydantic_ai.usage import RequestUsage
 from core.chat.schema import DB_NAME as CHAT_DB_NAME
 from core.chat.schema import ensure_chat_sessions_schema
 from core.database import connect_sqlite_from_system_db
-from core.memory.work_episodes import (
-    WorkEpisodeArtifact,
-    WorkEpisodeField,
-    WorkEpisodeStore,
+from core.memory.workstreams import (
+    WorkstreamArtifact,
+    WorkstreamField,
+    WorkstreamStore,
     normalize_field_value,
 )
 from core.vector import VectorService
@@ -34,7 +34,7 @@ class MemoryExperimentFixture:
     vault_root: Path
     vault_name: str
     session_ids: tuple[str, ...]
-    episode_ids: tuple[str, ...]
+    workstream_ids: tuple[str, ...]
 
 
 class MemoryExperimentHarness:
@@ -51,10 +51,10 @@ class MemoryExperimentHarness:
         self.system_root = system_root
         self.vault_name = vault_name
         self.vault_root = data_root / "vaults" / vault_name
-        self.store = WorkEpisodeStore(system_root=str(system_root))
+        self.store = WorkstreamStore(system_root=str(system_root))
 
     def populate(self) -> MemoryExperimentFixture:
-        """Populate synthetic vault files, chat sessions, and work episodes."""
+        """Populate synthetic vault files, chat sessions, and workstreams."""
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.system_root.mkdir(parents=True, exist_ok=True)
         self.vault_root.mkdir(parents=True, exist_ok=True)
@@ -65,14 +65,14 @@ class MemoryExperimentHarness:
         for session in sessions:
             self._insert_chat_session(session)
 
-        episode_ids = tuple(self._create_seed_episodes())
+        workstream_ids = tuple(self._create_seed_workstreams())
         return MemoryExperimentFixture(
             data_root=self.data_root,
             system_root=self.system_root,
             vault_root=self.vault_root,
             vault_name=self.vault_name,
             session_ids=tuple(session["session_id"] for session in sessions),
-            episode_ids=episode_ids,
+            workstream_ids=workstream_ids,
         )
 
     def extraction_report(self, fixture: MemoryExperimentFixture) -> dict[str, Any]:
@@ -87,15 +87,15 @@ class MemoryExperimentHarness:
         return {"vault_name": fixture.vault_name, "sessions": sessions}
 
     def related_report(self, fixture: MemoryExperimentFixture) -> dict[str, Any]:
-        """Return explainable related candidates for all fixture episodes."""
-        episodes: dict[str, Any] = {}
-        for episode_id in fixture.episode_ids:
-            candidates = self.store.related_episode_candidates(
+        """Return explainable related candidates for all fixture workstreams."""
+        workstreams: dict[str, Any] = {}
+        for workstream_id in fixture.workstream_ids:
+            candidates = self.store.related_workstream_candidates(
                 vault_name=fixture.vault_name,
-                episode_id=episode_id,
+                workstream_id=workstream_id,
             )
-            episodes[episode_id] = [candidate.to_dict() for candidate in candidates]
-        return {"vault_name": fixture.vault_name, "episodes": episodes}
+            workstreams[workstream_id] = [candidate.to_dict() for candidate in candidates]
+        return {"vault_name": fixture.vault_name, "workstreams": workstreams}
 
     async def semantic_report(
         self,
@@ -104,9 +104,9 @@ class MemoryExperimentHarness:
         vector_service: VectorService,
     ) -> dict[str, Any]:
         """Return vector-backed field-match candidates for selected query sessions."""
-        for episode_id in fixture.episode_ids:
-            await self.store.vectorize_episode_fields(
-                episode_id=episode_id,
+        for workstream_id in fixture.workstream_ids:
+            await self.store.vectorize_workstream_fields(
+                workstream_id=workstream_id,
                 vector_service=vector_service,
             )
 
@@ -122,14 +122,14 @@ class MemoryExperimentHarness:
             exact_matches = []
             for value in exact_topic_values:
                 exact_matches.extend(
-                    episode.to_dict()
-                    for episode in self.store.search_episodes(
+                    workstream.to_dict()
+                    for workstream in self.store.search_workstreams(
                         vault_name=fixture.vault_name,
                         field_type="topic",
                         normalized_value=value,
                     )
                 )
-            semantic_matches = await self.store.semantic_related_episode_candidates(
+            semantic_matches = await self.store.semantic_related_workstream_candidates(
                 vault_name=fixture.vault_name,
                 query_fields=tuple(field for field in fields if field.field_type == "topic"),
                 vector_service=vector_service,
@@ -137,8 +137,8 @@ class MemoryExperimentHarness:
             )
             queries[session_id] = {
                 "query_fields": [field.to_dict() for field in fields],
-                "exact_topic_match_episode_ids": [
-                    episode["episode_id"] for episode in exact_matches
+                "exact_topic_match_workstream_ids": [
+                    workstream["workstream_id"] for workstream in exact_matches
                 ],
                 "semantic_candidates": [
                     candidate.to_dict() for candidate in semantic_matches
@@ -215,22 +215,22 @@ class MemoryExperimentHarness:
         finally:
             conn.close()
 
-    def _create_seed_episodes(self) -> list[str]:
-        seed_episodes = _scenario_episodes(self.vault_name)
-        episode_ids: list[str] = []
-        for seed in seed_episodes:
-            episode = self.store.create_episode(
-                episode_id=seed["episode_id"],
+    def _create_seed_workstreams(self) -> list[str]:
+        seed_workstreams = _scenario_workstreams(self.vault_name)
+        workstream_ids: list[str] = []
+        for seed in seed_workstreams:
+            workstream = self.store.create_workstream(
+                workstream_id=seed["workstream_id"],
                 vault_name=self.vault_name,
                 title=seed["title"],
                 weight=seed["weight"],
                 confidence=seed["confidence"],
                 metadata=seed.get("metadata", {}),
             )
-            self.store.update_episode_fields(
-                episode_id=episode.episode_id,
+            self.store.update_workstream_fields(
+                workstream_id=workstream.workstream_id,
                 fields=tuple(
-                    WorkEpisodeField(
+                    WorkstreamField(
                         field_type=field["field_type"],
                         value=field["value"],
                         normalized_value=normalize_field_value(field["value"]),
@@ -240,10 +240,10 @@ class MemoryExperimentHarness:
                     for field in seed["fields"]
                 ),
             )
-            self.store.add_episode_artifacts(
-                episode_id=episode.episode_id,
+            self.store.add_workstream_artifacts(
+                workstream_id=workstream.workstream_id,
                 artifacts=tuple(
-                    WorkEpisodeArtifact(
+                    WorkstreamArtifact(
                         vault_name=self.vault_name,
                         path=artifact["path"],
                         artifact_role=artifact["artifact_role"],
@@ -255,15 +255,15 @@ class MemoryExperimentHarness:
             )
             session_id = seed.get("session_id")
             if session_id:
-                self.store.link_session_to_episode(
-                    episode_id=episode.episode_id,
+                self.store.link_session_to_workstream(
+                    workstream_id=workstream.workstream_id,
                     vault_name=self.vault_name,
                     session_id=session_id,
                     link_source="seed_fixture",
                     confidence=0.95,
                 )
-            episode_ids.append(episode.episode_id)
-        return episode_ids
+            workstream_ids.append(workstream.workstream_id)
+        return workstream_ids
 
 
 def _scenario_sessions() -> list[dict[str, Any]]:
@@ -368,11 +368,11 @@ def _scenario_sessions() -> list[dict[str, Any]]:
     ]
 
 
-def _scenario_episodes(vault_name: str) -> list[dict[str, Any]]:
+def _scenario_workstreams(vault_name: str) -> list[dict[str, Any]]:
     del vault_name
     return [
         {
-            "episode_id": "episode-donor-wetlands",
+            "workstream_id": "workstream-donor-wetlands",
             "session_id": "donor-wetlands-session",
             "title": "Wetlands donor report",
             "weight": 7.5,
@@ -389,7 +389,7 @@ def _scenario_episodes(vault_name: str) -> list[dict[str, Any]]:
             ],
         },
         {
-            "episode_id": "episode-donor-forest",
+            "workstream_id": "workstream-donor-forest",
             "session_id": "donor-forest-session",
             "title": "Forest donor report",
             "weight": 5.5,
@@ -405,7 +405,7 @@ def _scenario_episodes(vault_name: str) -> list[dict[str, Any]]:
             ],
         },
         {
-            "episode_id": "episode-wetlands-proposal",
+            "workstream_id": "workstream-wetlands-proposal",
             "session_id": "wetlands-proposal-session",
             "title": "Wetlands funding proposal",
             "weight": 6.0,
@@ -421,7 +421,7 @@ def _scenario_episodes(vault_name: str) -> list[dict[str, Any]]:
             ],
         },
         {
-            "episode_id": "episode-annual-review",
+            "workstream_id": "workstream-annual-review",
             "session_id": "annual-review-session",
             "title": "Annual goals and performance review",
             "weight": 8.0,
@@ -437,7 +437,7 @@ def _scenario_episodes(vault_name: str) -> list[dict[str, Any]]:
             ],
         },
         {
-            "episode_id": "episode-snippets-wetlands",
+            "workstream_id": "workstream-snippets-wetlands",
             "session_id": "snippets-session",
             "title": "Wetlands snippet synthesis",
             "weight": 4.0,

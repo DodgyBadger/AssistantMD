@@ -1,4 +1,4 @@
-"""Work episode memory persistence and deterministic experiment helpers."""
+"""Workstream memory persistence and deterministic experiment helpers."""
 
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ FIELD_TYPES = {
     "strategy",
 }
 VECTOR_FIELD_TYPES = {"type", "topic", "objective", "strategy"}
-FIELD_VECTOR_NAMESPACE = "work_episode_fields"
-FIELD_VECTOR_TABLE = "work_episode_field_vectors"
+FIELD_VECTOR_NAMESPACE = "workstream_fields"
+FIELD_VECTOR_TABLE = "workstream_field_vectors"
 
 
 @dataclass(frozen=True)
-class WorkEpisodeField:
-    """One typed query dimension for a work episode."""
+class WorkstreamField:
+    """One typed query dimension for a workstream."""
 
     field_type: str
     value: str
@@ -48,8 +48,8 @@ class WorkEpisodeField:
 
 
 @dataclass(frozen=True)
-class WorkEpisodeArtifact:
-    """One vault artifact associated with a work episode."""
+class WorkstreamArtifact:
+    """One vault artifact associated with a workstream."""
 
     path: str
     artifact_role: str
@@ -63,10 +63,10 @@ class WorkEpisodeArtifact:
 
 
 @dataclass(frozen=True)
-class WorkEpisode:
-    """Stored work episode with fields and artifacts."""
+class Workstream:
+    """Stored workstream with fields and artifacts."""
 
-    episode_id: str
+    workstream_id: str
     vault_name: str
     title: str | None
     status: str
@@ -75,13 +75,13 @@ class WorkEpisode:
     created_at: str
     last_seen_at: str
     metadata: dict[str, Any] = field(default_factory=dict)
-    fields: tuple[WorkEpisodeField, ...] = ()
-    artifacts: tuple[WorkEpisodeArtifact, ...] = ()
+    fields: tuple[WorkstreamField, ...] = ()
+    artifacts: tuple[WorkstreamArtifact, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Render as a JSON-compatible dictionary."""
         return {
-            "episode_id": self.episode_id,
+            "workstream_id": self.workstream_id,
             "vault_name": self.vault_name,
             "title": self.title,
             "status": self.status,
@@ -96,10 +96,10 @@ class WorkEpisode:
 
 
 @dataclass(frozen=True)
-class RelatedEpisodeCandidate:
-    """Explainable related episode candidate."""
+class RelatedWorkstreamCandidate:
+    """Explainable related workstream candidate."""
 
-    episode_id: str
+    workstream_id: str
     title: str | None
     relation_types: tuple[str, ...]
     reasons: tuple[str, ...]
@@ -121,9 +121,9 @@ class CandidateField:
     source: str
     reason: str
 
-    def to_episode_field(self) -> WorkEpisodeField:
+    def to_workstream_field(self) -> WorkstreamField:
         """Convert to the storage field shape."""
-        return WorkEpisodeField(
+        return WorkstreamField(
             field_type=self.field_type,
             value=self.value,
             normalized_value=self.normalized_value,
@@ -136,39 +136,39 @@ class CandidateField:
         return asdict(self)
 
 
-class WorkEpisodeStore:
-    """SQLite-backed store for work episode memory."""
+class WorkstreamStore:
+    """SQLite-backed store for workstream memory."""
 
     def __init__(self, system_root: str | None = None):
         self.system_root = system_root
         ensure_memory_schema(system_root)
 
-    def create_episode(
+    def create_workstream(
         self,
         *,
         vault_name: str,
         title: str | None = None,
-        episode_id: str | None = None,
+        workstream_id: str | None = None,
         status: str = "active",
         weight: float = 0,
         confidence: float = 0,
         metadata: dict[str, Any] | None = None,
-    ) -> WorkEpisode:
-        """Create and return a work episode without linking any session."""
-        episode_id = episode_id or f"episode-{uuid4().hex}"
+    ) -> Workstream:
+        """Create and return a workstream without linking any session."""
+        workstream_id = workstream_id or f"workstream-{uuid4().hex}"
         now = _utc_now()
         metadata_json = _dump_json(metadata or {})
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO work_episodes (
-                    episode_id, vault_name, title, status, weight, confidence,
+                INSERT INTO workstreams (
+                    workstream_id, vault_name, title, status, weight, confidence,
                     created_at, last_seen_at, metadata_json
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    episode_id,
+                    workstream_id,
                     vault_name,
                     title,
                     status,
@@ -179,136 +179,136 @@ class WorkEpisodeStore:
                     metadata_json,
                 ),
             )
-        episode = self.get_episode(episode_id)
-        if episode is None:
-            raise RuntimeError(f"Failed to create work episode {episode_id}")
-        return episode
+        workstream = self.get_workstream(workstream_id)
+        if workstream is None:
+            raise RuntimeError(f"Failed to create workstream {workstream_id}")
+        return workstream
 
-    def get_episode(self, episode_id: str) -> WorkEpisode | None:
-        """Return one episode by id, including fields and artifacts."""
+    def get_workstream(self, workstream_id: str) -> Workstream | None:
+        """Return one workstream by id, including fields and artifacts."""
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT episode_id, vault_name, title, status, weight, confidence,
+                SELECT workstream_id, vault_name, title, status, weight, confidence,
                        created_at, last_seen_at, metadata_json
-                FROM work_episodes
-                WHERE episode_id = ?
+                FROM workstreams
+                WHERE workstream_id = ?
                 """,
-                (episode_id,),
+                (workstream_id,),
             ).fetchone()
             if row is None:
                 return None
-            return self._episode_from_row(conn, row)
+            return self._workstream_from_row(conn, row)
 
-    def get_current_episode(
+    def get_current_workstream(
         self,
         *,
         vault_name: str,
         session_id: str,
-    ) -> WorkEpisode | None:
-        """Return the episode currently linked to a session, if any."""
+    ) -> Workstream | None:
+        """Return the workstream currently linked to a session, if any."""
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT e.episode_id, e.vault_name, e.title, e.status, e.weight,
+                SELECT e.workstream_id, e.vault_name, e.title, e.status, e.weight,
                        e.confidence, e.created_at, e.last_seen_at, e.metadata_json
-                FROM work_episode_sessions s
-                JOIN work_episodes e ON e.episode_id = s.episode_id
+                FROM workstream_sessions s
+                JOIN workstreams e ON e.workstream_id = s.workstream_id
                 WHERE s.session_id = ? AND s.vault_name = ?
                 """,
                 (session_id, vault_name),
             ).fetchone()
             if row is None:
                 return None
-            return self._episode_from_row(conn, row)
+            return self._workstream_from_row(conn, row)
 
-    def link_session_to_episode(
+    def link_session_to_workstream(
         self,
         *,
-        episode_id: str,
+        workstream_id: str,
         vault_name: str,
         session_id: str,
         link_source: str,
         confidence: float,
-    ) -> WorkEpisode:
-        """Link a session to one current episode in the same vault."""
+    ) -> Workstream:
+        """Link a session to one current workstream in the same vault."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT vault_name FROM work_episodes WHERE episode_id = ?",
-                (episode_id,),
+                "SELECT vault_name FROM workstreams WHERE workstream_id = ?",
+                (workstream_id,),
             ).fetchone()
             if row is None:
-                raise ValueError(f"Unknown work episode: {episode_id}")
-            episode_vault = str(row["vault_name"])
-            if episode_vault != vault_name:
-                raise ValueError("Cannot link a session to an episode in another vault")
+                raise ValueError(f"Unknown workstream: {workstream_id}")
+            workstream_vault = str(row["vault_name"])
+            if workstream_vault != vault_name:
+                raise ValueError("Cannot link a session to a workstream in another vault")
             conn.execute(
                 """
-                INSERT INTO work_episode_sessions (
-                    episode_id, session_id, vault_name, linked_at, link_source, confidence
+                INSERT INTO workstream_sessions (
+                    workstream_id, session_id, vault_name, linked_at, link_source, confidence
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id, vault_name)
                 DO UPDATE SET
-                    episode_id = excluded.episode_id,
+                    workstream_id = excluded.workstream_id,
                     linked_at = excluded.linked_at,
                     link_source = excluded.link_source,
                     confidence = excluded.confidence
                 """,
-                (episode_id, session_id, vault_name, _utc_now(), link_source, confidence),
+                (workstream_id, session_id, vault_name, _utc_now(), link_source, confidence),
             )
             conn.execute(
                 """
-                UPDATE work_episodes
+                UPDATE workstreams
                 SET last_seen_at = ?
-                WHERE episode_id = ?
+                WHERE workstream_id = ?
                 """,
-                (_utc_now(), episode_id),
+                (_utc_now(), workstream_id),
             )
-        episode = self.get_episode(episode_id)
-        if episode is None:
-            raise RuntimeError(f"Linked episode disappeared: {episode_id}")
-        return episode
+        workstream = self.get_workstream(workstream_id)
+        if workstream is None:
+            raise RuntimeError(f"Linked workstream disappeared: {workstream_id}")
+        return workstream
 
-    def unlink_session_from_episode(self, *, vault_name: str, session_id: str) -> None:
-        """Remove the current episode link for a session."""
+    def unlink_session_from_workstream(self, *, vault_name: str, session_id: str) -> None:
+        """Remove the current workstream link for a session."""
         with self._connect() as conn:
             conn.execute(
                 """
-                DELETE FROM work_episode_sessions
+                DELETE FROM workstream_sessions
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
             )
 
-    def update_episode_fields(
+    def update_workstream_fields(
         self,
         *,
-        episode_id: str,
-        fields: list[WorkEpisodeField] | tuple[WorkEpisodeField, ...],
+        workstream_id: str,
+        fields: list[WorkstreamField] | tuple[WorkstreamField, ...],
     ) -> None:
-        """Upsert typed fields for an episode."""
+        """Upsert typed fields for a workstream."""
         with self._connect() as conn:
-            if not self._episode_exists(conn, episode_id):
-                raise ValueError(f"Unknown work episode: {episode_id}")
+            if not self._workstream_exists(conn, workstream_id):
+                raise ValueError(f"Unknown workstream: {workstream_id}")
             now = _utc_now()
             for field_value in fields:
                 _validate_field_type(field_value.field_type)
                 conn.execute(
                     """
-                    INSERT INTO work_episode_fields (
-                        episode_id, field_type, value, normalized_value, confidence,
+                    INSERT INTO workstream_fields (
+                        workstream_id, field_type, value, normalized_value, confidence,
                         source, created_at, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(episode_id, field_type, normalized_value, source)
+                    ON CONFLICT(workstream_id, field_type, normalized_value, source)
                     DO UPDATE SET
                         value = excluded.value,
-                        confidence = MAX(work_episode_fields.confidence, excluded.confidence),
+                        confidence = MAX(workstream_fields.confidence, excluded.confidence),
                         updated_at = excluded.updated_at
                     """,
                     (
-                        episode_id,
+                        workstream_id,
                         field_value.field_type,
                         field_value.value,
                         field_value.normalized_value,
@@ -319,31 +319,31 @@ class WorkEpisodeStore:
                     ),
                 )
 
-    def add_episode_artifacts(
+    def add_workstream_artifacts(
         self,
         *,
-        episode_id: str,
-        artifacts: list[WorkEpisodeArtifact] | tuple[WorkEpisodeArtifact, ...],
+        workstream_id: str,
+        artifacts: list[WorkstreamArtifact] | tuple[WorkstreamArtifact, ...],
     ) -> None:
-        """Upsert vault artifacts for an episode."""
+        """Upsert vault artifacts for a workstream."""
         with self._connect() as conn:
-            if not self._episode_exists(conn, episode_id):
-                raise ValueError(f"Unknown work episode: {episode_id}")
+            if not self._workstream_exists(conn, workstream_id):
+                raise ValueError(f"Unknown workstream: {workstream_id}")
             now = _utc_now()
             for artifact in artifacts:
                 conn.execute(
                     """
-                    INSERT INTO work_episode_artifacts (
-                        episode_id, vault_name, path, artifact_role, source,
+                    INSERT INTO workstream_artifacts (
+                        workstream_id, vault_name, path, artifact_role, source,
                         created_at, metadata_json
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(episode_id, path, artifact_role, source)
+                    ON CONFLICT(workstream_id, path, artifact_role, source)
                     DO UPDATE SET
                         metadata_json = excluded.metadata_json
                     """,
                     (
-                        episode_id,
+                        workstream_id,
                         artifact.vault_name,
                         artifact.path,
                         artifact.artifact_role,
@@ -353,59 +353,59 @@ class WorkEpisodeStore:
                     ),
                 )
 
-    def list_episode_artifacts(self, episode_id: str) -> tuple[WorkEpisodeArtifact, ...]:
-        """List artifacts for one episode."""
+    def list_workstream_artifacts(self, workstream_id: str) -> tuple[WorkstreamArtifact, ...]:
+        """List artifacts for one workstream."""
         with self._connect() as conn:
-            return self._artifacts_for_episode(conn, episode_id)
+            return self._artifacts_for_workstream(conn, workstream_id)
 
     def record_feedback(
         self,
         *,
-        current_episode_id: str,
-        related_episode_id: str,
+        current_workstream_id: str,
+        related_workstream_id: str,
         action: str,
         reason: str | None = None,
     ) -> None:
-        """Record user/system feedback on an episode relationship."""
+        """Record user/system feedback on a workstream relationship."""
         with self._connect() as conn:
-            if not self._episode_exists(conn, current_episode_id):
-                raise ValueError(f"Unknown current work episode: {current_episode_id}")
-            if not self._episode_exists(conn, related_episode_id):
-                raise ValueError(f"Unknown related work episode: {related_episode_id}")
+            if not self._workstream_exists(conn, current_workstream_id):
+                raise ValueError(f"Unknown current workstream: {current_workstream_id}")
+            if not self._workstream_exists(conn, related_workstream_id):
+                raise ValueError(f"Unknown related workstream: {related_workstream_id}")
             conn.execute(
                 """
-                INSERT INTO work_episode_feedback (
-                    current_episode_id, related_episode_id, action, reason, created_at
+                INSERT INTO workstream_feedback (
+                    current_workstream_id, related_workstream_id, action, reason, created_at
                 )
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    current_episode_id,
-                    related_episode_id,
+                    current_workstream_id,
+                    related_workstream_id,
                     action,
                     reason,
                     _utc_now(),
                 ),
             )
 
-    def search_episodes(
+    def search_workstreams(
         self,
         *,
         vault_name: str,
         field_type: str | None = None,
         normalized_value: str | None = None,
         limit: int = 20,
-    ) -> tuple[WorkEpisode, ...]:
-        """Search episodes by vault and optionally a normalized field."""
+    ) -> tuple[Workstream, ...]:
+        """Search workstreams by vault and optionally a normalized field."""
         with self._connect() as conn:
             if field_type and normalized_value:
                 rows = conn.execute(
                     """
-                    SELECT DISTINCT e.episode_id, e.vault_name, e.title, e.status,
+                    SELECT DISTINCT e.workstream_id, e.vault_name, e.title, e.status,
                            e.weight, e.confidence, e.created_at, e.last_seen_at,
                            e.metadata_json
-                    FROM work_episodes e
-                    JOIN work_episode_fields f ON f.episode_id = e.episode_id
+                    FROM workstreams e
+                    JOIN workstream_fields f ON f.workstream_id = e.workstream_id
                     WHERE e.vault_name = ?
                       AND f.field_type = ?
                       AND f.normalized_value = ?
@@ -417,30 +417,30 @@ class WorkEpisodeStore:
             else:
                 rows = conn.execute(
                     """
-                    SELECT episode_id, vault_name, title, status, weight, confidence,
+                    SELECT workstream_id, vault_name, title, status, weight, confidence,
                            created_at, last_seen_at, metadata_json
-                    FROM work_episodes
+                    FROM workstreams
                     WHERE vault_name = ?
                     ORDER BY weight DESC, last_seen_at DESC
                     LIMIT ?
                     """,
                     (vault_name, limit),
                 ).fetchall()
-            return tuple(self._episode_from_row(conn, row) for row in rows)
+            return tuple(self._workstream_from_row(conn, row) for row in rows)
 
-    def related_episode_candidates(
+    def related_workstream_candidates(
         self,
         *,
         vault_name: str,
-        episode_id: str,
+        workstream_id: str,
         limit: int = 10,
-    ) -> tuple[RelatedEpisodeCandidate, ...]:
-        """Return explainable related episode candidates for experiments."""
-        episode = self.get_episode(episode_id)
-        if episode is None:
-            raise ValueError(f"Unknown work episode: {episode_id}")
-        if episode.vault_name != vault_name:
-            raise ValueError("Cannot search related episodes across vaults")
+    ) -> tuple[RelatedWorkstreamCandidate, ...]:
+        """Return explainable related workstream candidates for experiments."""
+        workstream = self.get_workstream(workstream_id)
+        if workstream is None:
+            raise ValueError(f"Unknown workstream: {workstream_id}")
+        if workstream.vault_name != vault_name:
+            raise ValueError("Cannot search related workstreams across vaults")
 
         candidate_reasons: dict[str, list[str]] = {}
         candidate_relations: dict[str, set[str]] = {}
@@ -455,30 +455,30 @@ class WorkEpisodeStore:
             "objective": 1.25,
             "strategy": 1.0,
         }
-        for field_value in episode.fields:
-            matches = self.search_episodes(
+        for field_value in workstream.fields:
+            matches = self.search_workstreams(
                 vault_name=vault_name,
                 field_type=field_value.field_type,
                 normalized_value=field_value.normalized_value,
                 limit=50,
             )
             for match in matches:
-                if match.episode_id == episode_id:
+                if match.workstream_id == workstream_id:
                     continue
                 relation = f"same_{field_value.field_type}"
                 reason = f"{field_value.field_type}: {field_value.value}"
                 weight = field_weights.get(field_value.field_type, 1.0)
                 score = weight + field_value.confidence + match.confidence
-                candidate_reasons.setdefault(match.episode_id, []).append(reason)
-                candidate_relations.setdefault(match.episode_id, set()).add(relation)
-                candidate_scores[match.episode_id] = (
-                    candidate_scores.get(match.episode_id, 0) + score
+                candidate_reasons.setdefault(match.workstream_id, []).append(reason)
+                candidate_relations.setdefault(match.workstream_id, set()).add(relation)
+                candidate_scores[match.workstream_id] = (
+                    candidate_scores.get(match.workstream_id, 0) + score
                 )
 
-        for artifact in episode.artifacts:
+        for artifact in workstream.artifacts:
             folder = artifact.path.rsplit("/", 1)[0] if "/" in artifact.path else ""
-            for match in self._episodes_with_artifact_context(vault_name, artifact.path, folder):
-                if match.episode_id == episode_id:
+            for match in self._workstreams_with_artifact_context(vault_name, artifact.path, folder):
+                if match.workstream_id == workstream_id:
                     continue
                 if artifact.path in {item.path for item in match.artifacts}:
                     relation = "same_artifact_path"
@@ -488,20 +488,20 @@ class WorkEpisodeStore:
                     relation = "same_folder_namespace"
                     reason = f"folder: {folder}"
                     score = 1.0
-                candidate_reasons.setdefault(match.episode_id, []).append(reason)
-                candidate_relations.setdefault(match.episode_id, set()).add(relation)
-                candidate_scores[match.episode_id] = (
-                    candidate_scores.get(match.episode_id, 0) + score
+                candidate_reasons.setdefault(match.workstream_id, []).append(reason)
+                candidate_relations.setdefault(match.workstream_id, set()).add(relation)
+                candidate_scores[match.workstream_id] = (
+                    candidate_scores.get(match.workstream_id, 0) + score
                 )
 
-        candidates: list[RelatedEpisodeCandidate] = []
+        candidates: list[RelatedWorkstreamCandidate] = []
         for candidate_id, score in candidate_scores.items():
-            candidate = self.get_episode(candidate_id)
+            candidate = self.get_workstream(candidate_id)
             if candidate is None:
                 continue
             candidates.append(
-                RelatedEpisodeCandidate(
-                    episode_id=candidate.episode_id,
+                RelatedWorkstreamCandidate(
+                    workstream_id=candidate.workstream_id,
                     title=candidate.title,
                     relation_types=tuple(sorted(candidate_relations[candidate_id])),
                     reasons=tuple(dict.fromkeys(candidate_reasons[candidate_id])),
@@ -511,21 +511,21 @@ class WorkEpisodeStore:
         candidates.sort(key=lambda item: item.score, reverse=True)
         return tuple(candidates[:limit])
 
-    async def vectorize_episode_fields(
+    async def vectorize_workstream_fields(
         self,
         *,
-        episode_id: str,
+        workstream_id: str,
         vector_service: VectorService,
         vector_store: VectorStore | None = None,
         model_alias: str = "embeddings",
     ) -> int:
-        """Embed vector-searchable fields for one episode."""
-        episode = self.get_episode(episode_id)
-        if episode is None:
-            raise ValueError(f"Unknown work episode: {episode_id}")
+        """Embed vector-searchable fields for one workstream."""
+        workstream = self.get_workstream(workstream_id)
+        if workstream is None:
+            raise ValueError(f"Unknown workstream: {workstream_id}")
         fields = tuple(
             field_value
-            for field_value in episode.fields
+            for field_value in workstream.fields
             if field_value.id is not None and field_value.field_type in VECTOR_FIELD_TYPES
         )
         if not fields:
@@ -540,8 +540,8 @@ class WorkEpisodeStore:
                 item_id=str(field_value.id),
                 embedding=embedding,
                 metadata={
-                    "episode_id": episode.episode_id,
-                    "vault_name": episode.vault_name,
+                    "workstream_id": workstream.workstream_id,
+                    "vault_name": workstream.vault_name,
                     "field_type": field_value.field_type,
                     "field_value": field_value.value,
                     "normalized_value": field_value.normalized_value,
@@ -551,18 +551,18 @@ class WorkEpisodeStore:
             )
         return len(fields)
 
-    async def semantic_related_episode_candidates(
+    async def semantic_related_workstream_candidates(
         self,
         *,
         vault_name: str,
-        query_fields: tuple[CandidateField | WorkEpisodeField, ...],
+        query_fields: tuple[CandidateField | WorkstreamField, ...],
         vector_service: VectorService,
         vector_store: VectorStore | None = None,
         model_alias: str = "embeddings",
         limit: int = 10,
         min_score: float = 0.78,
-    ) -> tuple[RelatedEpisodeCandidate, ...]:
-        """Return vector-backed related episode candidates from extracted fields."""
+    ) -> tuple[RelatedWorkstreamCandidate, ...]:
+        """Return vector-backed related workstream candidates from extracted fields."""
         fields = tuple(
             field_value
             for field_value in query_fields
@@ -592,8 +592,8 @@ class WorkEpisodeStore:
                 metadata = hit.metadata
                 if metadata.get("vault_name") != vault_name:
                     continue
-                episode_id = str(metadata.get("episode_id") or "")
-                if not episode_id:
+                workstream_id = str(metadata.get("workstream_id") or "")
+                if not workstream_id:
                     continue
                 matched_type = str(metadata.get("field_type") or "")
                 matched_value = str(metadata.get("field_value") or hit.text)
@@ -603,24 +603,24 @@ class WorkEpisodeStore:
                     f"({hit.score:.2f})"
                 )
                 confidence = float(metadata.get("confidence") or 0)
-                candidate_reasons.setdefault(episode_id, []).append(reason)
-                candidate_relations.setdefault(episode_id, set()).add(relation)
-                candidate_scores[episode_id] = (
-                    candidate_scores.get(episode_id, 0) + hit.score + confidence
+                candidate_reasons.setdefault(workstream_id, []).append(reason)
+                candidate_relations.setdefault(workstream_id, set()).add(relation)
+                candidate_scores[workstream_id] = (
+                    candidate_scores.get(workstream_id, 0) + hit.score + confidence
                 )
 
-        candidates: list[RelatedEpisodeCandidate] = []
-        for episode_id, score in candidate_scores.items():
-            episode = self.get_episode(episode_id)
-            if episode is None:
+        candidates: list[RelatedWorkstreamCandidate] = []
+        for workstream_id, score in candidate_scores.items():
+            workstream = self.get_workstream(workstream_id)
+            if workstream is None:
                 continue
             candidates.append(
-                RelatedEpisodeCandidate(
-                    episode_id=episode.episode_id,
-                    title=episode.title,
-                    relation_types=tuple(sorted(candidate_relations[episode_id])),
-                    reasons=tuple(dict.fromkeys(candidate_reasons[episode_id])),
-                    score=round(score + episode.weight, 3),
+                RelatedWorkstreamCandidate(
+                    workstream_id=workstream.workstream_id,
+                    title=workstream.title,
+                    relation_types=tuple(sorted(candidate_relations[workstream_id])),
+                    reasons=tuple(dict.fromkeys(candidate_reasons[workstream_id])),
+                    score=round(score + workstream.weight, 3),
                 )
             )
         candidates.sort(key=lambda item: item.score, reverse=True)
@@ -677,10 +677,10 @@ class WorkEpisodeStore:
             system_root=self.system_root,
         )
 
-    def _episode_from_row(self, conn: sqlite3.Connection, row: sqlite3.Row) -> WorkEpisode:
-        episode_id = str(row["episode_id"])
-        return WorkEpisode(
-            episode_id=episode_id,
+    def _workstream_from_row(self, conn: sqlite3.Connection, row: sqlite3.Row) -> Workstream:
+        workstream_id = str(row["workstream_id"])
+        return Workstream(
+            workstream_id=workstream_id,
             vault_name=str(row["vault_name"]),
             title=str(row["title"]) if row["title"] is not None else None,
             status=str(row["status"]),
@@ -689,26 +689,26 @@ class WorkEpisodeStore:
             created_at=str(row["created_at"]),
             last_seen_at=str(row["last_seen_at"]),
             metadata=_load_json(row["metadata_json"]),
-            fields=self._fields_for_episode(conn, episode_id),
-            artifacts=self._artifacts_for_episode(conn, episode_id),
+            fields=self._fields_for_workstream(conn, workstream_id),
+            artifacts=self._artifacts_for_workstream(conn, workstream_id),
         )
 
-    def _fields_for_episode(
+    def _fields_for_workstream(
         self,
         conn: sqlite3.Connection,
-        episode_id: str,
-    ) -> tuple[WorkEpisodeField, ...]:
+        workstream_id: str,
+    ) -> tuple[WorkstreamField, ...]:
         rows = conn.execute(
             """
             SELECT id, field_type, value, normalized_value, confidence, source
-            FROM work_episode_fields
-            WHERE episode_id = ?
+            FROM workstream_fields
+            WHERE workstream_id = ?
             ORDER BY field_type ASC, normalized_value ASC
             """,
-            (episode_id,),
+            (workstream_id,),
         ).fetchall()
         return tuple(
-            WorkEpisodeField(
+            WorkstreamField(
                 id=int(row["id"]),
                 field_type=str(row["field_type"]),
                 value=str(row["value"]),
@@ -719,22 +719,22 @@ class WorkEpisodeStore:
             for row in rows
         )
 
-    def _artifacts_for_episode(
+    def _artifacts_for_workstream(
         self,
         conn: sqlite3.Connection,
-        episode_id: str,
-    ) -> tuple[WorkEpisodeArtifact, ...]:
+        workstream_id: str,
+    ) -> tuple[WorkstreamArtifact, ...]:
         rows = conn.execute(
             """
             SELECT vault_name, path, artifact_role, source, metadata_json
-            FROM work_episode_artifacts
-            WHERE episode_id = ?
+            FROM workstream_artifacts
+            WHERE workstream_id = ?
             ORDER BY path ASC, artifact_role ASC
             """,
-            (episode_id,),
+            (workstream_id,),
         ).fetchall()
         return tuple(
-            WorkEpisodeArtifact(
+            WorkstreamArtifact(
                 vault_name=str(row["vault_name"]),
                 path=str(row["path"]),
                 artifact_role=str(row["artifact_role"]),
@@ -744,34 +744,34 @@ class WorkEpisodeStore:
             for row in rows
         )
 
-    def _episode_exists(self, conn: sqlite3.Connection, episode_id: str) -> bool:
+    def _workstream_exists(self, conn: sqlite3.Connection, workstream_id: str) -> bool:
         row = conn.execute(
-            "SELECT 1 FROM work_episodes WHERE episode_id = ? LIMIT 1",
-            (episode_id,),
+            "SELECT 1 FROM workstreams WHERE workstream_id = ? LIMIT 1",
+            (workstream_id,),
         ).fetchone()
         return row is not None
 
-    def _episodes_with_artifact_context(
+    def _workstreams_with_artifact_context(
         self,
         vault_name: str,
         path: str,
         folder: str,
-    ) -> tuple[WorkEpisode, ...]:
+    ) -> tuple[Workstream, ...]:
         with self._connect() as conn:
             like_pattern = f"{folder}/%" if folder else "%"
             rows = conn.execute(
                 """
-                SELECT DISTINCT e.episode_id, e.vault_name, e.title, e.status,
+                SELECT DISTINCT e.workstream_id, e.vault_name, e.title, e.status,
                        e.weight, e.confidence, e.created_at, e.last_seen_at,
                        e.metadata_json
-                FROM work_episodes e
-                JOIN work_episode_artifacts a ON a.episode_id = e.episode_id
+                FROM workstreams e
+                JOIN workstream_artifacts a ON a.workstream_id = e.workstream_id
                 WHERE e.vault_name = ?
                   AND (a.path = ? OR a.path LIKE ?)
                 """,
                 (vault_name, path, like_pattern),
             ).fetchall()
-            return tuple(self._episode_from_row(conn, row) for row in rows)
+            return tuple(self._workstream_from_row(conn, row) for row in rows)
 
 
 def extract_candidate_fields(text: str) -> tuple[CandidateField, ...]:
@@ -858,7 +858,7 @@ def normalize_field_value(value: str) -> str:
     return re.sub(r"\s+", " ", normalized)
 
 
-def _field_embedding_text(field_value: CandidateField | WorkEpisodeField) -> str:
+def _field_embedding_text(field_value: CandidateField | WorkstreamField) -> str:
     return f"{field_value.field_type}: {field_value.value}"
 
 
@@ -891,7 +891,7 @@ def _first_sentence_with_verb(text: str) -> str | None:
 def _validate_field_type(field_type: str) -> None:
     if field_type not in FIELD_TYPES:
         available = ", ".join(sorted(FIELD_TYPES))
-        raise ValueError(f"Unsupported work episode field type '{field_type}'. Use: {available}")
+        raise ValueError(f"Unsupported workstream field type '{field_type}'. Use: {available}")
 
 
 def _dump_json(value: dict[str, Any]) -> str:

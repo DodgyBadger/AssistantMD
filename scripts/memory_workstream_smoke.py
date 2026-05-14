@@ -1,4 +1,4 @@
-"""Run Slice 1 work episode memory smoke experiments."""
+"""Run Slice 1 workstream memory smoke experiments."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ async def main() -> None:
                         "system_root": str(fixture.system_root),
                         "vault_name": fixture.vault_name,
                         "session_count": len(fixture.session_ids),
-                        "episode_count": len(fixture.episode_ids),
+                        "workstream_count": len(fixture.workstream_ids),
                     },
                     "extraction": extraction,
                     "related": related,
@@ -79,17 +79,17 @@ def _assert_extraction(report: dict) -> None:
 
 
 def _assert_related(report: dict) -> None:
-    candidates = report["episodes"]["episode-donor-wetlands"]
-    candidate_ids = [candidate["episode_id"] for candidate in candidates]
-    assert "episode-donor-forest" in candidate_ids
-    assert "episode-wetlands-proposal" in candidate_ids
+    candidates = report["workstreams"]["workstream-donor-wetlands"]
+    candidate_ids = [candidate["workstream_id"] for candidate in candidates]
+    assert "workstream-donor-forest" in candidate_ids
+    assert "workstream-wetlands-proposal" in candidate_ids
     donor_forest = next(
-        candidate for candidate in candidates if candidate["episode_id"] == "episode-donor-forest"
+        candidate for candidate in candidates if candidate["workstream_id"] == "workstream-donor-forest"
     )
     wetlands_proposal = next(
         candidate
         for candidate in candidates
-        if candidate["episode_id"] == "episode-wetlands-proposal"
+        if candidate["workstream_id"] == "workstream-wetlands-proposal"
     )
     assert "same_type" in donor_forest["relation_types"]
     assert "same_topic" in wetlands_proposal["relation_types"]
@@ -97,16 +97,16 @@ def _assert_related(report: dict) -> None:
 
 def _assert_semantic(report: dict) -> None:
     query = report["queries"]["riparian-grant-session"]
-    assert query["exact_topic_match_episode_ids"] == []
+    assert query["exact_topic_match_workstream_ids"] == []
     candidate_ids = [
-        candidate["episode_id"] for candidate in query["semantic_candidates"]
+        candidate["workstream_id"] for candidate in query["semantic_candidates"]
     ]
-    assert "episode-wetlands-proposal" in candidate_ids
-    assert "episode-donor-wetlands" in candidate_ids
+    assert "workstream-wetlands-proposal" in candidate_ids
+    assert "workstream-donor-wetlands" in candidate_ids
     wetlands_proposal = next(
         candidate
         for candidate in query["semantic_candidates"]
-        if candidate["episode_id"] == "episode-wetlands-proposal"
+        if candidate["workstream_id"] == "workstream-wetlands-proposal"
     )
     assert any(
         relation.startswith("semantic_topic") for relation in wetlands_proposal["relation_types"]

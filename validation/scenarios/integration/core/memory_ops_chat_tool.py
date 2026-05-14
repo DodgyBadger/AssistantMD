@@ -2,7 +2,7 @@
 Integration scenario for the chat-facing memory_ops tool.
 
 Validates that a selected chat agent can call memory_ops through the normal
-tool path and use active chat session/vault context for work episode operations.
+tool path and use active chat session/vault context for workstream operations.
 """
 
 from __future__ import annotations
@@ -16,23 +16,23 @@ from validation.core.base_scenario import BaseScenario
 
 
 class MemoryOpsChatToolScenario(BaseScenario):
-    """Validate memory_ops can link and update work episodes from chat."""
+    """Validate memory_ops can link and update workstreams from chat."""
 
     async def test_scenario(self):
         vault = self.create_vault("MemoryOpsChatToolVault")
         session_id = "memory_ops_chat_tool_session"
-        episode_id = "episode-chat-tool-probe"
+        workstream_id = "workstream-chat-tool-probe"
 
         await self.start_system()
 
         import core.chat.executor as chat_executor
         from core.authoring.shared.tool_binding import resolve_tool_binding
-        from core.memory.work_episodes import WorkEpisodeStore
+        from core.memory.workstreams import WorkstreamStore
         from pydantic_ai.models.test import TestModel
 
-        store = WorkEpisodeStore(system_root=str(self._get_system_controller()._system_root))
-        store.create_episode(
-            episode_id=episode_id,
+        store = WorkstreamStore(system_root=str(self._get_system_controller()._system_root))
+        store.create_workstream(
+            workstream_id=workstream_id,
             vault_name=vault.name,
             title="Chat tool memory probe",
             confidence=0.9,
@@ -51,14 +51,14 @@ class MemoryOpsChatToolScenario(BaseScenario):
                 if current_case["name"] == "link":
                     return {
                         "operation": "link_session",
-                        "episode_id": episode_id,
+                        "workstream_id": workstream_id,
                         "link_source": "validation_chat",
                         "confidence": 0.93,
                     }
                 if current_case["name"] == "update":
                     return {
-                        "operation": "update_episode",
-                        "episode_id": episode_id,
+                        "operation": "update_workstream",
+                        "workstream_id": workstream_id,
                         "field_type": "topic",
                         "value": "chat memory testing",
                         "confidence": 0.71,
@@ -83,17 +83,17 @@ class MemoryOpsChatToolScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Link this chat to the seeded work episode.",
+                    "prompt": "Link this chat to the seeded workstream.",
                     "session_id": session_id,
                     "tools": ["memory_ops"],
                     "model": "test",
                 },
             )
             self.soft_assert_equal(linked.status_code, 200, "Link chat should succeed")
-            current = store.get_current_episode(vault_name=vault.name, session_id=session_id)
+            current = store.get_current_workstream(vault_name=vault.name, session_id=session_id)
             self.soft_assert(
-                current is not None and current.episode_id == episode_id,
-                "memory_ops should link the active chat session to the seeded episode",
+                current is not None and current.workstream_id == workstream_id,
+                "memory_ops should link the active chat session to the seeded workstream",
             )
 
             current_case["name"] = "update"
@@ -102,18 +102,18 @@ class MemoryOpsChatToolScenario(BaseScenario):
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Update the current work episode topic.",
+                    "prompt": "Update the current workstream topic.",
                     "session_id": f"{session_id}_update",
                     "tools": ["memory_ops"],
                     "model": "test",
                 },
             )
             self.soft_assert_equal(updated.status_code, 200, "Update chat should succeed")
-            episode = store.get_episode(episode_id)
+            workstream = store.get_workstream(workstream_id)
             self.soft_assert(
-                episode is not None
-                and _has_field(episode.fields, "topic", "chat memory testing"),
-                "memory_ops should update episode fields from chat",
+                workstream is not None
+                and _has_field(workstream.fields, "topic", "chat memory testing"),
+                "memory_ops should update workstream fields from chat",
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare

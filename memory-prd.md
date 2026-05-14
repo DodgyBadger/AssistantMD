@@ -1,15 +1,15 @@
-# PRD: Memory, Work Episodes, and Adaptive Context
+# PRD: Memory, Work Workstreams, and Adaptive Context
 
 ## Summary
 
 AssistantMD memory helps the agent assemble the right working set for the task
-at hand by remembering prior work episodes and the vault material used during
+at hand by remembering prior workstreams and the vault material used during
 that work.
 
 The vault remains the source of truth. Memory does not replace vault files with a
 hidden agent database. Instead, it tracks the shape of work as it happens:
 current objective, topics, people, organizations, files used, outputs created,
-and prior episodes that may be relevant. The default context assembly path uses
+and prior workstreams that may be relevant. The default context assembly path uses
 that memory conservatively to suggest or include useful context, while authored
 context scripts remain the override point for users who want explicit control.
 
@@ -17,9 +17,9 @@ context scripts remain the override point for users who want explicit control.
 
 - Give users useful continuity across chat sessions without requiring them to
   manually write custom context scripts for every project.
-- Track every chat session as a new work episode or continuation of an existing
-  work episode.
-- Use work episodes as the gateway into relevant vault material for similar
+- Track every chat session as a new workstream or continuation of an existing
+  workstream.
+- Use workstreams as the gateway into relevant vault material for similar
   future work.
 - Keep memory transparent: show why prior work or files were considered
   relevant.
@@ -48,7 +48,7 @@ somewhere in the vault.
 
 ### Related Work Is Multi-Dimensional
 
-Two episodes can be related by task type, topic, person, organization, project,
+Two workstreams can be related by task type, topic, person, organization, project,
 artifact pattern, objective, or strategy. A donor report about wetlands may be
 related to another donor report by format, and to a wetlands proposal by topic.
 Those relationships should not collapse into one opaque similarity score.
@@ -78,15 +78,15 @@ A working set is the context the agent needs for the task at hand: relevant
 notes, prior history, source files, project summaries, decisions, constraints,
 recent changes, examples, or instructions.
 
-### Work Episode
+### Work Workstream
 
-A work episode records the shape of a piece of work. Every chat session belongs
-to one work episode, either by continuing prior work or by starting a new
-episode.
+A workstream records the shape of a piece of work. Every chat session belongs
+to one workstream, either by continuing prior work or by starting a new
+workstream.
 
-Work episodes can be small or substantial. Ranking and aging determine whether
-an episode should influence future retrieval. A short one-file question may
-remain a low-weight episode. A multi-session report with source files and output
+Workstreams can be small or substantial. Ranking and aging determine whether
+a workstream should influence future retrieval. A short one-file question may
+remain a low-weight workstream. A multi-session report with source files and output
 artifacts becomes a stronger future signal.
 
 ### Adaptive Context Assembly
@@ -95,7 +95,7 @@ Memory feeds context assembly. Context assembly remains the mechanism that
 decides what the chat agent sees.
 
 The default context assembly policy becomes memory-aware: it can infer the
-current work episode, find related prior episodes, include safe continuation
+current workstream, find related prior workstreams, include safe continuation
 context, and suggest looser related material. User-authored context scripts can
 call the same `memory_ops` tool or bypass memory entirely.
 
@@ -105,14 +105,14 @@ call the same `memory_ops` tool or bypass memory entirely.
 
 When a new chat starts, AssistantMD should:
 
-1. Create a provisional work episode or match the chat to an existing active or
-   recent episode.
+1. Create a provisional workstream or match the chat to an existing active or
+   recent workstream.
 2. Treat the selected vault as the hard scope for matching. Within that scope,
    use early signals such as user prompt, session title, active files, recent
    files, and explicit user language.
 3. If a high-confidence continuation is found, load a conservative working set
    through default context assembly.
-4. If related but lower-confidence episodes are found, present them as
+4. If related but lower-confidence workstreams are found, present them as
    suggestions rather than silently injecting them.
 
 Example:
@@ -129,7 +129,7 @@ notes.
 
 ### During Chat
 
-As the user works, AssistantMD should update the current episode with signals:
+As the user works, AssistantMD should update the current workstream with signals:
 
 - objective or mission
 - task type
@@ -149,16 +149,16 @@ completion update path if that is more reliable.
 ### Future Chat Retrieval
 
 When a future chat resembles prior work, AssistantMD should retrieve related
-episodes by relationship type:
+workstreams by relationship type:
 
-- continuation of the same episode
+- continuation of the same workstream
 - same organization/person/project
 - same topic/theme
 - same task type
 - same output format or artifact pattern
 - related source files
 
-The system should rank candidates using relationship strength, episode weight,
+The system should rank candidates using relationship strength, workstream weight,
 recency, user confirmation, reuse, and confidence.
 
 ### User Control
@@ -167,19 +167,19 @@ The user should be able to:
 
 - accept suggested prior context
 - reject a suggestion
-- continue a prior episode
-- start a new episode
-- rename or retitle the current episode
-- eventually inspect and edit episode metadata
+- continue a prior workstream
+- start a new workstream
+- rename or retitle the current workstream
+- eventually inspect and edit workstream metadata
 
 V1 does not need a full management UI, but the design should not prevent one.
 
-## Episode Data Model
+## Workstream Data Model
 
 Recommended v1 fields:
 
 ```yaml
-episode_id:
+workstream_id:
 vault_name:
 title:
 status: active | paused | completed | archived
@@ -228,8 +228,8 @@ signals:
   continuation_count:
   last_reused_at:
 
-related_episodes:
-  - episode_id:
+related_workstreams:
+  - workstream_id:
     relation: continuation | same_entity | same_topic | same_type | format_reference | source_overlap
     confidence:
 ```
@@ -244,7 +244,7 @@ Field policy:
 
 ## Ranking And Aging
 
-Every episode exists, but not every episode matters equally.
+Every workstream exists, but not every workstream matters equally.
 
 Ranking signals:
 
@@ -257,17 +257,17 @@ Ranking signals:
 - user-provided title
 - user-confirmed fields
 - repeated continuation
-- reuse by later episodes
+- reuse by later workstreams
 - relationship type to current work
 - confidence of extracted fields
 
 Aging behavior:
 
-- Episodes decay over time unless reinforced by reuse, continuation, durable
+- Workstreams decay over time unless reinforced by reuse, continuation, durable
   outputs, user confirmation, or explicit archival/pinning.
-- Low-weight one-off episodes should remain searchable but rarely appear as
+- Low-weight one-off workstreams should remain searchable but rarely appear as
   proactive suggestions.
-- Completed or archived episodes may still be useful as format references,
+- Completed or archived workstreams may still be useful as format references,
   source references, or historical evidence.
 
 ## Context Assembly Contract
@@ -278,7 +278,7 @@ Default behavior:
 
 - The default context assembly path is memory-aware.
 - It can include high-confidence continuation context automatically.
-- It should suggest lower-confidence related episodes before pulling them into
+- It should suggest lower-confidence related workstreams before pulling them into
   the working set.
 - It should explain the route: why prior work was considered relevant.
 
@@ -287,17 +287,17 @@ Custom behavior:
 - User-authored context scripts can call `memory_ops(...)` directly, the same
   way they call tools such as `file_ops_safe(...)`.
 - Users can choose stricter or looser policies.
-- Users can ignore inferred episodes, include only confirmed memory, scope to
+- Users can ignore inferred workstreams, include only confirmed memory, scope to
   specific project folders, or build specialized working sets.
 
 Candidate `memory_ops` operation surface:
 
 ```python
-await memory_ops(operation="current_episode")
-await memory_ops(operation="related_episodes", limit=5, relation_types=["same_topic", "same_type"])
-await memory_ops(operation="episode_artifacts", episode_id="...", include=["outputs", "sources"])
-await memory_ops(operation="relink_session", episode_id="...")
-await memory_ops(operation="update_episode", topics=["wetlands"], source="user_confirmed")
+await memory_ops(operation="current_workstream")
+await memory_ops(operation="related_workstreams", limit=5, relation_types=["same_topic", "same_type"])
+await memory_ops(operation="workstream_artifacts", workstream_id="...", include=["outputs", "sources"])
+await memory_ops(operation="relink_session", workstream_id="...")
+await memory_ops(operation="update_workstream", topics=["wetlands"], source="user_confirmed")
 ```
 
 The default memory behavior should be implemented through the same `memory_ops`
@@ -310,30 +310,30 @@ recreated or modified by a context script using `memory_ops`, it is too hidden.
 
 Recommended v1 persistence:
 
-- Store work episodes and fields in a system database.
-- Link episode records to chat sessions, vault names, file paths, and artifacts.
-- Do not require markdown episode files in v1.
-- Keep the door open for future markdown export or user-editable episode notes.
+- Store workstreams and fields in a system database.
+- Link workstream records to chat sessions, vault names, file paths, and artifacts.
+- Do not require markdown workstream files in v1.
+- Keep the door open for future markdown export or user-editable workstream notes.
 
 Derived indexes:
 
-- Episode fields form the first indexing surface.
-- Topic, entity, task-type, artifact, and related-episode indexes are derived
-  from work episodes.
+- Workstream fields form the first indexing surface.
+- Topic, entity, task-type, artifact, and related-workstream indexes are derived
+  from workstreams.
 - The system should not first infer a global vault-wide entity/theme map.
-  Information enters memory through observed work episodes and their linked vault
+  Information enters memory through observed workstreams and their linked vault
   material.
 
 Semantic search:
 
-- Useful later for fuzzy matching over episode summaries, topics, objectives,
+- Useful later for fuzzy matching over workstream summaries, topics, objectives,
   and strategies.
 - Should not be the first authority layer.
 - Exact entity/path matching should remain separate from semantic similarity.
 
 ## Inputs And Instrumentation
 
-To make work episodes useful, AssistantMD needs to observe more than file
+To make workstreams useful, AssistantMD needs to observe more than file
 mutations.
 
 Potential inputs:
@@ -360,12 +360,12 @@ AssistantMD should distinguish:
 - source vault files
 - imported files
 - generated summaries
-- inferred episode fields
-- user-confirmed episode fields
+- inferred workstream fields
+- user-confirmed workstream fields
 - output artifacts
 - candidate recommendations
 
-Generated memory starts as evidence. A work episode can suggest that a file,
+Generated memory starts as evidence. A workstream can suggest that a file,
 decision, or strategy was useful before, but should not silently make it
 authoritative for new work.
 
@@ -375,21 +375,21 @@ Every recommendation should be explainable:
 Suggested because:
 - same organization: Foundation X
 - same deliverable type: donor report
-- prior episode created output: Reports/Foundation-X/2025-update.md
+- prior workstream created output: Reports/Foundation-X/2025-update.md
 ```
 
 ## V1 Scope Recommendation
 
 Build the smallest useful slice:
 
-1. Add work episode persistence.
-2. Assign every chat session to a new or existing episode.
+1. Add workstream persistence.
+2. Assign every chat session to a new or existing workstream.
 3. Extract/update a small set of fields from chat/session metadata:
    title, type, topics, organizations, objectives, artifacts.
-4. Link episodes to chat sessions and files modified through existing mutation
+4. Link workstreams to chat sessions and files modified through existing mutation
    routing.
-5. Add related-episode retrieval by exact fields and simple lexical matching.
-6. Add conservative default context assembly suggestions for related episodes.
+5. Add related-workstream retrieval by exact fields and simple lexical matching.
+6. Add conservative default context assembly suggestions for related workstreams.
 7. Expand `memory_ops` so context scripts and chat tools use the same memory
    operation surface.
 8. Add enough UI/chat messaging to show suggestions and reasons.
@@ -398,24 +398,24 @@ Defer:
 
 - embeddings
 - full vault semantic retrieval
-- markdown episode mirrors
-- full episode management UI
+- markdown workstream mirrors
+- full workstream management UI
 - complex graph/centrality maps
 - automatic promotion of inferred decisions
 
 ## Affected Areas
 
-- `core/memory/`: likely home for work episode service or broker integration.
-- `core/chat/`: session-to-episode assignment and chat metadata links.
+- `core/memory/`: likely home for workstream service or broker integration.
+- `core/chat/`: session-to-workstream assignment and chat metadata links.
 - `core/authoring/context_manager.py`: default context assembly integration.
 - `core/tools/memory_ops.py`: canonical tool contract for conversation history
-  and work episode operations.
+  and workstream operations.
 - `core/authoring/`: ensure `memory_ops` is available to context scripts through
   the existing direct tool-call surface where policy allows it.
 - `core/vault_state/`: artifact links from routed mutations and vault paths.
-- `api/models.py` and `api/endpoints.py`: current episode, related episode, and
+- `api/models.py` and `api/endpoints.py`: current workstream, related workstream, and
   user action endpoints.
-- `static/`: UI affordances for related-work suggestions or current episode
+- `static/`: UI affordances for related-work suggestions or current workstream
   state.
 - `docs/architecture/memory.md`: architecture contract update.
 
@@ -423,30 +423,30 @@ Defer:
 
 Recommended validation scenarios:
 
-- A first chat creates a work episode and links it to the chat session.
-- A second chat with matching organization/type retrieves the first episode as a
+- A first chat creates a workstream and links it to the chat session.
+- A second chat with matching organization/type retrieves the first workstream as a
   related candidate with reasons.
 - A same-topic but different-type chat is related by topic, not continuation.
-- A short one-file question creates a low-weight episode that is searchable but
+- A short one-file question creates a low-weight workstream that is searchable but
   not proactively suggested over stronger matches.
-- User rejection prevents a suggested episode from being injected again for the
-  same current episode.
-- A context script can retrieve related episodes through `memory_ops(...)`.
+- User rejection prevents a suggested workstream from being injected again for the
+  same current workstream.
+- A context script can retrieve related workstreams through `memory_ops(...)`.
 
 ## Open Questions
 
-- Should episode extraction run after every assistant response, on session idle,
+- Should workstream extraction run after every assistant response, on session idle,
   or through a session-end summarization pass?
 - What is the minimum UI for accepting/rejecting related context?
-- How should users manually merge, split, or reassign episodes?
-- Should episode state ever be mirrored into markdown by default?
+- How should users manually merge, split, or reassign workstreams?
+- Should workstream state ever be mirrored into markdown by default?
 - What is the first safe source for files read/retrieved, not just modified?
 - What fields should be user-confirmable in v1?
-- How should default context assembly behave when multiple related episodes are
+- How should default context assembly behave when multiple related workstreams are
   plausible but none is clearly a continuation?
 
 ## Next Phase
 
 Feature development should start by locating the current chat session lifecycle,
 context assembly entry points, and persistence patterns, then propose the
-smallest episode persistence and matching slice before adding UI behavior.
+smallest workstream persistence and matching slice before adding UI behavior.
