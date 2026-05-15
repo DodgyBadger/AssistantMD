@@ -192,6 +192,9 @@ automation.
   scenario code into core/product behavior.
 - Keep field contribution output in responses so ranking remains inspectable.
 - Revisit named-entity exact matching after real data accumulates.
+- Keep lexical retrieval simple for now: no custom stopword or domain-filtering
+  layer. Tune the existing BM25/vector weights first, and only add filtering
+  after repeated retrieval failures point to a specific need.
 
 ### Slice E: Vault-State Retrieval Signals
 

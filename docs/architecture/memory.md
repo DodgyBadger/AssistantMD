@@ -53,13 +53,19 @@ including after process restart.
 `memory_ops` is the LLM-facing adapter for session memory operations. It is
 available through the normal configured tool path, so chat agents and authored
 scripts use the same operation surface for session memory lookup, updates, and
-field search. Conversation history is not exposed through `memory_ops`; if chat
+search. Conversation history is not exposed through `memory_ops`; if chat
 history should become memory, it should first be exported or extracted into
 vault artifacts or direct session memory fields. Context scripts should use
 `retrieve_history(...)` and `assemble_context(...)` for context reassembly. If a
 lower-level caller needs direct access to individual provider-native parts, it
 should use a lower-level service/provider interface rather than the
 general-purpose LLM tool.
+
+Session retrieval is exposed as `search_sessions` with modes rather than direct
+field selection. `related` compares the current or specified session against
+stored memory; `search` fans a user query across memory fields using FTS/BM25
+and vector evidence; `deep` adds FTS/BM25 over raw chat transcripts. Field-aware
+storage and scoring remain internal implementation details.
 
 ## Design Notes
 

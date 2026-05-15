@@ -174,6 +174,8 @@ For now, the best experimental baseline is:
 - durable `summary` and `user_intent`;
 - derived `domain`, `work_product`, and `named_entities`;
 - vectors over `summary`, `domain`, `work_product`, and `user_intent`;
+- lexical FTS/BM25 over memory fields and transcripts without custom
+  stopword/domain filtering;
 - exact/wildcard search for `named_entities`;
 - scenario-local compound retrieval using field-aware scores.
 

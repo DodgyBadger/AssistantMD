@@ -23,6 +23,7 @@ SESSION_MEMORY_TEXT_FIELDS = (
 )
 VECTOR_FIELD_TYPES = {"summary", "domain", "work_product", "user_intent"}
 WILDCARD_FIELD_TYPES = {"named_entities"}
+MEMORY_VECTOR_MIN_SCORE = 0.50
 FIELD_VECTOR_NAMESPACE = "session_memory_fields"
 FIELD_VECTOR_TABLE = "session_memory_field_vectors"
 RELATED_SESSION_FIELD_WEIGHTS = {
@@ -30,7 +31,7 @@ RELATED_SESSION_FIELD_WEIGHTS = {
     "work_product": 0.35,
     "user_intent": 0.20,
 }
-RELATED_SESSION_FIELD_MIN_SCORE = 0.40
+RELATED_SESSION_FIELD_MIN_SCORE = MEMORY_VECTOR_MIN_SCORE
 RELATED_SESSION_AUTOMATIC_THRESHOLD = 0.70
 RELATED_SESSION_POSSIBLE_THRESHOLD = 0.55
 
@@ -98,6 +99,7 @@ class SessionMemorySearchResult:
     match_type: str
     matched_fields: tuple[dict[str, Any], ...]
     score: float | None = None
+    rank: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Render as a JSON-compatible dictionary."""
@@ -106,6 +108,7 @@ class SessionMemorySearchResult:
             "match_type": self.match_type,
             "matched_fields": list(self.matched_fields),
             "score": self.score,
+            "rank": self.rank,
         }
 
 
@@ -212,6 +215,17 @@ class SessionMemoryStore:
                     _dump_json(metadata) if metadata is not None else None,
                 ),
             )
+            row = conn.execute(
+                f"""
+                SELECT {self._session_memory_select_columns()}
+                FROM session_memories
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (session_id, vault_name),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError(f"Failed to upsert session memory {session_id}")
+            self._upsert_fts_row(conn, row)
         session_memory = self.get_session_memory(
             vault_name=vault_name,
             session_id=session_id,
@@ -243,6 +257,13 @@ class SessionMemoryStore:
     def delete_session_memory(self, *, vault_name: str, session_id: str) -> bool:
         """Delete one session memory row and associated artifacts."""
         with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM session_memories_fts
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (session_id, vault_name),
+            )
             cursor = conn.execute(
                 """
                 DELETE FROM session_memories
@@ -251,6 +272,66 @@ class SessionMemoryStore:
                 (session_id, vault_name),
             )
             return cursor.rowcount > 0
+
+    def search_session_memories_fts(
+        self,
+        *,
+        vault_name: str,
+        query: str,
+        limit: int = 20,
+    ) -> tuple[SessionMemorySearchResult, ...]:
+        """Search session memory fields with SQLite FTS5/BM25."""
+        fts_query = build_fts_query(query)
+        if not fts_query or limit <= 0:
+            return ()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, bm25(
+                    session_memories_fts,
+                    0.0, 0.0, 1.0, 0.8, 0.75, 0.95, 0.6, 0.5
+                ) AS rank
+                FROM session_memories_fts
+                WHERE vault_name = ?
+                  AND session_memories_fts MATCH ?
+                ORDER BY rank ASC
+                LIMIT ?
+                """,
+                (vault_name, fts_query, limit),
+            ).fetchall()
+            results: list[SessionMemorySearchResult] = []
+            for row in rows:
+                session_id = str(row["session_id"])
+                session_memory = self.get_session_memory(
+                    vault_name=vault_name,
+                    session_id=session_id,
+                )
+                if session_memory is None:
+                    continue
+                rank = float(row["rank"])
+                coverage = _fts_query_coverage(query, session_memory)
+                score = round(_bm25_score(rank) * max(coverage, 0.5), 6)
+                if score <= 0.0:
+                    continue
+                results.append(
+                    SessionMemorySearchResult(
+                        session_memory=session_memory,
+                        match_type="lexical",
+                        matched_fields=(
+                            {
+                                "field_type": "session_memory",
+                                "query_value": query,
+                                "matched_value": None,
+                                "match_type": "lexical",
+                                "fts_query": fts_query,
+                                "term_coverage": coverage,
+                            },
+                        ),
+                        score=score,
+                        rank=round(rank, 6),
+                    )
+                )
+            return tuple(results)
 
     def add_session_artifacts(
         self,
@@ -294,16 +375,12 @@ class SessionMemoryStore:
         value: str | None = None,
         limit: int = 20,
     ) -> tuple[SessionMemory, ...]:
-        """Search session memories by vault and optionally one direct field value."""
+        """Search session memories by vault and optionally one substring field value."""
         with self._connect() as conn:
             if field_type and value:
                 _validate_field_type(field_type)
-                if field_type in WILDCARD_FIELD_TYPES:
-                    where_clause = f"lower({field_type}) LIKE ? ESCAPE '\\'"
-                    field_value = f"%{_escape_like(value.lower())}%"
-                else:
-                    where_clause = f"{field_type} IS NOT NULL AND lower(trim({field_type})) = ?"
-                    field_value = value.lower().strip()
+                where_clause = f"lower({field_type}) LIKE ? ESCAPE '\\'"
+                field_value = f"%{_escape_like(value.lower().strip())}%"
                 rows = conn.execute(
                     f"""
                     SELECT {self._session_memory_select_columns()}
@@ -339,36 +416,37 @@ class SessionMemoryStore:
         limit: int = 20,
         min_score: float = 0.0,
         model_alias: str = "embeddings",
+        include_direct: bool = True,
     ) -> tuple[SessionMemorySearchResult, ...]:
-        """Search one session memory field using exact/wildcard plus vectors."""
+        """Search one session memory field using optional substring plus vectors."""
         _validate_field_type(field_type)
-        exact_matches = self.search_session_memories(
-            vault_name=vault_name,
-            field_type=field_type,
-            value=value,
-            limit=limit,
-        )
-        results: dict[tuple[str, str], SessionMemorySearchResult] = {
-            (memory.session_id, memory.vault_name): SessionMemorySearchResult(
-                session_memory=memory,
-                match_type="exact" if field_type not in WILDCARD_FIELD_TYPES else "wildcard",
-                matched_fields=(
-                    {
-                        "field_type": field_type,
-                        "query_value": value,
-                        "matched_value": memory.field_value(field_type),
-                        "match_type": "exact"
-                        if field_type not in WILDCARD_FIELD_TYPES
-                        else "wildcard",
-                    },
-                ),
-                score=1.0,
+        results: list[SessionMemorySearchResult] = []
+        if include_direct:
+            direct_matches = self.search_session_memories(
+                vault_name=vault_name,
+                field_type=field_type,
+                value=value,
+                limit=limit,
             )
-            for memory in exact_matches
-        }
+            results.extend(
+                SessionMemorySearchResult(
+                    session_memory=memory,
+                    match_type=_direct_match_type(field_type),
+                    matched_fields=(
+                        {
+                            "field_type": field_type,
+                            "query_value": value,
+                            "matched_value": memory.field_value(field_type),
+                            "match_type": _direct_match_type(field_type),
+                        },
+                    ),
+                    score=1.0,
+                )
+                for memory in direct_matches
+            )
 
-        if field_type not in VECTOR_FIELD_TYPES or len(results) >= limit:
-            return tuple(results.values())[:limit]
+        if field_type not in VECTOR_FIELD_TYPES:
+            return tuple(results)
 
         store = vector_store or self._field_vector_store()
         query = await vector_service.embed_query(
@@ -388,8 +466,7 @@ class SessionMemoryStore:
             if metadata.get("field_type") != field_type:
                 continue
             session_id = str(metadata.get("session_id") or "")
-            key = (session_id, vault_name)
-            if not session_id or key in results:
+            if not session_id:
                 continue
             session_memory = self.get_session_memory(
                 vault_name=vault_name,
@@ -400,22 +477,22 @@ class SessionMemoryStore:
             current_value = session_memory.field_value(field_type)
             if not current_value:
                 continue
-            results[key] = SessionMemorySearchResult(
-                session_memory=session_memory,
-                match_type="semantic",
-                matched_fields=(
-                    {
-                        "field_type": field_type,
-                        "query_value": value,
-                        "matched_value": current_value,
-                        "match_type": "semantic",
-                    },
-                ),
-                score=round(hit.score, 6),
+            results.append(
+                SessionMemorySearchResult(
+                    session_memory=session_memory,
+                    match_type="semantic",
+                    matched_fields=(
+                        {
+                            "field_type": field_type,
+                            "query_value": value,
+                            "matched_value": current_value,
+                            "match_type": "semantic",
+                        },
+                    ),
+                    score=round(hit.score, 6),
+                )
             )
-            if len(results) >= limit:
-                break
-        return tuple(results.values())
+        return tuple(results)
 
     async def find_related_sessions(
         self,
@@ -481,13 +558,16 @@ class SessionMemoryStore:
                     key,
                     {
                         "session_memory": memory,
-                        "score": 0.0,
+                        "field_scores": {},
                         "contributions": [],
                     },
                 )
                 field_score = float(match.score or 0.0)
                 weighted_score = weight * field_score
-                candidate["score"] += weighted_score
+                candidate["field_scores"][field_type] = max(
+                    float(candidate["field_scores"].get(field_type, 0.0)),
+                    weighted_score,
+                )
                 candidate["contributions"].append(
                     RelatedSessionContribution(
                         field_type=field_type,
@@ -502,7 +582,7 @@ class SessionMemoryStore:
 
         results: list[RelatedSessionResult] = []
         for candidate in candidates.values():
-            score = round(float(candidate["score"]), 6)
+            score = round(sum(float(value) for value in candidate["field_scores"].values()), 6)
             if score < min_score:
                 continue
             contributions = tuple(
@@ -517,7 +597,7 @@ class SessionMemoryStore:
                     session_memory=candidate["session_memory"],
                     band=_related_session_band(score),
                     score=score,
-                    matched_field_count=len(contributions),
+                    matched_field_count=len(candidate["field_scores"]),
                     contributions=contributions,
                 )
             )
@@ -585,6 +665,34 @@ class SessionMemoryStore:
             db_name=DB_NAME,
             table_name=FIELD_VECTOR_TABLE,
             system_root=self.system_root,
+        )
+
+    def _upsert_fts_row(self, conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+        conn.execute(
+            """
+            DELETE FROM session_memories_fts
+            WHERE session_id = ? AND vault_name = ?
+            """,
+            (row["session_id"], row["vault_name"]),
+        )
+        conn.execute(
+            """
+            INSERT INTO session_memories_fts (
+                session_id, vault_name, title, summary, domain,
+                work_product, user_intent, named_entities
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["session_id"],
+                row["vault_name"],
+                row["title"] or "",
+                row["summary"] or "",
+                row["domain"] or "",
+                row["work_product"] or "",
+                row["user_intent"] or "",
+                row["named_entities"] or "",
+            ),
         )
 
     def _session_memory_from_row(
@@ -677,9 +785,65 @@ class SessionMemoryStore:
 
 
 def normalize_field_value(value: str) -> str:
-    """Normalize a field value for exact lookup."""
+    """Normalize a field value for vector metadata and diagnostics."""
     normalized = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
     return re.sub(r"\s+", " ", normalized)
+
+
+def build_fts_query(value: str, *, max_terms: int = 12) -> str:
+    """Build a tolerant FTS5 query from LLM-shaped search text."""
+    terms = _fts_query_terms(value, max_terms=max_terms)
+    return " OR ".join(_quote_fts_phrase(term) for term in terms)
+
+
+def _fts_query_terms(value: str, *, max_terms: int = 12) -> list[str]:
+    phrases = [
+        phrase.strip().lower()
+        for phrase in re.findall(r'"([^"]+)"', value)
+        if phrase.strip()
+    ]
+    without_phrases = re.sub(r'"[^"]+"', " ", value)
+    tokens = [
+        token.lower()
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9-]{1,}", without_phrases)
+    ]
+    parts = [*phrases, *tokens]
+    deduped: list[str] = []
+    for part in parts:
+        if part not in deduped:
+            deduped.append(part)
+        if len(deduped) >= max_terms:
+            break
+    return deduped
+
+
+def _fts_query_coverage(query: str, session_memory: SessionMemory) -> float:
+    terms = _fts_query_terms(query)
+    if not terms:
+        return 0.0
+    haystack = " ".join(
+        value.lower()
+        for value in (
+            session_memory.title,
+            session_memory.summary,
+            session_memory.domain,
+            session_memory.work_product,
+            session_memory.user_intent,
+            session_memory.named_entities,
+        )
+        if value
+    )
+    matched = sum(1 for term in terms if term in haystack)
+    return round(matched / len(terms), 6)
+
+
+def _quote_fts_phrase(value: str) -> str:
+    escaped = value.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _bm25_score(rank: float) -> float:
+    return round(min(abs(rank) / 10.0, 1.0), 6)
 
 
 def _field_embedding_text(*, field_type: str, value: str) -> str:
@@ -690,6 +854,10 @@ def _validate_field_type(field_type: str) -> None:
     if field_type not in SESSION_MEMORY_TEXT_FIELDS:
         allowed = ", ".join(SESSION_MEMORY_TEXT_FIELDS)
         raise ValueError(f"Unsupported session memory field_type '{field_type}'. Allowed: {allowed}")
+
+
+def _direct_match_type(field_type: str) -> str:
+    return "wildcard" if field_type in WILDCARD_FIELD_TYPES else "substring"
 
 
 def _related_session_band(score: float) -> str:

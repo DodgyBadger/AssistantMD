@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
 from typing import Any
 
 from pydantic import BaseModel, Field
-from pydantic_ai import RunContext
+from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.tools import Tool
 
 from core.chat.chat_store import ChatStore, StoredChatMessage, StoredChatSession
@@ -15,11 +17,13 @@ from core.llm.model_factory import build_model_instance
 from core.logger import UnifiedLogger
 from core.memory import MemoryContext
 from core.memory.session_memory import (
+    MEMORY_VECTOR_MIN_SCORE,
     RELATED_SESSION_AUTOMATIC_THRESHOLD,
-    RELATED_SESSION_POSSIBLE_THRESHOLD,
     RELATED_SESSION_FIELD_WEIGHTS,
+    VECTOR_FIELD_TYPES,
     SessionMemoryArtifact,
     SessionMemoryStore,
+    build_fts_query,
 )
 from core.vector import VectorService
 
@@ -27,6 +31,16 @@ from .base import BaseTool
 
 
 logger = UnifiedLogger(tag="memory-ops-tool")
+
+SESSION_SEARCH_FIELD_WEIGHTS = {
+    "domain": 0.25,
+    "user_intent": 0.15,
+    "summary": 0.10,
+    "work_product": 0.05,
+}
+SESSION_LEXICAL_WEIGHT = 0.45
+TRANSCRIPT_LEXICAL_WEIGHT = 0.35
+SESSION_SEARCH_MIN_SCORE = 0.05
 
 
 class MemoryOps(BaseTool):
@@ -41,32 +55,33 @@ class MemoryOps(BaseTool):
             *,
             operation: str,
             session_id: str = "",
-            limit: int | str = "all",
+            mode: str = "related",
+            query: str = "",
+            limit: int | str = 5,
             title: str | None = None,
             summary: str | None = None,
             domain: str | None = None,
             work_product: str | None = None,
             user_intent: str | None = None,
             named_entities: str | None = None,
-            field_type: str = "",
-            value: str = "",
             extraction_model: str = "gpt-mini",
             artifacts: list[dict[str, Any]] | None = None,
             metadata: dict[str, Any] | None = None,
+            **legacy_kwargs: Any,
         ) -> str:
             """Manage memory extracted from chat sessions.
 
             :param operation: Operation name.
             :param session_id: Optional explicit session id. Defaults to the active session when available.
-            :param limit: Positive integer or "all".
+            :param mode: Search mode for search_sessions: related, search, or deep. Defaults to related.
+            :param query: User-provided search phrase for search and deep modes.
+            :param limit: Positive integer result limit for search_sessions.
             :param title: Optional human-readable session label.
             :param summary: Short plain-language summary of the chat session.
             :param domain: Subject area or knowledge area.
             :param work_product: Concrete thing the user wanted produced or answered.
             :param user_intent: User's underlying goal or intent.
             :param named_entities: Named people, organizations, and places.
-            :param field_type: Field type for search operations.
-            :param value: Field value for search operations.
             :param extraction_model: Model alias used by extract_session_memory.
             :param artifacts: Optional list of artifact objects.
             :param metadata: Optional object metadata for upsert operations.
@@ -183,75 +198,56 @@ class MemoryOps(BaseTool):
                     }
                 elif op == "search_sessions":
                     _require(active_vault_name, "vault_name is required")
-                    resolved_search_limit = resolved_limit if isinstance(resolved_limit, int) else 20
-                    if field_type and value:
-                        matches = await store.search_session_memories_by_field(
-                            vault_name=active_vault_name,
-                            field_type=field_type,
-                            value=value,
-                            vector_service=VectorService(),
-                            limit=resolved_search_limit,
-                        )
-                        result = {
-                            "status": "ok",
-                            "operation": op,
-                            "query": {
-                                "field_type": field_type,
-                                "value": value,
-                            },
-                            "matches": [match.to_dict() for match in matches],
-                            "session_memories": [
-                                match.session_memory.to_dict() for match in matches
-                            ],
-                        }
-                    else:
-                        session_memories = store.search_session_memories(
-                            vault_name=active_vault_name,
-                            limit=resolved_search_limit,
-                        )
-                        result = {
-                            "status": "ok",
-                            "operation": op,
-                            "session_memories": [
-                                session_memory.to_dict()
-                                for session_memory in session_memories
-                            ],
-                        }
+                    query_from_legacy = str(
+                        legacy_kwargs.get("value")
+                        or legacy_kwargs.get("query")
+                        or ""
+                    )
+                    mode_from_legacy = str(
+                        legacy_kwargs.get("mode")
+                        or mode
+                        or ""
+                    )
+                    if legacy_kwargs.get("field_type") and not query:
+                        mode_from_legacy = "search"
+                    _validate_search_sessions_request(
+                        mode=mode_from_legacy,
+                        query=query or query_from_legacy,
+                        resolved_limit=resolved_limit,
+                    )
+                    resolved_search_limit = resolved_limit if isinstance(resolved_limit, int) else 5
+                    result = await _search_sessions(
+                        store=store,
+                        vault_name=active_vault_name,
+                        session_id=active_session_id,
+                        mode=mode_from_legacy,
+                        query=query or query_from_legacy,
+                        limit=resolved_search_limit,
+                    )
                 elif op == "find_related_sessions":
                     _require(active_vault_name, "vault_name is required")
                     resolved_search_limit = resolved_limit if isinstance(resolved_limit, int) else 5
-                    matches = await store.find_related_sessions(
+                    result = await _search_sessions(
+                        store=store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        vector_service=VectorService(),
+                        mode="related",
+                        query="",
                         limit=resolved_search_limit,
                     )
-                    result = {
-                        "status": "ok",
-                        "operation": op,
-                        "query": {
-                            "vault_name": active_vault_name,
-                            "session_id": active_session_id,
-                            "policy": {
-                                "weights": RELATED_SESSION_FIELD_WEIGHTS,
-                                "automatic_threshold": RELATED_SESSION_AUTOMATIC_THRESHOLD,
-                                "possible_threshold": RELATED_SESSION_POSSIBLE_THRESHOLD,
-                            },
-                        },
-                        "matches": [match.to_dict() for match in matches],
-                        "session_memories": [
-                            match.session_memory.to_dict() for match in matches
-                        ],
-                    }
+                    result["operation"] = op
+                    result["mode"] = "related"
                 else:
                     return (
                         "Unknown operation. Available: extract_session_memory, "
                         "upsert_session_memory, "
-                        "get_session_memory, search_sessions, find_related_sessions"
+                        "get_session_memory, search_sessions"
                     )
                 if hasattr(result, "to_dict"):
                     result = result.to_dict()
                 return json.dumps(result, ensure_ascii=False, indent=2)
+            except ModelRetry:
+                raise
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "memory_ops failed",
@@ -282,9 +278,21 @@ Session memory field guidance:
 - `named_entities`: only named people, organizations, and places.
 
 Use `search_sessions` for caller-driven lookup across indexed chat-session
-memory. Use `find_related_sessions` with only `session_id` and `limit` when you
-want the current or specified session compared against prior sessions using the
-default compound related-work policy.
+memory. `search_sessions` has three modes:
+- `related`: default. Compares the current or specified session against prior
+  sessions using the default compound related-work policy.
+- `search`: searches a user-provided query across all session-memory fields.
+- `deep`: searches a user-provided query across all session-memory fields and
+  raw chat transcripts.
+
+Mode selection:
+- Use `related` for general related-session lookup.
+- Use `search` when the user names a specific word, phrase, topic, or concept.
+- Use `deep` when the user asks for a broader or transcript-level search.
+
+For `search` and `deep`, write `query` as a plain natural-language phrase. Do
+not use explicit boolean syntax such as uppercase AND/OR. Use a positive
+integer `limit`.
 
 Update only fields supported by current context. Leave unknown fields empty.
 
@@ -329,6 +337,316 @@ def _require(value: object, message: str) -> None:
         raise ValueError(message)
     if isinstance(value, str) and not value.strip():
         raise ValueError(message)
+
+
+def _validate_search_sessions_request(
+    *,
+    mode: str,
+    query: str,
+    resolved_limit: int | str,
+) -> None:
+    normalized_mode = (mode or "related").strip().lower()
+    if resolved_limit == "all":
+        raise ModelRetry(
+            "search_sessions requires a positive integer limit. Retry with a numeric limit such as 5 or 10."
+        )
+    if normalized_mode in {"search", "deep"} and _has_boolean_operator(query):
+        raise ModelRetry(
+            "search_sessions query must be a plain search phrase. Retry without AND/OR; combine related terms with spaces."
+        )
+
+
+def _has_boolean_operator(query: str) -> bool:
+    return re.search(r"\b(?:AND|OR)\b", query) is not None
+
+
+async def _search_sessions(
+    *,
+    store: SessionMemoryStore,
+    vault_name: str,
+    session_id: str | None,
+    mode: str,
+    query: str,
+    limit: int,
+) -> dict[str, Any]:
+    normalized_mode = (mode or "related").strip().lower()
+    if normalized_mode not in {"related", "search", "deep"}:
+        raise ValueError("mode must be one of: related, search, deep")
+
+    if normalized_mode == "related":
+        _require(session_id, "session_id is required for related mode")
+        matches = await store.find_related_sessions(
+            vault_name=vault_name,
+            session_id=session_id,
+            vector_service=VectorService(),
+            limit=limit,
+        )
+        return {
+            "status": "ok",
+            "operation": "search_sessions",
+            "mode": normalized_mode,
+            "query": {
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "policy": {
+                    "weights": RELATED_SESSION_FIELD_WEIGHTS,
+                    "automatic_threshold": RELATED_SESSION_AUTOMATIC_THRESHOLD,
+                },
+            },
+            "matches": [match.to_dict() for match in matches],
+            "session_memories": [
+                match.session_memory.to_dict()
+                for match in matches
+            ],
+        }
+
+    _require(query, "query is required for search and deep modes")
+    memory_matches = await _search_session_memory_fields(
+        store=store,
+        vault_name=vault_name,
+        query=query,
+        limit=limit,
+    )
+    if normalized_mode == "deep":
+        _merge_transcript_matches(
+            memory_matches,
+            store=store,
+            vault_name=vault_name,
+            query=query,
+        )
+    for candidate in memory_matches.values():
+        candidate["evidence"].sort(
+            key=lambda item: float(item.get("weighted_score") or 0.0),
+            reverse=True,
+        )
+    ranked_matches = sorted(
+        (
+            match
+            for match in memory_matches.values()
+            if float(match.get("score") or 0.0) >= SESSION_SEARCH_MIN_SCORE
+        ),
+        key=lambda item: (item["score"], len(item["evidence"])),
+        reverse=True,
+    )[:limit]
+    return {
+        "status": "ok",
+        "operation": "search_sessions",
+        "mode": normalized_mode,
+        "query": {
+            "vault_name": vault_name,
+            "value": query,
+        },
+        "matches": ranked_matches,
+    }
+
+
+async def _search_session_memory_fields(
+    *,
+    store: SessionMemoryStore,
+    vault_name: str,
+    query: str,
+    limit: int,
+) -> dict[str, dict[str, Any]]:
+    candidates: dict[str, dict[str, Any]] = {}
+    lexical_matches = store.search_session_memories_fts(
+        vault_name=vault_name,
+        query=query,
+        limit=max(limit * 4, limit),
+    )
+    for match in lexical_matches:
+        memory = match.session_memory
+        weighted_score = round(float(match.score or 0.0) * SESSION_LEXICAL_WEIGHT, 6)
+        candidate = candidates.setdefault(
+            memory.session_id,
+            {
+                "session_id": memory.session_id,
+                "vault_name": memory.vault_name,
+                "field_scores": {},
+                "session_memory": memory.to_dict(),
+                "evidence": [],
+            },
+        )
+        candidate["field_scores"]["session_memory_fts"] = max(
+            float(candidate["field_scores"].get("session_memory_fts", 0.0)),
+            weighted_score,
+        )
+        candidate["evidence"].append(
+            {
+                "source": "session_memory",
+                "match_type": "lexical",
+                "score": match.score,
+                "weighted_score": weighted_score,
+                "rank": match.rank,
+                "matched_value": None,
+            }
+        )
+
+    for current_field in VECTOR_FIELD_TYPES:
+        matches = await store.search_session_memories_by_field(
+            vault_name=vault_name,
+            field_type=current_field,
+            value=query,
+            vector_service=VectorService(),
+            limit=max(limit * 3, limit),
+            min_score=MEMORY_VECTOR_MIN_SCORE,
+            include_direct=False,
+        )
+        field_weight = SESSION_SEARCH_FIELD_WEIGHTS.get(current_field, 0.5)
+        for match in matches:
+            memory = match.session_memory
+            normalized_score = _normalize_vector_score(float(match.score or 0.0))
+            weighted_score = round(normalized_score * field_weight, 6)
+            candidate = candidates.setdefault(
+                memory.session_id,
+                {
+                    "session_id": memory.session_id,
+                    "vault_name": memory.vault_name,
+                    "field_scores": {},
+                    "session_memory": memory.to_dict(),
+                    "evidence": [],
+                },
+            )
+            candidate["field_scores"][current_field] = max(
+                float(candidate["field_scores"].get(current_field, 0.0)),
+                weighted_score,
+            )
+            candidate["evidence"].append(
+                {
+                    "source": "session_memory",
+                    "field_type": current_field,
+                    "match_type": match.match_type,
+                    "score": match.score,
+                    "normalized_score": normalized_score,
+                    "weighted_score": weighted_score,
+                    "matched_value": _preview_text(memory.field_value(current_field)),
+                }
+            )
+    for candidate in candidates.values():
+        candidate["score"] = round(
+            min(sum(float(value) for value in candidate["field_scores"].values()), 1.0),
+            6,
+        )
+        del candidate["field_scores"]
+        candidate["evidence"].sort(
+            key=lambda item: float(item.get("weighted_score") or 0.0),
+            reverse=True,
+        )
+    return candidates
+
+
+def _merge_transcript_matches(
+    candidates: dict[str, dict[str, Any]],
+    *,
+    store: SessionMemoryStore,
+    vault_name: str,
+    query: str,
+) -> None:
+    chat_store = ChatStore()
+    fts_query = build_fts_query(query)
+    if not fts_query:
+        return
+    sessions = chat_store.list_sessions(vault_name)
+    if not sessions:
+        return
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE transcript_fts USING fts5(
+            session_id UNINDEXED,
+            title,
+            transcript,
+            tokenize = 'unicode61'
+        )
+        """
+    )
+    for session in sessions:
+        messages = chat_store.get_stored_messages(
+            session_id=session.session_id,
+            vault_name=vault_name,
+        )
+        transcript = "\n\n".join(message.content_text for message in messages)
+        conn.execute(
+            "INSERT INTO transcript_fts(session_id, title, transcript) VALUES (?, ?, ?)",
+            (session.session_id, session.title or "", transcript),
+        )
+    rows = conn.execute(
+        """
+        SELECT session_id,
+               bm25(transcript_fts, 0.0, 0.8, 1.0) AS rank,
+               snippet(transcript_fts, 2, '[', ']', '...', 32) AS snippet
+        FROM transcript_fts
+        WHERE transcript_fts MATCH ?
+        ORDER BY rank ASC
+        LIMIT ?
+        """,
+        (fts_query, max(len(sessions), 1)),
+    ).fetchall()
+    sessions_by_id = {session.session_id: session for session in sessions}
+    for row in rows:
+        session_id = str(row["session_id"])
+        session = sessions_by_id.get(session_id)
+        if session is None:
+            continue
+        memory = store.get_session_memory(
+            vault_name=vault_name,
+            session_id=session_id,
+        )
+        transcript_score = _bm25_rank_score(float(row["rank"]))
+        if transcript_score <= 0.0:
+            continue
+        weighted_score = round(transcript_score * TRANSCRIPT_LEXICAL_WEIGHT, 6)
+        candidate = candidates.setdefault(
+            session_id,
+            {
+                "session_id": session_id,
+                "vault_name": session.vault_name,
+                "session_memory": memory.to_dict() if memory else None,
+                "chat_session": {
+                    "session_id": session_id,
+                    "vault_name": session.vault_name,
+                    "title": session.title,
+                    "created_at": session.created_at,
+                    "last_activity_at": session.last_activity_at,
+                },
+                "evidence": [],
+            },
+        )
+        if memory is not None and candidate.get("session_memory") is None:
+            candidate["session_memory"] = memory.to_dict()
+        candidate["score"] = round(
+            min(float(candidate.get("score") or 0.0) + weighted_score, 1.0),
+            6,
+        )
+        candidate["evidence"].append(
+            {
+                "source": "chat_transcript",
+                "match_type": "lexical",
+                "score": round(transcript_score, 6),
+                "weighted_score": weighted_score,
+                "rank": round(float(row["rank"]), 6),
+                "snippet": str(row["snippet"] or ""),
+            }
+        )
+
+
+def _preview_text(value: str | None, *, limit: int = 240) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if len(stripped) <= limit:
+        return stripped
+    return f"{stripped[:limit].rstrip()}..."
+
+
+def _bm25_rank_score(rank: float) -> float:
+    return round(min(abs(rank) / 10.0, 1.0), 6)
+
+
+def _normalize_vector_score(score: float) -> float:
+    if score <= MEMORY_VECTOR_MIN_SCORE:
+        return 0.0
+    return round((score - MEMORY_VECTOR_MIN_SCORE) / (1.0 - MEMORY_VECTOR_MIN_SCORE), 6)
 
 
 async def _extract_session_memory(

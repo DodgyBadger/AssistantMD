@@ -41,7 +41,7 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
                 vector_service=vector_service,
             )
 
-        exact_riparian = store.search_session_memories(
+        substring_riparian = store.search_session_memories(
             vault_name=vault_name,
             field_type="user_intent",
             value="riparian restoration",
@@ -53,7 +53,7 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
             vector_service=vector_service,
             min_score=0.78,
         )
-        exact_donor = store.search_session_memories(
+        substring_donor = store.search_session_memories(
             vault_name=vault_name,
             field_type="work_product",
             value="donor report",
@@ -68,9 +68,9 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
         report = {
             "vault_name": vault_name,
             "session_ids": session_ids,
-            "exact_riparian": [memory.to_dict() for memory in exact_riparian],
+            "substring_riparian": [memory.to_dict() for memory in substring_riparian],
             "semantic_riparian": [result.to_dict() for result in semantic_riparian],
-            "exact_donor": [memory.to_dict() for memory in exact_donor],
+            "substring_donor": [memory.to_dict() for memory in substring_donor],
             "related_sessions": [result.to_dict() for result in related_sessions],
         }
         (self.artifacts_dir / "memory_session_data_model_probe.json").write_text(
@@ -79,9 +79,13 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
         )
 
         self.soft_assert_equal(
-            len(exact_riparian),
-            0,
-            "Riparian query should not have exact user-intent matches in seeded sessions",
+            len(substring_riparian),
+            1,
+            "Riparian query should find substring user-intent matches in seeded sessions",
+        )
+        self.soft_assert(
+            any(memory.session_id == "session-riparian-proposal" for memory in substring_riparian),
+            "Substring search should retrieve the directly matching riparian proposal",
         )
         semantic_ids = [
             result.session_memory.session_id for result in semantic_riparian
@@ -99,12 +103,12 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
             "Field-aware semantic search should not pull unrelated forest topics",
         )
         self.soft_assert(
-            all(result.match_type in {"exact", "semantic"} for result in semantic_riparian),
+            all(result.match_type in {"substring", "semantic"} for result in semantic_riparian),
             "Search results should expose how each session memory matched",
         )
         self.soft_assert(
-            any(memory.session_id == "session-donor-wetlands" for memory in exact_donor),
-            "Exact field search should still retrieve by normalized field value",
+            any(memory.session_id == "session-donor-wetlands" for memory in substring_donor),
+            "Substring field search should still retrieve direct field matches",
         )
         related_ids = [
             result.session_memory.session_id for result in related_sessions

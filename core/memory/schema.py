@@ -67,6 +67,22 @@ def ensure_memory_schema(system_root: str | None = None) -> None:
             ON session_memory_artifacts(vault_name, path)
             """
         )
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS session_memories_fts USING fts5(
+                session_id UNINDEXED,
+                vault_name UNINDEXED,
+                title,
+                summary,
+                domain,
+                work_product,
+                user_intent,
+                named_entities,
+                tokenize = 'unicode61'
+            )
+            """
+        )
+        _backfill_session_memories_fts(conn)
         conn.commit()
     finally:
         conn.close()
@@ -81,3 +97,24 @@ def _drop_obsolete_memory_tables(conn) -> None:
         "workstream_field_vectors",
     ):
         conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+
+def _backfill_session_memories_fts(conn) -> None:
+    """Populate the FTS table for existing memory rows when first introduced."""
+    memory_count = conn.execute("SELECT COUNT(*) FROM session_memories").fetchone()[0]
+    fts_count = conn.execute("SELECT COUNT(*) FROM session_memories_fts").fetchone()[0]
+    if memory_count == 0 or fts_count > 0:
+        return
+    conn.execute(
+        """
+        INSERT INTO session_memories_fts (
+            session_id, vault_name, title, summary, domain,
+            work_product, user_intent, named_entities
+        )
+        SELECT
+            session_id, vault_name, COALESCE(title, ''), COALESCE(summary, ''),
+            COALESCE(domain, ''), COALESCE(work_product, ''),
+            COALESCE(user_intent, ''), COALESCE(named_entities, '')
+        FROM session_memories
+        """
+    )

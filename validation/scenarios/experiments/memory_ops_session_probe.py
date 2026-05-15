@@ -11,6 +11,7 @@ from typing import Any, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from pydantic_ai.embeddings import EmbedInputType, EmbeddingModel, EmbeddingResult
+from pydantic_ai import ModelRetry
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.usage import RequestUsage
 
@@ -153,15 +154,15 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 tool,
                 ctx,
                 operation="search_sessions",
-                field_type="user_intent",
-                value="riparian restoration",
+                mode="search",
+                query="riparian restoration",
             )
             semantic_search = await _call(
                 tool,
                 ctx,
                 operation="search_sessions",
-                field_type="domain",
-                value="watershed protection",
+                mode="search",
+                query="watershed protection",
             )
             fetched = await _call(
                 tool,
@@ -172,18 +173,50 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 tool,
                 ctx,
                 operation="search_sessions",
-                field_type="work_product",
-                value="donor report",
+                mode="search",
+                query="donor report",
+            )
+            legacy_field_search = await _call(
+                tool,
+                ctx,
+                operation="search_sessions",
+                field_type="summary",
+                value="riparian",
+            )
+            boolean_search_error = await _call_model_retry(
+                tool,
+                ctx,
+                operation="search_sessions",
+                mode="search",
+                query='GHG OR "greenhouse gas"',
+                limit=5,
+            )
+            natural_language_search = await _call(
+                tool,
+                ctx,
+                operation="search_sessions",
+                mode="search",
+                query="riparian restoration and watershed protection",
+                limit=5,
+            )
+            all_limit_error = await _call_model_retry(
+                tool,
+                ctx,
+                operation="search_sessions",
+                mode="search",
+                query="greenhouse gas GHG",
+                limit="all",
             )
             related = await _call(
                 tool,
                 ctx,
-                operation="find_related_sessions",
+                operation="search_sessions",
             )
             related_with_ignored_fields = await _call(
                 tool,
                 ctx,
-                operation="find_related_sessions",
+                operation="search_sessions",
+                mode="related",
                 domain="unrelated cooking",
                 work_product="recipe",
                 user_intent="Find dinner ideas.",
@@ -203,6 +236,10 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "semantic_search": semantic_search,
             "fetched": fetched,
             "searched_by_type": searched_by_type,
+            "legacy_field_search": legacy_field_search,
+            "boolean_search_error": boolean_search_error,
+            "natural_language_search": natural_language_search,
+            "all_limit_error": all_limit_error,
             "related": related,
             "related_with_ignored_fields": related_with_ignored_fields,
         }
@@ -254,15 +291,18 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         )
         self.soft_assert(
             any(
-                memory["session_id"] == "riparian-grant-session"
-                for memory in searched["session_memories"]
+                match["session_id"] == "riparian-grant-session"
+                for match in searched["matches"]
             ),
             "search_sessions should find created session memory",
         )
         self.soft_assert(
             any(
-                match["session_memory"]["session_id"] == "riparian-grant-session"
-                and match["match_type"] == "semantic"
+                match["session_id"] == "riparian-grant-session"
+                and any(
+                    evidence["match_type"] == "semantic"
+                    for evidence in match["evidence"]
+                )
                 for match in semantic_search["matches"]
             ),
             "search_sessions should use indexed field vectors for semantic matches",
@@ -270,10 +310,35 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         self.soft_assert_equal(len(fetched["session_memory"]["artifacts"]), 1)
         self.soft_assert(
             any(
-                memory["session_id"] == "session-donor-wetlands"
-                for memory in searched_by_type["session_memories"]
+                match["session_id"] == "session-donor-wetlands"
+                for match in searched_by_type["matches"]
             ),
-            "search_sessions should retrieve candidates by field",
+            "search_sessions should retrieve candidates across memory fields",
+        )
+        self.soft_assert_equal(
+            legacy_field_search["mode"],
+            "search",
+            "legacy field/value calls should be translated to search mode",
+        )
+        self.soft_assert(
+            any(
+                match["session_id"] == "riparian-grant-session"
+                for match in legacy_field_search["matches"]
+            ),
+            "legacy field/value calls should not fail tool validation",
+        )
+        self.soft_assert(
+            "plain search phrase" in boolean_search_error,
+            "Boolean-looking search queries should trigger a retryable correction",
+        )
+        self.soft_assert_equal(
+            natural_language_search["status"],
+            "ok",
+            "Natural-language search queries containing lowercase conjunctions should be accepted",
+        )
+        self.soft_assert(
+            "positive integer limit" in all_limit_error,
+            "search_sessions should reject limit='all' with a retryable correction",
         )
         self.soft_assert_equal(related["status"], "ok")
         self.soft_assert(
@@ -281,23 +346,23 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 match["session_memory"]["session_id"] != "riparian-grant-session"
                 for match in related["matches"]
             ),
-            "find_related_sessions should exclude the current session",
+            "related search should exclude the current session",
         )
         self.soft_assert(
             any(
                 match["session_memory"]["session_id"] == "session-donor-wetlands"
                 for match in related["matches"]
             ),
-            "find_related_sessions should retrieve related prior sessions",
+            "related search should retrieve related prior sessions",
         )
         self.soft_assert(
             all(match["contributions"] for match in related["matches"]),
-            "find_related_sessions should explain field contributions",
+            "related search should explain field contributions",
         )
         self.soft_assert_equal(
             related_with_ignored_fields["matches"],
             related["matches"],
-            "find_related_sessions should ignore caller-supplied field overrides",
+            "related search should ignore caller-supplied field overrides",
         )
         self.teardown_scenario()
         self.assert_no_failures()
@@ -308,6 +373,14 @@ async def _call(tool, ctx, **kwargs) -> dict:
     parsed = json.loads(raw)
     assert isinstance(parsed, dict)
     return parsed
+
+
+async def _call_model_retry(tool, ctx, **kwargs) -> str:
+    try:
+        await tool.function(ctx, **kwargs)
+    except ModelRetry as exc:
+        return str(exc)
+    raise AssertionError("Expected memory_ops call to raise ModelRetry")
 
 
 class SemanticProbeEmbeddingModel(EmbeddingModel):
