@@ -12,11 +12,13 @@ from core.memory.service import (
     SQLiteConversationHistoryProvider,
     resolve_conversation_history_provider,
 )
-from core.memory.workstreams import (
-    Workstream,
-    WorkstreamArtifact,
-    WorkstreamSearchResult,
-    WorkstreamStore,
+from core.memory.session_memory import (
+    RelatedSessionContribution,
+    RelatedSessionResult,
+    SessionMemory,
+    SessionMemoryArtifact,
+    SessionMemorySearchResult,
+    SessionMemoryStore,
     normalize_field_value,
 )
 
@@ -29,11 +31,13 @@ __all__ = [
     "InMemoryConversationHistoryProvider",
     "MemoryContext",
     "MemoryService",
+    "RelatedSessionContribution",
+    "RelatedSessionResult",
     "SQLiteConversationHistoryProvider",
-    "Workstream",
-    "WorkstreamArtifact",
-    "WorkstreamSearchResult",
-    "WorkstreamStore",
+    "SessionMemory",
+    "SessionMemoryArtifact",
+    "SessionMemorySearchResult",
+    "SessionMemoryStore",
     "normalize_field_value",
     "resolve_conversation_history_provider",
 ]

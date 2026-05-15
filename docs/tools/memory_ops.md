@@ -2,98 +2,90 @@
 
 ## Purpose
 
-Manage workstream memory.
+Manage memory extracted from chat sessions.
 
 This tool is available to chat and context scripts as the direct operation
-surface for current workstreams, workstream search, artifacts, session links,
-and direct workstream field updates.
+surface for session memory lookup, field search, and session-memory updates.
 
 ## Parameters
 
-- `operation`: required. Supported values are `create_workstream`,
-  `get_workstream`, `search_workstreams`, `link_session`, and
-  `update_workstream`.
-- `session_id`: optional explicit session id.
-- `vault_name`: optional explicit vault name. Defaults to the active vault when
-  available.
+- `operation`: required. Supported values are `extract_session_memory`,
+  `upsert_session_memory`, `get_session_memory`, `search_sessions`, and
+  `find_related_sessions`.
+- `session_id`: optional explicit session id. Defaults to the active session
+  when available.
 - `limit`: optional positive integer or `all`.
-- `workstream_id`: workstream id for explicit workstream reads, links, and
-  updates. Omit it with `get_workstream` to read the workstream linked to the
-  current session.
-- `title`: optional title for `create_workstream` or `update_workstream`.
-- `status`: optional workstream status for `create_workstream` or
-  `update_workstream`.
-- `type`: optional task/deliverable type text.
-- `topic`: optional topic/theme text. This can be a phrase or sentence, not just
-  a single label.
-- `entities`: optional people, organizations, and other named entities text.
-- `project`: optional project/program text.
-- `objective`: optional objective text.
-- `strategy`: optional strategy, reusable approach, or preference text.
-- `field_type` and `value`: optional field pair for `search_workstreams`.
+- `title`: optional human-readable session label.
+- `summary`: optional short plain-language summary of the chat session.
+- `domain`: optional subject area or knowledge area.
+- `work_product`: optional concrete thing the user wanted produced or answered.
+- `user_intent`: optional user goal or intent after clarification or topic
+  drift.
+- `named_entities`: optional named people, organizations, and places.
+- `field_type` and `value`: optional field pair for `search_sessions`.
+- `extraction_model`: optional model alias for `extract_session_memory`.
 - `artifacts`: optional list of artifact objects with `path`, optional
-  `artifact_role`, `vault_name`, and `metadata`.
-- `metadata`: optional JSON object for `create_workstream`.
+  `artifact_role`, and `metadata`.
+- `metadata`: optional JSON object for `upsert_session_memory`.
 
-## Workstream Field Contract
+## Session Memory Field Contract
 
-Use these fields as short summaries of the user's unit of work. Prefer durable,
-work-level descriptions over momentary chat phrasing.
+Use these fields as short summaries of one chat session. Prefer durable
+descriptions of the user's work over momentary prompt phrasing.
 
-- `title`: human-readable label for the workstream. Use a compact noun phrase
-  that would make sense in a list, such as `Wetlands donor report`.
-- `type`: the kind of work being done or deliverable being produced. Use a
-  stable category-like phrase, such as `donor report`, `grant proposal`,
-  `weekly planning`, `performance review`, `retrieval`, or `snippet synthesis`.
-  Do not put the subject matter here.
-- `topic`: the subject/theme of the work. This can be a sentence when a short
-  label would lose meaning, such as `Riparian restoration funding narrative for
-  watershed protection`. Do not list people or organizations here unless they
-  are part of the subject itself.
-- `entities`: named people, organizations, funders, clients, partners, places,
-  or other proper-noun entities relevant to the work. Use a concise comma- or
-  semicolon-separated text list. Do not use this for broad themes.
-- `project`: the user's project, program, client engagement, initiative, or
-  internal work area that scopes the work. Leave empty if there is no clear
-  project/program scope.
-- `objective`: what the user is trying to accomplish in this workstream. Write a
-  short outcome-oriented phrase or sentence, not a transcript of the latest
-  request.
-- `strategy`: reusable approach, format, style preference, decision, constraint,
-  or tactic that may help similar future work. Use this for cross-workstream
-  carryover such as `reuse the three-section donor report format`.
+- `summary`: short plain-language summary of the whole chat session. Include
+  enough context for a human to quickly understand what happened.
+- `domain`: the subject area or knowledge area of the work, such as
+  `data visualization`, `nutrition`, `ServiceNow administration`, `statistics`,
+  `research synthesis`, or `conservation fundraising`.
+- `work_product`: the concrete thing the user wanted produced or answered, such
+  as `Python script`, `recipe`, `article summary`, `stacked bar chart`,
+  `rewrite`, `donor email`, or `factual answer`.
+- `user_intent`: the user's underlying goal or intent after clarification,
+  repetition, or topic drift. Write this as what the user wants to accomplish,
+  not what the assistant should do next.
+- `named_entities`: only named people, organizations, and places. Use a concise
+  comma- or semicolon-separated text list. Leave empty if there are no named
+  people, organizations, or places.
 
-Update only fields that are known from the current context. Do not invent
-specific entities, projects, or objectives to fill blanks.
+Update only fields that are known from the current context. Leave unknown fields
+empty.
 
 ## Output Shape
 
-Returns pretty-printed JSON text. Successful workstream operations include a
-stable `status` and `operation` value, plus operation-specific data such as a
-`workstream`, `workstreams`, or field-aware `matches` list.
+Returns pretty-printed JSON text. Successful operations include a stable
+`status` and `operation` value, plus operation-specific data such as
+`session_memory`, `session_memories`, or field-aware `matches`.
 
 ## Notes
 
-- `get_workstream` is read-only. With `workstream_id`, it fetches that
-  workstream and returns `status: "found"` or `status: "not_found"`. Without
-  `workstream_id`, it fetches the workstream linked to the current session and
-  returns `status: "linked"` or `status: "unlinked"`. Returned workstreams
-  include direct workstream fields and artifacts.
-- `link_session` links the current or specified session to a workstream. If the
-  session is already linked, the existing link is replaced.
-- Session links are scoped to the selected vault. Linking a session to an
-  unrelated vault's workstream is rejected.
-- `update_workstream` replaces any supplied direct field value. For example,
-  `topic="Riparian restoration grant for watershed protection"` replaces the
-  previous topic text instead of appending another topic row.
-- `search_workstreams` is the retrieval primitive for finding candidate
-  workstreams by known fields. When `field_type` and `value` are supplied, it
-  searches within that field type. Semantic vector matches are available for
-  `type`, `topic`, `objective`, and `strategy`; `entities` and `project` use
-  case-insensitive wildcard matching.
-- `create_workstream` and `update_workstream` index vector-searchable direct
-  fields immediately after updates. If embedding is unavailable, the write still
-  succeeds and non-vector search remains available.
+- The selected runtime vault is always the search/write scope. `memory_ops` does
+  not accept a vault selector parameter.
+- `get_session_memory` is read-only. It fetches the memory row for the current
+  or specified session and returns `status: "found"` or `status: "not_found"`.
+- `extract_session_memory` reads the persisted transcript for the current or
+  specified session, runs AssistantMD's standard two-step extraction policy,
+  upserts the resulting memory fields, and indexes vector-searchable fields.
+- `upsert_session_memory` creates memory for the current or specified session,
+  or updates the supplied fields when memory already exists. It does not create
+  a separate project or work object.
+- `search_sessions` is the retrieval primitive for finding candidate prior
+  sessions. The current implementation searches indexed session memory fields.
+  When `field_type` and `value` are supplied, it searches within that field
+  type. Semantic vector matches are available for `summary`, `domain`,
+  `work_product`, and `user_intent`; `named_entities` uses case-insensitive
+  wildcard matching. Future implementations may also search full transcripts or
+  linked vault artifacts behind this same operation.
+- `find_related_sessions` is the higher-level retrieval policy for finding
+  prior sessions related to the current or specified session. It uses the stored
+  memory fields for that session, compares `domain`, `work_product`, and
+  `user_intent`, returns ranked matches with `automatic_recommendation` or
+  `possible_related` bands, and includes per-field score contributions. It
+  accepts only `session_id` and `limit`; use `search_sessions` for caller-driven
+  field queries.
+- `upsert_session_memory` indexes vector-searchable direct fields immediately
+  after updates. If embedding is unavailable, the write still succeeds and
+  non-vector search remains available.
 - Conversation history is intentionally not exposed through this tool. If chat
-  history needs to become memory, it should first be exported or extracted into
-  vault artifacts or direct workstream fields.
+  history needs to become memory, extract it into session memory fields or
+  export it as vault material first.

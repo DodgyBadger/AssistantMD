@@ -377,7 +377,7 @@ tools:
     chat_visible: true
   memory_ops:
     module: core.tools.memory_ops
-    description: "Manage workstream memory"
+    description: "Manage session memory"
     requires_secrets: []
     user_editable: false
     chat_visible: true

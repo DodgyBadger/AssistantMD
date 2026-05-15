@@ -1,5 +1,5 @@
 """
-Experiment scenario for workstream field storage and semantic search.
+Experiment scenario for session memory field storage and semantic search.
 """
 
 import json
@@ -12,60 +12,68 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from pydantic_ai.embeddings import EmbedInputType, EmbeddingModel, EmbeddingResult
 from pydantic_ai.usage import RequestUsage
 
-from core.memory.workstreams import (
-    WorkstreamArtifact,
-    WorkstreamStore,
+from core.memory.session_memory import (
+    SessionMemoryArtifact,
+    SessionMemoryStore,
 )
 from core.vector import VectorService
 from validation.core.base_scenario import BaseScenario
 
 
-class MemoryWorkstreamDataModelProbeScenario(BaseScenario):
-    """Probe the core workstream model and field-aware semantic retrieval."""
+class MemorySessionDataModelProbeScenario(BaseScenario):
+    """Probe the core session memory model and field-aware semantic retrieval."""
 
     async def test_scenario(self):
         controller = self._get_system_controller()
-        store = WorkstreamStore(system_root=str(controller._system_root))
+        store = SessionMemoryStore(system_root=str(controller._system_root))
         vault_name = "MemoryModelProbeVault"
 
-        workstream_ids = _seed_workstreams(store, vault_name)
+        session_ids = _seed_session_memories(store, vault_name)
         vector_service = VectorService(
             embedding_model_overrides={
                 "embeddings": SemanticProbeEmbeddingModel(dimensions=1536)
             }
         )
-        for workstream_id in workstream_ids:
-            await store.index_workstream_fields(
-                workstream_id=workstream_id,
+        for session_id in session_ids:
+            await store.index_session_memory_fields(
+                vault_name=vault_name,
+                session_id=session_id,
                 vector_service=vector_service,
             )
 
-        exact_riparian = store.search_workstreams(
+        exact_riparian = store.search_session_memories(
             vault_name=vault_name,
-            field_type="topic",
+            field_type="user_intent",
             value="riparian restoration",
         )
-        semantic_riparian = await store.search_workstreams_by_field(
+        semantic_riparian = await store.search_session_memories_by_field(
             vault_name=vault_name,
-            field_type="topic",
+            field_type="user_intent",
             value="riparian restoration",
             vector_service=vector_service,
             min_score=0.78,
         )
-        exact_donor = store.search_workstreams(
+        exact_donor = store.search_session_memories(
             vault_name=vault_name,
-            field_type="type",
+            field_type="work_product",
             value="donor report",
+        )
+        related_sessions = await store.find_related_sessions(
+            vault_name=vault_name,
+            session_id="session-riparian-proposal",
+            vector_service=vector_service,
+            limit=5,
         )
 
         report = {
             "vault_name": vault_name,
-            "workstream_ids": workstream_ids,
-            "exact_riparian": [workstream.to_dict() for workstream in exact_riparian],
+            "session_ids": session_ids,
+            "exact_riparian": [memory.to_dict() for memory in exact_riparian],
             "semantic_riparian": [result.to_dict() for result in semantic_riparian],
-            "exact_donor": [workstream.to_dict() for workstream in exact_donor],
+            "exact_donor": [memory.to_dict() for memory in exact_donor],
+            "related_sessions": [result.to_dict() for result in related_sessions],
         }
-        (self.artifacts_dir / "memory_workstream_data_model_probe.json").write_text(
+        (self.artifacts_dir / "memory_session_data_model_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
@@ -73,44 +81,62 @@ class MemoryWorkstreamDataModelProbeScenario(BaseScenario):
         self.soft_assert_equal(
             len(exact_riparian),
             0,
-            "Riparian query should not have exact topic matches in seeded workstreams",
+            "Riparian query should not have exact user-intent matches in seeded sessions",
         )
         semantic_ids = [
-            result.workstream.workstream_id for result in semantic_riparian
+            result.session_memory.session_id for result in semantic_riparian
         ]
         self.soft_assert(
-            "workstream-wetlands-proposal" in semantic_ids,
+            "session-wetlands-proposal" in semantic_ids,
             "Riparian query should retrieve wetlands proposal through semantic field vectors",
         )
         self.soft_assert(
-            "workstream-donor-wetlands" in semantic_ids,
+            "session-donor-wetlands" in semantic_ids,
             "Riparian query should retrieve wetlands donor report through semantic field vectors",
         )
         self.soft_assert(
-            "workstream-donor-forest" not in semantic_ids,
+            "session-donor-forest" not in semantic_ids,
             "Field-aware semantic search should not pull unrelated forest topics",
         )
         self.soft_assert(
             all(result.match_type in {"exact", "semantic"} for result in semantic_riparian),
-            "Search results should expose how each workstream matched",
+            "Search results should expose how each session memory matched",
         )
         self.soft_assert(
-            any(workstream.workstream_id == "workstream-donor-wetlands" for workstream in exact_donor),
+            any(memory.session_id == "session-donor-wetlands" for memory in exact_donor),
             "Exact field search should still retrieve by normalized field value",
+        )
+        related_ids = [
+            result.session_memory.session_id for result in related_sessions
+        ]
+        self.soft_assert(
+            "session-wetlands-proposal" in related_ids,
+            "Related-session retrieval should find adjacent proposal work",
+        )
+        self.soft_assert(
+            all(result.session_memory.session_id != "session-riparian-proposal"
+                for result in related_sessions),
+            "Related-session retrieval should exclude the query session",
+        )
+        self.soft_assert(
+            all(result.contributions for result in related_sessions),
+            "Related-session results should include field contribution evidence",
         )
 
         self.teardown_scenario()
         self.assert_no_failures()
 
 
-def _seed_workstreams(store: WorkstreamStore, vault_name: str) -> tuple[str, ...]:
+def _seed_session_memories(store: SessionMemoryStore, vault_name: str) -> tuple[str, ...]:
     seeds = [
         {
-            "workstream_id": "workstream-donor-wetlands",
+            "session_id": "session-donor-wetlands",
             "title": "Wetlands donor report",
             "fields": [
+                "Prepared a donor report about wetlands restoration work.",
+                "conservation fundraising",
                 "donor report",
-                "wetlands",
+                "Create a donor report about wetlands restoration.",
                 "North Star Foundation",
             ],
             "artifacts": [
@@ -118,11 +144,13 @@ def _seed_workstreams(store: WorkstreamStore, vault_name: str) -> tuple[str, ...
             ],
         },
         {
-            "workstream_id": "workstream-donor-forest",
+            "session_id": "session-donor-forest",
             "title": "Forest donor report",
             "fields": [
+                "Prepared a donor report about forest conservation work.",
+                "conservation fundraising",
                 "donor report",
-                "forests",
+                "Create a donor report about forest conservation.",
                 "North Star Foundation",
             ],
             "artifacts": [
@@ -130,32 +158,51 @@ def _seed_workstreams(store: WorkstreamStore, vault_name: str) -> tuple[str, ...
             ],
         },
         {
-            "workstream_id": "workstream-wetlands-proposal",
+            "session_id": "session-wetlands-proposal",
             "title": "Wetlands funding proposal",
             "fields": [
+                "Prepared a funding proposal about wetlands restoration work.",
+                "conservation fundraising",
                 "funding proposal",
-                "wetlands",
+                "Create a funding proposal for wetlands restoration.",
                 "River Fund",
             ],
             "artifacts": [
                 ("Proposals/Wetlands/funding-proposal.md", "output_created"),
             ],
         },
+        {
+            "session_id": "session-riparian-proposal",
+            "title": "Riparian funding proposal",
+            "fields": [
+                "Prepared a funding proposal about riparian restoration work.",
+                "conservation fundraising",
+                "funding proposal",
+                "Create a funding proposal for riparian restoration.",
+                "River Fund",
+            ],
+            "artifacts": [
+                ("Proposals/Riparian/funding-proposal.md", "output_created"),
+            ],
+        },
     ]
-    workstream_ids: list[str] = []
+    session_ids: list[str] = []
     for seed in seeds:
-        workstream = store.create_workstream(
-            workstream_id=seed["workstream_id"],
+        session_memory = store.upsert_session_memory(
+            session_id=seed["session_id"],
             vault_name=vault_name,
             title=seed["title"],
-            type=seed["fields"][0],
-            topic=seed["fields"][1],
-            entities=seed["fields"][2],
+            summary=seed["fields"][0],
+            domain=seed["fields"][1],
+            work_product=seed["fields"][2],
+            user_intent=seed["fields"][3],
+            named_entities=seed["fields"][4],
         )
-        store.add_workstream_artifacts(
-            workstream_id=workstream.workstream_id,
+        store.add_session_artifacts(
+            vault_name=vault_name,
+            session_id=session_memory.session_id,
             artifacts=tuple(
-                WorkstreamArtifact(
+                SessionMemoryArtifact(
                     vault_name=vault_name,
                     path=path,
                     artifact_role=artifact_role,
@@ -163,8 +210,8 @@ def _seed_workstreams(store: WorkstreamStore, vault_name: str) -> tuple[str, ...
                 for path, artifact_role in seed["artifacts"]
             ),
         )
-        workstream_ids.append(workstream.workstream_id)
-    return tuple(workstream_ids)
+        session_ids.append(session_memory.session_id)
+    return tuple(session_ids)
 
 
 class SemanticProbeEmbeddingModel(EmbeddingModel):

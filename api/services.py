@@ -53,6 +53,7 @@ from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.memory.session_memory import SessionMemoryStore
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSource,
@@ -581,9 +582,10 @@ async def compact_chat_session_history(
 
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
-    """Delete one chat session from the canonical store only."""
+    """Delete one chat session and its session memory."""
     del vault_path
     _chat_store.delete_sessions(vault_name, session_id=session_id)
+    SessionMemoryStore().delete_session_memory(vault_name=vault_name, session_id=session_id)
 
 
 def purge_chat_sessions(
@@ -594,6 +596,9 @@ def purge_chat_sessions(
 ) -> ChatSessionsPurgeResponse:
     """Delete old chat sessions and their transcript files for a vault."""
     deleted_ids = _chat_store.delete_sessions(vault_name, older_than_days=older_than_days)
+    memory_store = SessionMemoryStore()
+    for session_id in deleted_ids:
+        memory_store.delete_session_memory(vault_name=vault_name, session_id=session_id)
     remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted_ids)
 
     n = len(deleted_ids)

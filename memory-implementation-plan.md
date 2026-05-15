@@ -1,892 +1,236 @@
 # Memory Implementation Plan
 
+## Current Decision
+
+Memory is session-scoped. The v1 data model should not contain a separate
+work/project aggregation object. A user who wants to continue a prior unit of
+work can reopen that chat session. A new session can retrieve related prior
+sessions as context candidates without merging their summaries or intents into a
+shared canonical record.
+
+This keeps the provenance boundary clear and avoids noisy cross-session merge
+logic before real usage proves that a higher-level aggregation is needed.
+
 ## Current Architecture Read
 
-Relevant existing contracts:
-
 - `core/chat/chat_store.py` persists canonical chat sessions in
-  `system/chat_sessions.db`, keyed by globally unique `session_id` and hard
-  scoped to `vault_name`.
-- `core/chat/executor.py` performs chat preflight, runs context assembly through
-  chat capabilities, persists the accepted user request before model execution,
-  persists new assistant/tool messages after completion, and handles streaming
-  and non-streaming paths separately after shared preflight.
-- `core/authoring/context_manager.py` runs the selected context template as a
-  Monty history processor. Context scripts receive prior history and
-  `latest_message`, then return assembled context through `assemble_context`.
-- `core/authoring/runtime/monty_runner.py` exposes all configured tools as direct
-  Monty functions, excluding only `code_execution`. Therefore `memory_ops` can
-  be called from context scripts once it is present in tool configuration.
-- `core/memory/service.py` is currently a conversation-history broker. It is the
-  right domain boundary to grow into workstream operations, but existing
-  conversation-history behavior should remain stable.
-- `core/tools/memory_ops.py` exists as an optional tool, but the current settings
-  template does not register it. Docs describe it as disabled by default.
-- `core/vault_state/` tracks vault manifests, AssistantMD-routed mutations, and
-  task-scoped file mutation rows. It is useful for outputs/files modified, but
-  it does not currently track every file read or retrieved.
-- `docs/architecture/authoring-engine.md` distinguishes direct tools from
-  built-in helpers. Memory should use the direct tool path, not a parallel
-  helper contract.
+  `system/chat_sessions.db`, keyed by `session_id` and scoped to `vault_name`.
+- `core/authoring/context_manager.py` runs selected context templates and can
+  call configured tools through Monty.
+- `core/authoring/runtime/monty_runner.py` exposes configured tools as direct
+  Monty functions, so `memory_ops` is the right shared operation surface for
+  chat agents and context scripts.
+- `core/memory/service.py` remains the conversation-history broker.
+- `core/memory/session_memory.py` owns session-memory persistence and
+  field-aware retrieval.
+- `core/vector` owns embedding generation and vector storage abstraction.
 
-Design invariants:
+## Invariants
 
-- The selected vault is a hard scope. Workstream matching should not cross vaults
-  unless a future feature explicitly opts into cross-vault memory.
-- Session-to-workstream linking is context-policy controlled. A chat session may
-  be unlinked when memory is disabled, when there is not enough signal yet, or
-  when the user chooses an incognito/no-memory context policy.
-- A linked chat session belongs to at most one current workstream. Relinking
-  is explicit, auditable, and vault-scoped.
+- The selected vault is a hard scope.
+- One `(vault_name, session_id)` has at most one session memory row.
+- No session-memory operation creates or links a separate project/work object.
 - `memory_ops` is the canonical operation surface for chat agents and authored
-  scripts. Do not create a second helper API with a separate contract.
-- Default adaptive behavior should use the same `memory_ops` operations available
-  to context scripts.
-- Inferred fields are candidates. User-confirmed fields and source vault files
-  carry stronger trust.
-- Retrieval is field-aware. Exact and semantic matching should compare like
-  fields to like fields (`topic` to `topic`, `type` to `type`, `strategy` to
-  `strategy`) because each field encodes a different kind of relationship.
-  Cross-field aggregation can happen after retrieval, but raw matches should
-  preserve their field channel and reason.
-- This feature is experimental. Each major slice should include a small product
-  experiment, not only unit/integration validation, and later slices should
-  adjust based on what those experiments show.
+  scripts.
+- Retrieval is field-aware: compare `domain` to `domain`, `work_product` to
+  `work_product`, and `user_intent` to `user_intent`.
+- Generated memory is candidate context, not hidden authority.
 
-## Iteration Model
+## Implemented Slice: Shared Vector Plumbing
 
-Memory should be built as a sequence of reversible experiments. For each slice:
+Implemented earlier:
 
-- Define the technical contract being added.
-- Add focused automated tests for that contract.
-- Run a small scenario experiment against realistic vault/chat examples.
-- Record what the experiment shows, including confusing or low-value behavior.
-- Decide whether to proceed, adjust the data model/policy, or defer the next
-  slice.
+- `core.vector.VectorService`
+- embedding model configuration through existing `models` settings entries
+- embedding-only model aliases via `capabilities: ["embedding"]`
+- `embedding_space_id` including provider, base URL, model string, and
+  dimensions
+- `SQLitePythonVectorStore` with plain SQLite rows and Python cosine search
+- validation probe using deterministic test embeddings
 
-Experiment notes should live alongside this plan until the shape stabilizes,
-then move into architecture/product docs only when they describe current
-contract.
+## Implemented Slice: Session Memory Persistence
 
-Initial scenario set:
+Storage:
 
-- Donor/client report: a new report should find prior format/source/context
-  candidates without confusing reports for different subjects.
-- Annual goals and performance review: recurring work should surface durable
-  goals, themes, and artifacts over time.
-- Pure retrieval: a quick "where did I mention X?" chat should not become
-  high-authority memory by default.
-- Snippet folder synthesis: a collection of saved material should be available
-  as source context without pretending every transient note is a durable
-  conclusion.
-- Incognito/no-memory: a session should be able to use normal chat/context
-  behavior without linking or writing workstream state.
-
-Decision checkpoints:
-
-- After Slice 0: confirm the vector provider/model/settings contract is reusable
-  outside memory and can be validated without real provider calls.
-- After Slice 3: confirm the persistence/tool contract is understandable enough
-  for authored scripts before wiring default behavior.
-- After Slice 5: inspect actual captured signals and decide whether the current
-  fields are too noisy, too sparse, or missing important dimensions.
-- After Slice 8: test whether field-search suggestions are useful enough to
-  justify default memory-aware context assembly.
-- Before Slice 10: decide whether LLM extraction is needed, and if so what it
-  should be allowed to infer.
-
-## Slice 0: Shared Vector Embedding Plumbing
-
-Goal: add reusable provider/model/settings plumbing for embeddings before memory
-stores or queries vectors. This should be a general service that any subsystem
-can call, not a memory-specific shortcut.
-
-Pydantic AI read:
-
-- The installed Pydantic AI version exposes `pydantic_ai.Embedder` as the
-  high-level embedding interface.
-- `Embedder` supports `embed_query(...)` and `embed_documents(...)`, returning
-  `EmbeddingResult` with vectors, input type, model/provider names, usage, and
-  provider details.
-- Built-in embedding models include `OpenAIEmbeddingModel`; it accepts an
-  `OpenAIProvider(api_key=..., base_url=...)`, which matches the current
-  provider/secret pattern used by chat model construction.
-- `EmbeddingSettings` supports dimensions and provider options.
-- `TestEmbeddingModel` provides deterministic validation without real provider
-  calls.
-
-Recommended contract:
-
-- Add a `core.vector` or `core.embeddings` service boundary. Prefer
-  `core.vector` if the service will own both embedding generation and vector
-  storage helpers; prefer `core.embeddings` if storage remains entirely with
-  consumers.
-- Use the existing `models` section for embedding aliases. Embedding models are
-  regular model entries with `capabilities: ["embedding"]` and an explicit
-  `dimensions` value.
-- Provider entries continue to hold `api_key` and `base_url` secret pointers.
-- Do not expose embedding-only aliases as chat-capable models; `["embedding"]`
-  must remain embedding-only rather than silently gaining `text`.
-- Reuse the existing secrets store; do not introduce new secret storage.
-- Build an embedder factory that resolves provider/model config and constructs
-  Pydantic AI embedding models.
-- Provide service methods:
-  - `embed_query(text, model_alias="default")`
-  - `embed_documents(texts, model_alias="default")`
-  - `cosine_similarity(left, right)`
-  - optional `fingerprint_text(text)` for cache keys
-- Return a local result type that preserves vectors plus provider/model metadata
-  without exposing provider-specific response objects to callers.
-- Compute an `embedding_space_id` from provider, resolved base URL, model string,
-  and dimensions. Vector comparisons must only happen within the same embedding
-  space.
-
-Storage guidance:
-
-- Slice 0 should provide a vector-store abstraction with `upsert(...)` and
-  `search_similar(...)`, so memory does not depend on whether similarity search
-  is Python cosine, `sqlite-vec`, or another backend.
-- The first implementation can use ordinary SQLite rows and Python cosine.
-- Memory can then create a namespace for workstream field vectors keyed by
-  field id, model alias, input text fingerprint, dimensions, vector blob/json,
-  created_at, and provider metadata.
-- Full vault-level vector indexing remains out of scope.
-
-Validation:
-
-- Unit/smoke test using Pydantic AI `TestEmbeddingModel` to prove query/document
-  calls, dimensions, metadata, and usage are handled.
-- Settings test that an embedding alias resolves provider/model/secret pointers
-  without requiring a populated real API key in validation.
-- Error test for missing embedding provider config.
-- Error test for returned vector dimensions that do not match configured
-  dimensions.
-- Vector-store test that rows from a different embedding space are not returned
-  for a query.
-- No real network/provider calls in default validation.
-
-Experiment:
-
-- Add a fixture-level vector smoke using `TestEmbeddingModel` first.
-- Then optionally run a manual provider-backed smoke when secrets are configured.
-- Use the memory scenario fields as example documents:
-  - `topic: wetlands`
-  - `topic: watershed protection`
-  - `topic: riparian restoration`
-  - `type: donor report`
-  - `type: funding proposal`
-- Confirm the service can support comparing query fields to stored workstream
-  fields before memory owns vector ranking.
-
-Risks:
-
-- Pydantic AI embedding APIs are provider-capable, but the app's settings schema
-  previously assumed model aliases were text-capable by default. Embedding-only
-  aliases must not be allowed to look like chat models.
-- Test embeddings are deterministic but not semantically meaningful; they prove
-  plumbing, not retrieval quality.
-
-Progress notes:
-
-- Implemented `core.vector.VectorService` as a reusable Pydantic AI embedding
-  wrapper.
-- Kept embedding configuration in the existing `models` section using
-  `capabilities: ["embedding"]` and explicit `dimensions`.
-- Added default `embeddings` alias pointing to OpenAI
-  `text-embedding-3-small` with 1536 dimensions.
-- Updated settings/API model serialization to preserve `dimensions`.
-- Changed capability normalization so embedding-only aliases do not silently
-  gain `text`.
-- Added `embedding_space_id` derived from provider, resolved base URL, model
-  string, and dimensions; vector comparisons reject dimension mismatches.
-- Added `VectorStore` protocol and `SQLitePythonVectorStore`, using plain SQLite
-  storage plus Python cosine behind an upsert/search abstraction.
-- Added `validation/scenarios/experiments/vector_embedding_service_probe.py`
-  using Pydantic AI `TestEmbeddingModel`, with no network calls.
-
-## Slice 1: Work Workstream Data Model And Validation Scenarios
-
-Goal: prove the underlying memory shape before building higher-level behavior.
-This slice includes durable workstream records and validation scenarios that seed
-synthetic workstreams, sessions, direct fields, artifacts, and vectors directly. The
-scenario layer is the experiment surface; core modules should not carry
-fixture-only extraction or ranking code.
-
-Storage recommendation:
-
-- New system DB: `system/memory.db`, owned by `core.memory`.
-- Register `memory` in `core/database.py`.
-
-Initial tables:
-
-- `workstreams`
-  - `workstream_id`
-  - `vault_name`
-  - `title`
-  - `status`
-  - `type`
-  - `topic`
-  - `entities`
-  - `project`
-  - `objective`
-  - `strategy`
-  - `created_at`
-  - `last_seen_at`
-  - `metadata_json`
-- `workstream_sessions`
-  - `workstream_id`
+- `system/memory.db`
+- `session_memories`
   - `session_id`
   - `vault_name`
-  - `linked_at`
-- `workstream_artifacts`
-  - `id`
-  - `workstream_id`
+  - `title`
+  - `summary`
+  - `domain`
+  - `work_product`
+  - `user_intent`
+  - `named_entities`
+  - `created_at`
+  - `updated_at`
+  - `metadata_json`
+- `session_memory_artifacts`
+  - `session_id`
   - `vault_name`
   - `path`
-  - `artifact_role` (`file_read`, `file_retrieved`, `file_modified`,
-    `output_created`, `planning_note`)
+  - `artifact_role`
   - `created_at`
   - `metadata_json`
-- `workstream_field_vectors`
-  - `id`
-  - `field_id`
-  - `workstream_id`
-  - `model_alias`
-  - `input_text`
-  - `input_fingerprint`
-  - `dimensions`
-  - `vector_json` or compact blob
-  - `provider_name`
-  - `model_name`
-  - `created_at`
-  - `metadata_json`
-
-Direct field contract:
-
-- `title`: compact human-readable label for the workstream.
-- `type`: kind of work or deliverable, not the subject matter.
-- `topic`: subject/theme of the work; may be a phrase or sentence.
-- `entities`: named people, organizations, funders, clients, partners, places,
-  or other proper-noun entities.
-- `project`: project, program, initiative, client engagement, or internal work
-  area.
-- `objective`: outcome the user is trying to accomplish.
-- `strategy`: reusable approach, format, style preference, decision,
-  constraint, or tactic.
-
-Field extraction/update policy:
-
-- Update only fields supported by current context.
-- Leave unknown fields empty rather than inventing specific entities, projects,
-  or objectives.
-- Summarize the unit of work, not the latest prompt wording.
-- `update_workstream` replaces supplied direct field values.
-
-Vector policy:
-
-- Store vectors for direct workstream fields, not whole vault files.
-- Vectorized fields should include at least `type`, `topic`, `objective`, and
-  `strategy`. `entities` and `project` use simple case-insensitive wildcard
-  matching in the first pass.
-- Vector search is field-aware. A query `topic` vector searches stored `topic`
-  vectors; a query `type` vector searches stored `type` vectors. Retrieval
-  should not collapse different fields into one undifferentiated similarity
-  pool.
-- Semantic field matches are candidate generators and should produce softer
-  reasons than exact matches, for example `semantic_topic_similarity`.
-- The first semantic experiment should specifically test that a wetlands report
-  can be found as a candidate for watershed protection or riparian restoration
-  work even when exact topic strings do not match.
-- For now, `memory_ops` indexes vector-searchable fields immediately after
-  `create_workstream` and `update_workstream`. Indexing is best effort: field
-  writes still succeed if embeddings are unavailable, and exact search remains
-  usable.
-
-Service API:
-
-- `get_current_workstream(vault_name, session_id)`
-- `create_workstream(vault_name, title=None, metadata=None, ...)`
-- `link_session_to_workstream(...)`
-- `update_workstream(...)`
-- `list_workstream_artifacts(...)`
-
-Validation scenario fixtures:
-
-- Add scenario-local fixtures for isolated runtime roots that can populate:
-  - synthetic vault files
-  - `chat_sessions.db` sessions/messages
-  - `memory.db` workstreams/artifacts
-  - optional `task_file_mutations` rows for AssistantMD-created outputs
-- Keep the fixture data close to the initial scenario set:
-  - two donor reports with the same format but different subjects
-  - one wetlands funding proposal related by topic but not task type
-  - annual goals, weekly plans, and performance review sessions
-  - a one-off pure retrieval question
-  - a snippets/research folder synthesis session
-  - an incognito/no-memory session
-- Add validation scenarios that print or snapshot:
-  - extracted candidate fields from a chat transcript
-  - linked workstream rows
-  - artifact rows
-  - field-search candidates and reasons
-
-Extraction prototype:
-
-- Build only scenario-local experimental extractors in this slice, not
-  production chat behavior.
-- Start with deterministic extraction from session title, latest prompt, simple
-  path/artifact signals, and manually seeded expected fields.
-- Optionally add an offline LLM extraction validation scenario behind an
-  explicit flag so we can compare model output with expected fields without
-  committing to runtime LLM extraction.
-- Record mismatches between expected fields and extracted fields as product
-  feedback on the data model.
-
-Validation:
-
-- Creating a workstream does not implicitly link a session.
-- Linking a session to a workstream is idempotent.
-- An unlinked session has no current workstream.
-- A session cannot link to a workstream in another vault.
-- Field updates replace direct workstream text fields.
-- Persistence works with runtime `system_root` isolation.
-- Validation scenarios can create isolated synthetic chat sessions and
-  workstreams without touching `/app/data` or `/app/system`.
-- Extraction probes produce stable candidate fields for seeded scenarios when
-  extraction is explicitly under test.
-
-Experiment:
-
-- Populate both synthetic workstreams and synthetic chat sessions inside
-  validation scenarios, then run the extraction/query probes before finalizing
-  the schema.
-- Check whether the current fields can represent the important distinctions:
-  same task type vs same topic, same entity vs different subject, durable work
-  vs one-off retrieval, linked vs incognito.
-- Inspect whether extracted values are useful as query dimensions or whether
-  they collapse into vague labels.
-- Compare exact field matching with vector-backed field matching for related
-  concepts like wetlands, watershed protection, and riparian restoration.
-- Adjust table shape if the artifact model is awkward to explain, extract, or
-  query.
-- Treat this as the highest-feedback slice; do not move to the `memory_ops`
-  refactor until the data model survives these scenario probes.
-
-Progress notes:
-
-- Initial implementation added `system/memory.db` schema registration, a
-  `WorkstreamStore`, synthetic scenario fixtures, deterministic extraction
-  probes, and explainable related-workstream query experiments.
-- Added `validation/scenarios/experiments/memory_workstream_data_model_probe.py`
-  so maintainers have a scenario entry point for the same data-model probe.
-- First scenario run caught an overly broad organization extractor; it was
-  tightened inside the validation probe to avoid treating an entire prompt
-  prefix as the organization.
-- Current scenario output distinguishes same task type/different subject
-  (`donor report`) from same topic/different task (`wetlands`) and leaves the
-  incognito fixture without extracted fields.
-- Added field-vector storage through the shared `VectorStore` abstraction using
-  the `workstream_field_vectors` table in `memory.db`.
-- Reworked core workstream storage to keep synthetic extraction and experiment
-  ranking out of `core/memory/workstreams.py`; fixture-specific extraction now
-  lives only in validation scenarios.
-- Wired `memory_ops` search to the field-aware semantic search path and added
-  immediate best-effort indexing after create/update operations.
-- Added a deterministic semantic embedding probe to the Slice 1 scenarios. The
-  riparian/watershed query has no exact topic match, but vector-backed topic
-  search returns wetlands-adjacent workstreams with reasons such as
-  `semantic_topic_similarity`.
-- The semantic probe initially pulled in a forest donor report via broad
-  semantic type similarity. The experiment now scopes the riparian/watershed
-  comparison to topic fields, which is a useful early signal that semantic
-  matching should be field-policy aware rather than one global score.
-
-Risks:
-
-- A dedicated `memory.db` avoids expanding `chat_sessions.db`, but it creates a
-  new system DB to document and maintain.
-
-## Slice 2: Refactor `memory_ops` For Workstream Operations
-
-Goal: replace the current narrow conversation-history `memory_ops` behavior with
-the workstream operation surface backed by Slice 1 persistence. Conversation
-history is not part of this tool contract.
-
-Operations:
-
-- `create_workstream`
-- `get_workstream`
-- `search_workstreams`
-- `link_session`
-- `update_workstream`
-
-Contract:
-
-- Return JSON text, matching current `memory_ops` behavior.
-- Include stable `status`, `operation`, and `workstream_id` fields in metadata-like
-  payloads.
-- `get_workstream` is read-only. Without `workstream_id`, it returns the workstream linked to the current session or an unlinked status.
-- Write operations should store concrete fields and artifacts, not durable
-  confidence/provenance scores.
-
-Policy:
-
-- Reads are safe for context scripts and chat if the tool is enabled.
-- Writes are allowed but auditable. Later UI/policy can restrict chat-visible
-  writes if needed.
-- Cross-vault operations are rejected.
-
-Validation:
-
-- Direct Python service tests for each operation.
-- Tool-level test for JSON result shape.
-- Conversation-history retrieval remains available to context assembly through
-  `retrieve_history(...)`, not through `memory_ops`.
-
-Experiment:
-
-- Write one throwaway authoring-style script that uses only `memory_ops`
-  operations to create, link, update, and inspect a workstream.
-- Evaluate whether the operation names and payloads feel composable enough for a
-  real context script.
-- Revise the operation surface before registering it broadly.
-
-Risks:
-
-- Existing docs said `memory_ops` was for conversation history. This slice
-  changes its scope; docs and tool description must be updated in the same
-  commit.
-
-Progress notes:
-
-- Refactored `core/tools/memory_ops.py` into the workstream operation surface
-  and removed legacy chat-history operations.
-- Added operations for current workstream lookup, workstream create/get/search,
-  session link, and field update.
-- Kept the tool return contract as pretty JSON text with stable `status` and
-  `operation` fields for workstream operations.
-- Added `validation/scenarios/experiments/memory_ops_workstream_probe.py` to drive
-  the tool directly against scenario-local synthetic workstreams without
-  registering it in global settings.
-- Updated `docs/tools/memory_ops.md` to describe the expanded contract.
-- Recorded the product decision that memory exposed to agents is mediated
-  through workstreams. Chat history can later feed memory through transcript
-  export or extraction, but it is not directly queryable through `memory_ops`.
-
-## Slice 3: Register `memory_ops` For Authoring And Optional Chat Use
-
-Goal: add the refactored memory tool back into settings once its real contract
-exists.
-
-Changes:
-
-- Add `memory_ops` to `core/settings/settings.template.yaml` tools with
-  `chat_visible: true` so it can be selected and tested from chat.
-- Add `memory_ops` to default chat tools during this experimental branch so the
-  UI exposes it without manual settings edits.
-- Ensure settings reload / tool config surfaces handle the tool.
-- Update `docs/tools/memory_ops.md` to clarify that it is callable from authored
-  scripts and chat through the normal configured tool path.
-- Update architecture docs to record that `memory_ops` is the memory operation
-  surface for both chat and authoring.
-
-Validation:
-
-- Unit or integration check that `resolve_tool_binding(["memory_ops"], ...)`
-  returns a callable tool spec.
-- Monty compile/run smoke where an authoring script calls
-  `await memory_ops(operation="get_workstream")`.
-- Separate Monty run that creates/links a workstream through `memory_ops`.
-- Chat-agent tool call can link or update the current workstream when
-  `memory_ops` is chat-visible in test settings.
-
-Experiment:
-
-- Build two tiny context scripts:
-  - memory-on: reads current workstream and links when explicitly told to
-  - memory-off/incognito: never writes memory state
-- Confirm the difference is transparent from logs/results and does not require a
-  hidden platform mode.
-
-Risks:
-
-- Existing user settings may not include `memory_ops`. Reload/repair behavior
-  should be checked so default context scripts do not fail unexpectedly.
-
-Progress notes:
-
-- Registered `memory_ops` in the settings template and added it to default chat
-  tools so it is available for manual chat experiments.
-- Kept `memory_ops` on the normal configured tool path rather than adding a
-  separate helper API.
-- Added `validation/scenarios/integration/core/memory_ops_chat_tool.py` to prove
-  a selected chat agent can call `memory_ops` to link the active session and
-  update a workstream.
-- Updated chat metadata validation to expect `memory_ops` in the exposed tool
-  list.
-- Fixed runtime bootstrap to clear the typed settings cache after bootstrap
-  roots are established, so settings-backed tools are read from the active
-  system root.
-
-## Slice 4: Context-Controlled Workstream Linking
-
-Goal: let context policy decide whether and when a session attaches to a work
-workstream.
-
-Integration points:
-
-- Shared chat preflight in `_prepare_chat_execution(...)` has session id, vault,
-  prompt, context template, model/tools, and prior persisted history.
-- Accepted user request is persisted later inside streaming/non-streaming
-  execution. The platform should make session/vault/latest-message context
-  available to `memory_ops`, but it should not create or link a workstream as an
-  unconditional preflight side effect.
-- Context assembly runs before the chat agent answers and is the right place for
-  the default memory policy to inspect early signals and choose whether to link.
-
-Recommended approach:
-
-- Do not add `memory_service.ensure_workstream_for_session(...)` to chat preflight.
-- Ensure `memory_ops` can resolve the active vault and session from the current
-  tool/runtime context.
-- Update the default context template to run an initial memory policy:
-  - call `memory_ops(operation="get_workstream")`
-  - if already linked, retrieve current workstream state
-  - if unlinked, inspect session title, latest prompt, prior history, and
-    working set
-  - either create/link a new workstream, suggest likely continuations, or leave
-    the session unlinked
-- Represent incognito/no-memory behavior as a context policy that never calls
-  memory write operations. A later UI toggle can select that policy or pass an
-  explicit memory mode into context assembly.
-- Store initial prompt/session title as metadata/fields only when a policy
-  chooses to create or link a workstream.
-
-Validation:
-
-- Non-streaming and streaming first chats can remain unlinked when the selected
-  context policy does not call memory write operations.
-- Default context policy can create and link one workstream when matching
-  thresholds are met.
-- Reusing a linked session does not create duplicate workstreams.
-- Switching vaults starts a different session and cannot reuse the prior vault's
-  workstream.
-- Incognito/no-memory context policy leaves no workstream link and writes no workstream
-  fields/artifacts.
-- Cancellation preserves any explicit link made during context assembly but does
-  not fabricate assistant output artifacts.
-
-Experiment:
-
-- Run the initial scenario set with the default policy and inspect which chats
-  link, stay unlinked, or suggest continuations.
-- Pay special attention to quick retrieval sessions and subject-mismatched donor
-  reports.
-- Adjust thresholds/policy before adding more signal capture.
-
-Risks:
-
-- If linking happens inside context assembly, a failed context script can leave
-  the session unlinked. That is acceptable and should fail closed.
-- Context scripts must be careful not to create noisy low-value workstreams too
-  early. Thresholds belong in the default policy, not in hidden preflight code.
-
-## Slice 5: Capture Basic Workstream Signals
-
-Goal: populate useful low-risk fields for linked workstreams without LLM
-extraction.
-
-Signals:
-
-- session title -> workstream title candidate
-- prompt text -> objective candidate if short enough, source `inferred`
-- chat turn count from stored messages
-- modified/output files from `task_file_mutations` where task scope is
-  `chat_session:<session_id>`
-- tools selected for the run
-- context template used
-
-Implementation:
-
-- Add post-turn update hook after successful chat persistence in both streaming
-  and non-streaming paths.
-- If the session is unlinked, skip workstream signal capture.
-- Query `task_file_mutations` for chat session scope to link modified/output
-  artifacts.
-- Keep extraction deterministic in this slice.
-
-Validation:
-
-- A chat that writes a file links that file as `file_modified` or
-  `output_created` when the session is linked.
-- An unlinked or incognito chat writes no workstream artifacts.
-- A chat with no file activity still updates turn-count signals.
-- Repeated turns update `last_seen_at`.
-- Failed/cancelled turns do not overstate outputs.
-
-Experiment:
-
-- Review captured workstream state after several realistic chats.
-- Check whether the workstream rollups tell the user something they would not
-  already know from the chat title and file list.
-- Decide whether additional instrumentation, such as read/retrieval tracking, is
-  required before related search can be useful.
-
-Risks:
-
-- Vault-state mutation rows may be created after tool execution but before final
-  chat persistence; post-turn hook should see them, but ordering should be
-  validated.
-
-## Slice 6: Manual Relink And Field Update Through Chat
-
-Goal: make the flexible session-to-workstream link usable.
-
-Behavior:
-
-- User can tell the chat agent:
-  - "This is part of the wetlands proposal workstream."
-  - "Start a new workstream for this."
-  - "Do not remember this session."
-  - "Add Foundation X as the organization."
-  - "This is not related to the prior donor report."
-- Chat agent uses `memory_ops` to link or update when the tool is available.
-
-UI:
-
-- No full management UI in this slice.
-- Optional minimal chat-visible confirmation text from agent is enough.
-
-Validation:
-
-- `memory_ops(link_session)` moves the current session from workstream A to B
-  when the session already has an existing link.
-- Bad or noisy workstreams need an explicit cleanup policy before adding a
-  public correction operation.
-- Rejected relation is recorded and suppresses the same candidate for the same
-  current workstream.
-- User-confirmed organization/topic outranks inferred values in related search.
-
-Experiment:
-
-- Use natural chat instructions to correct memory state in the scenario set.
-- Compare the tool calls/results with what a user would expect from phrases like
-  "this is not related" or "do not remember this."
-- If the agent needs too much prompting to do the right thing, adjust tool
-  descriptions and default context instructions before adding retrieval ranking.
-
-Risks:
-
-- If `memory_ops` is not chat-visible by default, validation must enable it in
-  test settings.
-
-## Slice 7: Related Workstream Retrieval
-
-Goal: retrieve candidate prior workstreams by transparent relationship type.
-
-Matching v1:
-
-- same organization/person/project exact normalized match
-- same topic/type lexical normalized match
-- same modified/output artifact path
-- same folder namespace from artifact paths
-- recent active workstreams in same vault
-
-Result shape:
-
-- candidate workstream id/title
-- relation types
-- reasons
-- candidate artifacts
-- whether it is safe to auto-include or should be suggested
-
-Ranking:
-
-- relation strength
-- recency decay
-- user-confirmed fields
-- reuse/continuation count
-
-Validation:
-
-- Same organization + same type ranks above same topic only.
-- Same topic but different type is returned as related, not continuation.
-- Small one-off workstreams are searchable but not high-priority suggestions
-  once ranking policy exists.
-- Rejected candidates are suppressed.
-- Cross-vault candidates are never returned.
-
-Experiment:
-
-- Create paired scenario workstreams:
-  - same task type, different subject
-  - different task type, same subject
-  - same organization, different goal
-  - one-off retrieval note
-- Inspect returned reasons and ranking with a human eye. Do not move to default
-  context inclusion until the explanations are clear enough to trust.
-
-Risks:
-
-- Avoid embeddings in this slice. Keep matching explainable and deterministic.
-
-## Slice 8: Candidate Memory-Aware Context Assembly
-
-Goal: after related-workstream retrieval exists, extend the default memory policy
-so default chat behavior can use or suggest prior work without requiring custom
-scripts.
-
-Approach:
-
-- Extend the default context template under
-  `core/authoring/seed_templates/context/default.md`.
-- It should already call `memory_ops(operation="get_workstream")` from Slice 4.
-- Search for candidate workstreams with
-  `memory_ops(operation="search_workstreams", ...)` using fields inferred from
-  the current session or fetched from the linked workstream.
-- Conservative policy:
-  - include current workstream summary/status if compact and clearly relevant
-  - do not automatically include loosely related source files
-  - emit a short system/context note with suggested candidate workstreams and
-    reasons
-  - leave actual file inclusion to explicit user/agent follow-up in v1
-
-Validation:
-
-- Default context script compiles and runs when `memory_ops` is registered.
-- Related workstream suggestions appear in assembled context with reasons.
-- When no candidate workstreams exist, default behavior remains close to current
-  context assembly.
-- Context history protocol safety remains intact.
-
-Experiment:
-
-- Compare the same chat prompts with memory-aware default context and
-  incognito/no-memory context.
-- Assess whether memory suggestions help the agent answer or merely add noise.
-- Record examples where memory should suggest files, suggest a workstream only, or
-  stay silent.
-
-Risks:
-
-- Direct tools are all configured tools in Monty. If `memory_ops` is absent from
-  user settings, the default context script must handle that gracefully or the
-  settings repair path must ensure availability.
-
-## Slice 9: API/UI Inspection Surface
-
-Goal: provide basic visibility into current workstream state and related
-suggestions.
-
-API:
-
-- `GET /api/chat/sessions/{session_id}/workstream`
-- `GET /api/memory/workstreams/{workstream_id}`
-- `GET /api/memory/workstreams/{workstream_id}/related`
-- `PATCH /api/memory/workstreams/{workstream_id}`
-- `POST /api/chat/sessions/{session_id}/workstream-link`
-
-UI v1:
-
-- Show current workstream title/status near session title or in chat settings.
-- Show an unlinked/incognito state when no workstream is attached.
-- Show a small related-work suggestion panel/message when candidates exist.
-- Allow "use", "ignore", and "not related" for suggestions if
-  feasible.
-
-Validation:
-
-- API response models serialize stable workstream shapes.
-- UI can show current workstream without blocking chat.
-- User choices are reflected in chat history; durable feedback storage is
-  deferred until real use clarifies the right shape.
-
-Experiment:
-
-- Use the UI against scenario sessions and check whether the memory state is
-  understandable without reading implementation docs.
-- Verify that "unlinked", "linked", and "suggested candidate work" are visually
-  distinct enough.
-- Keep or cut UI affordances based on whether they help users correct memory
-  behavior.
-
-Risks:
-
-- Keep UI small. Do not build a full workstream manager in v1.
-
-## Slice 10: LLM-Assisted Workstream Extraction
-
-Goal: add model judgment only after deterministic workstream plumbing works.
-
-Approach:
-
-- Use `delegate` or a dedicated internal extraction path to suggest fields from
-  recent session history.
-- Run after response completion or on idle/session close, not before the agent
-  answers.
-- Extract:
-  - type
-  - topics
-  - people
-  - organizations
-  - objectives
-  - strategies
-  - open questions
-- Store model-derived fields as candidate workstream fields only after the
-  extraction policy decides they are useful query dimensions.
-- Do not overwrite user-edited fields without explicit user confirmation.
-
-Validation:
-
-- Extraction output is schema-validated.
-- User-confirmed fields survive later inferred updates.
-- Bad/empty extraction does not break chat completion.
-- Validation fixtures cover donor report vs wetlands proposal relationship
-  nuance.
-
-Experiment:
-
-- Run extraction offline against saved scenario transcripts before enabling it in
-  normal chat flow.
-- Compare inferred fields with user-confirmed ground truth.
-- Only promote extraction into default behavior if it improves candidate workstream
-  retrieval without creating authoritative-looking false memory.
-
-Risks:
-
-- This is where "magic" can become overconfident. Keep it asynchronous,
-  auditable, and low authority.
-
-## Deferred Work
-
-- Embeddings over workstream summaries/topics/objectives.
-- Full vault semantic retrieval.
-- Read/retrieval instrumentation for all tools.
-- Markdown mirrors or editable workstream notes.
-- Full workstream management UI.
-- Cross-vault memory.
-- Graph/centrality maps.
-- Automatic promotion of inferred decisions to instruction-grade memory.
-
-## Documentation Updates
-
-As slices land, update:
-
-- `docs/architecture/memory.md`
-- `docs/architecture/settings-secrets.md`
-- `docs/architecture/chat-sessions.md`
-- `docs/architecture/authoring-engine.md`
-- `docs/tools/memory_ops.md`
-- `docs/use/authoring.md`
-- README memory section once user-facing behavior exists
-
-## Next Concrete Step
-
-Continue with Slice 4 in feature development:
-
-1. Build a narrow context-controlled linking experiment.
-2. Let context policy inspect the current workstream and decide whether to leave
-   the session unlinked, create/link a new workstream, or suggest likely related
-   workstreams.
-3. Keep incognito/no-memory behavior as a context policy that does not call
-   memory write operations.
+- `session_memory_field_vectors`
+  - owned through the vector-store abstraction
+
+Store API:
+
+- `upsert_session_memory(...)`
+- `get_session_memory(vault_name, session_id)`
+- `delete_session_memory(vault_name, session_id)`
+- `search_session_memories(...)`
+- `search_session_memories_by_field(...)`
+- `find_related_sessions(...)`
+- `index_session_memory_fields(...)`
+
+## Implemented Slice: `memory_ops`
+
+Tool operations:
+
+- `extract_session_memory`
+- `upsert_session_memory`
+- `get_session_memory`
+- `search_sessions`
+- `find_related_sessions`
+
+The active vault and session default from `MemoryContext`. The tool no longer
+accepts a separate memory object id because `session_id` is the identity.
+`extract_session_memory` is the automatic creation policy; it reads the
+persisted transcript, runs two-step extraction, and writes through the same
+session-memory storage/indexing path as `upsert_session_memory`.
+
+## Current Extraction Policy
+
+The best live-model result so far is two-step extraction:
+
+1. Full chat transcript -> `summary`, `user_intent`
+2. `summary`, `user_intent`, and title -> `domain`, `work_product`,
+   `named_entities`
+
+Working guidance:
+
+- `summary` and `user_intent` are durable.
+- `domain`, `work_product`, and `named_entities` are retrieval fields that may
+  be rebuilt from durable fields later.
+- `named_entities` should be limited to people, organizations, and places.
+
+## Current Retrieval Policy Recommendation
+
+Use field-aware semantic retrieval over session memory fields.
+
+Compound score:
+
+```text
+score = 0.45 * domain
+      + 0.35 * work_product
+      + 0.20 * user_intent
+```
+
+Bands:
+
+- `>= 0.70`: automatic recommendation
+- `0.55-0.70`: possible related work
+- `< 0.55`: hide
+
+`summary` should be shown as explanation/evidence, not used in first-pass
+ranking. The stricter domain-plus-support policy is useful as a diagnostic but
+too brittle as the default.
+
+This policy is implemented as `find_related_sessions`, leaving
+`search_sessions` as the lower-level search primitive. The first implementation
+searches indexed session memory fields, but the operation name leaves room for
+future transcript and linked-artifact search.
+The public `find_related_sessions` operation only accepts `session_id` and
+`limit`; it loads stored fields from that session and applies the policy.
+
+## Validation Scenarios
+
+Current focused scenarios:
+
+- `validation/scenarios/experiments/vector_embedding_service_probe.py`
+- `validation/scenarios/experiments/memory_session_data_model_probe.py`
+- `validation/scenarios/experiments/memory_ops_session_probe.py`
+- `validation/scenarios/integration/core/memory_ops_chat_tool.py`
+- `validation/scenarios/experiments/ashley_ncc_two_step_extraction_probe.py`
+
+The Ashley_NCC scenario writes artifacts for extraction quality, single-field
+retrieval probes, and compound retrieval policy probes.
+
+## Next Slices
+
+### Slice A: Stabilize Session Memory Contract
+
+- Run focused validation scenarios.
+- Verify delete/purge cleanup removes session memory.
+- Confirm no remaining product-facing docs describe project/work aggregation as
+  current behavior.
+
+### Slice B: Context Script Experiment
+
+- Build a default memory-aware context script that can:
+  - inspect current session memory
+  - search related prior sessions
+  - surface candidates transparently
+- Keep it opt-in while retrieval policy is still being tuned.
+
+### Slice C: Extraction Timing
+
+Decide when `upsert_session_memory` should run by default:
+
+- explicit chat-agent/tool call only
+- context script after enough history exists
+- session idle or response-completion background task
+
+The current implementation supports the first two without adding background
+automation.
+
+### Slice D: Retrieval Policy Hardening
+
+- Add deterministic tests for compound scoring once the policy moves from
+  scenario code into core/product behavior.
+- Keep field contribution output in responses so ranking remains inspectable.
+- Revisit named-entity exact matching after real data accumulates.
+
+### Slice E: Vault-State Retrieval Signals
+
+Discuss and design how vault-state should influence `find_related_sessions`.
+Candidate signals include:
+
+- shared files read, retrieved, modified, or created;
+- shared directories or nearby paths;
+- repeated output locations or artifact roles;
+- recency of AssistantMD-routed file mutations;
+- whether a candidate session touched durable files that still exist.
+
+This should start as an experiment, not an immediate production scoring rule.
+The first question is whether vault-state overlap improves recommendations
+enough to justify mixing it with semantic field scores.
+
+### Slice F: Memory Pruning And Expiry
+
+Define how session memories should age, decay, or be removed. The design should
+distinguish:
+
+- deleting memory when its source chat session is deleted;
+- hiding old or low-value memories from default recommendations;
+- keeping old memories searchable through explicit `search_sessions`;
+- pruning generated vectors or stale derived fields when extraction policy
+  changes;
+- whether expiry should be time-based, activity-based, user-controlled, or a
+  combination.
+
+## Open Questions
+
+- Should session memory be generated automatically at session idle, or only by a
+  selected memory-aware context policy?
+- Should memory rows be visible in the UI next to chat sessions?
+- Should a deleted chat transcript export also delete any memory artifacts, or
+  only the session memory row?
+- How should vault-state overlap be weighted against semantic similarity in
+  `find_related_sessions`?
+- What memory aging policy should affect default recommendations without making
+  explicit search forget useful old work?
+- What minimum real-data volume is enough before revisiting higher-level
+  project/work aggregation?
