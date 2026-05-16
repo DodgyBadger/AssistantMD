@@ -64,6 +64,7 @@ Available helpers and reserved inputs:
 
 - direct tool functions such as `file_ops_safe(...)`, `delegate(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
+- `retrieve_sessions(...)`: select current-vault chat session metadata, such as sessions pending memory extraction
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
 - `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
@@ -109,6 +110,12 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - in context assembly scripts, use read-only `latest_message` only to decide what prior history, files, or instructions to include
 - do not add `latest_message` to `history` or `context_messages`; the chat runtime appends it exactly once after your assembled context
 - use `latest_message.exists`, `latest_message.role`, `latest_message.content`, and `latest_message.text` when context selection should depend on the active request
+
+### `retrieve_sessions`
+
+- `retrieve_sessions(selection="pending_memory")` returns current-vault chat sessions that do not yet have derived memory
+- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, and `has_memory`
+- use this helper to select sessions, then call `memory_ops(operation="extract_session_memory", session_id=...)` when a workflow should extract memory for selected sessions
 
 ### `parse_markdown`
 

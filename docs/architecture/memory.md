@@ -7,6 +7,7 @@ The memory subsystem is the shared broker for conversation-history access. It ke
 - `core/memory/service.py` — broker, providers, normalized result types
 - `core/memory/providers.py` — compatibility re-exports for older provider imports
 - `core/authoring/helpers/history/retrieve.py` — Monty `retrieve_history(...)` adapter
+- `core/authoring/helpers/retrieve_sessions.py` — Monty `retrieve_sessions(...)` adapter
 - `core/authoring/helpers/history/assemble.py` — Monty `assemble_context(...)` adapter
 - `core/tools/memory_ops.py` — LLM-facing memory tool adapter
 - `core/chat/chat_store.py` — persisted SQLite-backed message source
@@ -40,6 +41,12 @@ Context scripts should use `retrieve_history(...)` rather than reading chat stor
 - one atomic tool call + tool return exchange
 
 `assemble_context(...)` accepts those safe units and preserves provider-native message fidelity for downstream chat context. The latest active message is not appended by scripts; the chat runtime adds it once after assembled history.
+
+Workflow scripts can use `retrieve_sessions(selection="pending_memory")` to enumerate
+current-vault chat sessions that do not yet have a derived session-memory row.
+The helper returns session metadata only; it does not retrieve transcript
+messages or perform extraction. Workflows should compose it with `memory_ops`
+when they need to extract memory for selected sessions.
 
 During active context assembly, the context manager passes curated prior history in
 `message_history` and exposes the current user prompt through `latest_message`. That path

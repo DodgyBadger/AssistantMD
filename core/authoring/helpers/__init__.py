@@ -12,6 +12,7 @@ from core.authoring.helpers.import_content import build_definition as build_impo
 from core.authoring.helpers.pending_files import build_definition as build_pending_files_definition
 from core.authoring.helpers.parse_markdown import build_definition as build_parse_markdown_definition
 from core.authoring.helpers.read_cache import build_definition as build_read_cache_definition
+from core.authoring.helpers.retrieve_sessions import build_definition as build_retrieve_sessions_definition
 
 
 def get_builtin_helper_definitions() -> tuple[AuthoringCapabilityDefinition, ...]:
@@ -19,6 +20,7 @@ def get_builtin_helper_definitions() -> tuple[AuthoringCapabilityDefinition, ...
     return (
         build_read_cache_definition(),
         build_pending_files_definition(),
+        build_retrieve_sessions_definition(),
         build_retrieve_history_definition(),
         build_assemble_context_definition(),
         build_parse_markdown_definition(),

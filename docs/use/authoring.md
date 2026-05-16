@@ -84,6 +84,8 @@ description: Regular chat with full history
 
 Most context scripts use three core pieces: `retrieve_history()` to read completed prior session history, read-only `latest_message` to branch on the active message, and `assemble_context()` to hand the assembled context to the chat agent. `retrieve_history().items` counts safe units: user message = 1, assistant message = 1, matched tool call + return = 1. Do not append `latest_message` manually; the runtime adds it exactly once after the assembled context.
 
+Workflows can use `retrieve_sessions(selection="pending_memory")` to select current-vault chat sessions that do not yet have derived memory. It returns session metadata only; use `retrieve_history()` or `memory_ops` when a workflow needs to process a specific session.
+
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
 Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence. System seed scripts are refreshed on startup; copy one to a new vault script before customizing it.
