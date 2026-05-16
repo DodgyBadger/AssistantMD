@@ -127,17 +127,19 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 tool,
                 ctx,
                 operation="upsert_session_memory",
-                title="Riparian restoration grant",
-                summary="Drafting a grant proposal about riparian restoration.",
-                domain="conservation fundraising",
-                work_product="funding proposal",
-                user_intent="Create a funding proposal for riparian restoration work.",
-                artifacts=[
-                    {
-                        "path": "Proposals/Riparian/grant.md",
-                        "artifact_role": "planning_note",
-                    }
-                ],
+                data={
+                    "summary": "Drafting a grant proposal about riparian restoration.",
+                    "domain": "conservation fundraising",
+                    "work_product": "funding proposal",
+                    "user_intent": "Create a funding proposal for riparian restoration work.",
+                    "artifacts": [
+                        {
+                            "path": "Proposals/Riparian/grant.md",
+                            "artifact_role": "planning_note",
+                        }
+                    ],
+                    "metadata": {"source": "validation_probe"},
+                },
             )
 
             current = await _call(tool, ctx, operation="get_session_memory")
@@ -145,10 +147,12 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 tool,
                 ctx,
                 operation="upsert_session_memory",
-                summary="Drafting a grant proposal about riparian restoration using a reusable grant narrative.",
-                domain="conservation fundraising",
-                work_product="funding proposal",
-                user_intent="Create a funding proposal for riparian restoration work.",
+                data={
+                    "summary": "Drafting a grant proposal about riparian restoration using a reusable grant narrative.",
+                    "domain": "conservation fundraising",
+                    "work_product": "funding proposal",
+                    "user_intent": "Create a funding proposal for riparian restoration work.",
+                },
             )
             searched = await _call(
                 tool,
@@ -175,13 +179,6 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 operation="search_sessions",
                 mode="search",
                 query="donor report",
-            )
-            legacy_field_search = await _call(
-                tool,
-                ctx,
-                operation="search_sessions",
-                field_type="summary",
-                value="riparian",
             )
             boolean_search_error = await _call_model_retry(
                 tool,
@@ -212,14 +209,11 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 ctx,
                 operation="search_sessions",
             )
-            related_with_ignored_fields = await _call(
+            explicit_related = await _call(
                 tool,
                 ctx,
                 operation="search_sessions",
                 mode="related",
-                domain="unrelated cooking",
-                work_product="recipe",
-                user_intent="Find dinner ideas.",
             )
         finally:
             memory_ops_module.VectorService = original_vector_service
@@ -236,12 +230,11 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "semantic_search": semantic_search,
             "fetched": fetched,
             "searched_by_type": searched_by_type,
-            "legacy_field_search": legacy_field_search,
             "boolean_search_error": boolean_search_error,
             "natural_language_search": natural_language_search,
             "all_limit_error": all_limit_error,
             "related": related,
-            "related_with_ignored_fields": related_with_ignored_fields,
+            "explicit_related": explicit_related,
         }
         (self.artifacts_dir / "memory_ops_session_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
@@ -315,18 +308,6 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             ),
             "search_sessions should retrieve candidates across memory fields",
         )
-        self.soft_assert_equal(
-            legacy_field_search["mode"],
-            "search",
-            "legacy field/value calls should be translated to search mode",
-        )
-        self.soft_assert(
-            any(
-                match["session_id"] == "riparian-grant-session"
-                for match in legacy_field_search["matches"]
-            ),
-            "legacy field/value calls should not fail tool validation",
-        )
         self.soft_assert(
             "plain search phrase" in boolean_search_error,
             "Boolean-looking search queries should trigger a retryable correction",
@@ -360,9 +341,9 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "related search should explain field contributions",
         )
         self.soft_assert_equal(
-            related_with_ignored_fields["matches"],
+            explicit_related["matches"],
             related["matches"],
-            "related search should ignore caller-supplied field overrides",
+            "explicit related mode should match the default search mode",
         )
         self.teardown_scenario()
         self.assert_no_failures()

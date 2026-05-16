@@ -43,10 +43,12 @@ class MemoryOpsChatToolScenario(BaseScenario):
                 if current_case["name"] == "upsert":
                     return {
                         "operation": "upsert_session_memory",
-                        "summary": "Chat memory testing",
-                        "domain": "validation",
-                        "work_product": "test artifact",
-                        "user_intent": "Validate that chat can write session memory.",
+                        "data": {
+                            "summary": "Chat memory testing",
+                            "domain": "validation",
+                            "work_product": "test artifact",
+                            "user_intent": "Validate that chat can write session memory.",
+                        },
                     }
                 if current_case["name"] == "get":
                     return {"operation": "get_session_memory"}

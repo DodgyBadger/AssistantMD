@@ -18,6 +18,7 @@
 - Confirm docs and validation still describe the post-refactor behavior.
   This includes `docs/architecture/` when subsystem boundaries, responsibilities, or execution flow changed.
 - If the refactor reveals a bug, fix it explicitly and keep the scope clear.
+- Ask before building compatibility shims or adapters.
 
 ## Guardrails
 - Refactor in small, reviewable chunks.

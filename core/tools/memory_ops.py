@@ -58,16 +58,8 @@ class MemoryOps(BaseTool):
             mode: str = "related",
             query: str = "",
             limit: int | str = 5,
-            title: str | None = None,
-            summary: str | None = None,
-            domain: str | None = None,
-            work_product: str | None = None,
-            user_intent: str | None = None,
-            named_entities: str | None = None,
+            data: dict[str, Any] | None = None,
             extraction_model: str = "gpt-mini",
-            artifacts: list[dict[str, Any]] | None = None,
-            metadata: dict[str, Any] | None = None,
-            **legacy_kwargs: Any,
         ) -> str:
             """Manage memory extracted from chat sessions.
 
@@ -76,15 +68,8 @@ class MemoryOps(BaseTool):
             :param mode: Search mode for search_sessions: related, search, or deep. Defaults to related.
             :param query: User-provided search phrase for search and deep modes.
             :param limit: Positive integer result limit for search_sessions.
-            :param title: Optional human-readable session label.
-            :param summary: Short plain-language summary of the chat session.
-            :param domain: Subject area or knowledge area.
-            :param work_product: Concrete thing the user wanted produced or answered.
-            :param user_intent: User's underlying goal or intent.
-            :param named_entities: Named people, organizations, and places.
+            :param data: Memory record payload for upsert_session_memory.
             :param extraction_model: Model alias used by extract_session_memory.
-            :param artifacts: Optional list of artifact objects.
-            :param metadata: Optional object metadata for upsert operations.
             """
             try:
                 deps = getattr(ctx, "deps", None)
@@ -107,22 +92,26 @@ class MemoryOps(BaseTool):
                 if op == "upsert_session_memory":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
+                    memory_data = _upsert_data(data)
                     session_memory = store.upsert_session_memory(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        title=title,
-                        summary=summary,
-                        domain=domain,
-                        work_product=work_product,
-                        user_intent=user_intent,
-                        named_entities=named_entities,
-                        metadata=metadata,
+                        title=_session_title(
+                            vault_name=active_vault_name,
+                            session_id=active_session_id,
+                        ),
+                        summary=memory_data.get("summary"),
+                        domain=memory_data.get("domain"),
+                        work_product=memory_data.get("work_product"),
+                        user_intent=memory_data.get("user_intent"),
+                        named_entities=memory_data.get("named_entities"),
+                        metadata=memory_data.get("metadata"),
                     )
                     _maybe_add_artifacts(
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        artifacts=artifacts,
+                        artifacts=memory_data.get("artifacts"),
                     )
                     indexed_fields = await _maybe_index_session_memory_fields(
                         store,
@@ -150,14 +139,13 @@ class MemoryOps(BaseTool):
                     session_memory = store.upsert_session_memory(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        title=title or extraction["title"],
+                        title=extraction["title"],
                         summary=extraction["summary"],
                         domain=extraction["domain"],
                         work_product=extraction["work_product"],
                         user_intent=extraction["user_intent"],
                         named_entities=extraction["named_entities"],
                         metadata={
-                            **(metadata or {}),
                             "source": "chat_session_extraction",
                             "extraction_policy": "two_step_summary_intent_then_classification",
                             "extraction_model": extraction_model,
@@ -198,21 +186,10 @@ class MemoryOps(BaseTool):
                     }
                 elif op == "search_sessions":
                     _require(active_vault_name, "vault_name is required")
-                    query_from_legacy = str(
-                        legacy_kwargs.get("value")
-                        or legacy_kwargs.get("query")
-                        or ""
-                    )
-                    mode_from_legacy = str(
-                        legacy_kwargs.get("mode")
-                        or mode
-                        or ""
-                    )
-                    if legacy_kwargs.get("field_type") and not query:
-                        mode_from_legacy = "search"
+                    normalized_mode = str(mode or "")
                     _validate_search_sessions_request(
-                        mode=mode_from_legacy,
-                        query=query or query_from_legacy,
+                        mode=normalized_mode,
+                        query=query,
                         resolved_limit=resolved_limit,
                     )
                     resolved_search_limit = resolved_limit if isinstance(resolved_limit, int) else 5
@@ -220,23 +197,10 @@ class MemoryOps(BaseTool):
                         store=store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        mode=mode_from_legacy,
-                        query=query or query_from_legacy,
+                        mode=normalized_mode,
+                        query=query,
                         limit=resolved_search_limit,
                     )
-                elif op == "find_related_sessions":
-                    _require(active_vault_name, "vault_name is required")
-                    resolved_search_limit = resolved_limit if isinstance(resolved_limit, int) else 5
-                    result = await _search_sessions(
-                        store=store,
-                        vault_name=active_vault_name,
-                        session_id=active_session_id,
-                        mode="related",
-                        query="",
-                        limit=resolved_search_limit,
-                    )
-                    result["operation"] = op
-                    result["mode"] = "related"
                 else:
                     return (
                         "Unknown operation. Available: extract_session_memory, "
@@ -277,6 +241,12 @@ Session memory field guidance:
 - `user_intent`: user's underlying goal or intent after clarification or drift.
 - `named_entities`: only named people, organizations, and places.
 
+Use `upsert_session_memory` only when you already have field values to store.
+Pass those values in `data`; supported keys are `summary`, `domain`,
+`work_product`, `user_intent`, `named_entities`, `artifacts`, and `metadata`.
+It persists supplied values; it does not inspect the transcript or infer missing
+fields.
+
 Use `search_sessions` for caller-driven lookup across indexed chat-session
 memory. `search_sessions` has three modes:
 - `related`: default. Compares the current or specified session against prior
@@ -294,7 +264,8 @@ For `search` and `deep`, write `query` as a plain natural-language phrase. Do
 not use explicit boolean syntax such as uppercase AND/OR. Use a positive
 integer `limit`.
 
-Update only fields supported by current context. Leave unknown fields empty.
+For manual writes, include only `data` fields supported by current context.
+Leave unknown fields empty.
 
 Full documentation:
 - `__virtual_docs__/tools/memory_ops.md`
@@ -337,6 +308,38 @@ def _require(value: object, message: str) -> None:
         raise ValueError(message)
     if isinstance(value, str) and not value.strip():
         raise ValueError(message)
+
+
+def _session_title(*, vault_name: str, session_id: str) -> str | None:
+    session = ChatStore().get_session(session_id=session_id, vault_name=vault_name)
+    return session.title if session is not None else None
+
+
+def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("data must be an object for upsert_session_memory")
+    allowed_keys = {
+        "summary",
+        "domain",
+        "work_product",
+        "user_intent",
+        "named_entities",
+        "artifacts",
+        "metadata",
+    }
+    unknown_keys = sorted(set(data) - allowed_keys)
+    if unknown_keys:
+        joined = ", ".join(unknown_keys)
+        raise ValueError(f"Unsupported upsert_session_memory data keys: {joined}")
+
+    parsed = dict(data)
+    if parsed.get("metadata") is not None and not isinstance(parsed["metadata"], dict):
+        raise ValueError("data.metadata must be an object")
+    if parsed.get("artifacts") is not None and not isinstance(parsed["artifacts"], list):
+        raise ValueError("data.artifacts must be a list")
+    return parsed
 
 
 def _validate_search_sessions_request(
