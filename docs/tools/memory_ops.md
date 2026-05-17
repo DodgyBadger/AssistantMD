@@ -61,7 +61,8 @@ Returns pretty-printed JSON text. Successful operations include a stable
   or specified session and returns `status: "found"` or `status: "not_found"`.
 - `extract_session_memory` reads the transcript for the current or
   specified session, runs AssistantMD's standard two-step extraction policy,
-  upserts the resulting memory fields, and indexes vector-searchable fields.
+  upserts the resulting memory fields, attaches any vault files mutated by that
+  chat session as artifacts, and indexes vector-searchable fields.
 - `upsert_session_memory` manually stores the `data` values supplied by the
   caller for the current or specified session. It does not read the transcript
   or infer missing fields.

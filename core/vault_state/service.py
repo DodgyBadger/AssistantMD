@@ -24,6 +24,7 @@ from core.settings import (
     get_vault_state_enabled,
     get_vault_state_excluded_patterns,
 )
+from core.runtime.execution_tasks import chat_session_scope
 from core.utils.hash import hash_file_bytes
 from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import (
@@ -459,6 +460,57 @@ class VaultStateService:
                 )
             )
         return groups
+
+    def list_chat_session_mutations(
+        self,
+        *,
+        vault_name: str,
+        session_id: str,
+        include_expired: bool = False,
+    ) -> tuple[VaultTaskMutationItem, ...]:
+        """Return file mutations recorded for one chat session."""
+        now = datetime.now(UTC)
+        scope = chat_session_scope(session_id)
+        with self.SessionFactory() as session:
+            stmt = select(TaskFileMutation).where(
+                TaskFileMutation.vault_name == vault_name,
+                TaskFileMutation.task_kind == "chat",
+                TaskFileMutation.task_scope == scope,
+            )
+            if not include_expired:
+                stmt = stmt.where(
+                    or_(
+                        TaskFileMutation.expires_at.is_(None),
+                        TaskFileMutation.expires_at >= now,
+                    )
+                )
+            stmt = stmt.order_by(TaskFileMutation.created_at.asc(), TaskFileMutation.id.asc())
+            rows = list(session.scalars(stmt))
+
+        return tuple(
+            VaultTaskMutationItem(
+                id=row.id,
+                task_id=row.task_id,
+                task_kind=row.task_kind,
+                task_source=row.task_source,
+                task_scope=row.task_scope,
+                task_label=row.task_label,
+                path=row.path,
+                related_path=row.related_path,
+                operation=row.operation,
+                event_sequence=row.event_sequence,
+                before_exists=bool(row.before_exists),
+                before_hash=row.before_hash,
+                before_snapshot_id=row.before_snapshot_id,
+                after_exists=bool(row.after_exists),
+                after_hash=row.after_hash,
+                after_snapshot_id=row.after_snapshot_id,
+                snapshot_ref=row.snapshot_ref,
+                created_at=row.created_at,
+                expires_at=row.expires_at,
+            )
+            for row in rows
+        )
 
     def resolve_snapshot_file(self, snapshot_id: int) -> VaultSnapshotFile | None:
         """Resolve one retained file snapshot to an on-disk path under the managed snapshot root."""

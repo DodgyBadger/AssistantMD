@@ -3,7 +3,9 @@ Experiment scenario for the memory_ops session memory contract.
 """
 
 import json
+import sqlite3
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Sequence
@@ -17,8 +19,10 @@ from pydantic_ai.usage import RequestUsage
 
 from core.chat.chat_store import ChatStore
 from core.memory.session_memory import SessionMemoryStore
+from core.runtime.execution_tasks import chat_session_scope
 from core.tools.memory_ops import MemoryOps
 from core.vector import VectorService
+from core.vault_state.service import VaultStateService
 from validation.core.base_scenario import BaseScenario
 
 
@@ -32,6 +36,13 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
 
         store = SessionMemoryStore(system_root=str(system_root))
         chat_store = ChatStore(system_root=str(system_root))
+        VaultStateService()
+        _insert_chat_mutation_rows(
+            system_root=system_root,
+            vault_id="memory-ops-probe-vault-id",
+            vault_name=vault_name,
+            session_id="extract-session",
+        )
         store.upsert_session_memory(
             session_id="session-donor-wetlands",
             vault_name=vault_name,
@@ -263,6 +274,28 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "extract_session_memory should index extracted vector-searchable fields",
         )
         self.soft_assert_equal(
+            extracted["artifact_count"],
+            2,
+            "extract_session_memory should attach artifacts from chat-scoped file mutations",
+        )
+        extracted_artifacts = extracted["session_memory"]["artifacts"]
+        self.soft_assert_equal(
+            {artifact["path"] for artifact in extracted_artifacts},
+            {"Reports/Wetlands/update.md", "Reports/Wetlands/archive.md"},
+            "Extracted memory artifacts should include mutated vault paths",
+        )
+        self.soft_assert_equal(
+            {
+                (artifact["path"], artifact["artifact_role"])
+                for artifact in extracted_artifacts
+            },
+            {
+                ("Reports/Wetlands/update.md", "created"),
+                ("Reports/Wetlands/archive.md", "deleted"),
+            },
+            "Extracted memory artifacts should classify simple create/delete mutations",
+        )
+        self.soft_assert_equal(
             upserted["indexed_fields"],
             4,
             "upsert_session_memory should index vector-searchable fields",
@@ -362,6 +395,81 @@ async def _call_model_retry(tool, ctx, **kwargs) -> str:
     except ModelRetry as exc:
         return str(exc)
     raise AssertionError("Expected memory_ops call to raise ModelRetry")
+
+
+def _insert_chat_mutation_rows(
+    *,
+    system_root: Path,
+    vault_id: str,
+    vault_name: str,
+    session_id: str,
+) -> None:
+    db_path = system_root / "vault_state.db"
+    now = datetime.now(UTC)
+    rows = [
+        (
+            "memory-extract-chat-task-1",
+            "chat",
+            "api",
+            chat_session_scope(session_id),
+            f"chat:{session_id}",
+            vault_id,
+            vault_name,
+            "Reports/Wetlands/update.md",
+            None,
+            "write",
+            101,
+            0,
+            None,
+            None,
+            1,
+            "created-hash",
+            None,
+            None,
+            now.isoformat(),
+            (now + timedelta(days=7)).isoformat(),
+        ),
+        (
+            "memory-extract-chat-task-2",
+            "chat",
+            "api",
+            chat_session_scope(session_id),
+            f"chat:{session_id}",
+            vault_id,
+            vault_name,
+            "Reports/Wetlands/archive.md",
+            None,
+            "delete",
+            102,
+            1,
+            "deleted-before-hash",
+            None,
+            0,
+            None,
+            None,
+            None,
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(days=7)).isoformat(),
+        ),
+    ]
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO task_file_mutations (
+                task_id, task_kind, task_source, task_scope, task_label,
+                vault_id, vault_name, path, related_path, operation,
+                event_sequence, before_exists, before_hash, before_snapshot_id,
+                after_exists, after_hash, after_snapshot_id, snapshot_ref,
+                created_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class SemanticProbeEmbeddingModel(EmbeddingModel):

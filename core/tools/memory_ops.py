@@ -26,6 +26,7 @@ from core.memory.session_memory import (
     build_fts_query,
 )
 from core.vector import VectorService
+from core.vault_state.service import VaultStateService
 
 from .base import BaseTool
 
@@ -152,6 +153,11 @@ class MemoryOps(BaseTool):
                             "message_count": extraction["message_count"],
                         },
                     )
+                    artifact_count = _add_chat_mutation_artifacts(
+                        store,
+                        vault_name=active_vault_name,
+                        session_id=active_session_id,
+                    )
                     indexed_fields = await _maybe_index_session_memory_fields(
                         store,
                         vault_name=active_vault_name,
@@ -165,6 +171,7 @@ class MemoryOps(BaseTool):
                         "status": "ok",
                         "operation": op,
                         "indexed_fields": indexed_fields,
+                        "artifact_count": artifact_count,
                         "extraction": extraction,
                         "session_memory": refreshed.to_dict() if refreshed else None,
                     }
@@ -830,3 +837,94 @@ def _maybe_add_artifacts(
             session_id=session_id,
             artifacts=tuple(parsed),
         )
+
+
+def _add_chat_mutation_artifacts(
+    store: SessionMemoryStore,
+    *,
+    vault_name: str,
+    session_id: str,
+) -> int:
+    """Attach vault files mutated by this chat session to its memory row."""
+    try:
+        mutations = VaultStateService().list_chat_session_mutations(
+            vault_name=vault_name,
+            session_id=session_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "session_memory_artifact_population_skipped",
+            data={
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return 0
+
+    artifacts_by_key: dict[tuple[str, str], SessionMemoryArtifact] = {}
+    for mutation in mutations:
+        role = _artifact_role_for_mutation(
+            operation=mutation.operation,
+            before_exists=mutation.before_exists,
+            after_exists=mutation.after_exists,
+        )
+        key = (mutation.path, role)
+        metadata = {
+            "source": "task_file_mutation",
+            "operation": mutation.operation,
+            "task_id": mutation.task_id,
+            "task_kind": mutation.task_kind,
+            "task_source": mutation.task_source,
+            "task_scope": mutation.task_scope,
+            "task_label": mutation.task_label,
+            "related_path": mutation.related_path,
+            "event_sequence": mutation.event_sequence,
+            "before_exists": mutation.before_exists,
+            "before_hash": mutation.before_hash,
+            "after_exists": mutation.after_exists,
+            "after_hash": mutation.after_hash,
+            "created_at": _datetime_to_text(mutation.created_at),
+        }
+        artifacts_by_key[key] = SessionMemoryArtifact(
+            path=mutation.path,
+            artifact_role=role,
+            vault_name=vault_name,
+            metadata={key: value for key, value in metadata.items() if value is not None},
+        )
+
+    artifacts = tuple(artifacts_by_key.values())
+    if not artifacts:
+        return 0
+    store.add_session_artifacts(
+        vault_name=vault_name,
+        session_id=session_id,
+        artifacts=artifacts,
+    )
+    return len(artifacts)
+
+
+def _artifact_role_for_mutation(
+    *,
+    operation: str,
+    before_exists: bool,
+    after_exists: bool,
+) -> str:
+    """Return a stable artifact role for one recorded file mutation."""
+    normalized_operation = (operation or "").strip().lower()
+    if normalized_operation == "move":
+        return "moved_to" if after_exists else "moved_from"
+    if normalized_operation == "delete" or not after_exists:
+        return "deleted"
+    if not before_exists and after_exists:
+        return "created"
+    if before_exists and after_exists:
+        return "modified"
+    return normalized_operation or "touched"
+
+
+def _datetime_to_text(value: Any) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
