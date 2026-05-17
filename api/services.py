@@ -1253,6 +1253,8 @@ def _resolve_workflow_file_path(global_id: str) -> tuple[Path, str]:
     vault_authoring_root = (vault_root / ASSISTANTMD_ROOT_DIR / "Authoring").resolve()
     if not workflow_path.is_relative_to(vault_authoring_root):
         raise ValueError("Workflow path escapes vault Authoring root")
+    if workflow_path.suffix.lower() != ".md":
+        raise ValueError("Workflow editing only supports markdown authoring files")
     if not workflow_path.is_file():
         raise ValueError(f"Workflow file not found: {normalized_id}")
     return workflow_path, "vault"
@@ -1279,6 +1281,8 @@ def _resolve_system_workflow_file_path(global_id: str) -> Path:
     system_authoring_root = (system_root / "Authoring").resolve()
     if not template_path.is_relative_to(system_authoring_root):
         raise ValueError("System workflow template path escapes system Authoring root")
+    if template_path.suffix.lower() != ".md":
+        raise ValueError("System workflow editing only supports markdown authoring files")
     if not template_path.is_file():
         raise ValueError(f"System workflow template file not found: {global_id}")
     return template_path
