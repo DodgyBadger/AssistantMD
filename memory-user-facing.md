@@ -1,65 +1,104 @@
 # Memory
 
-AssistantMD treats your vault as your memory system. Memory is not a separate
-place where facts are stored; it is a way to build better working sets from the
-vault.
+AssistantMD memory is session memory.
 
-Your notes, project files, drafts, references, daily logs, imported documents,
-and curated memory pages already live in the place where you work. AssistantMD
-builds on that. It can help find relevant files, summarize what matters, capture
-decisions, update project notes, and assemble context for chats or workflows.
+When you work with AssistantMD, the chat session is where the pieces of the work
+come together: what you asked for, what the assistant tried, which tools were
+used, and which vault files were touched. Memory gives AssistantMD a compact,
+searchable record of that prior work so a future chat can find useful leads
+instead of starting from scratch.
 
-A working set is the context the agent needs for the task at hand: relevant
-notes, prior history, source files, project summaries, decisions, constraints,
-recent changes, or instructions. Context scripts already assemble working sets
-for chat sessions. Memory and vault awareness expand what those scripts can draw
-on.
+The vault is still the source of truth. Memory does not replace your notes,
+documents, drafts, or project files. It points back to prior sessions and, when
+available, to the vault files those sessions created, edited, moved, or deleted.
 
-Most files in the vault are treated as source material: they are part of your
-working knowledge, not just data to be summarized away. When AssistantMD creates
-derived files such as summaries, reports, imports, or captured memory, those
-files remain visible markdown artifacts in the vault. You can inspect them,
-edit them, move them, or delete them.
+## What Gets Stored
 
-The goal is transparent memory. AssistantMD should be able to show what it used,
-where it came from, and whether it is user-authored, imported, or generated.
-Generated memory starts as supporting evidence unless you review or confirm it
-as guidance. The vault remains the source of truth.
+A session memory record contains short derived fields:
 
-Short version:
+- `summary`: what happened in the chat session
+- `user_intent`: what the user was trying to accomplish
+- `domain`: the subject area of the work
+- `work_product`: the kind of deliverable, answer, or artifact involved
+- `named_entities`: central people, organizations, and places
 
-> Your vault is the memory. AssistantMD helps assemble the right working set.
+When AssistantMD has vault-state mutation records for the session, memory also
+stores artifact pointers for files touched by that chat. These pointers include
+the vault-relative path and a simple role such as `created`, `modified`,
+`deleted`, `moved_from`, or `moved_to`.
 
-## Vault Awareness
+The memory record is stored in AssistantMD's system database. It is derived
+metadata, not a new authoritative note in the vault.
 
-The long-term goal is vault awareness.
+## How Memory Is Created
 
-AssistantMD should be able to build and maintain maps of the vault, or of a
-scoped slice of the vault: a project folder, a research area, a workflow domain,
-or a curated memory namespace. Those maps should help the agent understand what
-exists, what is active, what is authoritative, what is stale, and how files
-relate to each other.
+Memory creation is explicit and composable.
 
-This does not mean summarizing the entire vault into one giant document. It means
-maintaining enough structured, inspectable context that AssistantMD can answer
-questions like:
+AssistantMD provides a `memory_ops` tool that can extract memory from a chat
+session. A workflow can call that tool for sessions that do not yet have memory.
+For example, a manually run or scheduled workflow can:
 
-- What is this vault about?
-- What projects are active?
-- Which notes look central or authoritative?
-- What changed recently?
-- What decisions or constraints have been recorded?
-- What sources support this answer?
-- Which areas look stale, duplicated, contradictory, or incomplete?
+1. find sessions pending memory extraction
+2. extract session memory for a limited batch
+3. store the derived fields and any chat-linked artifact pointers
 
-The user should be able to scope that awareness. A chat might ask for awareness
-of one project folder. A workflow might maintain an overview of imported research.
-A context script might retrieve only confirmed memory notes. The vault remains
-the source of truth, and these maps are derived aids for navigation, recall, and
-working-set assembly.
+Users can also manually create or update memory fields through the same tool
+when they want tighter control over what a session should remember.
 
-Another way to think about this is maps and wayfinding. AssistantMD can use
-different maps of the same vault, such as recent activity, source notes,
-decisions, open questions, links, or trust status, to assemble a working set. It
-should be able to show which route it used and suggest other ways to explore the
-same knowledge.
+## How Memory Is Used
+
+AssistantMD can search session memory to find prior work that may be relevant to
+the current chat.
+
+Search results return candidate sessions, not final answers. A useful result can
+tell the agent:
+
+- what the prior session was about
+- what the user was trying to do
+- what kind of output was produced
+- which named entities were central
+- which vault files the session touched, if known
+
+The agent can then decide whether to inspect the prior session, read linked vault
+files, or ask the user for confirmation before relying on that material.
+
+## Context Scripts
+
+Memory behavior is controlled by context scripts and workflows rather than a
+single automatic policy.
+
+The default context script includes a playbook for using memory. Its built-in
+fallback is vault-first: once the user's work intent is clear, and before doing
+external research or substantial new synthesis, the agent should ask once
+whether to check prior session memory or search the vault first. If the user
+agrees, the agent can use `memory_ops` to search prior sessions and
+`file_ops_safe` to search or read vault files.
+
+You can override that behavior without editing Python by adding
+`AssistantMD/playbook.md` to a vault. When that file exists, the default context
+script uses it instead of the built-in vault-first playbook. This lets a vault
+define its own operating style, such as asking project-scoping questions first,
+using memory only on request, or following a domain-specific research workflow.
+
+This keeps memory visible and user-directed. Memory is a way to find likely
+leads, not a hidden instruction layer that silently decides what the agent should
+believe.
+
+## Current Limits
+
+Memory currently focuses on chat sessions. It works best for work that happened
+through AssistantMD.
+
+If you edit files manually in Obsidian or another editor, the vault-state worker
+can observe that files changed, but those changes are not automatically attached
+to a chat session. They can still be found through vault file search, but they
+are not session memory unless some workflow or chat explicitly turns them into
+memory.
+
+Artifact pointers are only available when AssistantMD has task mutation records
+for the chat session. Older sessions, imported sessions, or sessions from before
+vault-state mutation tracking may have memory fields without artifact pointers.
+
+Memory search is retrieval, not verification. Retrieved sessions and artifacts
+should be treated as leads back to the vault and transcript. The vault files and
+the user's judgment remain authoritative.
