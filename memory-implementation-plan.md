@@ -224,6 +224,21 @@ distinguish:
 - whether expiry should be time-based, activity-based, user-controlled, or a
   combination.
 
+### Slice G: Shipped Workflow Templates
+
+Use system Authoring files as shipped templates and vault Authoring files as the
+active user-owned workflow surface.
+
+- Stop overwriting existing system Authoring templates during startup.
+- Add a manual System/Misc action that refreshes packaged system Authoring
+  templates when the user explicitly asks for it.
+- Add the nightly memory extraction workflow as a disabled packaged system
+  template.
+- Add Dashboard/Workflows affordances to copy a system template into the
+  selected vault.
+- Add a workflow enabled/disabled toggle that edits the same frontmatter field
+  for every active vault workflow.
+
 ## Open Questions
 
 - Should session memory be generated automatically at session idle, or only by a

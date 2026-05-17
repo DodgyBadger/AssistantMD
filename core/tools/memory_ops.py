@@ -56,7 +56,7 @@ class MemoryOps(BaseTool):
             *,
             operation: str,
             session_id: str = "",
-            mode: str = "related",
+            mode: str = "search",
             query: str = "",
             limit: int | str = 5,
             data: dict[str, Any] | None = None,
@@ -66,7 +66,7 @@ class MemoryOps(BaseTool):
 
             :param operation: Operation name.
             :param session_id: Optional explicit session id. Defaults to the active session when available.
-            :param mode: Search mode for search_sessions: related, search, or deep. Defaults to related.
+            :param mode: Search mode for search_sessions: search, deep, or related. Defaults to search.
             :param query: User-provided search phrase for search and deep modes.
             :param limit: Positive integer result limit for search_sessions.
             :param data: Memory record payload for upsert_session_memory.
@@ -256,20 +256,23 @@ fields.
 
 Use `search_sessions` for caller-driven lookup across indexed chat-session
 memory. `search_sessions` has three modes:
-- `related`: default. Compares the current or specified session against prior
-  sessions using the default compound related-work policy.
-- `search`: searches a user-provided query across all session-memory fields.
+- `search`: default. Searches a user-provided query across all session-memory
+  fields.
 - `deep`: searches a user-provided query across all session-memory fields and
   raw chat transcripts.
+- `related`: compares an already-extracted current or specified session against
+  prior sessions using the default compound related-work policy.
 
 Mode selection:
-- Use `related` for general related-session lookup.
-- Use `search` when the user names a specific word, phrase, topic, or concept.
+- Use `search` for normal live-chat lookup when the current session does not
+  yet have stored memory.
 - Use `deep` when the user asks for a broader or transcript-level search.
+- Use `related` only when investigating an existing session that already has
+  stored memory and you want to find neighboring sessions.
 
 For `search` and `deep`, write `query` as a plain natural-language phrase. Do
 not use explicit boolean syntax such as uppercase AND/OR. Use a positive
-integer `limit`.
+integer `limit`. Search and deep modes require a query.
 
 For manual writes, include only `data` fields supported by current context.
 Leave unknown fields empty.
@@ -355,10 +358,14 @@ def _validate_search_sessions_request(
     query: str,
     resolved_limit: int | str,
 ) -> None:
-    normalized_mode = (mode or "related").strip().lower()
+    normalized_mode = (mode or "search").strip().lower()
     if resolved_limit == "all":
         raise ModelRetry(
             "search_sessions requires a positive integer limit. Retry with a numeric limit such as 5 or 10."
+        )
+    if normalized_mode in {"search", "deep"} and not str(query or "").strip():
+        raise ModelRetry(
+            "search_sessions requires a plain natural-language query for search and deep modes."
         )
     if normalized_mode in {"search", "deep"} and _has_boolean_operator(query):
         raise ModelRetry(
@@ -379,7 +386,7 @@ async def _search_sessions(
     query: str,
     limit: int,
 ) -> dict[str, Any]:
-    normalized_mode = (mode or "related").strip().lower()
+    normalized_mode = (mode or "search").strip().lower()
     if normalized_mode not in {"related", "search", "deep"}:
         raise ValueError("mode must be one of: related, search, deep")
 

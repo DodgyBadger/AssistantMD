@@ -17,8 +17,8 @@ parameter.
 - `session_id`: optional explicit session id. Defaults to the active session
   when available.
 - `mode`: optional search mode for `search_sessions`. Supported values are
-  `related`, `search`, and `deep`. Defaults to `related`.
-- `query`: optional search phrase for `search` and `deep` modes.
+  `search`, `deep`, and `related`. Defaults to `search`.
+- `query`: search phrase for the default `search` mode and for `deep` mode.
 - `limit`: optional positive integer result limit for `search_sessions`.
 - `data`: optional object for `upsert_session_memory`. Supported keys are
   `summary`, `domain`, `work_product`, `user_intent`, `named_entities`,
@@ -67,15 +67,18 @@ Returns pretty-printed JSON text. Successful operations include a stable
   caller for the current or specified session. It does not read the transcript
   or infer missing fields.
 - `search_sessions` finds candidate prior sessions.
-  - `mode: "related"` is the default. It compares the current or specified
-    session against prior sessions using stored memory fields.
-  - `mode: "search"` searches the supplied `query` across memory fields using
+  - `mode: "search"` is the default. It searches the supplied `query` across memory fields using
     lexical FTS/BM25 evidence plus semantic vector evidence.
   - `mode: "deep"` searches memory fields plus raw chat transcripts.
-- Use `related` for general related-session lookup.
-- Use `search` when the user names a specific word, phrase, topic, or concept.
+  - `mode: "related"` compares an already-extracted current or specified session
+    against prior sessions using stored memory fields.
+- Use `search` for normal live-chat lookup when the current session does not
+  yet have stored memory, or when the user names a specific word, phrase, topic,
+  or concept.
 - Use `deep` when the user asks for a broader or transcript-level search.
-- For `search` and `deep`, write `query` as a plain natural-language phrase.
+- Use `related` only when investigating an existing session that already has
+  stored memory and you want to find neighboring sessions.
+- For `search` and `deep`, include `query` as a plain natural-language phrase.
   Do not use explicit boolean syntax such as uppercase `AND`/`OR`. Use a
   positive integer `limit`.
 
@@ -112,20 +115,20 @@ Manually store memory fields for the current session:
 }
 ```
 
-Find sessions related to the current session:
-
-```json
-{"operation": "search_sessions"}
-```
-
 Search memory fields for a user-named concept:
 
 ```json
-{"operation": "search_sessions", "mode": "search", "query": "greenhouse gas accounting", "limit": 5}
+{"operation": "search_sessions", "query": "greenhouse gas accounting", "limit": 5}
 ```
 
 Search memory fields and raw transcripts:
 
 ```json
 {"operation": "search_sessions", "mode": "deep", "query": "greenhouse gas accounting", "limit": 5}
+```
+
+Find sessions related to an already-extracted session:
+
+```json
+{"operation": "search_sessions", "mode": "related", "session_id": "existing-session-id", "limit": 5}
 ```

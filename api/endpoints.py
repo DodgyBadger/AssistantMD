@@ -25,12 +25,17 @@ from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from .models import (
     WorkflowLoadErrorsResponse,
     CachePurgeResponse,
+    SystemTemplateSeedResponse,
     VaultRescanRequest,
     VaultRescanResponse,
     VaultTaskMutationsResponse,
     VaultStateCleanupResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
+    WorkflowEnabledRequest,
+    WorkflowEnabledResponse,
+    WorkflowFileResponse,
+    WorkflowFileUpdateRequest,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
@@ -75,6 +80,9 @@ from .services import (
     rescan_vaults_and_update_scheduler,
     get_system_status,
     execute_workflow_manually,
+    set_workflow_enabled_state,
+    get_workflow_file,
+    update_workflow_file,
     get_metadata,
     list_context_templates,
     list_chat_sessions,
@@ -104,6 +112,7 @@ from .services import (
     import_url_direct,
     get_workflow_load_errors,
     purge_expired_cache,
+    refresh_system_authoring_templates,
     cancel_chat_session_task,
     cancel_execution_task,
     get_active_chat_task,
@@ -664,6 +673,15 @@ async def purge_expired_cache_endpoint():
         return create_error_response(e)
 
 
+@router.post("/system/authoring/seed-refresh", response_model=SystemTemplateSeedResponse)
+async def refresh_system_authoring_templates_endpoint():
+    """Manually refresh packaged system Authoring templates."""
+    try:
+        return refresh_system_authoring_templates()
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.post("/vault-state/cleanup", response_model=VaultStateCleanupResponse)
 async def cleanup_vault_state_endpoint():
     """Manually delete expired vault-state task safety artifacts."""
@@ -762,9 +780,41 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         result = await execute_workflow_manually(
             request.global_id,
             request.expect_failure,
+            vault_name=request.vault_name,
         )
         response = ExecuteWorkflowResponse(**result)
         return response
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/workflows/enabled", response_model=WorkflowEnabledResponse)
+async def set_workflow_enabled(request: WorkflowEnabledRequest):
+    """Set a workflow enabled flag in frontmatter."""
+    try:
+        return await set_workflow_enabled_state(request.global_id, request.enabled)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/workflows/file", response_model=WorkflowFileResponse)
+async def workflow_file(global_id: str):
+    """Return editable workflow file content."""
+    try:
+        return get_workflow_file(global_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put("/workflows/file", response_model=WorkflowFileResponse)
+async def save_workflow_file(global_id: str, request: WorkflowFileUpdateRequest):
+    """Replace workflow file content and reload workflows."""
+    try:
+        return await update_workflow_file(
+            global_id,
+            content=request.content,
+            expected_sha256=request.expected_sha256,
+        )
     except Exception as e:
         return create_error_response(e)
 

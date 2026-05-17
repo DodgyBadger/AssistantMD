@@ -26,10 +26,52 @@ class VaultRescanRequest(BaseModel):
 class ExecuteWorkflowRequest(BaseModel):
     """Request model for manually executing a workflow."""
     global_id: str = Field(..., description="Workflow global ID (vault/name format)")
+    vault_name: Optional[str] = Field(
+        None,
+        description="Vault scope for system workflow templates.",
+    )
     expect_failure: bool = Field(
         False,
         description="Validation/testing hint: marks execution failures as expected in workflow logs.",
     )
+
+
+class WorkflowEnabledRequest(BaseModel):
+    """Request model for changing workflow enabled state."""
+
+    global_id: str = Field(..., description="Workflow global ID (vault/name or system/name format)")
+    enabled: bool = Field(..., description="Desired enabled state")
+
+
+class WorkflowEnabledResponse(BaseModel):
+    """Response model for workflow enabled-state changes."""
+
+    success: bool = Field(..., description="Whether the enabled state was updated")
+    global_id: str = Field(..., description="Workflow global ID")
+    enabled_before: bool = Field(..., description="Enabled state before the update")
+    enabled_after: bool = Field(..., description="Enabled state after the update")
+    message: str = Field(..., description="Human-readable update summary")
+
+
+class WorkflowFileUpdateRequest(BaseModel):
+    """Request model for replacing workflow source content."""
+
+    content: str = Field(..., description="Complete workflow file content")
+    expected_sha256: Optional[str] = Field(
+        None,
+        description="Optional hash from the last read response; rejects stale saves when provided.",
+    )
+
+
+class WorkflowFileResponse(BaseModel):
+    """Response model for workflow source content."""
+
+    global_id: str = Field(..., description="Workflow global ID")
+    path: str = Field(..., description="Filesystem path for display")
+    source: str = Field(..., description="Source scope: vault or system")
+    content: str = Field(..., description="Complete workflow file content")
+    sha256: str = Field(..., description="SHA-256 hash of the returned content")
+    message: Optional[str] = Field(None, description="Human-readable update summary")
 
 
 class ChatExecuteRequest(BaseModel):
@@ -110,6 +152,10 @@ class StatusResponse(BaseModel):
     total_workflows: int = Field(..., description="Total number of workflows across all vaults")
     enabled_workflows: List["WorkflowSummary"] = Field(default_factory=list, description="List of enabled workflows with details")
     disabled_workflows: List["WorkflowSummary"] = Field(default_factory=list, description="List of disabled workflows with details")
+    system_workflow_templates: List["SystemWorkflowTemplateSummary"] = Field(
+        default_factory=list,
+        description="Packaged system workflow templates available to copy into a vault",
+    )
     configuration_errors: List["ConfigurationError"] = Field(default_factory=list, description="Configuration errors encountered during loading")
     configuration_status: ConfigurationStatusInfo = Field(default_factory=ConfigurationStatusInfo, description="Aggregated configuration health information")
 
@@ -485,6 +531,17 @@ class CachePurgeResponse(BaseModel):
     purged_count: int = Field(..., description="Number of expired cache artifacts removed")
 
 
+class SystemTemplateSeedResponse(BaseModel):
+    """Response model for manual system authoring template refresh."""
+
+    success: bool = Field(..., description="Whether the refresh completed without copy errors")
+    message: str = Field(..., description="Human-readable refresh summary")
+    created: List[str] = Field(default_factory=list, description="System template files created")
+    updated: List[str] = Field(default_factory=list, description="System template files overwritten")
+    skipped: List[str] = Field(default_factory=list, description="System template files left unchanged")
+    errors: List[str] = Field(default_factory=list, description="Copy errors encountered during refresh")
+
+
 class SecretInfo(BaseModel):
     """Information about a stored secret without revealing its value."""
 
@@ -566,6 +623,17 @@ class WorkflowSummary(BaseModel):
     run_type: str
     schedule_cron: Optional[str]
     description: str
+
+
+class SystemWorkflowTemplateSummary(BaseModel):
+    """Summary information about a packaged system workflow template."""
+
+    name: str
+    run_type: str
+    enabled: bool
+    schedule_cron: Optional[str]
+    description: str
+    path: str
 
 
 class ConfigurationError(BaseModel):

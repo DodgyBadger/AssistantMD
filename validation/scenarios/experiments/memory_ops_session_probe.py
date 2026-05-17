@@ -169,7 +169,6 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 tool,
                 ctx,
                 operation="search_sessions",
-                mode="search",
                 query="riparian restoration",
             )
             semantic_search = await _call(
@@ -215,12 +214,12 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 query="greenhouse gas GHG",
                 limit="all",
             )
-            related = await _call(
+            no_query_search_error = await _call_model_retry(
                 tool,
                 ctx,
                 operation="search_sessions",
             )
-            explicit_related = await _call(
+            related = await _call(
                 tool,
                 ctx,
                 operation="search_sessions",
@@ -244,8 +243,8 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "boolean_search_error": boolean_search_error,
             "natural_language_search": natural_language_search,
             "all_limit_error": all_limit_error,
+            "no_query_search_error": no_query_search_error,
             "related": related,
-            "explicit_related": explicit_related,
         }
         (self.artifacts_dir / "memory_ops_session_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
@@ -354,6 +353,10 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "positive integer limit" in all_limit_error,
             "search_sessions should reject limit='all' with a retryable correction",
         )
+        self.soft_assert(
+            "plain natural-language query" in no_query_search_error,
+            "default search mode should require a query",
+        )
         self.soft_assert_equal(related["status"], "ok")
         self.soft_assert(
             all(
@@ -372,11 +375,6 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         self.soft_assert(
             all(match["contributions"] for match in related["matches"]),
             "related search should explain field contributions",
-        )
-        self.soft_assert_equal(
-            explicit_related["matches"],
-            related["matches"],
-            "explicit related mode should match the default search mode",
         )
         self.teardown_scenario()
         self.assert_no_failures()

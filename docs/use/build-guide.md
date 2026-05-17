@@ -104,7 +104,7 @@ For the full authoring reference, see [Authoring](authoring.md).
 
 ## Level 4: Context Assembly Script
 
-A Context Assembly Script controls what the chat agent knows at the start of every conversation. AssistantMD ships with a default script that loads skills in `AssistantMD/Skills/`, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`. Built-in global scripts (found in the `system/` folder) are refreshed on startup; copy a system script into `AssistantMD/Authoring/` under a new name before customizing it.
+A Context Assembly Script controls what the chat agent knows at the start of every conversation. AssistantMD ships with a default script that loads skills in `AssistantMD/Skills/`, passes full message history, and allows simple persona customization in `AssistantMD/soul.md`. Built-in global scripts live in the `system/` folder; **System → Misc** can refresh them from packaged defaults.
 
 ### Customizing the agent's personality: soul.md
 

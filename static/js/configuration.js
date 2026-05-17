@@ -20,6 +20,7 @@
         isSavingSecret: false,
         isPurgingCache: false,
         isCleaningVaultState: false,
+        isRefreshingSystemAuthoring: false,
         isLoadingSystemJobs: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
@@ -88,6 +89,8 @@
         secretResetBtn: null,
 
         miscFeedback: null,
+        refreshSystemAuthoringBtn: null,
+        refreshSystemAuthoringFeedback: null,
         purgeExpiredCacheBtn: null,
         cleanupVaultStateBtn: null,
         cleanupVaultStateFeedback: null,
@@ -147,6 +150,8 @@
         elements.secretResetBtn = document.getElementById('secret-reset');
 
         elements.miscFeedback = document.getElementById('misc-feedback');
+        elements.refreshSystemAuthoringBtn = document.getElementById('refresh-system-authoring');
+        elements.refreshSystemAuthoringFeedback = document.getElementById('refresh-system-authoring-feedback');
         elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
         elements.cleanupVaultStateBtn = document.getElementById('cleanup-vault-state');
         elements.cleanupVaultStateFeedback = document.getElementById('cleanup-vault-state-feedback');
@@ -188,6 +193,7 @@
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
+        elements.refreshSystemAuthoringBtn?.addEventListener('click', handleRefreshSystemAuthoring);
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
         elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
         elements.refreshSystemJobsBtn?.addEventListener('click', loadSystemJobs);
@@ -1522,6 +1528,54 @@ async function saveModelRow(rowKey) {
             button.disabled = false;
             button.textContent = originalLabel;
             state.isPurgingCache = false;
+        }
+    }
+
+    async function handleRefreshSystemAuthoring() {
+        if (!elements.refreshSystemAuthoringBtn || state.isRefreshingSystemAuthoring) return;
+
+        const confirmed = window.confirm(
+            'Refresh system authoring scripts?\n\n'
+            + 'This will overwrite scripts in system/Authoring. Use this if you have customized '
+            + 'the system scripts and want to return to baseline or update to the latest version '
+            + 'of system scripts. Vault scripts in AssistantMD/Authoring are not touched.'
+        );
+        if (!confirmed) return;
+
+        state.isRefreshingSystemAuthoring = true;
+        const button = elements.refreshSystemAuthoringBtn;
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Refreshing…';
+        setStatus(elements.refreshSystemAuthoringFeedback, 'Refreshing system authoring scripts…', 'info');
+
+        try {
+            const response = await fetch('api/system/authoring/seed-refresh', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            setStatus(
+                elements.refreshSystemAuthoringFeedback,
+                result?.message || 'System authoring scripts refreshed.',
+                result?.success === false ? 'warning' : 'success'
+            );
+            await callbacks.refreshStatus?.();
+        } catch (error) {
+            setStatus(
+                elements.refreshSystemAuthoringFeedback,
+                `Failed to refresh system authoring scripts: ${error.message}`,
+                'error'
+            );
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
+            state.isRefreshingSystemAuthoring = false;
         }
     }
 

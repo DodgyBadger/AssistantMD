@@ -61,7 +61,7 @@ The active/latest message is not part of the retrieved history. Scripts may insp
 ## Discovery and precedence
 
 - `template_discovery.py` scans `AssistantMD/Authoring/` (one level deep) per vault.
-- System templates in `system/Authoring/` provide defaults; packaged seed templates are refreshed on startup, so users should customize copies rather than editing seeded files in place.
+- System templates in `system/Authoring/` provide defaults. Startup creates missing packaged templates only; existing system templates are refreshed by an explicit maintenance action.
 - Vault files take precedence when names match.
 - On first access, `ensure_vault_directories()` creates `AssistantMD/Authoring/` and `AssistantMD/Skills/` for each vault, seeding starter files from `core/authoring/seed_templates/`.
 

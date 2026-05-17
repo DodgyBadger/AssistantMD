@@ -88,4 +88,4 @@ Workflows can use `retrieve_sessions(selection="pending_memory")` to select curr
 
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 
-Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence. System seed scripts are refreshed on startup; copy one to a new vault script before customizing it.
+Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence. Startup creates missing system seed scripts, and **System → Misc** can refresh existing system seed scripts from packaged defaults.

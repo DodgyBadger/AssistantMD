@@ -1023,7 +1023,18 @@ function renderDashboardWorkflows(status) {
     if (!dashElements.workflowsStatus) return;
     const enabledWorkflows = status.enabled_workflows || [];
     const disabledWorkflows = status.disabled_workflows || [];
-    const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows];
+    const systemWorkflowTemplates = status.system_workflow_templates || [];
+    const templateWorkflows = systemWorkflowTemplates.map(template => ({
+        global_id: `system/${template.name}`,
+        name: template.name,
+        vault: 'system',
+        enabled: Boolean(template.enabled),
+        run_type: template.run_type || 'workflow',
+        schedule_cron: template.schedule_cron || '',
+        description: template.description || '',
+        is_system_template: true
+    }));
+    const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows, ...templateWorkflows];
     const schedulerJobs = status.scheduler?.job_details || [];
     const schedulerRunning = Boolean(status.scheduler?.running);
     const jobByWorkflowId = new Map(
@@ -1055,12 +1066,14 @@ function renderDashboardWorkflows(status) {
                         ${renderDashboardWorkflowSortHeader('last_run', 'Last Run')}
                         ${renderDashboardWorkflowSortHeader('next_run', 'Next Run')}
                         <th>Description</th>
-                        <th class="cell-center">Actions</th>
+                        <th class="cell-center" aria-label="Run"></th>
                     </tr>
                 </thead>
                 <tbody>
                     ${sortedWorkflows.map(workflow => {
-                        const job = jobByWorkflowId.get(workflow.global_id);
+                        const job = workflow.is_system_template
+                            ? dashboardSystemWorkflowTemplateJob(workflow, schedulerJobs)
+                            : jobByWorkflowId.get(workflow.global_id);
                         const nextRun = job?.next_run_time
                             ? new Date(job.next_run_time).toLocaleString('en-US', {
                                 month: 'short',
@@ -1079,22 +1092,56 @@ function renderDashboardWorkflows(status) {
                             : '—';
                         const description = workflow.description || '—';
                         const { statusLabel, statusClass } = dashboardWorkflowStatus(workflow, job);
+                        const toggleLabel = workflow.enabled ? 'Disable workflow' : 'Enable workflow';
+                        const nextEnabled = workflow.enabled ? 'false' : 'true';
+                        const statusButton = `
+                            <button
+                                type="button"
+                                class="badge ${statusClass}"
+                                data-dashboard-workflow-toggle="${escapeHtml(workflow.global_id)}"
+                                data-dashboard-workflow-enabled="${nextEnabled}"
+                                title="${toggleLabel}"
+                                aria-label="${toggleLabel}"
+                            >
+                                ${statusLabel}
+                            </button>
+                        `;
+                        const runButton = workflow.is_system_template
+                            ? `
+                                <button
+                                    type="button"
+                                    class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
+                                    data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
+                                    data-dashboard-workflow-system-template="true"
+                                >
+                                    Run
+                                </button>
+                            `
+                            : `
+                                <button
+                                    type="button"
+                                    class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
+                                    data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
+                                >
+                                    Run
+                                </button>
+                            `;
                         return `
                             <tr>
-                                <td><strong>${escapeHtml(workflow.global_id)}</strong></td>
-                                <td><span class="badge ${statusClass}">${statusLabel}</span></td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        class="font-semibold text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm text-left"
+                                        data-dashboard-workflow-edit="${escapeHtml(workflow.global_id)}"
+                                    >
+                                        ${escapeHtml(workflow.global_id)}
+                                    </button>
+                                </td>
+                                <td>${statusButton}</td>
                                 <td class="cell-xs">${lastRun}</td>
                                 <td class="cell-xs">${nextRun}</td>
                                 <td class="cell-xs subtle">${escapeHtml(description)}</td>
-                                <td class="cell-center">
-                                    <button
-                                        type="button"
-                                        class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
-                                        data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
-                                    >
-                                        Run
-                                    </button>
-                                </td>
+                                <td class="cell-center">${runButton}</td>
                             </tr>
                         `;
                     }).join('')}
@@ -1139,6 +1186,10 @@ function renderDashboardBadgeStyles() {
     return `
         <style>
             .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+            button.badge { cursor: pointer; border: 1px solid currentColor; line-height: 1.2; transition: filter 120ms ease, box-shadow 120ms ease; }
+            button.badge:hover { filter: brightness(1.06); box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18); }
+            button.badge:focus-visible { outline: 2px solid rgb(var(--accent-primary)); outline-offset: 2px; }
+            button.badge:disabled { cursor: not-allowed; opacity: 0.65; }
             .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
             .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
             .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
@@ -1280,6 +1331,19 @@ function dashboardWorkflowStatus(workflow, job) {
         return { statusLabel: 'scheduled', statusClass: 'badge-scheduled' };
     }
     return { statusLabel: 'enabled', statusClass: 'badge-enabled' };
+}
+
+function dashboardSystemWorkflowTemplateJob(workflow, schedulerJobs) {
+    const templateName = String(workflow?.name || '').replace(/\//g, '__');
+    if (!templateName) return null;
+    const jobSuffix = `__system__${templateName}`;
+    const matchingJobs = schedulerJobs.filter(job => String(job.id || '').endsWith(jobSuffix));
+    if (!matchingJobs.length) return null;
+    return matchingJobs.reduce((best, job) => {
+        const bestTime = Date.parse(best?.next_run_time || '') || Number.POSITIVE_INFINITY;
+        const jobTime = Date.parse(job?.next_run_time || '') || Number.POSITIVE_INFINITY;
+        return jobTime < bestTime ? job : best;
+    }, matchingJobs[0]);
 }
 
 function compareOptionalDates(a, b) {
@@ -1808,9 +1872,27 @@ function setupEventListeners() {
         dashElements.workflowsStatus.addEventListener('click', (event) => {
             const target = event.target;
             if (!(target instanceof HTMLElement)) return;
+            const editButton = target.closest('[data-dashboard-workflow-edit]');
+            if (editButton instanceof HTMLElement) {
+                openWorkflowFileEditor(editButton.getAttribute('data-dashboard-workflow-edit') || '');
+                return;
+            }
+            const toggleButton = target.closest('[data-dashboard-workflow-toggle]');
+            if (toggleButton instanceof HTMLElement) {
+                toggleWorkflowEnabled(
+                    toggleButton.getAttribute('data-dashboard-workflow-toggle') || '',
+                    toggleButton.getAttribute('data-dashboard-workflow-enabled') === 'true',
+                    toggleButton
+                );
+                return;
+            }
             const runButton = target.closest('[data-dashboard-workflow-run]');
             if (runButton instanceof HTMLElement) {
-                executeWorkflow(runButton.getAttribute('data-dashboard-workflow-run') || '', runButton);
+                executeWorkflow(
+                    runButton.getAttribute('data-dashboard-workflow-run') || '',
+                    runButton,
+                    runButton.getAttribute('data-dashboard-workflow-system-template') === 'true'
+                );
                 return;
             }
             const workflowSortButton = target.closest('[data-dashboard-workflow-sort]');
@@ -3036,8 +3118,175 @@ function renderRescanResult(data) {
 }
 
 // Execute workflow manually
-async function executeWorkflow(globalId, triggerButton = null) {
+async function toggleWorkflowEnabled(globalId, enabled, triggerButton = null) {
     if (!globalId) {
+        return;
+    }
+
+    if (triggerButton) {
+        triggerButton.disabled = true;
+    }
+
+    try {
+        const response = await fetch('api/workflows/enabled', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ global_id: globalId, enabled })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        dashElements.executeWorkflowResult.innerHTML = `
+            <div class="state-surface-success p-3 rounded border">
+                <p class="font-medium">${escapeHtml(data.message || 'Workflow updated.')}</p>
+            </div>
+        `;
+        await fetchSystemStatus();
+    } catch (error) {
+        console.error('Error updating workflow enabled state:', error);
+        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
+    } finally {
+        if (triggerButton) {
+            triggerButton.disabled = false;
+        }
+    }
+}
+
+async function openWorkflowFileEditor(globalId) {
+    if (!globalId) {
+        return;
+    }
+
+    closeWorkflowFileEditor();
+    const overlay = document.createElement('div');
+    overlay.id = 'workflow-file-modal';
+    overlay.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    overlay.innerHTML = `
+        <div class="absolute inset-0" data-workflow-file-close="true"></div>
+        <section class="relative h-full bg-app-card border-l border-border-primary shadow-xl flex flex-col" style="width: min(48rem, calc(100vw - 2rem));" role="dialog" aria-modal="true" aria-labelledby="workflow-file-modal-title">
+            <div class="bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3 flex-none">
+                <div>
+                    <h2 id="workflow-file-modal-title" class="text-lg font-semibold text-txt-primary">Workflow: ${escapeHtml(globalId)}</h2>
+                    <p id="workflow-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">Loading...</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-workflow-file-save="true" disabled>
+                        Save
+                    </button>
+                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workflow-file-close="true">
+                        Close
+                    </button>
+                </div>
+            </div>
+            <div class="p-4 space-y-3 flex-1 min-h-0 flex flex-col">
+                <div id="workflow-file-modal-status" class="text-sm text-txt-secondary">Loading workflow file...</div>
+                <textarea
+                    id="workflow-file-modal-editor"
+                    class="w-full flex-1 min-h-0 px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    spellcheck="false"
+                    disabled
+                ></textarea>
+            </div>
+        </section>
+    `;
+    document.body.appendChild(overlay);
+
+    const editor = overlay.querySelector('#workflow-file-modal-editor');
+    const pathLabel = overlay.querySelector('#workflow-file-modal-path');
+    const statusLabel = overlay.querySelector('#workflow-file-modal-status');
+    const saveButton = overlay.querySelector('[data-workflow-file-save]');
+    let sha256 = '';
+
+    overlay.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        if (target.dataset.workflowFileClose === 'true') {
+            closeWorkflowFileEditor();
+            return;
+        }
+        if (target.dataset.workflowFileSave === 'true' && editor instanceof HTMLTextAreaElement) {
+            saveButton.disabled = true;
+            statusLabel.textContent = 'Saving...';
+            try {
+                const response = await fetch(`api/workflows/file?global_id=${encodeURIComponent(globalId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content: editor.value,
+                        expected_sha256: sha256
+                    })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                sha256 = data.sha256 || '';
+                statusLabel.textContent = data.message || 'Saved.';
+                await fetchSystemStatus();
+                saveButton.disabled = false;
+            } catch (error) {
+                console.error('Error saving workflow file:', error);
+                statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
+                saveButton.disabled = false;
+            }
+        }
+    });
+
+    try {
+        const response = await fetch(`api/workflows/file?global_id=${encodeURIComponent(globalId)}`);
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        sha256 = data.sha256 || '';
+        if (pathLabel) {
+            pathLabel.textContent = data.path || '';
+        }
+        if (editor instanceof HTMLTextAreaElement) {
+            editor.value = data.content || '';
+            editor.disabled = false;
+        }
+        if (statusLabel) {
+            statusLabel.textContent = `Editing ${data.source || 'workflow'} workflow file.`;
+        }
+        if (saveButton instanceof HTMLButtonElement) {
+            saveButton.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error loading workflow file:', error);
+        if (statusLabel) {
+            statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
+        }
+    }
+}
+
+function closeWorkflowFileEditor() {
+    document.getElementById('workflow-file-modal')?.remove();
+}
+
+async function executeWorkflow(globalId, triggerButton = null, isSystemTemplate = false) {
+    if (!globalId) {
+        return;
+    }
+
+    const selectedVault = chatElements.vaultSelector?.value || '';
+    const scopeLabel = isSystemTemplate
+        ? ` for vault "${selectedVault || '(none selected)'}"`
+        : '';
+    const confirmed = window.confirm(`Run workflow "${globalId}"${scopeLabel}?`);
+    if (!confirmed) {
+        return;
+    }
+    if (isSystemTemplate && !selectedVault) {
+        dashElements.executeWorkflowResult.innerHTML = '<p class="state-error">Select a vault before running a system workflow.</p>';
         return;
     }
 
@@ -3048,6 +3297,9 @@ async function executeWorkflow(globalId, triggerButton = null) {
 
     try {
         const payload = { global_id: globalId };
+        if (isSystemTemplate) {
+            payload.vault_name = selectedVault;
+        }
 
         const response = await fetch('api/workflows/execute', {
             method: 'POST',

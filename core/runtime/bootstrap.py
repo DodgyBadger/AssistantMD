@@ -60,7 +60,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         set_bootstrap_roots(config.data_root, config.system_root)
         refresh_settings_cache()
 
-        # Seed system templates if missing (non-fatal)
+        # Ensure packaged system templates exist without overwriting runtime edits.
         seed_system_templates(config.system_root)
 
         # Validate configuration before continuing bootstrap
