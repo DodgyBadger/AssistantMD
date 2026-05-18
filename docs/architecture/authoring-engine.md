@@ -31,7 +31,7 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 | --- | --- |
 | direct tool functions | Invoke configured tools by name, e.g. `file_ops_safe(...)` |
 | `retrieve_sessions` | Retrieve chat-session metadata selections for the current vault |
-| `retrieve_history` | Retrieve safe structured conversation-history units from the memory broker |
+| `retrieve_history` | Retrieve safe structured conversation-history units from the chat-history broker |
 | `assemble_context` | Build chat context from safe history units, context messages, and instructions |
 | `read_cache` | Read a cached value |
 | `pending_files` | List files awaiting processing |
@@ -52,7 +52,7 @@ This separation means the sandbox itself has no host imports — all side effect
 
 ## Context Assembly
 
-Context scripts execute as history processors for chat. They receive completed prior history through the shared memory broker and return an `AssembleContextResult` through `assemble_context(...)`.
+Context scripts execute as history processors for chat. They receive completed prior history through the shared chat-history broker and return an `AssembleContextResult` through `assemble_context(...)`.
 
 The active/latest message is not part of the retrieved history. Scripts may inspect read-only `latest_message` for branching, but they must not append it manually. The chat runtime appends it exactly once after the assembled context, including during subsequent tool-loop model calls in the same run.
 

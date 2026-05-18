@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.tools import Tool
 
-from core.chat.chat_store import ChatStore, StoredChatMessage, StoredChatSession
+from core.chat.chat_store import ChatStore, StoredChatSession
 from core.llm.agents import create_agent, generate_response
 from core.llm.model_factory import build_model_instance
 from core.logger import UnifiedLogger
-from core.memory import MemoryContext
+from core.chat.history_service import ConversationHistoryItem, ChatHistoryContext, ChatHistoryService
 from core.memory.session_memory import (
     MEMORY_VECTOR_MIN_SCORE,
     RELATED_SESSION_AUTOMATIC_THRESHOLD,
@@ -76,9 +76,9 @@ class MemoryOps(BaseTool):
                 deps = getattr(ctx, "deps", None)
                 requested_session_id = str(session_id or "").strip() or None
                 op = (operation or "").strip().lower()
-                memory_context = MemoryContext.from_deps(deps)
-                active_session_id = requested_session_id or memory_context.session_id
-                active_vault_name = memory_context.vault_name
+                history_context = ChatHistoryContext.from_deps(deps)
+                active_session_id = requested_session_id or history_context.session_id
+                active_vault_name = history_context.vault_name
                 store = SessionMemoryStore()
 
                 logger.set_sinks(["validation"]).info(
@@ -676,11 +676,13 @@ async def _extract_session_memory(
     session = chat_store.get_session(session_id=session_id, vault_name=vault_name)
     if session is None:
         raise ValueError(f"Unknown chat session: {session_id}")
-    messages = chat_store.get_stored_messages(
+    history = ChatHistoryService(chat_store=chat_store).get_conversation_history(
+        context=ChatHistoryContext(session_id=session_id, vault_name=vault_name),
+        scope="session",
         session_id=session_id,
-        vault_name=vault_name,
+        limit="all",
     )
-    if not messages:
+    if not history.items:
         raise ValueError(f"Chat session has no persisted messages: {session_id}")
     summary_agent = await create_agent(
         model=build_model_instance(extraction_model),
@@ -692,7 +694,7 @@ async def _extract_session_memory(
     )
     summary_intent = await generate_response(
         summary_agent,
-        _build_first_pass_prompt(session=session, messages=messages),
+        _build_first_pass_prompt(session=session, messages=history.items),
     )
     summary_intent_data = summary_intent.model_dump()
     classification = await generate_response(
@@ -712,17 +714,17 @@ async def _extract_session_memory(
         "domain": classification_data["domain"],
         "work_product": classification_data["work_product"],
         "named_entities": classification_data["named_entities"],
-        "message_count": len(messages),
+        "message_count": history.item_count,
     }
 
 
 def _build_first_pass_prompt(
     *,
     session: StoredChatSession,
-    messages: list[StoredChatMessage],
+    messages: tuple[ConversationHistoryItem, ...],
 ) -> str:
     transcript = "\n\n".join(
-        f"{message.role.upper()} [{message.sequence_index}]:\n{message.content_text}"
+        f"{message.role.upper()} [{message.sequence_index}]:\n{message.content}"
         for message in messages
     )
     title = session.title or ""
