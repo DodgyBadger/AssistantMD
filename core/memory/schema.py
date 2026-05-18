@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 from core.database import connect_sqlite_from_system_db
+from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
 
 DB_NAME = "memory"
+MIGRATION_NAMESPACE = "memory"
+
+MEMORY_MIGRATIONS = (
+    SQLiteMigration(
+        version=1,
+        name="add_session_memory_source_summary",
+        apply=lambda conn: _migrate_source_summary(conn),
+    ),
+)
 
 
 def ensure_memory_schema(system_root: str | None = None) -> None:
@@ -25,6 +35,7 @@ def ensure_memory_schema(system_root: str | None = None) -> None:
                 work_product TEXT,
                 user_intent TEXT,
                 named_entities TEXT,
+                source_summary TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 metadata_json TEXT,
@@ -67,21 +78,9 @@ def ensure_memory_schema(system_root: str | None = None) -> None:
             ON session_memory_artifacts(vault_name, path)
             """
         )
-        conn.execute(
-            """
-            CREATE VIRTUAL TABLE IF NOT EXISTS session_memories_fts USING fts5(
-                session_id UNINDEXED,
-                vault_name UNINDEXED,
-                title,
-                summary,
-                domain,
-                work_product,
-                user_intent,
-                named_entities,
-                tokenize = 'unicode61'
-            )
-            """
-        )
+        _create_session_memories_fts(conn)
+        conn.commit()
+        apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=MEMORY_MIGRATIONS)
         _backfill_session_memories_fts(conn)
         conn.commit()
     finally:
@@ -99,22 +98,65 @@ def _drop_obsolete_memory_tables(conn) -> None:
         conn.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 
+def _migrate_source_summary(conn) -> None:
+    """Add source_summary and rebuild the FTS table with the extra column."""
+    columns = _table_columns(conn, "session_memories")
+    if "source_summary" not in columns:
+        conn.execute("ALTER TABLE session_memories ADD COLUMN source_summary TEXT")
+    _rebuild_session_memories_fts(conn)
+
+
+def _create_session_memories_fts(conn) -> None:
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_memories_fts USING fts5(
+            session_id UNINDEXED,
+            vault_name UNINDEXED,
+            title,
+            summary,
+            domain,
+            work_product,
+            user_intent,
+            named_entities,
+            source_summary,
+            tokenize = 'unicode61'
+        )
+        """
+    )
+
+
+def _rebuild_session_memories_fts(conn) -> None:
+    conn.execute("DROP TABLE IF EXISTS session_memories_fts")
+    _create_session_memories_fts(conn)
+    _insert_session_memories_fts_rows(conn)
+
+
 def _backfill_session_memories_fts(conn) -> None:
     """Populate the FTS table for existing memory rows when first introduced."""
     memory_count = conn.execute("SELECT COUNT(*) FROM session_memories").fetchone()[0]
     fts_count = conn.execute("SELECT COUNT(*) FROM session_memories_fts").fetchone()[0]
     if memory_count == 0 or fts_count > 0:
         return
+    _insert_session_memories_fts_rows(conn)
+
+
+def _insert_session_memories_fts_rows(conn) -> None:
     conn.execute(
         """
         INSERT INTO session_memories_fts (
             session_id, vault_name, title, summary, domain,
-            work_product, user_intent, named_entities
+            work_product, user_intent, named_entities, source_summary
         )
         SELECT
             session_id, vault_name, COALESCE(title, ''), COALESCE(summary, ''),
             COALESCE(domain, ''), COALESCE(work_product, ''),
-            COALESCE(user_intent, ''), COALESCE(named_entities, '')
+            COALESCE(user_intent, ''), COALESCE(named_entities, ''),
+            COALESCE(source_summary, '')
         FROM session_memories
         """
     )
+
+
+def _table_columns(conn, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows}

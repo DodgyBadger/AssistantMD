@@ -20,8 +20,9 @@ SESSION_MEMORY_TEXT_FIELDS = (
     "work_product",
     "user_intent",
     "named_entities",
+    "source_summary",
 )
-VECTOR_FIELD_TYPES = {"summary", "domain", "work_product", "user_intent"}
+VECTOR_FIELD_TYPES = {"summary", "domain", "work_product", "user_intent", "source_summary"}
 WILDCARD_FIELD_TYPES = {"named_entities"}
 MEMORY_VECTOR_MIN_SCORE = 0.50
 FIELD_VECTOR_NAMESPACE = "session_memory_fields"
@@ -64,6 +65,7 @@ class SessionMemory:
     work_product: str | None = None
     user_intent: str | None = None
     named_entities: str | None = None
+    source_summary: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     artifacts: tuple[SessionMemoryArtifact, ...] = ()
 
@@ -78,6 +80,7 @@ class SessionMemory:
             "work_product": self.work_product,
             "user_intent": self.user_intent,
             "named_entities": self.named_entities,
+            "source_summary": self.source_summary,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "metadata": self.metadata,
@@ -171,6 +174,7 @@ class SessionMemoryStore:
         work_product: str | None = None,
         user_intent: str | None = None,
         named_entities: str | None = None,
+        source_summary: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SessionMemory:
         """Create or replace the memory fields for one chat session."""
@@ -181,9 +185,10 @@ class SessionMemoryStore:
                 INSERT INTO session_memories (
                     session_id, vault_name, title,
                     summary, domain, work_product, user_intent, named_entities,
+                    source_summary,
                     created_at, updated_at, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id, vault_name)
                 DO UPDATE SET
                     title = COALESCE(excluded.title, session_memories.title),
@@ -194,6 +199,10 @@ class SessionMemoryStore:
                     named_entities = COALESCE(
                         excluded.named_entities,
                         session_memories.named_entities
+                    ),
+                    source_summary = COALESCE(
+                        excluded.source_summary,
+                        session_memories.source_summary
                     ),
                     updated_at = excluded.updated_at,
                     metadata_json = COALESCE(
@@ -210,6 +219,7 @@ class SessionMemoryStore:
                     _clean_text(work_product),
                     _clean_text(user_intent),
                     _clean_text(named_entities),
+                    _clean_text(source_summary),
                     now,
                     now,
                     _dump_json(metadata) if metadata is not None else None,
@@ -289,7 +299,7 @@ class SessionMemoryStore:
                 """
                 SELECT session_id, bm25(
                     session_memories_fts,
-                    0.0, 0.0, 1.0, 0.8, 0.75, 0.95, 0.6, 0.5
+                    0.0, 0.0, 1.0, 0.8, 0.75, 0.95, 0.6, 0.5, 0.65
                 ) AS rank
                 FROM session_memories_fts
                 WHERE vault_name = ?
@@ -679,9 +689,9 @@ class SessionMemoryStore:
             """
             INSERT INTO session_memories_fts (
                 session_id, vault_name, title, summary, domain,
-                work_product, user_intent, named_entities
+                work_product, user_intent, named_entities, source_summary
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row["session_id"],
@@ -692,6 +702,7 @@ class SessionMemoryStore:
                 row["work_product"] or "",
                 row["user_intent"] or "",
                 row["named_entities"] or "",
+                row["source_summary"] or "",
             ),
         )
 
@@ -711,6 +722,7 @@ class SessionMemoryStore:
             work_product=_optional_text(row["work_product"]),
             user_intent=_optional_text(row["user_intent"]),
             named_entities=_optional_text(row["named_entities"]),
+            source_summary=_optional_text(row["source_summary"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             metadata=_load_json(row["metadata_json"]),
@@ -775,6 +787,7 @@ class SessionMemoryStore:
             "work_product",
             "user_intent",
             "named_entities",
+            "source_summary",
             "created_at",
             "updated_at",
             "metadata_json",
@@ -830,6 +843,7 @@ def _fts_query_coverage(query: str, session_memory: SessionMemory) -> float:
             session_memory.work_product,
             session_memory.user_intent,
             session_memory.named_entities,
+            session_memory.source_summary,
         )
         if value
     )
@@ -843,7 +857,10 @@ def _quote_fts_phrase(value: str) -> str:
 
 
 def _bm25_score(rank: float) -> float:
-    return round(min(abs(rank) / 10.0, 1.0), 6)
+    score = min(abs(rank) / 10.0, 1.0)
+    if rank != 0.0:
+        score = max(score, 0.000001)
+    return round(score, 6)
 
 
 def _field_embedding_text(*, field_type: str, value: str) -> str:

@@ -73,6 +73,40 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 ),
             ],
         )
+        chat_store.add_tool_event(
+            session_id="extract-session",
+            vault_name=vault_name,
+            tool_call_id="read-source-1",
+            tool_name="file_ops_safe",
+            event_type="call",
+            args={"operation": "read", "path": "Sources/Wetlands/source-note.md"},
+        )
+        chat_store.add_tool_event(
+            session_id="extract-session",
+            vault_name=vault_name,
+            tool_call_id="read-source-1",
+            tool_name="file_ops_safe",
+            event_type="result",
+            result_text="Source note about wetland restoration progress and donor-facing outcomes.",
+            result_metadata={"token_count": 9},
+        )
+        chat_store.add_tool_event(
+            session_id="extract-session",
+            vault_name=vault_name,
+            tool_call_id="read-virtual-doc-1",
+            tool_name="file_ops_safe",
+            event_type="call",
+            args={"operation": "read", "path": "__virtual_docs__/tools/delegate.md"},
+        )
+        chat_store.add_tool_event(
+            session_id="extract-session",
+            vault_name=vault_name,
+            tool_call_id="read-virtual-doc-1",
+            tool_name="file_ops_safe",
+            event_type="result",
+            result_text="Internal delegate tool documentation.",
+            result_metadata={"token_count": 5},
+        )
 
         import core.tools.memory_ops as memory_ops_module
 
@@ -91,16 +125,29 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             return output_type
 
         async def _fake_generate_response(agent, prompt):
-            assert "extract only" in prompt or "Extract classification fields" in prompt
+            assert (
+                "extract only" in prompt
+                or "Extract classification fields" in prompt
+                or "Extract `source_summary`" in prompt
+            )
+            if "Extract `source_summary`" in prompt:
+                self.soft_assert(
+                    "__virtual_docs__" not in prompt,
+                    "source_summary tool log should filter virtual docs file reads",
+                )
             if agent is memory_ops_module._SessionSummaryIntent:
                 return memory_ops_module._SessionSummaryIntent(
                     summary="Drafted a donor update about wetland restoration.",
                     user_intent="Prepare a donor-facing update about wetland restoration progress.",
                 )
-            return memory_ops_module._SessionClassification(
-                domain="conservation fundraising",
-                work_product="donor update",
-                named_entities="",
+            if agent is memory_ops_module._SessionClassification:
+                return memory_ops_module._SessionClassification(
+                    domain="conservation fundraising",
+                    work_product="donor update",
+                    named_entities="",
+                )
+            return memory_ops_module._SessionSourceSummary(
+                source_summary="Read Sources/Wetlands/source-note.md for wetland restoration progress and donor-facing outcomes.",
             )
 
         memory_ops_module.create_agent = _fake_create_agent
@@ -269,8 +316,13 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         )
         self.soft_assert_equal(
             extracted["indexed_fields"],
-            4,
+            5,
             "extract_session_memory should index extracted vector-searchable fields",
+        )
+        self.soft_assert_equal(
+            extracted["session_memory"]["source_summary"],
+            "Read Sources/Wetlands/source-note.md for wetland restoration progress and donor-facing outcomes.",
+            "extract_session_memory should persist source_summary from tool events",
         )
         self.soft_assert_equal(
             extracted["artifact_count"],

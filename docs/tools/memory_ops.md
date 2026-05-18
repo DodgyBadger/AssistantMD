@@ -22,7 +22,7 @@ parameter.
 - `limit`: optional positive integer result limit for `search_sessions`.
 - `data`: optional object for `upsert_session_memory`. Supported keys are
   `summary`, `domain`, `work_product`, `user_intent`, `named_entities`,
-  `artifacts`, and `metadata`.
+  `source_summary`, `artifacts`, and `metadata`.
 - `extraction_model`: optional model alias for `extract_session_memory`.
 
 ## Session Memory Field Contract
@@ -44,6 +44,11 @@ descriptions of the user's work over momentary prompt phrasing.
 - `named_entities`: only named people, organizations, and places. Use a concise
   comma- or semicolon-separated text list. Leave empty if there are no named
   people, organizations, or places.
+- `source_summary`: concise bullet summary of source material or prior context
+  the session appears to have drawn on, based on tool calls/results and the
+  session summary. Include vault files, web pages, retrieved memories, imported
+  docs, or user-pasted source text when identifiable. Do not judge source
+  quality.
 
 For manual writes, put these fields inside `data`. `data.artifacts` is an
 optional list of artifact objects with `path`, optional `artifact_role`, and
@@ -59,10 +64,10 @@ Returns pretty-printed JSON text. Successful operations include a stable
 
 - `get_session_memory` is read-only. It fetches the memory row for the current
   or specified session and returns `status: "found"` or `status: "not_found"`.
-- `extract_session_memory` reads the transcript for the current or
-  specified session, runs AssistantMD's standard two-step extraction policy,
-  upserts the resulting memory fields, attaches any vault files mutated by that
-  chat session as artifacts, and indexes vector-searchable fields.
+- `extract_session_memory` reads the transcript and structured tool events for
+  the current or specified session, runs AssistantMD's standard extraction
+  policy, upserts the resulting memory fields, attaches any vault files mutated
+  by that chat session as artifacts, and indexes vector-searchable fields.
 - `upsert_session_memory` manually stores the `data` values supplied by the
   caller for the current or specified session. It does not read the transcript
   or infer missing fields.
@@ -107,6 +112,7 @@ Manually store memory fields for the current session:
     "work_product": "donor update",
     "user_intent": "Prepare a donor-facing update about restoration progress.",
     "named_entities": "North Star Foundation",
+    "source_summary": "Drew on wetland restoration progress notes and prior donor reporting context.",
     "artifacts": [
       {"path": "Reports/Wetlands/donor-update.md", "artifact_role": "output"}
     ],

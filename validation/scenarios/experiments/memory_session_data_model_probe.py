@@ -3,6 +3,7 @@ Experiment scenario for session memory field storage and semantic search.
 """
 
 import json
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -25,8 +26,32 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
 
     async def test_scenario(self):
         controller = self._get_system_controller()
+        _seed_legacy_memory_db(controller._system_root)
         store = SessionMemoryStore(system_root=str(controller._system_root))
         vault_name = "MemoryModelProbeVault"
+
+        migrated_memory = store.get_session_memory(
+            vault_name=vault_name,
+            session_id="legacy-session",
+        )
+        self.soft_assert(migrated_memory is not None, "Legacy memory row should survive schema migration")
+        self.soft_assert(
+            migrated_memory is not None and migrated_memory.source_summary is None,
+            "Legacy memory row should have empty source_summary after migration",
+        )
+        store.upsert_session_memory(
+            session_id="legacy-session",
+            vault_name=vault_name,
+            source_summary="Read legacy source notes before migration.",
+        )
+        migrated_source_matches = store.search_session_memories_fts(
+            vault_name=vault_name,
+            query="legacy source notes",
+        )
+        self.soft_assert(
+            any(result.session_memory.session_id == "legacy-session" for result in migrated_source_matches),
+            "Migrated FTS table should index source_summary after update",
+        )
 
         session_ids = _seed_session_memories(store, vault_name)
         vector_service = VectorService(
@@ -68,6 +93,7 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
         report = {
             "vault_name": vault_name,
             "session_ids": session_ids,
+            "migrated_source_matches": [result.to_dict() for result in migrated_source_matches],
             "substring_riparian": [memory.to_dict() for memory in substring_riparian],
             "semantic_riparian": [result.to_dict() for result in semantic_riparian],
             "substring_donor": [memory.to_dict() for memory in substring_donor],
@@ -129,6 +155,72 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
 
         self.teardown_scenario()
         self.assert_no_failures()
+
+
+def _seed_legacy_memory_db(system_root: Path) -> None:
+    """Create a pre-source_summary memory DB before SessionMemoryStore migrates it."""
+    system_root.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(system_root / "memory.db")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE session_memories (
+                session_id TEXT NOT NULL,
+                vault_name TEXT NOT NULL,
+                title TEXT,
+                summary TEXT,
+                domain TEXT,
+                work_product TEXT,
+                user_intent TEXT,
+                named_entities TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                metadata_json TEXT,
+                PRIMARY KEY (session_id, vault_name)
+            );
+            CREATE VIRTUAL TABLE session_memories_fts USING fts5(
+                session_id UNINDEXED,
+                vault_name UNINDEXED,
+                title,
+                summary,
+                domain,
+                work_product,
+                user_intent,
+                named_entities,
+                tokenize = 'unicode61'
+            );
+            INSERT INTO session_memories (
+                session_id, vault_name, title, summary, domain,
+                work_product, user_intent, named_entities, metadata_json
+            ) VALUES (
+                'legacy-session',
+                'MemoryModelProbeVault',
+                'Legacy memory',
+                'Existing memory row before source summary.',
+                'validation',
+                'migration probe',
+                'Validate memory schema migration.',
+                '',
+                '{}'
+            );
+            INSERT INTO session_memories_fts (
+                session_id, vault_name, title, summary, domain,
+                work_product, user_intent, named_entities
+            ) VALUES (
+                'legacy-session',
+                'MemoryModelProbeVault',
+                'Legacy memory',
+                'Existing memory row before source summary.',
+                'validation',
+                'migration probe',
+                'Validate memory schema migration.',
+                ''
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _seed_session_memories(store: SessionMemoryStore, vault_name: str) -> tuple[str, ...]:

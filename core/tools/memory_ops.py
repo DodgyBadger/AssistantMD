@@ -15,7 +15,12 @@ from core.chat.chat_store import ChatStore, StoredChatSession
 from core.llm.agents import create_agent, generate_response
 from core.llm.model_factory import build_model_instance
 from core.logger import UnifiedLogger
-from core.chat.history_service import ConversationHistoryItem, ChatHistoryContext, ChatHistoryService
+from core.chat.history_service import (
+    ChatHistoryContext,
+    ChatHistoryService,
+    ConversationHistoryItem,
+    ConversationToolEventItem,
+)
 from core.memory.session_memory import (
     MEMORY_VECTOR_MIN_SCORE,
     RELATED_SESSION_AUTOMATIC_THRESHOLD,
@@ -37,6 +42,7 @@ SESSION_SEARCH_FIELD_WEIGHTS = {
     "domain": 0.25,
     "user_intent": 0.15,
     "summary": 0.10,
+    "source_summary": 0.10,
     "work_product": 0.05,
 }
 SESSION_LEXICAL_WEIGHT = 0.45
@@ -106,6 +112,7 @@ class MemoryOps(BaseTool):
                         work_product=memory_data.get("work_product"),
                         user_intent=memory_data.get("user_intent"),
                         named_entities=memory_data.get("named_entities"),
+                        source_summary=memory_data.get("source_summary"),
                         metadata=memory_data.get("metadata"),
                     )
                     _maybe_add_artifacts(
@@ -146,11 +153,13 @@ class MemoryOps(BaseTool):
                         work_product=extraction["work_product"],
                         user_intent=extraction["user_intent"],
                         named_entities=extraction["named_entities"],
+                        source_summary=extraction["source_summary"],
                         metadata={
                             "source": "chat_session_extraction",
-                            "extraction_policy": "two_step_summary_intent_then_classification",
+                            "extraction_policy": "summary_intent_classification_source_summary",
                             "extraction_model": extraction_model,
                             "message_count": extraction["message_count"],
+                            "tool_event_count": extraction["tool_event_count"],
                         },
                     )
                     artifact_count = _add_chat_mutation_artifacts(
@@ -247,10 +256,13 @@ Session memory field guidance:
 - `work_product`: concrete thing the user wanted produced or answered.
 - `user_intent`: user's underlying goal or intent after clarification or drift.
 - `named_entities`: only named people, organizations, and places.
+- `source_summary`: concise description of source material or prior context
+  identifiable from tool use.
 
 Use `upsert_session_memory` only when you already have field values to store.
 Pass those values in `data`; supported keys are `summary`, `domain`,
-`work_product`, `user_intent`, `named_entities`, `artifacts`, and `metadata`.
+`work_product`, `user_intent`, `named_entities`, `source_summary`, `artifacts`,
+and `metadata`.
 It persists supplied values; it does not inspect the transcript or infer missing
 fields.
 
@@ -313,6 +325,12 @@ class _SessionClassification(BaseModel):
     work_product: str = Field(default="")
 
 
+class _SessionSourceSummary(BaseModel):
+    """Third-pass session source-summary extraction."""
+
+    source_summary: str = Field(default="")
+
+
 def _require(value: object, message: str) -> None:
     if value is None:
         raise ValueError(message)
@@ -336,6 +354,7 @@ def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
         "work_product",
         "user_intent",
         "named_entities",
+        "source_summary",
         "artifacts",
         "metadata",
     }
@@ -657,7 +676,10 @@ def _preview_text(value: str | None, *, limit: int = 240) -> str | None:
 
 
 def _bm25_rank_score(rank: float) -> float:
-    return round(min(abs(rank) / 10.0, 1.0), 6)
+    score = min(abs(rank) / 10.0, 1.0)
+    if rank != 0.0:
+        score = max(score, 0.000001)
+    return round(score, 6)
 
 
 def _normalize_vector_score(score: float) -> float:
@@ -682,6 +704,12 @@ async def _extract_session_memory(
         session_id=session_id,
         limit="all",
     )
+    tool_events = ChatHistoryService(chat_store=chat_store).get_conversation_tool_events(
+        context=ChatHistoryContext(session_id=session_id, vault_name=vault_name),
+        scope="session",
+        session_id=session_id,
+        limit="all",
+    )
     if not history.items:
         raise ValueError(f"Chat session has no persisted messages: {session_id}")
     summary_agent = await create_agent(
@@ -691,6 +719,10 @@ async def _extract_session_memory(
     classification_agent = await create_agent(
         model=build_model_instance(extraction_model),
         output_type=_SessionClassification,
+    )
+    source_agent = await create_agent(
+        model=build_model_instance(extraction_model),
+        output_type=_SessionSourceSummary,
     )
     summary_intent = await generate_response(
         summary_agent,
@@ -705,6 +737,19 @@ async def _extract_session_memory(
         ),
     )
     classification_data = classification.model_dump()
+    tool_event_log = _build_tool_event_log(tool_events.items)
+    if tool_event_log:
+        source_summary = await generate_response(
+            source_agent,
+            _build_source_summary_prompt(
+                session=session,
+                summary_intent=summary_intent_data,
+                tool_event_log=tool_event_log,
+            ),
+        )
+        source_summary_data = source_summary.model_dump()
+    else:
+        source_summary_data = {"source_summary": ""}
     return {
         "session_id": session.session_id,
         "vault_name": session.vault_name,
@@ -714,7 +759,9 @@ async def _extract_session_memory(
         "domain": classification_data["domain"],
         "work_product": classification_data["work_product"],
         "named_entities": classification_data["named_entities"],
+        "source_summary": source_summary_data["source_summary"],
         "message_count": history.item_count,
+        "tool_event_count": tool_events.item_count,
     }
 
 
@@ -794,6 +841,116 @@ Summary:
 User intent:
 {summary_intent["user_intent"]}
 """.strip()
+
+
+def _build_source_summary_prompt(
+    *,
+    session: StoredChatSession,
+    summary_intent: dict[str, str],
+    tool_event_log: str,
+) -> str:
+    title = session.title or ""
+    return f"""
+Extract `source_summary` for this AssistantMD chat session.
+
+Definition:
+- `source_summary`: a concise description of source material or prior context
+  the session appears to have drawn on, based on tool calls/results and the
+  session summary. Include vault files, web pages, retrieved memories, imported
+  docs, or user-pasted source text when identifiable. Do not judge source
+  quality. Leave blank if no identifiable sources were used.
+
+Rules:
+- Use the tool log to infer what the agent read, searched, retrieved, or
+  delegated for analysis.
+- The tool log may include exploratory or failed calls. Do not treat those as
+  authoritative sources unless the result indicates they informed the work.
+- Format as concise bullets.
+- Prefer user-facing source material over AssistantMD implementation details.
+- Keep delegate/code-execution details brief: mention what source or overflowed
+  result they helped inspect, not the mechanics of the delegation.
+- Omit tool docs, system docs, and other implementation references unless the
+  user's task was specifically about AssistantMD authoring, tools, or code.
+- Keep the source summary factual and compact.
+- Return only the structured output.
+
+Session:
+- session_id: {session.session_id}
+- title: {title}
+
+Summary:
+{summary_intent["summary"]}
+
+User intent:
+{summary_intent["user_intent"]}
+
+Tool log:
+{tool_event_log}
+""".strip()
+
+
+def _build_tool_event_log(events: tuple[ConversationToolEventItem, ...]) -> str:
+    """Build a flat extraction-only log from structured chat tool events."""
+    args_by_call_id: dict[str, dict[str, Any] | None] = {}
+    rows: list[str] = []
+    result_index = 0
+    for event in events:
+        if event.event_type == "call":
+            args_by_call_id[event.tool_call_id] = event.args
+            continue
+        if event.event_type != "result":
+            continue
+        args = args_by_call_id.get(event.tool_call_id)
+        if _is_virtual_docs_file_call(event, args):
+            continue
+        if _is_failed_tool_result(event):
+            continue
+        result_index += 1
+        args_text = json.dumps(args or {}, ensure_ascii=False, sort_keys=True)
+        result_text = _preview_text(event.result_text, limit=800) or ""
+        rows.append(
+            "\n".join(
+                (
+                    f"{result_index}. Tool: {event.tool_name}",
+                    f"   args: {args_text}",
+                    f"   result: {result_text}",
+                )
+            )
+        )
+    return "\n\n".join(rows)
+
+
+def _is_failed_tool_result(event: ConversationToolEventItem) -> bool:
+    metadata = event.result_metadata or {}
+    status = str(metadata.get("status") or metadata.get("state") or "").strip().lower()
+    if status in {"error", "failed", "failure"}:
+        return True
+    result_text = str(event.result_text or "").strip().lower()
+    return result_text.startswith(("error:", "error performing "))
+
+
+def _is_virtual_docs_file_call(
+    event: ConversationToolEventItem,
+    args: dict[str, Any] | None,
+) -> bool:
+    if event.tool_name != "file_ops_safe" or not args:
+        return False
+    paths = _extract_arg_paths(args)
+    return bool(paths) and all(path.startswith("__virtual_docs__/") for path in paths)
+
+
+def _extract_arg_paths(value: Any) -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key in {"path", "source_path", "target_path", "from_path", "to_path"}:
+                path = str(nested or "").strip()
+                if path:
+                    paths.append(path)
+                continue
+            if key in {"paths", "files"} and isinstance(nested, list):
+                paths.extend(str(item or "").strip() for item in nested if str(item or "").strip())
+    return paths
 
 
 async def _maybe_index_session_memory_fields(
