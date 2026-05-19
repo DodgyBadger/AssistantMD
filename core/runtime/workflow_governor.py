@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from core.authoring.workflow_execution import WorkflowExecutionResult, execute_workflow_by_id
 from core.logger import UnifiedLogger
-from core.settings import get_workflow_task_timeout_seconds
+from core.settings import get_max_concurrent_workflows, get_workflow_task_timeout_seconds
 
 from .execution_tasks import (
     ExecutionTaskKind,
@@ -34,6 +34,9 @@ class WorkflowGovernor:
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
         self._lane_guard = asyncio.Lock()
         self._lane_locks: dict[str, asyncio.Lock] = {}
+        self._global_limit_guard = asyncio.Lock()
+        self._global_limit = 0
+        self._global_semaphore: asyncio.Semaphore | None = None
 
     async def execute_workflow(
         self,
@@ -44,47 +47,53 @@ class WorkflowGovernor:
         expect_failure: bool = False,
         include_load_errors: bool = False,
     ) -> WorkflowExecutionResult:
-        """Execute one workflow if its vault lane is available."""
+        """Execute one workflow after waiting for its vault and global lanes."""
         vault_name = self._split_vault_name(global_id)
         source_value = str(source)
-        lane_lock = await self._get_lane_lock(vault_name)
-        if lane_lock.locked():
-            reason = f"workflow_vault_active:{vault_name}"
-            self._logger.add_sink("validation").info(
-                "workflow_task_overlap_skipped",
-                data={
-                    "event": "workflow_task_overlap_skipped",
-                    "workflow_id": global_id,
-                    "vault": vault_name,
-                    "source": source_value,
-                    "reason": reason,
-                },
-            )
-            return WorkflowExecutionResult(
-                success=True,
-                global_id=global_id,
-                status="skipped",
-                execution_time_seconds=0.0,
-                output_files=[],
-                reason=reason,
-                details=[],
-                message=f"Workflow '{global_id}' skipped: {reason}",
-            )
-
-        await lane_lock.acquire()
         task_id = ""
-        try:
-            async with self._task_coordinator.track_current_task(
-                kind=ExecutionTaskKind.WORKFLOW,
-                scope=workflow_vault_scope(vault_name),
-                source=source,
-                label=global_id,
-                metadata={
-                    "workflow_id": global_id,
-                    "vault": vault_name,
-                    "step_name": step_name,
-                },
-            ) as task:
+        async with self._task_coordinator.track_current_task(
+            kind=ExecutionTaskKind.WORKFLOW,
+            scope=workflow_vault_scope(vault_name),
+            source=source,
+            label=global_id,
+            metadata={
+                "workflow_id": global_id,
+                "vault": vault_name,
+                "step_name": step_name,
+            },
+            start_immediately=False,
+        ) as task:
+            lane_lock = await self._get_lane_lock(vault_name)
+            if lane_lock.locked():
+                self._log_queue_event(
+                    "workflow_task_queued_for_vault",
+                    global_id=global_id,
+                    vault_name=vault_name,
+                    source=source_value,
+                    task_id=task.task_id,
+                    reason=f"workflow_vault_active:{vault_name}",
+                )
+
+            await lane_lock.acquire()
+            global_semaphore: asyncio.Semaphore | None = None
+            global_permit_acquired = False
+            task_id = task.task_id
+            try:
+                global_semaphore = await self._get_global_semaphore()
+                if global_semaphore is not None:
+                    if global_semaphore.locked():
+                        self._log_queue_event(
+                            "workflow_task_queued_for_global_capacity",
+                            global_id=global_id,
+                            vault_name=vault_name,
+                            source=source_value,
+                            task_id=task_id,
+                            reason="workflow_global_capacity_active",
+                        )
+                    await global_semaphore.acquire()
+                    global_permit_acquired = True
+
+                await self._task_coordinator.mark_started(task_id)
                 task_id = task.task_id
                 self._log_workflow_event(
                     "workflow_task_started",
@@ -147,39 +156,73 @@ class WorkflowGovernor:
                 )
                 await self._mark_task_terminal_from_result(task_id, result)
                 return result
-        except asyncio.CancelledError:
-            self._log_workflow_event(
-                "workflow_task_cancelled",
-                global_id=global_id,
-                vault_name=vault_name,
-                source=source_value,
-                task_id=task_id,
-                status="cancelled",
-                reason="cancelled",
-            )
-            raise
-        except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"
-            self._log_workflow_event(
-                "workflow_task_failed",
-                global_id=global_id,
-                vault_name=vault_name,
-                source=source_value,
-                task_id=task_id,
-                status="failed",
-                reason=reason,
-            )
-            raise
-        finally:
-            lane_lock.release()
+            except asyncio.CancelledError:
+                self._log_workflow_event(
+                    "workflow_task_cancelled",
+                    global_id=global_id,
+                    vault_name=vault_name,
+                    source=source_value,
+                    task_id=task_id,
+                    status="cancelled",
+                    reason="cancelled",
+                )
+                raise
+            except Exception as exc:
+                reason = f"{type(exc).__name__}: {exc}"
+                self._log_workflow_event(
+                    "workflow_task_failed",
+                    global_id=global_id,
+                    vault_name=vault_name,
+                    source=source_value,
+                    task_id=task_id,
+                    status="failed",
+                    reason=reason,
+                )
+                raise
+            finally:
+                if global_permit_acquired and global_semaphore is not None:
+                    global_semaphore.release()
+                lane_lock.release()
 
     async def _get_lane_lock(self, vault_name: str) -> asyncio.Lock:
         async with self._lane_guard:
             lock = self._lane_locks.get(vault_name)
             if lock is None:
                 lock = asyncio.Lock()
-                self._lane_locks[vault_name] = lock
+            self._lane_locks[vault_name] = lock
             return lock
+
+    async def _get_global_semaphore(self) -> asyncio.Semaphore | None:
+        limit = get_max_concurrent_workflows()
+        if limit <= 0:
+            return None
+        async with self._global_limit_guard:
+            if self._global_semaphore is None or self._global_limit != limit:
+                self._global_limit = limit
+                self._global_semaphore = asyncio.Semaphore(limit)
+            return self._global_semaphore
+
+    def _log_queue_event(
+        self,
+        event: str,
+        *,
+        global_id: str,
+        vault_name: str,
+        source: str,
+        task_id: str,
+        reason: str,
+    ) -> None:
+        self._logger.add_sink("validation").info(
+            event,
+            data={
+                "event": event,
+                "workflow_id": global_id,
+                "vault": vault_name,
+                "source": source,
+                "task_id": task_id,
+                "reason": reason,
+            },
+        )
 
     def _log_workflow_event(
         self,

@@ -96,7 +96,10 @@ Runtime owns a process-local `TaskCoordinator` and `WorkflowGovernor`.
 
 `TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
-`WorkflowGovernor` is the policy layer for workflow runs. It serializes workflow execution per vault, registers workflow tasks, applies the configured workflow task timeout, and logs workflow lifecycle events.
+`WorkflowGovernor` is the policy layer for workflow runs. It queues workflow
+execution per vault, optionally limits total concurrent workflows across vaults,
+registers workflow tasks, applies the configured workflow task timeout, and logs
+workflow lifecycle events.
 
 ## Common Failure Modes
 

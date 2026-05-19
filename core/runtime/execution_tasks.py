@@ -191,6 +191,7 @@ class TaskCoordinator:
         source: str,
         label: str,
         metadata: dict[str, Any] | None = None,
+        start_immediately: bool = True,
     ) -> AsyncIterator[ExecutionTaskSnapshot]:
         """Register the current asyncio task for the duration of one operation."""
         current = asyncio.current_task()
@@ -207,7 +208,8 @@ class TaskCoordinator:
             handle=current,
             metadata=metadata,
         )
-        await self._mark_started(task_id)
+        if start_immediately:
+            await self.mark_started(task_id)
 
         snapshot = await self.get_task(task_id)
         if snapshot is None:  # pragma: no cover - defensive
@@ -306,6 +308,10 @@ class TaskCoordinator:
             reason=reason,
             event="execution_task_completed",
         )
+
+    async def mark_started(self, task_id: str) -> None:
+        """Mark one queued task running."""
+        await self._mark_started(task_id)
 
     async def mark_failed(self, task_id: str, *, reason: str | None = None) -> None:
         """Mark one task failed."""

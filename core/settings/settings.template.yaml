@@ -42,6 +42,10 @@ settings:
     value: 0
     description: "Maximum seconds for one workflow execution task. 0 disables the workflow task timeout."
     restart_required: false
+  max_concurrent_workflows:
+    value: 0
+    description: "Maximum number of workflows allowed to run at the same time across all vaults. 0 disables the global workflow concurrency limit."
+    restart_required: false
   browser_navigation_timeout_seconds:
     value: 20
     description: "Navigation timeout in seconds for the browser extraction tool."

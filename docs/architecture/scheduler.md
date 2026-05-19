@@ -44,11 +44,17 @@ The governor:
 
 - registers a process-local workflow execution task
 - serializes workflow execution by vault scope (`workflow_vault:<vault_name>`)
-- skips overlapping workflow runs in the same vault with status `skipped`
+- queues overlapping workflow runs in the same vault until the active workflow
+  completes
+- optionally limits total concurrent workflow executions across all vaults
 - applies `workflow_task_timeout_seconds` when configured
 - emits workflow lifecycle validation events
 
 APScheduler remains responsible for schedule timing and persistence. The governor owns in-process concurrency and lifecycle policy for the actual workflow run.
+
+`max_concurrent_workflows` in general settings controls global workflow
+concurrency across vaults. `0` disables the global limit. The per-vault lane is
+always active so workflows for one vault run sequentially.
 
 ## System Jobs
 

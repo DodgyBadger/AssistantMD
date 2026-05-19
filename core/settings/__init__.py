@@ -364,6 +364,17 @@ def get_workflow_task_timeout_seconds() -> float:
     return timeout if timeout > 0 else 0.0
 
 
+def get_max_concurrent_workflows() -> int:
+    """Return max concurrent workflows across vaults, where 0 disables the limit."""
+    entry = get_general_settings().get("max_concurrent_workflows")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return limit if limit > 0 else 0
+
+
 def get_browser_navigation_timeout_seconds() -> float:
     """Return browser navigation timeout seconds, falling back to 20 seconds."""
     entry = get_general_settings().get("browser_navigation_timeout_seconds")
