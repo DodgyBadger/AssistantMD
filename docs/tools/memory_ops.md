@@ -31,7 +31,9 @@ Use these fields as short summaries of one chat session. Prefer durable
 descriptions of the user's work over momentary prompt phrasing.
 
 - `summary`: short plain-language summary of the whole chat session. Include
-  enough context for a human to quickly understand what happened.
+  durable context a human or future assistant would need to understand what
+  happened, such as important facts, decisions, outputs, source paths,
+  constraints, corrections, and unresolved follow-up when relevant.
 - `domain`: the subject area or knowledge area of the work, such as
   `data visualization`, `nutrition`, `ServiceNow administration`, `statistics`,
   `research synthesis`, or `conservation fundraising`.
@@ -44,12 +46,14 @@ descriptions of the user's work over momentary prompt phrasing.
 - `named_entities`: only named people, organizations, and places. Use a concise
   comma- or semicolon-separated text list. Leave empty if there are no named
   people, organizations, or places.
-- `source_summary`: 3-6 concise bullets summarizing source material or prior
+- `source_summary`: concise bullets summarizing source material or prior
   context the session appears to have drawn on, based on tool calls/results and
-  the session summary. Start each bullet with the source path, source name, URL,
-  or source category when possible. Include vault files, web pages, retrieved
-  memories, imported docs, or user-pasted source text when identifiable. Do not
-  judge source quality.
+  the session summary. A source is material that was read, retrieved, imported,
+  or pasted into the session, such as a vault file, web page, imported document,
+  or user-provided source text. Do not create extra bullets for documents,
+  datasets, tools, or evidence that were only mentioned inside another source.
+  The session summary, user intent, and tool log are extraction evidence, not
+  source labels. Do not judge source quality.
 
 For manual writes, put these fields inside `data`. `data.artifacts` is an
 optional list of artifact objects with `path`, optional `artifact_role`, and

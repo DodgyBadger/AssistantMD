@@ -191,15 +191,29 @@ structured, and directly useful to the next assistant turn.
 
 
 SESSION_MEMORY_SUMMARY_INTENT_PROMPT = """
-Read this AssistantMD chat session and extract only:
+You are distilling what happened in an AssistantMD chat session.
 
-- `summary`: a short plain-language summary of the user's work in the session.
+You have been provided with:
+- Session metadata, to identify the chat session.
+- The conversation transcript, to understand what the user and assistant did.
+
+Task:
+Identify what happened in the session and what the user was trying to
+accomplish.
+
+Fields:
+- `summary`: a short plain-language summary of the whole session. Preserve the
+  durable context a future assistant or human would need to understand what
+  happened: important facts, decisions, inputs and outputs, constraints,
+  corrections, and unresolved follow-up when relevant.
 - `user_intent`: what the user was trying to accomplish after clarification,
   repetition, or topic drift.
 
 Rules:
 - Use only the conversation text and session metadata shown here.
-- Focus on the user's real work, not this extraction task.
+- Focus on the session's durable substance, not this extraction task.
+- Do not make `summary` a restatement of `user_intent`; `summary` should say
+  what happened, while `user_intent` should say why the user wanted it.
 - Keep both fields concise but specific enough to support later retrieval.
 - Return only the structured output.
 
@@ -216,10 +230,17 @@ Conversation:
 
 
 SESSION_MEMORY_CLASSIFICATION_PROMPT = """
-Extract classification fields from this distilled chat-session summary.
+You are turning a distilled AssistantMD chat-session summary into retrieval
+labels.
 
-Use only the summary, user intent, and session title below. Do not infer from
-the original transcript.
+You have been provided with:
+- Session metadata, to identify the chat session.
+- A distilled summary of what happened in the session.
+- The user's underlying intent for the session.
+
+Task:
+Create concise labels that would help future searches find sessions about
+similar work.
 
 Fields:
 - `domain`: the subject area or knowledge area of the user's work.
@@ -233,6 +254,7 @@ Fields:
   Leave empty if there are none.
 
 Rules:
+- Use only the summary, user intent, and session metadata shown here.
 - Keep fields concise but specific enough to support later retrieval.
 - Keep `work_product` under 8 words when possible.
 - Return only the structured output.
@@ -250,29 +272,37 @@ User intent:
 
 
 SESSION_MEMORY_SOURCE_SUMMARY_PROMPT = """
-Extract `source_summary` for this AssistantMD chat session.
+You are identifying the direct source materials used in an AssistantMD chat
+session.
 
-Definition:
-- `source_summary`: a concise description of source material or prior context
-  the session appears to have drawn on, based on tool calls/results and the
-  session summary. Include files, web pages, retrieved memories, imported
-  docs, or user-pasted source text when identifiable. Do not judge source
-  quality. Leave blank if no identifiable sources were used.
+You have been provided with:
+- Session metadata, to identify the chat session.
+- A distilled summary and user intent, to understand what the session was about.
+- A structured tool log, to see what files, web pages, imports, or other source
+  materials were actually read, retrieved, or provided to the assistant.
+
+Task:
+Identify the direct source materials used in the session. A source is material
+that was read, retrieved, imported, or pasted into the session, such as a vault
+file, web page, imported document, or user-provided source text.
+
+For each direct source, or closely related group of direct sources, write a
+concise bullet explaining what it contributed.
 
 Rules:
-- Use the tool log to infer what the agent read, searched, retrieved, or
-  delegated for analysis.
-- The tool log may include exploratory or failed calls. Do not treat those as
-  authoritative sources unless the result indicates they informed the work.
-- Format as 3-6 concise bullets.
+- List only direct sources that entered the chat context.
+- Do not list documents, datasets, people, tools, or evidence merely mentioned
+  inside another source unless they were also directly read, retrieved,
+  imported, or pasted.
+- Use the session summary, user intent, and tool log as evidence for identifying
+  sources; do not cite them as sources.
+- Do not create bullets named `Session summary`, `Tool log`, `Conversation`,
+  or similar meta labels.
+- If there were no direct sources beyond the conversation itself, leave
+  `source_summary` blank.
 - Start each bullet with the source path, source name, URL, or source category
   when possible.
-- Prefer user-facing source material over AssistantMD implementation details.
-- Keep delegate/code-execution details brief: mention what source or overflowed
-  result they helped inspect, not the mechanics of the delegation.
-- Omit tool docs, system docs, and other implementation references unless the
-  user's task was specifically about AssistantMD authoring, tools, or code.
-- Keep the source summary factual and compact.
+- Keep bullets factual and compact.
 - Return only the structured output.
 
 Session:

@@ -126,14 +126,28 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
 
         async def _fake_generate_response(agent, prompt):
             assert (
-                "extract only" in prompt
-                or "Extract classification fields" in prompt
-                or "Extract `source_summary`" in prompt
+                "distilling what happened" in prompt
+                or "turning a distilled AssistantMD chat-session summary" in prompt
+                or "identifying the direct source materials" in prompt
             )
-            if "Extract `source_summary`" in prompt:
+            if "distilling what happened" in prompt:
+                self.soft_assert(
+                    "You have been provided with:" in prompt,
+                    "summary/intent prompt should describe its inputs",
+                )
+            if "turning a distilled AssistantMD chat-session summary" in prompt:
+                self.soft_assert(
+                    "Create concise labels" in prompt,
+                    "classification prompt should frame labels as retrieval aids",
+                )
+            if "identifying the direct source materials" in prompt:
                 self.soft_assert(
                     "__virtual_docs__" not in prompt,
                     "source_summary tool log should filter virtual docs file reads",
+                )
+                self.soft_assert(
+                    "Do not create bullets named `Session summary`, `Tool log`" in prompt,
+                    "source_summary prompt should forbid meta-source labels",
                 )
             if agent is memory_ops_module._SessionSummaryIntent:
                 return memory_ops_module._SessionSummaryIntent(
