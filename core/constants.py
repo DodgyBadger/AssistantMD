@@ -188,3 +188,103 @@ verbatim outside the summary and should not be restated.
 Write the summary as system-maintained session history. It should be concise,
 structured, and directly useful to the next assistant turn.
 """.strip()
+
+
+SESSION_MEMORY_SUMMARY_INTENT_PROMPT = """
+Read this AssistantMD chat session and extract only:
+
+- `summary`: a short plain-language summary of the user's work in the session.
+- `user_intent`: what the user was trying to accomplish after clarification,
+  repetition, or topic drift.
+
+Rules:
+- Use only the conversation text and session metadata shown here.
+- Focus on the user's real work, not this extraction task.
+- Keep both fields concise but specific enough to support later retrieval.
+- Return only the structured output.
+
+Session:
+- session_id: {session_id}
+- vault_name: {vault_name}
+- title: {title}
+- created_at: {created_at}
+- last_activity_at: {last_activity_at}
+
+Conversation:
+{transcript}
+""".strip()
+
+
+SESSION_MEMORY_CLASSIFICATION_PROMPT = """
+Extract classification fields from this distilled chat-session summary.
+
+Use only the summary, user intent, and session title below. Do not infer from
+the original transcript.
+
+Fields:
+- `domain`: the subject area or knowledge area of the user's work.
+- `work_product`: the real deliverable, answer, document, artifact, or decision
+  the user wanted from the session. Use a concise generalized category or short
+  noun phrase, not a full sentence. Prefer labels such as `report draft`,
+  `funder email`, `briefing note`, `knowledge base`, `source memos`,
+  `workflow script`, `project summary`, `grant tracker`, or `decision note`.
+- `named_entities`: only named people, organizations, and places. Use a concise
+  comma- or semicolon-separated list of entities central to the summarized work.
+  Leave empty if there are none.
+
+Rules:
+- Keep fields concise but specific enough to support later retrieval.
+- Keep `work_product` under 8 words when possible.
+- Return only the structured output.
+
+Session:
+- session_id: {session_id}
+- title: {title}
+
+Summary:
+{summary}
+
+User intent:
+{user_intent}
+""".strip()
+
+
+SESSION_MEMORY_SOURCE_SUMMARY_PROMPT = """
+Extract `source_summary` for this AssistantMD chat session.
+
+Definition:
+- `source_summary`: a concise description of source material or prior context
+  the session appears to have drawn on, based on tool calls/results and the
+  session summary. Include files, web pages, retrieved memories, imported
+  docs, or user-pasted source text when identifiable. Do not judge source
+  quality. Leave blank if no identifiable sources were used.
+
+Rules:
+- Use the tool log to infer what the agent read, searched, retrieved, or
+  delegated for analysis.
+- The tool log may include exploratory or failed calls. Do not treat those as
+  authoritative sources unless the result indicates they informed the work.
+- Format as 3-6 concise bullets.
+- Start each bullet with the source path, source name, URL, or source category
+  when possible.
+- Prefer user-facing source material over AssistantMD implementation details.
+- Keep delegate/code-execution details brief: mention what source or overflowed
+  result they helped inspect, not the mechanics of the delegation.
+- Omit tool docs, system docs, and other implementation references unless the
+  user's task was specifically about AssistantMD authoring, tools, or code.
+- Keep the source summary factual and compact.
+- Return only the structured output.
+
+Session:
+- session_id: {session_id}
+- title: {title}
+
+Summary:
+{summary}
+
+User intent:
+{user_intent}
+
+Tool log:
+{tool_event_log}
+""".strip()

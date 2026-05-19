@@ -44,11 +44,12 @@ descriptions of the user's work over momentary prompt phrasing.
 - `named_entities`: only named people, organizations, and places. Use a concise
   comma- or semicolon-separated text list. Leave empty if there are no named
   people, organizations, or places.
-- `source_summary`: concise bullet summary of source material or prior context
-  the session appears to have drawn on, based on tool calls/results and the
-  session summary. Include vault files, web pages, retrieved memories, imported
-  docs, or user-pasted source text when identifiable. Do not judge source
-  quality.
+- `source_summary`: 3-6 concise bullets summarizing source material or prior
+  context the session appears to have drawn on, based on tool calls/results and
+  the session summary. Start each bullet with the source path, source name, URL,
+  or source category when possible. Include vault files, web pages, retrieved
+  memories, imported docs, or user-pasted source text when identifiable. Do not
+  judge source quality.
 
 For manual writes, put these fields inside `data`. `data.artifacts` is an
 optional list of artifact objects with `path`, optional `artifact_role`, and
