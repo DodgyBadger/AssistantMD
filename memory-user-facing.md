@@ -1,26 +1,30 @@
 # Memory
 
-AssistantMD memory is session memory.
+AssistantMD memory is a structured index of chat sessions.
 
 When you work with AssistantMD, the chat session is where the pieces of the work
 come together: what you asked for, what the assistant tried, which tools were
-used, and which vault files were touched. Memory gives AssistantMD a compact,
-searchable record of that prior work so a future chat can find useful leads
-instead of starting from scratch.
+used, which sources were read, what was produced, and which vault files were
+touched. Memory gives AssistantMD a compact, searchable card for that prior work
+so a future chat can find useful leads instead of searching raw transcripts
+first.
 
 The vault is still the source of truth. Memory does not replace your notes,
-documents, drafts, or project files. It points back to prior sessions and, when
-available, to the vault files those sessions created, edited, moved, or deleted.
+documents, drafts, or project files. It points back to prior sessions, the
+source materials those sessions used, and, when available, the vault files those
+sessions created, edited, moved, or deleted.
 
 ## What Gets Stored
 
 A session memory record contains short derived fields:
 
-- `summary`: what happened in the chat session
+- `summary`: durable context about what happened in the chat session
 - `user_intent`: what the user was trying to accomplish
 - `domain`: the subject area of the work
 - `work_product`: the kind of deliverable, answer, or artifact involved
 - `named_entities`: central people, organizations, and places
+- `source_summary`: direct source materials read, retrieved, imported, or
+  pasted into the session, with a short note about what they contributed
 
 When AssistantMD has vault-state mutation records for the session, memory also
 stores artifact pointers for files touched by that chat. These pointers include
@@ -48,7 +52,8 @@ when they want tighter control over what a session should remember.
 ## How Memory Is Used
 
 AssistantMD can search session memory to find prior work that may be relevant to
-the current chat.
+the current chat. This is best understood as a structured session index, not as a
+replacement for transcript or vault search.
 
 Search results return candidate sessions, not final answers. A useful result can
 tell the agent:
@@ -56,11 +61,17 @@ tell the agent:
 - what the prior session was about
 - what the user was trying to do
 - what kind of output was produced
+- which source materials were used
 - which named entities were central
 - which vault files the session touched, if known
 
 The agent can then decide whether to inspect the prior session, read linked vault
 files, or ask the user for confirmation before relying on that material.
+
+Memory search and raw transcript search work together. Memory is the first pass:
+it is compact, fielded, and easier to scan. If the useful detail is not captured
+in the memory card, AssistantMD can still search the full session transcript or
+the vault itself.
 
 ## Context Scripts
 
@@ -99,6 +110,6 @@ Artifact pointers are only available when AssistantMD has task mutation records
 for the chat session. Older sessions, imported sessions, or sessions from before
 vault-state mutation tracking may have memory fields without artifact pointers.
 
-Memory search is retrieval, not verification. Retrieved sessions and artifacts
-should be treated as leads back to the vault and transcript. The vault files and
-the user's judgment remain authoritative.
+Memory search is retrieval, not verification. Retrieved sessions, source
+summaries, and artifacts should be treated as leads back to the vault and
+transcript. The vault files and the user's judgment remain authoritative.

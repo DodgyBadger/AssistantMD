@@ -15,6 +15,11 @@ MEMORY_MIGRATIONS = (
         name="add_session_memory_source_summary",
         apply=lambda conn: _migrate_source_summary(conn),
     ),
+    SQLiteMigration(
+        version=2,
+        name="remove_source_summary_from_session_memory_fts",
+        apply=lambda conn: _migrate_source_summary_out_of_retrieval(conn),
+    ),
 )
 
 
@@ -99,11 +104,31 @@ def _drop_obsolete_memory_tables(conn) -> None:
 
 
 def _migrate_source_summary(conn) -> None:
-    """Add source_summary and rebuild the FTS table with the extra column."""
+    """Add source_summary and rebuild the FTS table."""
     columns = _table_columns(conn, "session_memories")
     if "source_summary" not in columns:
         conn.execute("ALTER TABLE session_memories ADD COLUMN source_summary TEXT")
     _rebuild_session_memories_fts(conn)
+
+
+def _migrate_source_summary_out_of_retrieval(conn) -> None:
+    """Remove source_summary from retrieval indexes while preserving the field."""
+    _rebuild_session_memories_fts(conn)
+    vector_table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'session_memory_field_vectors'
+        """
+    ).fetchone()
+    if vector_table_exists:
+        conn.execute(
+            """
+            DELETE FROM session_memory_field_vectors
+            WHERE metadata_json LIKE '%"field_type": "source_summary"%'
+            """
+        )
 
 
 def _create_session_memories_fts(conn) -> None:
@@ -118,7 +143,6 @@ def _create_session_memories_fts(conn) -> None:
             work_product,
             user_intent,
             named_entities,
-            source_summary,
             tokenize = 'unicode61'
         )
         """
@@ -145,13 +169,12 @@ def _insert_session_memories_fts_rows(conn) -> None:
         """
         INSERT INTO session_memories_fts (
             session_id, vault_name, title, summary, domain,
-            work_product, user_intent, named_entities, source_summary
+            work_product, user_intent, named_entities
         )
         SELECT
             session_id, vault_name, COALESCE(title, ''), COALESCE(summary, ''),
             COALESCE(domain, ''), COALESCE(work_product, ''),
-            COALESCE(user_intent, ''), COALESCE(named_entities, ''),
-            COALESCE(source_summary, '')
+            COALESCE(user_intent, ''), COALESCE(named_entities, '')
         FROM session_memories
         """
     )

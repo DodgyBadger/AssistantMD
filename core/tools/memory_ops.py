@@ -47,7 +47,6 @@ SESSION_SEARCH_FIELD_WEIGHTS = {
     "domain": 0.25,
     "user_intent": 0.15,
     "summary": 0.10,
-    "source_summary": 0.10,
     "work_product": 0.05,
 }
 SESSION_LEXICAL_WEIGHT = 0.45
@@ -256,13 +255,16 @@ class MemoryOps(BaseTool):
         """Get usage instructions for session memory access."""
         return """
 Session memory field guidance:
-- `summary`: short plain-language summary of the whole chat session.
+- `summary`: compact plain-language summary of the session's durable outcome;
+  target 500-800 characters and never exceed 1,000 characters.
 - `domain`: subject area or knowledge area.
 - `work_product`: concrete thing the user wanted produced or answered.
-- `user_intent`: user's underlying goal or intent after clarification or drift.
+- `user_intent`: user's underlying goal or intent after clarification or drift;
+  write 1-2 sentences and never exceed 500 characters.
 - `named_entities`: only named people, organizations, and places.
 - `source_summary`: concise description of source material or prior context
-  identifiable from tool use.
+  identifiable from tool use. This is provenance returned with a memory, not an
+  indexed retrieval field.
 
 Use `upsert_session_memory` only when you already have field values to store.
 Pass those values in `data`; supported keys are `summary`, `domain`,
@@ -318,8 +320,8 @@ Full documentation:
 class _SessionSummaryIntent(BaseModel):
     """First-pass session memory extraction."""
 
-    summary: str = Field(default="")
-    user_intent: str = Field(default="")
+    summary: str = Field(default="", max_length=1000)
+    user_intent: str = Field(default="", max_length=500)
 
 
 class _SessionClassification(BaseModel):

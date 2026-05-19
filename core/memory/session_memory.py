@@ -22,7 +22,7 @@ SESSION_MEMORY_TEXT_FIELDS = (
     "named_entities",
     "source_summary",
 )
-VECTOR_FIELD_TYPES = {"summary", "domain", "work_product", "user_intent", "source_summary"}
+VECTOR_FIELD_TYPES = {"summary", "domain", "work_product", "user_intent"}
 WILDCARD_FIELD_TYPES = {"named_entities"}
 MEMORY_VECTOR_MIN_SCORE = 0.50
 FIELD_VECTOR_NAMESPACE = "session_memory_fields"
@@ -299,7 +299,7 @@ class SessionMemoryStore:
                 """
                 SELECT session_id, bm25(
                     session_memories_fts,
-                    0.0, 0.0, 1.0, 0.8, 0.75, 0.95, 0.6, 0.5, 0.65
+                    0.0, 0.0, 1.0, 0.8, 0.75, 0.95, 0.6, 0.5
                 ) AS rank
                 FROM session_memories_fts
                 WHERE vault_name = ?
@@ -689,9 +689,9 @@ class SessionMemoryStore:
             """
             INSERT INTO session_memories_fts (
                 session_id, vault_name, title, summary, domain,
-                work_product, user_intent, named_entities, source_summary
+                work_product, user_intent, named_entities
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row["session_id"],
@@ -702,7 +702,6 @@ class SessionMemoryStore:
                 row["work_product"] or "",
                 row["user_intent"] or "",
                 row["named_entities"] or "",
-                row["source_summary"] or "",
             ),
         )
 
@@ -843,7 +842,6 @@ def _fts_query_coverage(query: str, session_memory: SessionMemory) -> float:
             session_memory.work_product,
             session_memory.user_intent,
             session_memory.named_entities,
-            session_memory.source_summary,
         )
         if value
     )

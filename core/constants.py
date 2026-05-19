@@ -202,12 +202,13 @@ Identify what happened in the session and what the user was trying to
 accomplish.
 
 Fields:
-- `summary`: a short plain-language summary of the whole session. Preserve the
-  durable context a future assistant or human would need to understand what
-  happened: important facts, decisions, inputs and outputs, constraints,
-  corrections, and unresolved follow-up when relevant.
+- `summary`: a compact plain-language summary of the session's durable outcome.
+  Capture what happened, the main result or decision, and any important
+  unresolved follow-up. Include only enough detail for a future assistant or
+  human to decide whether this session is relevant; do not preserve a full
+  process log. Target 500-800 characters; never exceed 1,000 characters.
 - `user_intent`: what the user was trying to accomplish after clarification,
-  repetition, or topic drift.
+  repetition, or topic drift. Write 1-2 sentences; never exceed 500 characters.
 
 Rules:
 - Use only the conversation text and session metadata shown here.

@@ -18,7 +18,9 @@ conversation history they are derived from.
 ## Responsibilities
 
 - Store extracted memory fields for chat sessions.
-- Index memory fields for lexical and vector retrieval.
+- Index retrieval-oriented memory fields for lexical and vector retrieval.
+- Store source provenance separately from indexed retrieval fields so source
+  details can ground returned memories without dominating candidate selection.
 - Attach output artifacts discovered from chat-scoped vault mutations.
 - Expose session-memory creation, update, lookup, and search through `memory_ops`.
 - Use the chat-history broker when memory extraction needs source conversation history.

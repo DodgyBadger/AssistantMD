@@ -30,10 +30,11 @@ parameter.
 Use these fields as short summaries of one chat session. Prefer durable
 descriptions of the user's work over momentary prompt phrasing.
 
-- `summary`: short plain-language summary of the whole chat session. Include
-  durable context a human or future assistant would need to understand what
-  happened, such as important facts, decisions, outputs, source paths,
-  constraints, corrections, and unresolved follow-up when relevant.
+- `summary`: compact plain-language summary of the session's durable outcome.
+  Capture what happened, the main result or decision, and any important
+  unresolved follow-up. Include only enough detail for a human or future
+  assistant to decide whether the session is relevant; do not preserve a full
+  process log. Target 500-800 characters and never exceed 1,000 characters.
 - `domain`: the subject area or knowledge area of the work, such as
   `data visualization`, `nutrition`, `ServiceNow administration`, `statistics`,
   `research synthesis`, or `conservation fundraising`.
@@ -42,7 +43,8 @@ descriptions of the user's work over momentary prompt phrasing.
   `rewrite`, `donor email`, or `factual answer`.
 - `user_intent`: the user's underlying goal or intent after clarification,
   repetition, or topic drift. Write this as what the user wants to accomplish,
-  not what the assistant should do next.
+  not what the assistant should do next. Use 1-2 sentences and never exceed 500
+  characters.
 - `named_entities`: only named people, organizations, and places. Use a concise
   comma- or semicolon-separated text list. Leave empty if there are no named
   people, organizations, or places.
@@ -53,7 +55,8 @@ descriptions of the user's work over momentary prompt phrasing.
   or user-provided source text. Do not create extra bullets for documents,
   datasets, tools, or evidence that were only mentioned inside another source.
   The session summary, user intent, and tool log are extraction evidence, not
-  source labels. Do not judge source quality.
+  source labels. Do not judge source quality. `source_summary` is returned as
+  provenance for grounding; it is not used as an indexed retrieval field.
 
 For manual writes, put these fields inside `data`. `data.artifacts` is an
 optional list of artifact objects with `path`, optional `artifact_role`, and

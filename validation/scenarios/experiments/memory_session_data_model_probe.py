@@ -42,15 +42,15 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
         store.upsert_session_memory(
             session_id="legacy-session",
             vault_name=vault_name,
-            source_summary="Read legacy source notes before migration.",
+            source_summary="Read zirconium provenance notes before migration.",
         )
         migrated_source_matches = store.search_session_memories_fts(
             vault_name=vault_name,
-            query="legacy source notes",
+            query="zirconium provenance notes",
         )
         self.soft_assert(
-            any(result.session_memory.session_id == "legacy-session" for result in migrated_source_matches),
-            "Migrated FTS table should index source_summary after update",
+            not any(result.session_memory.session_id == "legacy-session" for result in migrated_source_matches),
+            "source_summary should be stored as provenance, not indexed for FTS retrieval",
         )
 
         session_ids = _seed_session_memories(store, vault_name)

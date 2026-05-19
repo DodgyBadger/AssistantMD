@@ -135,6 +135,16 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                     "You have been provided with:" in prompt,
                     "summary/intent prompt should describe its inputs",
                 )
+                self.soft_assert(
+                    "Target 500-800 characters" in prompt
+                    and "never exceed 1,000 characters" in prompt
+                    and "never exceed 500 characters" in prompt,
+                    "summary/intent prompt should include field length contracts",
+                )
+                self.soft_assert(
+                    "do not preserve a full" in prompt and "process log" in prompt,
+                    "summary prompt should prefer compact retrieval-card output",
+                )
             if "turning a distilled AssistantMD chat-session summary" in prompt:
                 self.soft_assert(
                     "Create concise labels" in prompt,
@@ -330,7 +340,7 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         )
         self.soft_assert_equal(
             extracted["indexed_fields"],
-            5,
+            4,
             "extract_session_memory should index extracted vector-searchable fields",
         )
         self.soft_assert_equal(
