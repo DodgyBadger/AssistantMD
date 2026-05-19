@@ -113,8 +113,9 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### `retrieve_sessions`
 
-- `retrieve_sessions(selection="pending_memory")` returns current-vault chat sessions that do not yet have derived memory
-- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, and `has_memory`
+- `retrieve_sessions(selection="pending_or_stale_memory")` returns current-vault chat sessions that do not yet have derived memory or whose memory is stale
+- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, `has_memory`, `memory_status`, `memory_updated_at`, and `new_message_count`
+- stale memory is gated by a grace window and the `stale_memory_min_new_messages` general setting
 - use this helper to select sessions, then call `memory_ops(operation="extract_session_memory", session_id=...)` when a workflow should extract memory for selected sessions
 
 ### `parse_markdown`

@@ -374,6 +374,7 @@ class ChatSessionInfo(BaseModel):
     created_at: str = Field(..., description="Session creation timestamp")
     last_activity_at: str = Field(..., description="Most recent activity timestamp")
     title: Optional[str] = Field(None, description="User-defined title, if set")
+    has_memory: bool = Field(False, description="Whether a session memory record exists")
 
 
 class ChatSessionTitleRequest(BaseModel):

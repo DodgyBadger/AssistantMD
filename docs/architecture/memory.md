@@ -49,11 +49,14 @@ Context scripts should use `retrieve_history(...)` rather than reading chat stor
 
 `assemble_context(...)` accepts those safe units and preserves provider-native message fidelity for downstream chat context. The latest active message is not appended by scripts; the chat runtime adds it once after assembled history.
 
-Workflow scripts can use `retrieve_sessions(selection="pending_memory")` to enumerate
-current-vault chat sessions that do not yet have a derived session-memory row.
-The helper returns session metadata only; it does not retrieve transcript
-messages or perform extraction. Workflows should compose it with `memory_ops`
-when they need to extract memory for selected sessions.
+Workflow scripts can use `retrieve_sessions(selection="pending_or_stale_memory")`
+to enumerate current-vault chat sessions that either lack a derived
+session-memory row or have stale memory. The helper returns session metadata
+only; it does not retrieve transcript messages or perform extraction. Workflows
+should compose it with `memory_ops` when they need to extract memory for
+selected sessions. Stale-memory selection uses a fixed grace window after the
+last extraction and the `stale_memory_min_new_messages` general setting before
+including an already-indexed session again.
 
 During active context assembly, the context manager passes curated prior history in
 `message_history` and exposes the current user prompt through `latest_message`. That path

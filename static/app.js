@@ -393,7 +393,8 @@ function formatSessionOptionLabel(session) {
         ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
         : rawDate;
     const base = title || session.session_id;
-    return timeStr ? `${base} (last activity: ${timeStr})` : base;
+    const memoryMarker = session.has_memory ? ' 🧠' : '';
+    return timeStr ? `${base}${memoryMarker} (last activity: ${timeStr})` : `${base}${memoryMarker}`;
 }
 
 function renderSessionSelector() {

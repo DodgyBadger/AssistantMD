@@ -46,6 +46,10 @@ settings:
     value: 0
     description: "Maximum number of workflows allowed to run at the same time across all vaults. 0 disables the global workflow concurrency limit."
     restart_required: false
+  stale_memory_min_new_messages:
+    value: 3
+    description: "Minimum number of new chat messages required before existing session memory is treated as stale."
+    restart_required: false
   browser_navigation_timeout_seconds:
     value: 20
     description: "Navigation timeout in seconds for the browser extraction tool."

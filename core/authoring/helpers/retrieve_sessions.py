@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from core.authoring.contracts import (
     AuthoringCapabilityCall,
     AuthoringCapabilityDefinition,
@@ -13,9 +15,13 @@ from core.authoring.helpers.common import build_capability
 from core.chat.chat_store import ChatStore, StoredChatSession
 from core.logger import UnifiedLogger
 from core.memory.session_memory import SessionMemoryStore
+from core.settings import get_stale_memory_min_new_messages
 
 
 logger = UnifiedLogger(tag="authoring-host")
+
+PENDING_OR_STALE_MEMORY_SELECTION = "pending_or_stale_memory"
+STALE_MEMORY_GRACE_MINUTES = 30
 
 
 def build_definition() -> AuthoringCapabilityDefinition:
@@ -46,28 +52,37 @@ async def execute(
 
     chat_store = ChatStore()
     memory_store = SessionMemoryStore()
+    stale_memory_min_new_messages = get_stale_memory_min_new_messages()
     sessions = chat_store.list_sessions(vault_name)
     items: list[RetrievedItem] = []
     for session in sessions:
         if active_session_id and session.session_id == active_session_id:
             continue
-        if selection == "pending_memory":
-            has_memory = memory_store.get_session_memory(
+        message_count = chat_store.get_message_count(
+            session_id=session.session_id,
+            vault_name=vault_name,
+        )
+        if selection == PENDING_OR_STALE_MEMORY_SELECTION:
+            memory = memory_store.get_session_memory(
                 vault_name=vault_name,
                 session_id=session.session_id,
-            ) is not None
-            if has_memory:
+            )
+            memory_status = _memory_status(
+                session,
+                memory,
+                message_count=message_count,
+                stale_memory_min_new_messages=stale_memory_min_new_messages,
+            )
+            if memory_status["memory_status"] == "current":
                 continue
         else:  # pragma: no cover - guarded by _parse_call
             raise ValueError(f"Unsupported retrieve_sessions selection: {selection}")
         items.append(
             _session_item(
                 session,
-                message_count=chat_store.get_message_count(
-                    session_id=session.session_id,
-                    vault_name=vault_name,
-                ),
-                has_memory=False,
+                message_count=message_count,
+                has_memory=memory is not None,
+                memory_status=memory_status,
             )
         )
 
@@ -98,9 +113,11 @@ async def execute(
 def _parse_call(call: AuthoringCapabilityCall) -> tuple[str, int | str]:
     if call.args:
         raise ValueError("retrieve_sessions only supports keyword arguments")
-    selection = str(call.kwargs.get("selection") or "pending_memory").strip().lower()
-    if selection != "pending_memory":
-        raise ValueError("retrieve_sessions selection must be 'pending_memory'")
+    selection = str(
+        call.kwargs.get("selection") or PENDING_OR_STALE_MEMORY_SELECTION
+    ).strip().lower()
+    if selection != PENDING_OR_STALE_MEMORY_SELECTION:
+        raise ValueError("retrieve_sessions selection must be 'pending_or_stale_memory'")
     return selection, _parse_limit(call.kwargs.get("limit", "all"))
 
 
@@ -134,6 +151,7 @@ def _session_item(
     *,
     message_count: int,
     has_memory: bool,
+    memory_status: dict[str, object],
 ) -> RetrievedItem:
     title = session.title or ""
     content = title or session.session_id
@@ -145,6 +163,7 @@ def _session_item(
         "last_activity_at": session.last_activity_at,
         "message_count": message_count,
         "has_memory": has_memory,
+        **memory_status,
     }
     return RetrievedItem(
         ref=f"chat_session:{session.session_id}",
@@ -154,18 +173,91 @@ def _session_item(
     )
 
 
+def _memory_status(
+    session: StoredChatSession,
+    memory: object | None,
+    *,
+    message_count: int,
+    stale_memory_min_new_messages: int,
+) -> dict[str, object]:
+    if memory is None:
+        return {
+            "memory_status": "pending",
+            "memory_updated_at": None,
+            "memory_message_count": None,
+            "new_message_count": message_count,
+        }
+
+    memory_updated_at = str(getattr(memory, "updated_at", "") or "")
+    memory_message_count = _memory_message_count(getattr(memory, "metadata", {}) or {})
+    new_message_count = (
+        max(message_count - memory_message_count, 0)
+        if memory_message_count is not None
+        else None
+    )
+    session_last_activity = _parse_timestamp(session.last_activity_at)
+    memory_updated = _parse_timestamp(memory_updated_at)
+    if session_last_activity is None or memory_updated is None:
+        stale = new_message_count is None or new_message_count >= stale_memory_min_new_messages
+    else:
+        grace_cutoff = memory_updated + timedelta(minutes=STALE_MEMORY_GRACE_MINUTES)
+        stale = (
+            session_last_activity > grace_cutoff
+            and (
+                new_message_count is None
+                or new_message_count >= stale_memory_min_new_messages
+            )
+        )
+
+    return {
+        "memory_status": "stale" if stale else "current",
+        "memory_updated_at": memory_updated_at,
+        "memory_message_count": memory_message_count,
+        "new_message_count": new_message_count,
+        "stale_memory_grace_minutes": STALE_MEMORY_GRACE_MINUTES,
+        "stale_memory_min_new_messages": stale_memory_min_new_messages,
+    }
+
+
+def _memory_message_count(metadata: dict[str, object]) -> int | None:
+    raw = metadata.get("message_count")
+    try:
+        count = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    if "T" not in normalized and " " in normalized:
+        normalized = normalized.replace(" ", "T", 1)
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 def _contract() -> dict[str, object]:
     return {
-        "signature": "retrieve_sessions(*, selection: str = 'pending_memory', limit: int | str = 'all')",
+        "signature": "retrieve_sessions(*, selection: str = 'pending_or_stale_memory', limit: int | str = 'all')",
         "summary": (
             "Retrieve chat-session metadata for the current vault. "
-            "The initial 'pending_memory' selection returns sessions without memory."
+            "The 'pending_or_stale_memory' selection returns sessions without "
+            "memory or with memory older than recent session activity. "
+            "Stale selection respects the stale_memory_min_new_messages setting."
         ),
         "arguments": {
             "selection": {
                 "type": "string",
                 "required": False,
-                "description": "Selection to return. Currently only 'pending_memory' is supported.",
+                "description": "Selection to return. Currently only 'pending_or_stale_memory' is supported.",
             },
             "limit": {
                 "type": "int|string",
@@ -180,19 +272,21 @@ def _contract() -> dict[str, object]:
             "items": (
                 "Session metadata items. Each item has ref, content, exists, and metadata "
                 "including session_id, vault_name, title, created_at, last_activity_at, "
-                "message_count, and has_memory."
+                "message_count, has_memory, memory_status, memory_updated_at, "
+                "memory_message_count, new_message_count, stale_memory_grace_minutes, "
+                "and stale_memory_min_new_messages."
             ),
             "metadata": "Retrieval metadata.",
         },
         "examples": [
             {
                 "code": (
-                    "sessions = await retrieve_sessions(selection='pending_memory', limit=100)\n"
+                    "sessions = await retrieve_sessions(selection='pending_or_stale_memory', limit=100)\n"
                     "for item in sessions.items:\n"
                     "    await memory_ops(operation='extract_session_memory', "
                     "session_id=item.metadata['session_id'])"
                 ),
-                "description": "Find sessions without memory and extract them in a workflow.",
+                "description": "Find sessions with missing or stale memory and extract them in a workflow.",
             }
         ],
     }

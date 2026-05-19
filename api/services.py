@@ -528,12 +528,18 @@ def list_context_templates(vault_name: str) -> List[TemplateInfo]:
 def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
     """List persisted chat sessions for a vault ordered by latest activity."""
     sessions = _chat_store.list_sessions(vault_name)
+    memory_store = SessionMemoryStore()
     return [
         ChatSessionInfo(
             session_id=session.session_id,
             created_at=session.created_at,
             last_activity_at=session.last_activity_at,
             title=session.title or None,
+            has_memory=memory_store.get_session_memory(
+                vault_name=vault_name,
+                session_id=session.session_id,
+            )
+            is not None,
         )
         for session in sessions
     ]
