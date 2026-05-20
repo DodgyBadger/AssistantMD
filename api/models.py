@@ -376,6 +376,36 @@ class ChatSessionInfo(BaseModel):
     has_memory: bool = Field(False, description="Whether a session memory record exists")
 
 
+class ChatSessionMemorySummaryResponse(BaseModel):
+    """Lightweight session memory payload for UI previews."""
+
+    session_id: str = Field(..., description="Session identifier")
+    vault_name: str = Field(..., description="Owning vault name")
+    has_memory: bool = Field(..., description="Whether a session memory record exists")
+    summary: Optional[str] = Field(None, description="Extracted session memory summary")
+    user_intent: Optional[str] = Field(None, description="Extracted user intent")
+    created_at: Optional[str] = Field(None, description="Session memory creation timestamp")
+    updated_at: Optional[str] = Field(None, description="Session memory update timestamp")
+    domain: Optional[str] = Field(None, description="Extracted domain")
+    work_product: Optional[str] = Field(None, description="Extracted work product")
+    named_entities: Optional[str] = Field(None, description="Extracted named entities")
+    source_summary: Optional[str] = Field(None, description="Extracted source summary")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Memory metadata")
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list, description="Linked memory artifacts")
+
+
+class ChatSessionMemoryUpdateRequest(BaseModel):
+    """Request to manually update a session memory record."""
+
+    summary: Optional[str] = Field(None, description="Replacement summary")
+    domain: Optional[str] = Field(None, description="Replacement domain")
+    work_product: Optional[str] = Field(None, description="Replacement work product")
+    user_intent: Optional[str] = Field(None, description="Replacement user intent")
+    named_entities: Optional[str] = Field(None, description="Replacement named entities")
+    source_summary: Optional[str] = Field(None, description="Replacement source summary")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Replacement memory metadata")
+
+
 class ChatSessionTitleRequest(BaseModel):
     """Request to set or clear the user-defined title for a session."""
 

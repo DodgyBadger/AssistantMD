@@ -66,6 +66,15 @@ class VectorStore(Protocol):
         """Search for similar vectors in the same namespace and embedding space."""
         ...
 
+    def delete_items(
+        self,
+        *,
+        namespace: str,
+        item_ids: tuple[str, ...],
+    ) -> int:
+        """Delete stored vectors for item ids in one namespace."""
+        ...
+
 
 class SQLitePythonVectorStore:
     """Plain SQLite vector store that computes similarity in Python."""
@@ -176,6 +185,27 @@ class SQLitePythonVectorStore:
             )
         results.sort(key=lambda item: item.score, reverse=True)
         return tuple(results[:limit])
+
+    def delete_items(
+        self,
+        *,
+        namespace: str,
+        item_ids: tuple[str, ...],
+    ) -> int:
+        """Delete stored vectors for item ids in one namespace."""
+        if not item_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in item_ids)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                DELETE FROM {self.table_name}
+                WHERE namespace = ?
+                  AND item_id IN ({placeholders})
+                """,
+                (namespace, *item_ids),
+            )
+            return cursor.rowcount
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:

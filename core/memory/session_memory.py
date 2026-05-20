@@ -244,6 +244,70 @@ class SessionMemoryStore:
             raise RuntimeError(f"Failed to upsert session memory {session_id}")
         return session_memory
 
+    def update_session_memory_fields(
+        self,
+        *,
+        vault_name: str,
+        session_id: str,
+        summary: str | None = None,
+        domain: str | None = None,
+        work_product: str | None = None,
+        user_intent: str | None = None,
+        named_entities: str | None = None,
+        source_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SessionMemory:
+        """Replace editable memory fields for one existing session memory."""
+        now = _utc_now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE session_memories
+                SET summary = ?,
+                    domain = ?,
+                    work_product = ?,
+                    user_intent = ?,
+                    named_entities = ?,
+                    source_summary = ?,
+                    metadata_json = ?,
+                    updated_at = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (
+                    _clean_text(summary),
+                    _clean_text(domain),
+                    _clean_text(work_product),
+                    _clean_text(user_intent),
+                    _clean_text(named_entities),
+                    _clean_text(source_summary),
+                    _dump_json(metadata or {}),
+                    now,
+                    session_id,
+                    vault_name,
+                ),
+            )
+            if cursor.rowcount <= 0:
+                raise ValueError(f"Unknown session memory: {session_id}")
+            row = conn.execute(
+                f"""
+                SELECT {self._session_memory_select_columns()}
+                FROM session_memories
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (session_id, vault_name),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError(f"Failed to update session memory {session_id}")
+            self._upsert_fts_row(conn, row)
+
+        session_memory = self.get_session_memory(
+            vault_name=vault_name,
+            session_id=session_id,
+        )
+        if session_memory is None:
+            raise RuntimeError(f"Failed to update session memory {session_id}")
+        return session_memory
+
     def get_session_memory(
         self,
         *,
@@ -281,7 +345,10 @@ class SessionMemoryStore:
                 """,
                 (session_id, vault_name),
             )
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            self._delete_field_vectors(vault_name=vault_name, session_id=session_id)
+        return deleted
 
     def search_session_memories_fts(
         self,
@@ -630,6 +697,12 @@ class SessionMemoryStore:
         session_memory = self.get_session_memory(vault_name=vault_name, session_id=session_id)
         if session_memory is None:
             raise ValueError(f"Unknown session memory: {session_id}")
+        store = vector_store or self._field_vector_store()
+        self._delete_field_vectors(
+            vault_name=vault_name,
+            session_id=session_id,
+            vector_store=store,
+        )
         fields = tuple(
             field_type
             for field_type in SESSION_MEMORY_TEXT_FIELDS
@@ -638,7 +711,6 @@ class SessionMemoryStore:
         if not fields:
             return 0
 
-        store = vector_store or self._field_vector_store()
         inputs = [
             _field_embedding_text(
                 field_type=field_type,
@@ -662,6 +734,20 @@ class SessionMemoryStore:
                 },
             )
         return len(fields)
+
+    def _delete_field_vectors(
+        self,
+        *,
+        vault_name: str,
+        session_id: str,
+        vector_store: VectorStore | None = None,
+    ) -> None:
+        store = vector_store or self._field_vector_store()
+        item_ids = tuple(
+            f"{vault_name}:{session_id}:{field_type}"
+            for field_type in VECTOR_FIELD_TYPES
+        )
+        store.delete_items(namespace=FIELD_VECTOR_NAMESPACE, item_ids=item_ids)
 
     def _connect(self) -> sqlite3.Connection:
         ensure_memory_schema(self.system_root)

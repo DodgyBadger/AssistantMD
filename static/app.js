@@ -33,6 +33,8 @@ const state = {
     activeChatSessionId: null,
     activeChatAbortController: null,
     systemStatus: null,
+    sessionMemoryPreviewCache: {},
+    sessionMemoryPreviewInFlight: {},
     vaultActivity: {},
     selectedActivityVault: '',
     dashboardVaultSort: { column: 'name', direction: 'asc' },
@@ -60,6 +62,7 @@ const chatElements = {
     templateSelector: document.getElementById('template-selector'),
     thinkingSelector: document.getElementById('thinking-selector'),
     sessionSelector: document.getElementById('session-selector'),
+    sessionMemoryTrigger: document.getElementById('session-memory-trigger'),
     toolDropdown: document.getElementById('tool-dropdown'),
     toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
     toolDropdownMenu: document.getElementById('tool-dropdown-menu'),
@@ -399,6 +402,17 @@ function formatSessionOptionLabel(session) {
     return timeStr ? `${base}${memoryMarker} (last activity: ${timeStr})` : `${base}${memoryMarker}`;
 }
 
+function sessionMemoryCacheKey(vault, sessionId) {
+    return `${vault || ''}::${sessionId || ''}`;
+}
+
+function selectedSessionWithMemory() {
+    const sessionId = chatElements.sessionSelector?.value || '';
+    if (!sessionId) return null;
+    const session = state.sessions.find((item) => item.session_id === sessionId);
+    return session?.has_memory ? session : null;
+}
+
 function renderSessionSelector() {
     if (!chatElements.sessionSelector) return;
 
@@ -417,6 +431,338 @@ function renderSessionSelector() {
         chatElements.sessionSelector.value = activeValue;
     } else {
         chatElements.sessionSelector.value = '';
+    }
+    updateSessionMemoryTrigger();
+}
+
+function updateSessionMemoryTrigger() {
+    if (!chatElements.sessionMemoryTrigger) return;
+    const session = selectedSessionWithMemory();
+    if (!session) {
+        chatElements.sessionMemoryTrigger.classList.remove('is-visible');
+        chatElements.sessionMemoryTrigger.setAttribute('aria-hidden', 'true');
+        return;
+    }
+    const vault = chatElements.vaultSelector?.value || '';
+    const cached = state.sessionMemoryPreviewCache[sessionMemoryCacheKey(vault, session.session_id)];
+    chatElements.sessionMemoryTrigger.classList.add('is-visible');
+    chatElements.sessionMemoryTrigger.removeAttribute('aria-hidden');
+    chatElements.sessionMemoryTrigger.title = cached?.summary
+        ? truncateText(cached.summary, 700)
+        : 'Show session memory summary';
+    if (!cached) {
+        warmSelectedSessionMemoryPreview();
+    }
+}
+
+async function fetchSelectedSessionMemoryPreview() {
+    const session = selectedSessionWithMemory();
+    if (!session) return null;
+
+    const vault = chatElements.vaultSelector?.value || '';
+    const cacheKey = sessionMemoryCacheKey(vault, session.session_id);
+    const cached = state.sessionMemoryPreviewCache[cacheKey];
+    if (cached) {
+        return cached;
+    }
+    if (state.sessionMemoryPreviewInFlight[cacheKey]) {
+        return state.sessionMemoryPreviewInFlight[cacheKey];
+    }
+
+    state.sessionMemoryPreviewInFlight[cacheKey] = (async () => {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(session.session_id)}/memory?vault_name=${encodeURIComponent(vault)}`
+        );
+        if (!response.ok) {
+            throw new Error('Failed to fetch session memory');
+        }
+        const data = await response.json();
+        state.sessionMemoryPreviewCache[cacheKey] = data;
+        updateSessionMemoryTrigger();
+        return data;
+    })();
+
+    try {
+        return await state.sessionMemoryPreviewInFlight[cacheKey];
+    } finally {
+        delete state.sessionMemoryPreviewInFlight[cacheKey];
+    }
+}
+
+async function warmSelectedSessionMemoryPreview() {
+    try {
+        await fetchSelectedSessionMemoryPreview();
+    } catch (error) {
+        console.error('Error fetching session memory preview:', error);
+    }
+}
+
+function renderSessionMemoryDetails(memory) {
+    const fields = sessionMemoryEditableFields();
+    const artifacts = Array.isArray(memory.artifacts) ? memory.artifacts : [];
+    const metadata = memory.metadata && typeof memory.metadata === 'object' ? memory.metadata : {};
+    return `
+        <div class="space-y-4">
+            <div class="state-surface-warning p-3 rounded border text-sm">
+                Manual edits update this derived memory record only. If this chat session is continued later, memory extraction may replace these edits.
+            </div>
+            ${fields.map(field => renderSessionMemoryReadonlyField(memory, field)).join('')}
+            <div>
+                <p class="font-semibold text-txt-primary">Artifacts</p>
+                ${artifacts.length
+                    ? `<ul class="mt-1 list-disc list-inside text-sm text-txt-primary">${artifacts.map(artifact => `<li><span class="cell-mono">${escapeHtml(artifact.path || '')}</span>${artifact.artifact_role ? ` <span class="text-txt-secondary">(${escapeHtml(artifact.artifact_role)})</span>` : ''}</li>`).join('')}</ul>`
+                    : '<p class="text-sm text-txt-secondary">No artifacts linked.</p>'}
+            </div>
+            <div>
+                <p class="font-semibold text-txt-primary">Metadata</p>
+                <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(metadata, null, 2))}</pre>
+            </div>
+            <div class="text-xs text-txt-secondary">
+                Created ${escapeHtml(formatShortDate(memory.created_at || ''))} · Updated ${escapeHtml(formatShortDate(memory.updated_at || ''))}
+            </div>
+        </div>
+    `;
+}
+
+function sessionMemoryEditableFields() {
+    return [
+        { key: 'summary', label: 'Summary', rows: 6 },
+        { key: 'user_intent', label: 'User Intent', rows: 3 },
+        { key: 'domain', label: 'Domain', rows: 2 },
+        { key: 'work_product', label: 'Work Product', rows: 2 },
+        { key: 'named_entities', label: 'Named Entities', rows: 2 },
+        { key: 'source_summary', label: 'Source Summary', rows: 6 },
+    ];
+}
+
+function renderSessionMemoryReadonlyField(memory, field) {
+    const value = String(memory?.[field.key] || '').trim();
+    return `
+        <div>
+            <p class="font-semibold text-txt-primary">${escapeHtml(field.label)}</p>
+            ${value
+                ? `<p class="text-sm text-txt-primary whitespace-pre-wrap">${escapeHtml(value)}</p>`
+                : '<p class="text-sm text-txt-secondary">Not captured.</p>'}
+        </div>
+    `;
+}
+
+function renderSessionMemoryEditForm(memory) {
+    return `
+        <div class="space-y-4">
+            <div class="state-surface-warning p-3 rounded border text-sm">
+                Manual edits update this derived memory record only. If this chat session is continued later, memory extraction may replace these edits.
+            </div>
+            ${sessionMemoryEditableFields().map(field => `
+                <label class="block">
+                    <span class="font-semibold text-txt-primary">${escapeHtml(field.label)}</span>
+                    <textarea
+                        data-session-memory-field="${escapeHtml(field.key)}"
+                        rows="${field.rows}"
+                        class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    >${escapeHtml(memory?.[field.key] || '')}</textarea>
+                </label>
+            `).join('')}
+            <div>
+                <p class="font-semibold text-txt-primary">Metadata</p>
+                <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(memory?.metadata || {}, null, 2))}</pre>
+            </div>
+        </div>
+    `;
+}
+
+async function openSelectedSessionMemoryModal() {
+    const session = selectedSessionWithMemory();
+    if (!session) return;
+
+    closeSessionMemoryModal();
+    const popover = document.createElement('div');
+    popover.id = 'session-memory-modal';
+    popover.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    popover.innerHTML = `
+        <div class="absolute inset-0" data-session-memory-close="true"></div>
+        <section class="relative h-full w-full max-w-3xl bg-app-card border-l border-border-primary shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="session-memory-modal-title">
+            <div class="sticky top-0 bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3">
+                <div>
+                    <h2 id="session-memory-modal-title" class="text-lg font-semibold text-txt-primary">🧠 Session Memory</h2>
+                    <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(session.session_id)}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error" data-session-memory-delete="true">
+                        Delete Memory
+                    </button>
+                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-memory-edit="true">
+                        Edit
+                    </button>
+                    <button type="button" class="hidden px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-session-memory-save="true">
+                        Save
+                    </button>
+                    <button type="button" class="hidden px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-memory-cancel-edit="true">
+                        Cancel
+                    </button>
+                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-memory-close="true">
+                        Close
+                    </button>
+                </div>
+            </div>
+            <div id="session-memory-modal-body" class="p-4 text-sm text-txt-primary">
+                <p class="text-txt-secondary">Loading memory details...</p>
+            </div>
+        </section>
+    `;
+    popover.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement && target.dataset.sessionMemoryClose === 'true') {
+            closeSessionMemoryModal();
+            return;
+        }
+        if (target instanceof HTMLElement && target.dataset.sessionMemoryEdit === 'true') {
+            const memory = currentSessionMemoryFromModal();
+            setSessionMemoryModalEditing(popover, memory);
+            return;
+        }
+        if (target instanceof HTMLElement && target.dataset.sessionMemorySave === 'true') {
+            saveSessionMemoryModal(popover, target);
+            return;
+        }
+        if (target instanceof HTMLElement && target.dataset.sessionMemoryCancelEdit === 'true') {
+            cancelSessionMemoryEdit(popover);
+            return;
+        }
+        if (target instanceof HTMLElement && target.dataset.sessionMemoryDelete === 'true') {
+            deleteSessionMemoryFromModal(popover, target);
+        }
+    });
+    document.body.appendChild(popover);
+
+    const body = popover.querySelector('#session-memory-modal-body');
+    try {
+        const memory = await fetchSelectedSessionMemoryPreview();
+        if (!body) return;
+        popover._sessionMemory = memory;
+        body.innerHTML = memory?.has_memory
+            ? renderSessionMemoryDetails(memory)
+            : '<p class="text-sm text-txt-secondary">No memory record found for this session.</p>';
+    } catch (error) {
+        console.error('Error opening session memory modal:', error);
+        if (body) {
+            body.innerHTML = '<p class="text-sm state-error">Unable to load memory details.</p>';
+        }
+    }
+}
+
+function closeSessionMemoryModal() {
+    document.getElementById('session-memory-modal')?.remove();
+}
+
+function currentSessionMemoryFromModal() {
+    return document.getElementById('session-memory-modal')?._sessionMemory || null;
+}
+
+function setSessionMemoryModalEditing(modal, memory) {
+    const body = modal.querySelector('#session-memory-modal-body');
+    const editButton = modal.querySelector('[data-session-memory-edit]');
+    const saveButton = modal.querySelector('[data-session-memory-save]');
+    const cancelButton = modal.querySelector('[data-session-memory-cancel-edit]');
+    if (body) {
+        body.innerHTML = renderSessionMemoryEditForm(memory);
+    }
+    editButton?.classList.add('hidden');
+    saveButton?.classList.remove('hidden');
+    cancelButton?.classList.remove('hidden');
+}
+
+function setSessionMemoryModalReadonly(modal, memory) {
+    const body = modal.querySelector('#session-memory-modal-body');
+    const editButton = modal.querySelector('[data-session-memory-edit]');
+    const saveButton = modal.querySelector('[data-session-memory-save]');
+    const cancelButton = modal.querySelector('[data-session-memory-cancel-edit]');
+    if (body) {
+        body.innerHTML = memory?.has_memory
+            ? renderSessionMemoryDetails(memory)
+            : '<p class="text-sm text-txt-secondary">No memory record found for this session.</p>';
+    }
+    editButton?.classList.remove('hidden');
+    saveButton?.classList.add('hidden');
+    cancelButton?.classList.add('hidden');
+}
+
+function cancelSessionMemoryEdit(modal) {
+    setSessionMemoryModalReadonly(modal, currentSessionMemoryFromModal());
+}
+
+async function saveSessionMemoryModal(modal, triggerButton) {
+    const session = selectedSessionWithMemory();
+    const vault = chatElements.vaultSelector?.value || '';
+    if (!session || !vault) return;
+    triggerButton.disabled = true;
+    triggerButton.textContent = 'Saving...';
+    const payload = {};
+    sessionMemoryEditableFields().forEach(field => {
+        const input = modal.querySelector(`[data-session-memory-field="${field.key}"]`);
+        payload[field.key] = input ? input.value : '';
+    });
+    const existing = currentSessionMemoryFromModal();
+    payload.metadata = existing?.metadata || {};
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(session.session_id)}/memory?vault_name=${encodeURIComponent(vault)}`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }
+        );
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        const memory = await response.json();
+        const cacheKey = sessionMemoryCacheKey(vault, session.session_id);
+        state.sessionMemoryPreviewCache[cacheKey] = memory;
+        modal._sessionMemory = memory;
+        updateSessionMemoryTrigger();
+        setSessionMemoryModalReadonly(modal, memory);
+    } catch (error) {
+        console.error('Error saving session memory:', error);
+        const body = modal.querySelector('#session-memory-modal-body');
+        if (body) {
+            body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to save memory: ${escapeHtml(error.message)}</p>`);
+        }
+    } finally {
+        triggerButton.disabled = false;
+        triggerButton.textContent = 'Save';
+    }
+}
+
+async function deleteSessionMemoryFromModal(modal, triggerButton) {
+    const session = selectedSessionWithMemory();
+    const vault = chatElements.vaultSelector?.value || '';
+    if (!session || !vault) return;
+    const confirmed = window.confirm('Delete this derived memory record? The chat session will not be deleted.');
+    if (!confirmed) return;
+    triggerButton.disabled = true;
+    triggerButton.textContent = 'Deleting...';
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(session.session_id)}/memory?vault_name=${encodeURIComponent(vault)}`,
+            { method: 'DELETE' }
+        );
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        delete state.sessionMemoryPreviewCache[sessionMemoryCacheKey(vault, session.session_id)];
+        closeSessionMemoryModal();
+        await fetchSessions(vault, session.session_id);
+    } catch (error) {
+        console.error('Error deleting session memory:', error);
+        const body = modal.querySelector('#session-memory-modal-body');
+        if (body) {
+            body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to delete memory: ${escapeHtml(error.message)}</p>`);
+        }
+        triggerButton.disabled = false;
+        triggerButton.textContent = 'Delete Memory';
     }
 }
 
@@ -1842,12 +2188,19 @@ function setupEventListeners() {
     if (chatElements.sessionSelector) {
         chatElements.sessionSelector.addEventListener('change', async (event) => {
             const selectedSessionId = event.target.value || '';
+            updateSessionMemoryTrigger();
             if (!selectedSessionId) {
                 await clearSession(false);
                 return;
             }
             await loadSession(selectedSessionId);
         });
+    }
+
+    if (chatElements.sessionMemoryTrigger) {
+        chatElements.sessionMemoryTrigger.addEventListener('mouseenter', warmSelectedSessionMemoryPreview);
+        chatElements.sessionMemoryTrigger.addEventListener('focus', warmSelectedSessionMemoryPreview);
+        chatElements.sessionMemoryTrigger.addEventListener('click', openSelectedSessionMemoryModal);
     }
 
     if (chatElements.sessionTitleSave) {
@@ -2481,6 +2834,12 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function truncateText(value, maxLength) {
+    const text = String(value || '').trim();
+    if (!text || text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
 function getMathJax() {

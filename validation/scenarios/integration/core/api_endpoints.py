@@ -283,6 +283,54 @@ class ApiEndpointsScenario(BaseScenario):
         assert chat_first.status_code == 200, "Chat execution succeeds"
         session_id = chat_first.json()["session_id"]
 
+        from core.memory.session_memory import SessionMemoryStore
+
+        memory_store = SessionMemoryStore(system_root=str(self._get_system_controller()._system_root))
+        memory_store.upsert_session_memory(
+            vault_name=vault.name,
+            session_id=session_id,
+            summary="Original memory summary.",
+            domain="integration testing",
+            work_product="api validation",
+            user_intent="verify session memory preview",
+            named_entities="IntegrationApiVault",
+            source_summary="No external sources.",
+            metadata={"source": "api_endpoint_validation"},
+        )
+
+        memory_preview = self.call_api(
+            f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}"
+        )
+        assert memory_preview.status_code == 200, "Session memory preview endpoint succeeds"
+        assert memory_preview.json().get("summary") == "Original memory summary.", (
+            "Session memory preview returns summary"
+        )
+
+        memory_update = self.call_api(
+            f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}",
+            method="PUT",
+            data={
+                "summary": "Edited memory summary.",
+                "domain": "integration testing",
+                "work_product": "manual memory editing",
+                "user_intent": "verify session memory editing",
+                "named_entities": "IntegrationApiVault",
+                "source_summary": "No external sources.",
+                "metadata": {"source": "manual_api_edit"},
+            },
+        )
+        assert memory_update.status_code == 200, "Session memory update endpoint succeeds"
+        assert memory_update.json().get("summary") == "Edited memory summary.", (
+            "Session memory update replaces summary"
+        )
+
+        memory_delete = self.call_api(
+            f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}",
+            method="DELETE",
+        )
+        assert memory_delete.status_code == 200, "Session memory delete endpoint succeeds"
+        assert memory_delete.json().get("deleted") is True, "Session memory delete reports deletion"
+
         chat_second = self.call_api(
             "/api/chat/execute",
             method="POST",

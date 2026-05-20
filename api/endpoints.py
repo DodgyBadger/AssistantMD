@@ -57,6 +57,8 @@ from .models import (
     MetadataResponse,
     TemplateInfo,
     ChatSessionInfo,
+    ChatSessionMemorySummaryResponse,
+    ChatSessionMemoryUpdateRequest,
     ChatSessionDetailResponse,
     ChatSessionExportRequest,
     ChatSessionExportResponse,
@@ -86,6 +88,9 @@ from .services import (
     get_metadata,
     list_context_templates,
     list_chat_sessions,
+    get_chat_session_memory_summary,
+    update_chat_session_memory,
+    delete_chat_session_memory,
     get_chat_session_detail,
     export_chat_session_markdown,
     compact_chat_session_history,
@@ -939,6 +944,41 @@ async def cancel_chat_session(session_id: str):
     """Request cancellation for the active process-local task in a chat session."""
     try:
         return await cancel_chat_session_task(session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/sessions/{session_id}/memory", response_model=ChatSessionMemorySummaryResponse)
+async def chat_session_memory_summary(session_id: str, vault_name: str):
+    """Return a lightweight memory preview for one chat session."""
+    try:
+        return get_chat_session_memory_summary(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put("/chat/sessions/{session_id}/memory", response_model=ChatSessionMemorySummaryResponse)
+async def update_chat_session_memory_endpoint(
+    session_id: str,
+    vault_name: str,
+    request: ChatSessionMemoryUpdateRequest,
+):
+    """Manually update one session memory record."""
+    try:
+        return await update_chat_session_memory(
+            vault_name=vault_name,
+            session_id=session_id,
+            data=request.model_dump(mode="python"),
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete("/chat/sessions/{session_id}/memory")
+async def delete_chat_session_memory_endpoint(session_id: str, vault_name: str):
+    """Delete one session memory record without deleting the chat session."""
+    try:
+        return delete_chat_session_memory(vault_name, session_id)
     except Exception as e:
         return create_error_response(e)
 
