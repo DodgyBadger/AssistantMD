@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from dataclasses import replace
 
 from core.authoring.workflow_execution import WorkflowExecutionResult, execute_workflow_by_id
@@ -11,6 +12,7 @@ from core.settings import get_max_concurrent_workflows, get_workflow_task_timeou
 
 from .execution_tasks import (
     ExecutionTaskKind,
+    ExecutionTaskSnapshot,
     ExecutionTaskSource,
     ExecutionTaskStatus,
     TaskCoordinator,
@@ -46,23 +48,29 @@ class WorkflowGovernor:
         step_name: str | None = None,
         expect_failure: bool = False,
         include_load_errors: bool = False,
+        task_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute one workflow after waiting for its vault and global lanes."""
         vault_name = self._split_vault_name(global_id)
         source_value = str(source)
-        task_id = ""
-        async with self._task_coordinator.track_current_task(
-            kind=ExecutionTaskKind.WORKFLOW,
-            scope=workflow_vault_scope(vault_name),
-            source=source,
-            label=global_id,
-            metadata={
-                "workflow_id": global_id,
-                "vault": vault_name,
-                "step_name": step_name,
-            },
-            start_immediately=False,
-        ) as task:
+        active_task_id = task_id or ""
+        task_context = (
+            self._task_coordinator.track_existing_task(task_id)
+            if task_id
+            else self._task_coordinator.track_current_task(
+                kind=ExecutionTaskKind.WORKFLOW,
+                scope=workflow_vault_scope(vault_name),
+                source=source,
+                label=global_id,
+                metadata={
+                    "workflow_id": global_id,
+                    "vault": vault_name,
+                    "step_name": step_name,
+                },
+                start_immediately=False,
+            )
+        )
+        async with task_context as task:
             lane_lock = await self._get_lane_lock(vault_name)
             if lane_lock.locked():
                 self._log_queue_event(
@@ -77,7 +85,7 @@ class WorkflowGovernor:
             await lane_lock.acquire()
             global_semaphore: asyncio.Semaphore | None = None
             global_permit_acquired = False
-            task_id = task.task_id
+            active_task_id = task.task_id
             try:
                 global_semaphore = await self._get_global_semaphore()
                 if global_semaphore is not None:
@@ -87,20 +95,20 @@ class WorkflowGovernor:
                             global_id=global_id,
                             vault_name=vault_name,
                             source=source_value,
-                            task_id=task_id,
+                            task_id=active_task_id,
                             reason="workflow_global_capacity_active",
                         )
                     await global_semaphore.acquire()
                     global_permit_acquired = True
 
-                await self._task_coordinator.mark_started(task_id)
-                task_id = task.task_id
+                await self._task_coordinator.mark_started(active_task_id)
+                active_task_id = task.task_id
                 self._log_workflow_event(
                     "workflow_task_started",
                     global_id=global_id,
                     vault_name=vault_name,
                     source=source_value,
-                    task_id=task_id,
+                    task_id=active_task_id,
                 )
                 timeout = get_workflow_task_timeout_seconds()
                 try:
@@ -123,17 +131,7 @@ class WorkflowGovernor:
                         )
                 except TimeoutError:
                     reason = f"workflow_task_timeout:{timeout:g}s"
-                    await self._task_coordinator.mark_timed_out(task_id, reason=reason)
-                    self._log_workflow_event(
-                        "workflow_task_timed_out",
-                        global_id=global_id,
-                        vault_name=vault_name,
-                        source=source_value,
-                        task_id=task_id,
-                        status="timed_out",
-                        reason=reason,
-                    )
-                    return WorkflowExecutionResult(
+                    timeout_result = WorkflowExecutionResult(
                         success=False,
                         global_id=global_id,
                         status="timed_out",
@@ -143,18 +141,37 @@ class WorkflowGovernor:
                         details=[],
                         message=f"Workflow '{global_id}' timed out after {timeout:g} seconds",
                     )
+                    await self._task_coordinator.update_metadata(
+                        active_task_id,
+                        {"workflow_result": timeout_result.to_dict()},
+                    )
+                    await self._task_coordinator.mark_timed_out(active_task_id, reason=reason)
+                    self._log_workflow_event(
+                        "workflow_task_timed_out",
+                        global_id=global_id,
+                        vault_name=vault_name,
+                        source=source_value,
+                        task_id=active_task_id,
+                        status="timed_out",
+                        reason=reason,
+                    )
+                    return timeout_result
 
-                result = replace(result, details=[*result.details, f"task_id: {task_id}"])
+                result = replace(result, details=[*result.details, f"task_id: {active_task_id}"])
+                await self._task_coordinator.update_metadata(
+                    active_task_id,
+                    {"workflow_result": result.to_dict()},
+                )
                 self._log_workflow_event(
                     "workflow_task_completed",
                     global_id=global_id,
                     vault_name=vault_name,
                     source=source_value,
-                    task_id=task_id,
+                    task_id=active_task_id,
                     status=result.status,
                     reason=result.reason,
                 )
-                await self._mark_task_terminal_from_result(task_id, result)
+                await self._mark_task_terminal_from_result(active_task_id, result)
                 return result
             except asyncio.CancelledError:
                 self._log_workflow_event(
@@ -162,7 +179,7 @@ class WorkflowGovernor:
                     global_id=global_id,
                     vault_name=vault_name,
                     source=source_value,
-                    task_id=task_id,
+                    task_id=active_task_id,
                     status="cancelled",
                     reason="cancelled",
                 )
@@ -174,7 +191,7 @@ class WorkflowGovernor:
                     global_id=global_id,
                     vault_name=vault_name,
                     source=source_value,
-                    task_id=task_id,
+                    task_id=active_task_id,
                     status="failed",
                     reason=reason,
                 )
@@ -183,6 +200,54 @@ class WorkflowGovernor:
                 if global_permit_acquired and global_semaphore is not None:
                     global_semaphore.release()
                 lane_lock.release()
+
+    async def start_workflow(
+        self,
+        *,
+        global_id: str,
+        source: WorkflowSource,
+        step_name: str | None = None,
+        expect_failure: bool = False,
+        include_load_errors: bool = False,
+        background_tasks: set[asyncio.Task] | None = None,
+    ) -> ExecutionTaskSnapshot:
+        """Start one workflow in the background and return its execution task."""
+        vault_name = self._split_vault_name(global_id)
+        task = await self._task_coordinator.create_queued_task(
+            kind=ExecutionTaskKind.WORKFLOW,
+            scope=workflow_vault_scope(vault_name),
+            source=source,
+            label=global_id,
+            metadata={
+                "workflow_id": global_id,
+                "vault": vault_name,
+                "step_name": step_name,
+            },
+        )
+
+        async def _run() -> None:
+            try:
+                await self.execute_workflow(
+                    global_id=global_id,
+                    source=source,
+                    step_name=step_name,
+                    expect_failure=expect_failure,
+                    include_load_errors=include_load_errors,
+                    task_id=task.task_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                return
+
+        def _spawn() -> None:
+            background_task = asyncio.create_task(_run(), context=contextvars.Context())
+            if background_tasks is not None:
+                background_tasks.add(background_task)
+                background_task.add_done_callback(background_tasks.discard)
+
+        asyncio.get_running_loop().call_soon(_spawn, context=contextvars.Context())
+        return task
 
     async def _get_lane_lock(self, vault_name: str) -> asyncio.Lock:
         async with self._lane_guard:

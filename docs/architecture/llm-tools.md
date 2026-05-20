@@ -59,6 +59,6 @@ agent behavior toward Pydantic AI's composable capability model.
 
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 
-`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API and scheduled runs.
+`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI.
 
 `chat_history_compact` checks or compacts the active chat session after explicit user approval. Compaction rewrites canonical provider-native history to a summary plus recent raw messages and records a process-local history-compaction task.

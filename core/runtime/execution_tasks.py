@@ -228,6 +228,73 @@ class TaskCoordinator:
         finally:
             _CURRENT_EXECUTION_TASK.reset(token)
 
+    async def create_queued_task(
+        self,
+        *,
+        kind: str,
+        scope: str,
+        source: str,
+        label: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ExecutionTaskSnapshot:
+        """Create a queued task record before an asyncio handle exists."""
+        task_id = self._new_task_id()
+        await self._create_record(
+            task_id=task_id,
+            kind=kind,
+            scope=scope,
+            source=source,
+            label=label,
+            handle=None,
+            metadata=metadata,
+        )
+        snapshot = await self.get_task(task_id)
+        if snapshot is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"Execution task disappeared: {task_id}")
+        return snapshot
+
+    @asynccontextmanager
+    async def track_existing_task(
+        self,
+        task_id: str,
+    ) -> AsyncIterator[ExecutionTaskSnapshot]:
+        """Attach the current asyncio task to an existing queued task record."""
+        current = asyncio.current_task()
+        if current is None:
+            raise RuntimeError("TaskCoordinator requires an active asyncio task")
+
+        async with self._lock:
+            record = self._records.get(task_id)
+            if record is None:
+                raise RuntimeError(f"Execution task not found: {task_id}")
+            if record.status in TERMINAL_STATUSES:
+                raise RuntimeError(f"Execution task already terminal: {task_id}")
+            if record.cancel_requested:
+                snapshot = record.snapshot()
+                should_cancel = True
+            else:
+                should_cancel = False
+            record.handle = current
+            snapshot = record.snapshot()
+
+        if should_cancel:
+            await self.mark_cancelled(task_id, reason="cancelled_before_start")
+            raise asyncio.CancelledError
+
+        token = _CURRENT_EXECUTION_TASK.set(snapshot)
+        try:
+            yield snapshot
+        except asyncio.CancelledError:
+            await self.mark_cancelled(task_id, reason="cancelled")
+            raise
+        except Exception as exc:
+            await self.mark_failed(task_id, reason=f"{type(exc).__name__}: {exc}")
+            raise
+        else:
+            await self.mark_completed(task_id)
+        finally:
+            _CURRENT_EXECUTION_TASK.reset(token)
+
     async def get_task(self, task_id: str) -> ExecutionTaskSnapshot | None:
         """Return one task snapshot by id."""
         async with self._lock:
@@ -263,6 +330,7 @@ class TaskCoordinator:
     ) -> ExecutionTaskCancellationResult | None:
         """Request cancellation for one task by id."""
         handle: asyncio.Task[Any] | None = None
+        mark_cancelled_without_handle = False
         async with self._lock:
             record = self._records.get(task_id)
             if record is None:
@@ -278,11 +346,14 @@ class TaskCoordinator:
             record.cancel_requested = True
             record.latest_event = reason
             handle = record.handle
+            mark_cancelled_without_handle = handle is None
             snapshot = record.snapshot()
 
         self._log_event("execution_task_cancel_requested", snapshot)
         if handle is not None and not handle.done():
             handle.cancel()
+        elif mark_cancelled_without_handle:
+            await self.mark_cancelled(task_id, reason=reason)
         return ExecutionTaskCancellationResult(snapshot=snapshot, effective=True)
 
     async def cancel_scope(
@@ -299,6 +370,18 @@ class TaskCoordinator:
             if cancellation is not None:
                 snapshots.append(cancellation.snapshot)
         return snapshots
+
+    async def update_metadata(self, task_id: str, metadata: dict[str, Any]) -> None:
+        """Merge metadata into one task record."""
+        snapshot = None
+        async with self._lock:
+            record = self._records.get(task_id)
+            if record is None:
+                return
+            record.metadata.update(metadata)
+            snapshot = record.snapshot()
+
+        self._log_event("execution_task_metadata_updated", snapshot)
 
     async def mark_completed(self, task_id: str, *, reason: str | None = None) -> None:
         """Mark one task completed."""
@@ -365,7 +448,7 @@ class TaskCoordinator:
         scope: str,
         source: str,
         label: str,
-        handle: asyncio.Task[Any],
+        handle: asyncio.Task[Any] | None,
         metadata: dict[str, Any] | None,
     ) -> None:
         now = self._now()

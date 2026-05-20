@@ -37,6 +37,8 @@ const state = {
     selectedActivityVault: '',
     dashboardVaultSort: { column: 'name', direction: 'asc' },
     dashboardWorkflowSort: { column: 'id', direction: 'asc' },
+    workflowTasks: [],
+    workflowTaskPollTimer: null,
     vaultActivitySort: { column: 'last_run', direction: 'desc' },
     vaultActivityMutationSort: { column: 'time', direction: 'desc' },
     restartRequired: false,
@@ -963,6 +965,7 @@ async function fetchSystemStatus() {
             }
         }
         syncRestartFlagWithStorage();
+        await fetchWorkflowTasks({ render: false });
         displaySystemStatus();
         updateStatus();
     } catch (error) {
@@ -973,6 +976,26 @@ async function fetchSystemStatus() {
         }
         if (dashElements.vaultActivityStatus) {
             dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch AssistantMD activity</p>';
+        }
+    }
+}
+
+async function fetchWorkflowTasks({ render = true } = {}) {
+    try {
+        const response = await fetch('api/tasks?kind=workflow&include_terminal=false');
+        if (!response.ok) throw new Error('Failed to fetch workflow tasks');
+        const data = await response.json();
+        state.workflowTasks = data.tasks || [];
+        syncWorkflowTaskPolling();
+        if (render) {
+            displaySystemStatus();
+        }
+    } catch (error) {
+        console.error('Error fetching workflow tasks:', error);
+        state.workflowTasks = [];
+        syncWorkflowTaskPolling();
+        if (render && dashElements.executeWorkflowResult) {
+            dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
         }
     }
 }
@@ -1050,6 +1073,7 @@ function renderDashboardWorkflows(status) {
     if (combinedWorkflows.length === 0) {
         dashElements.workflowsStatus.innerHTML = `
             ${renderDashboardBadgeStyles()}
+            ${renderRunningWorkflowTasks()}
             <p class="text-sm text-txt-secondary">No workflows loaded.</p>
         `;
         return;
@@ -1058,6 +1082,7 @@ function renderDashboardWorkflows(status) {
 
     dashElements.workflowsStatus.innerHTML = `
         ${renderDashboardBadgeStyles()}
+        ${renderRunningWorkflowTasks()}
         <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
             <table class="dashboard-table">
                 <thead>
@@ -1107,26 +1132,7 @@ function renderDashboardWorkflows(status) {
                                 ${statusLabel}
                             </button>
                         `;
-                        const runButton = workflow.is_system_template
-                            ? `
-                                <button
-                                    type="button"
-                                    class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
-                                    data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
-                                    data-dashboard-workflow-system-template="true"
-                                >
-                                    Run
-                                </button>
-                            `
-                            : `
-                                <button
-                                    type="button"
-                                    class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
-                                    data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"
-                                >
-                                    Run
-                                </button>
-                            `;
+                        const runButton = renderDashboardWorkflowRunButton(workflow);
                         return `
                             <tr>
                                 <td>
@@ -1332,6 +1338,113 @@ function dashboardWorkflowStatus(workflow, job) {
         return { statusLabel: 'scheduled', statusClass: 'badge-scheduled' };
     }
     return { statusLabel: 'enabled', statusClass: 'badge-enabled' };
+}
+
+function renderDashboardWorkflowRunButton(workflow) {
+    const systemAttribute = workflow.is_system_template
+        ? ' data-dashboard-workflow-system-template="true"'
+        : '';
+    return `
+        <button
+            type="button"
+            class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
+            data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"${systemAttribute}
+        >
+            Run
+        </button>
+    `;
+}
+
+function renderRunningWorkflowTasks() {
+    const tasks = activeWorkflowTasks();
+    if (!tasks.length) {
+        return `
+            <div class="mb-3 rounded-md border border-border-primary bg-app-elevated p-3 text-sm text-txt-secondary">
+                No workflows are currently running.
+            </div>
+        `;
+    }
+
+    return `
+        <div class="mb-4 rounded-md border border-border-primary bg-app-elevated p-3">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p class="font-semibold text-txt-primary">Running Workflows</p>
+                    <p class="text-xs text-txt-secondary">${tasks.length} active workflow task${tasks.length === 1 ? '' : 's'}</p>
+                </div>
+                <button
+                    type="button"
+                    class="chat-stop-btn px-3 py-1.5 text-sm text-white rounded-md focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed"
+                    data-dashboard-workflow-stop-all="true"
+                >
+                    Stop All
+                </button>
+            </div>
+            <div class="dashboard-table-wrap" role="region" aria-label="Running workflows" tabindex="0">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Workflow</th>
+                            <th>Vault</th>
+                            <th>Status</th>
+                            <th>Started</th>
+                            <th>Source</th>
+                            <th class="cell-center" aria-label="Stop"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tasks.map(task => `
+                            <tr>
+                                <td class="cell-xs">
+                                    <strong>${escapeHtml(workflowTaskName(task))}</strong>
+                                    <div class="cell-mono subtle">${escapeHtml(task.task_id || '')}</div>
+                                </td>
+                                <td class="cell-xs">${escapeHtml(workflowTaskVault(task))}</td>
+                                <td class="cell-xs">${escapeHtml(task.status || 'running')}</td>
+                                <td class="cell-xs">${formatShortDate(task.started_at || task.created_at)}</td>
+                                <td class="cell-xs">${escapeHtml(task.source || 'unknown')}</td>
+                                <td class="cell-center">
+                                    <button
+                                        type="button"
+                                        class="chat-stop-btn px-3 py-1.5 text-sm text-white rounded-md focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed"
+                                        data-dashboard-workflow-stop="${escapeHtml(task.task_id || '')}"
+                                    >
+                                        Stop
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function activeWorkflowTasks() {
+    return (state.workflowTasks || []).filter(task => !isTerminalTaskStatus(task.status));
+}
+
+function workflowTaskName(task) {
+    return task?.metadata?.workflow_id || task?.label || '';
+}
+
+function workflowTaskVault(task) {
+    const scope = String(task?.scope || '');
+    const prefix = 'workflow_vault:';
+    return scope.startsWith(prefix) ? scope.slice(prefix.length) : '';
+}
+
+function syncWorkflowTaskPolling() {
+    const hasActiveWorkflowTasks = activeWorkflowTasks().length > 0;
+    if (hasActiveWorkflowTasks && !state.workflowTaskPollTimer) {
+        state.workflowTaskPollTimer = window.setInterval(() => {
+            fetchWorkflowTasks({ render: true });
+        }, 2000);
+    } else if (!hasActiveWorkflowTasks && state.workflowTaskPollTimer) {
+        window.clearInterval(state.workflowTaskPollTimer);
+        state.workflowTaskPollTimer = null;
+    }
 }
 
 function dashboardSystemWorkflowTemplateJob(workflow, schedulerJobs) {
@@ -1894,6 +2007,19 @@ function setupEventListeners() {
                     runButton,
                     runButton.getAttribute('data-dashboard-workflow-system-template') === 'true'
                 );
+                return;
+            }
+            const stopButton = target.closest('[data-dashboard-workflow-stop]');
+            if (stopButton instanceof HTMLElement) {
+                stopWorkflow(
+                    stopButton.getAttribute('data-dashboard-workflow-stop') || '',
+                    stopButton
+                );
+                return;
+            }
+            const stopAllButton = target.closest('[data-dashboard-workflow-stop-all]');
+            if (stopAllButton instanceof HTMLElement) {
+                stopAllWorkflows(stopAllButton);
                 return;
             }
             const workflowSortButton = target.closest('[data-dashboard-workflow-sort]');
@@ -3291,7 +3417,7 @@ async function executeWorkflow(globalId, triggerButton = null, isSystemTemplate 
         return;
     }
 
-    dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Executing...</p>';
+    dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Starting workflow...</p>';
     if (triggerButton) {
         triggerButton.disabled = true;
     }
@@ -3314,31 +3440,166 @@ async function executeWorkflow(globalId, triggerButton = null, isSystemTemplate 
         }
 
         const data = await response.json();
-        const outputFiles = data.output_files || [];
-
+        const task = data.task || {};
+        if (!task.task_id) {
+            throw new Error('Workflow did not return an execution task.');
+        }
+        await fetchWorkflowTasks({ render: true });
         dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-success p-3 rounded border">
-                <p class="font-medium">✅ Execution Completed</p>
-                <p>Workflow: ${data.global_id || ''}</p>
-                <p>Execution time: ${data.execution_time_seconds?.toFixed(2) || 0}s</p>
-                ${outputFiles.length ? `
-                    <p class="mt-2">Output files created:</p>
-                    <ul class="list-disc list-inside ml-4">
-                        ${outputFiles.map(f => `<li class="text-sm">${f}</li>`).join('')}
-                    </ul>
-                ` : ''}
-                <p class="mt-2 text-sm">${data.message || ''}</p>
+            <div class="state-surface-info p-3 rounded border">
+                <p class="font-medium">Workflow started</p>
+                <p>Workflow: ${escapeHtml(globalId)}</p>
+                <p class="text-sm">Task: ${escapeHtml(task.task_id)}</p>
+                <p class="text-sm">Use the Running Workflows list to monitor or stop this task.</p>
             </div>
         `;
-
+        monitorWorkflowTask(task.task_id);
     } catch (error) {
         console.error('Error executing workflow:', error);
         dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
+        displaySystemStatus();
     } finally {
         if (triggerButton) {
             triggerButton.disabled = false;
         }
     }
+}
+
+async function monitorWorkflowTask(taskId) {
+    if (!taskId) return;
+    try {
+        while (true) {
+            await new Promise(resolve => window.setTimeout(resolve, 1000));
+            const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}`);
+            if (!response.ok) {
+                return;
+            }
+            const task = await response.json();
+            if (!isTerminalTaskStatus(task.status)) {
+                continue;
+            }
+            await fetchWorkflowTasks({ render: true });
+            renderWorkflowTaskResult(task);
+            return;
+        }
+    } catch (error) {
+        console.error('Error monitoring workflow task:', error);
+    }
+}
+
+async function stopWorkflow(taskId, triggerButton = null) {
+    if (!taskId) return;
+    if (triggerButton) {
+        triggerButton.disabled = true;
+        triggerButton.textContent = 'Stopping...';
+    }
+    try {
+        const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}/cancel`, {
+            method: 'POST'
+        });
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        dashElements.executeWorkflowResult.innerHTML = `
+            <div class="state-surface-info p-3 rounded border">
+                <p class="font-medium">Stop requested</p>
+                <p class="text-sm">Task: ${escapeHtml(taskId)}</p>
+                <p class="text-sm">Files mutated by this workflow will be rolled back when cancellation completes.</p>
+            </div>
+        `;
+        await fetchWorkflowTasks({ render: true });
+    } catch (error) {
+        console.error('Error stopping workflow:', error);
+        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.textContent = 'Stop';
+        }
+    }
+}
+
+async function stopAllWorkflows(triggerButton = null) {
+    const tasks = activeWorkflowTasks();
+    if (!tasks.length) {
+        dashElements.executeWorkflowResult.innerHTML = '<p class="text-sm text-txt-secondary">No running workflows to stop.</p>';
+        return;
+    }
+    const confirmed = window.confirm(`Stop ${tasks.length} running workflow task${tasks.length === 1 ? '' : 's'}?`);
+    if (!confirmed) {
+        return;
+    }
+    if (triggerButton) {
+        triggerButton.disabled = true;
+        triggerButton.textContent = 'Stopping...';
+    }
+    try {
+        const results = await Promise.allSettled(
+            tasks.map(task => fetch(`api/tasks/${encodeURIComponent(task.task_id)}/cancel`, { method: 'POST' }))
+        );
+        const failures = [];
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                failures.push(result.reason?.message || 'request failed');
+                continue;
+            }
+            if (!result.value.ok) {
+                failures.push(`HTTP ${result.value.status}`);
+            }
+        }
+        await fetchWorkflowTasks({ render: true });
+        if (failures.length) {
+            dashElements.executeWorkflowResult.innerHTML = `
+                <p class="state-error">Stop requested for ${tasks.length - failures.length} workflow task${tasks.length - failures.length === 1 ? '' : 's'}, but ${failures.length} failed.</p>
+            `;
+            return;
+        }
+        dashElements.executeWorkflowResult.innerHTML = `
+            <div class="state-surface-info p-3 rounded border">
+                <p class="font-medium">Stop requested for all running workflows</p>
+                <p class="text-sm">${tasks.length} workflow task${tasks.length === 1 ? '' : 's'} will stop and roll back mutated files where applicable.</p>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error stopping all workflows:', error);
+        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
+    } finally {
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.textContent = 'Stop All';
+        }
+    }
+}
+
+function renderWorkflowTaskResult(task) {
+    const result = task?.metadata?.workflow_result || null;
+    const status = String(task?.status || '').toLowerCase();
+    const success = status === 'completed' && (!result || result.success !== false);
+    const surfaceClass = success ? 'state-surface-success' : 'state-surface-error';
+    const heading = success ? '✅ Execution Completed' : `Workflow ${status || 'finished'}`;
+    const outputFiles = result?.output_files || [];
+    dashElements.executeWorkflowResult.innerHTML = `
+        <div class="${surfaceClass} p-3 rounded border">
+            <p class="font-medium">${escapeHtml(heading)}</p>
+            <p>Workflow: ${escapeHtml(result?.global_id || task?.metadata?.workflow_id || task?.label || '')}</p>
+            ${typeof result?.execution_time_seconds === 'number'
+                ? `<p>Execution time: ${result.execution_time_seconds.toFixed(2)}s</p>`
+                : ''}
+            ${outputFiles.length ? `
+                <p class="mt-2">Output files created:</p>
+                <ul class="list-disc list-inside ml-4">
+                    ${outputFiles.map(f => `<li class="text-sm">${escapeHtml(f)}</li>`).join('')}
+                </ul>
+            ` : ''}
+            <p class="mt-2 text-sm">${escapeHtml(result?.message || task?.terminal_reason || '')}</p>
+        </div>
+    `;
+}
+
+function isTerminalTaskStatus(status) {
+    return ['completed', 'failed', 'cancelled', 'timed_out', 'skipped'].includes(
+        String(status || '').toLowerCase()
+    );
 }
 
 function updateStatus(message) {

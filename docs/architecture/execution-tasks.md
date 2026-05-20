@@ -57,6 +57,12 @@ Terminal statuses remain queryable until the bounded terminal history is pruned.
 
 Chat session cancellation is scope-oriented at the API layer: `/api/chat/sessions/{session_id}/cancel` resolves the active `chat_session:<session_id>` task and cancels that task ID.
 
+Manual workflow execution is task-oriented at the API layer: `/api/workflows/execute`
+starts the workflow in the background and returns the created task snapshot.
+Clients should poll `/api/tasks/{task_id}` for terminal status and call
+`/api/tasks/{task_id}/cancel` to stop a running workflow. Terminal workflow
+result details are attached to task metadata as `workflow_result` when available.
+
 ## Observability
 
 Execution task events use the validation sink and stable event names:

@@ -10,6 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core.runtime.execution_tasks import ExecutionTaskSource
+from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
 
@@ -165,7 +167,14 @@ class ApiEndpointsScenario(BaseScenario):
         assert execute_response.status_code == 200, (
             "Manual workflow execution succeeds"
         )
-        assert execute_response.json().get("success") is True, "Workflow reports success"
+        execute_payload = execute_response.json()
+        assert execute_payload.get("success") is True, "Workflow start reports success"
+        assert execute_payload.get("task", {}).get("task_id"), "Workflow start returns a task id"
+
+        await get_runtime_context().workflow_governor.execute_workflow(
+            global_id=f"{vault.name}/status_probe",
+            source=ExecutionTaskSource.API,
+        )
 
         # Execution task status endpoints expose the completed workflow task.
         tasks_response = self.call_api("/api/tasks")
@@ -180,6 +189,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert workflow_tasks, "Workflow execution should create a task snapshot"
         workflow_task = workflow_tasks[-1]
         assert workflow_task.get("status") == "completed", "Workflow task should complete"
+        assert workflow_task.get("metadata", {}).get("workflow_result", {}).get("status") == "completed", (
+            "Workflow task metadata should include the terminal workflow result"
+        )
 
         task_detail = self.call_api(f"/api/tasks/{workflow_task['task_id']}")
         assert task_detail.status_code == 200, "Execution task detail succeeds"
@@ -215,7 +227,12 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert skipped_execute.status_code == 200, "Skipped workflow execution succeeds"
         skipped_payload = skipped_execute.json()
-        assert skipped_payload.get("status") == "skipped", "Workflow result should report skipped"
+        assert skipped_payload.get("success") is True, "Skipped workflow start reports success"
+        assert skipped_payload.get("task", {}).get("task_id"), "Skipped workflow start returns a task id"
+        await get_runtime_context().workflow_governor.execute_workflow(
+            global_id=f"{vault.name}/skipped_probe",
+            source=ExecutionTaskSource.API,
+        )
 
         skipped_tasks_response = self.call_api("/api/tasks")
         assert skipped_tasks_response.status_code == 200, "Execution task listing succeeds after skipped workflow"
