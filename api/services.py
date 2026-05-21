@@ -708,11 +708,16 @@ def set_chat_session_title(vault_name: str, session_id: str, title: str | None) 
 
 def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: str) -> ChatSessionExportResponse:
     """Export one chat session transcript to the vault on demand."""
+    memory = SessionMemoryStore().get_session_memory(
+        vault_name=vault_name,
+        session_id=session_id,
+    )
     exported = export_chat_transcript(
         store=_chat_store,
         vault_path=vault_path,
         vault_name=vault_name,
         session_id=session_id,
+        memory_summary=memory.summary if memory else None,
     )
     return ChatSessionExportResponse(
         session_id=session_id,

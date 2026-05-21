@@ -324,6 +324,29 @@ class ApiEndpointsScenario(BaseScenario):
             "Session memory update replaces summary"
         )
 
+        title_update = self.call_api(
+            f"/api/chat/sessions/{session_id}/title",
+            method="PATCH",
+            data={"vault_name": vault.name, "title": "Exported Session"},
+        )
+        assert title_update.status_code == 200, "Session title update succeeds"
+
+        export_response = self.call_api(
+            f"/api/chat/sessions/{session_id}/export",
+            method="POST",
+            data={"vault_name": vault.name},
+        )
+        assert export_response.status_code == 200, "Chat transcript export succeeds"
+        export_path = Path(export_response.json()["path"])
+        exported_markdown = export_path.read_text(encoding="utf-8")
+        assert exported_markdown.startswith("---\n"), "Export includes frontmatter"
+        assert 'title: "Exported Session"' in exported_markdown, (
+            "Export frontmatter includes the user session title"
+        )
+        assert "memory_summary: |-\n  Edited memory summary." in exported_markdown, (
+            "Export frontmatter includes the memory summary"
+        )
+
         memory_delete = self.call_api(
             f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}",
             method="DELETE",
