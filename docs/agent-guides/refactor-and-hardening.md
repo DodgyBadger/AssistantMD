@@ -19,6 +19,8 @@
   This includes `docs/architecture/` when subsystem boundaries, responsibilities, or execution flow changed.
 - If the refactor reveals a bug, fix it explicitly and keep the scope clear.
 - Ask before building compatibility shims or adapters.
+- When a dev branch is approaching finalization, consider dependency freshness as part of the hardening pass:
+  check whether Python or Node dependencies are stale, whether security audit failures are likely, and whether newer dependency versions unlock simpler or safer implementation patterns. Only propose updates to versions that have been available for more than one week, unless a security fix requires faster action. Do not update dependencies during unrelated refactors by default; propose a scoped dependency refresh when it would reduce risk, fix CVEs, or simplify the code.
 
 ## Guardrails
 - Refactor in small, reviewable chunks.
