@@ -28,8 +28,8 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
                 "Chat metadata should expose code_execution",
             )
             self.soft_assert(
-                "memory_ops" in tool_names,
-                "Chat metadata should expose memory_ops",
+                "session_ops" in tool_names,
+                "Chat metadata should expose session_ops",
             )
         finally:
             await self.stop_system()

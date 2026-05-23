@@ -32,10 +32,10 @@ It has three tables:
 Canonical history contains completed prior turns plus the accepted user request for an active chat run. The active user input is passed separately to Pydantic AI, and provider-native response messages are persisted after completion through `new_messages()` for that run. On cancellation, the accepted user request remains persisted and no assistant response is added.
 
 `core/chat/history_service.py` is the shared broker over this store for tools,
-memory extraction, and authoring helpers. Context scripts should access session
-history through `retrieve_history(...)`, which preserves tool call/return pairs
-as atomic units before `assemble_context(...)` hands curated history back to
-chat.
+session summarization, and authoring helpers. Context scripts should access
+session history through `retrieve_history(...)`, which preserves tool
+call/return pairs as atomic units before `assemble_context(...)` hands curated
+history back to chat.
 
 ## Execution tasks and cancellation
 

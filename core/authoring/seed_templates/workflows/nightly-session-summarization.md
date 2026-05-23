@@ -2,29 +2,29 @@
 run_type: workflow
 schedule: "cron: 0 2 * * *"
 enabled: false
-description: Extract session memory for chat sessions with missing or stale derived memory.
+description: Summarize chat sessions with missing or stale stored summaries.
 ---
 
-## Nightly memory extraction
+## Nightly session summarization
 
 This workflow is disabled by default. Run it manually while tuning the batch
-size, then enable it when the extraction behavior looks right.
+size, then enable it when the summarization behavior looks right.
 
 ```python
-"""Extract memory for a bounded batch of chat sessions with missing or stale memory."""
+"""Summarize a bounded batch of chat sessions with missing or stale summaries."""
 
 # Editable settings
 BATCH_SIZE = 5
-EXTRACTION_MODEL = "gpt-mini"
+SUMMARIZATION_MODEL = "gpt-mini"
 
 
-pending = await retrieve_sessions(selection="pending_or_stale_memory", limit=BATCH_SIZE)
+pending = await retrieve_sessions(selection="pending_or_stale_summary", limit=BATCH_SIZE)
 sessions = list(pending.items)
 
 if not sessions:
-    await finish(status="skipped", reason="no sessions pending or stale memory extraction")
+    await finish(status="skipped", reason="no sessions pending or stale summarization")
 
-extracted = []
+summarized = []
 failed = []
 
 for item in sessions:
@@ -32,24 +32,24 @@ for item in sessions:
     session_id = metadata.get("session_id", "")
     title = metadata.get("title", "")
     message_count = metadata.get("message_count", 0)
-    memory_status = metadata.get("memory_status", "")
+    summary_status = metadata.get("summary_status", "")
 
     if not session_id:
         failed.append({"session_id": "", "title": title, "error": "missing session_id"})
         continue
 
     try:
-        result = await memory_ops(
-            operation="extract_session_memory",
+        result = await session_ops(
+            operation="summarize_session",
             session_id=session_id,
-            extraction_model=EXTRACTION_MODEL,
+            summarization_model=SUMMARIZATION_MODEL,
         )
-        extracted.append(
+        summarized.append(
             {
                 "session_id": session_id,
                 "title": title,
                 "message_count": message_count,
-                "memory_status": memory_status,
+                "summary_status": summary_status,
                 "result": result.return_value,
             }
         )
@@ -59,7 +59,7 @@ for item in sessions:
                 "session_id": session_id,
                 "title": title,
                 "message_count": message_count,
-                "memory_status": memory_status,
+                "summary_status": summary_status,
                 "error": str(exc),
             }
         )
@@ -67,10 +67,10 @@ for item in sessions:
 {
     "status": "completed" if not failed else "completed_with_errors",
     "selected": len(sessions),
-    "extracted": len(extracted),
+    "summarized": len(summarized),
     "failed": len(failed),
     "batch_size": BATCH_SIZE,
-    "extraction_model": EXTRACTION_MODEL,
+    "summarization_model": SUMMARIZATION_MODEL,
     "failures": failed,
 }
 ```

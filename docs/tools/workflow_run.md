@@ -37,7 +37,7 @@ workflow_run(operation="run", workflow_name="weekly-planner")
 ```
 
 ```python
-started = workflow_run(operation="start", workflow_name="nightly-memory-extraction")
+started = workflow_run(operation="start", workflow_name="nightly-session-summarization")
 ```
 
 ```python

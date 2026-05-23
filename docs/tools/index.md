@@ -34,7 +34,7 @@ Available tool docs:
 - `delegate`
 - `file_ops_safe`
 - `file_ops_unsafe`
-- `memory_ops`
+- `session_ops`
 - `tavily_crawl`
 - `tavily_extract`
 - `web_search_duckduckgo`

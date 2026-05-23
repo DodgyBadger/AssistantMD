@@ -57,8 +57,8 @@ from .models import (
     MetadataResponse,
     TemplateInfo,
     ChatSessionInfo,
-    ChatSessionMemorySummaryResponse,
-    ChatSessionMemoryUpdateRequest,
+    ChatSessionSummaryResponse,
+    ChatSessionSummaryUpdateRequest,
     ChatSessionDetailResponse,
     ChatSessionExportRequest,
     ChatSessionExportResponse,
@@ -88,9 +88,9 @@ from .services import (
     get_metadata,
     list_context_templates,
     list_chat_sessions,
-    get_chat_session_memory_summary,
-    update_chat_session_memory,
-    delete_chat_session_memory,
+    get_chat_session_summary,
+    update_chat_session_summary,
+    delete_chat_session_summary,
     get_chat_session_detail,
     export_chat_session_markdown,
     compact_chat_session_history,
@@ -948,24 +948,24 @@ async def cancel_chat_session(session_id: str):
         return create_error_response(e)
 
 
-@router.get("/chat/sessions/{session_id}/memory", response_model=ChatSessionMemorySummaryResponse)
-async def chat_session_memory_summary(session_id: str, vault_name: str):
-    """Return a lightweight memory preview for one chat session."""
+@router.get("/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse)
+async def chat_session_summary(session_id: str, vault_name: str):
+    """Return a lightweight summary preview for one chat session."""
     try:
-        return get_chat_session_memory_summary(vault_name, session_id)
+        return get_chat_session_summary(vault_name, session_id)
     except Exception as e:
         return create_error_response(e)
 
 
-@router.put("/chat/sessions/{session_id}/memory", response_model=ChatSessionMemorySummaryResponse)
-async def update_chat_session_memory_endpoint(
+@router.put("/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse)
+async def update_chat_session_summary_endpoint(
     session_id: str,
     vault_name: str,
-    request: ChatSessionMemoryUpdateRequest,
+    request: ChatSessionSummaryUpdateRequest,
 ):
-    """Manually update one session memory record."""
+    """Manually update one session summary record."""
     try:
-        return await update_chat_session_memory(
+        return await update_chat_session_summary(
             vault_name=vault_name,
             session_id=session_id,
             data=request.model_dump(mode="python"),
@@ -974,11 +974,11 @@ async def update_chat_session_memory_endpoint(
         return create_error_response(e)
 
 
-@router.delete("/chat/sessions/{session_id}/memory")
-async def delete_chat_session_memory_endpoint(session_id: str, vault_name: str):
-    """Delete one session memory record without deleting the chat session."""
+@router.delete("/chat/sessions/{session_id}/summary")
+async def delete_chat_session_summary_endpoint(session_id: str, vault_name: str):
+    """Delete one session summary record without deleting the chat session."""
     try:
-        return delete_chat_session_memory(vault_name, session_id)
+        return delete_chat_session_summary(vault_name, session_id)
     except Exception as e:
         return create_error_response(e)
 

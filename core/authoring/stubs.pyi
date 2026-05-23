@@ -171,7 +171,7 @@ async def retrieve_history(
 
 async def retrieve_sessions(
     *,
-    selection: str = "pending_or_stale_memory",
+    selection: str = "pending_or_stale_summary",
     limit: int | str = "all",
 ) -> RetrievedSessionsResult: ...
 

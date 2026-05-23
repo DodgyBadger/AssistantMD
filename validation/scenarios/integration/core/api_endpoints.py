@@ -268,9 +268,9 @@ class ApiEndpointsScenario(BaseScenario):
             for tool in metadata_payload.get("tools", [])
         ), "workflow_run tool is exposed in metadata"
         assert any(
-            tool.get("name") == "memory_ops"
+            tool.get("name") == "session_ops"
             for tool in metadata_payload.get("tools", [])
-        ), "memory_ops tool is exposed in metadata"
+        ), "session_ops tool is exposed in metadata"
 
         chat_payload = {
             "vault_name": vault.name,
@@ -283,45 +283,45 @@ class ApiEndpointsScenario(BaseScenario):
         assert chat_first.status_code == 200, "Chat execution succeeds"
         session_id = chat_first.json()["session_id"]
 
-        from core.memory.session_memory import SessionMemoryStore
+        from core.memory.session_summary import SessionSummaryStore
 
-        memory_store = SessionMemoryStore(system_root=str(self._get_system_controller()._system_root))
-        memory_store.upsert_session_memory(
+        summary_store = SessionSummaryStore(system_root=str(self._get_system_controller()._system_root))
+        summary_store.upsert_session_summary(
             vault_name=vault.name,
             session_id=session_id,
-            summary="Original memory summary.",
+            summary="Original session summary.",
             domain="integration testing",
             work_product="api validation",
-            user_intent="verify session memory preview",
+            user_intent="verify session summary preview",
             named_entities="IntegrationApiVault",
             source_summary="No external sources.",
             metadata={"source": "api_endpoint_validation"},
         )
 
         memory_preview = self.call_api(
-            f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}"
+            f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}"
         )
-        assert memory_preview.status_code == 200, "Session memory preview endpoint succeeds"
-        assert memory_preview.json().get("summary") == "Original memory summary.", (
-            "Session memory preview returns summary"
+        assert memory_preview.status_code == 200, "Session summary preview endpoint succeeds"
+        assert memory_preview.json().get("summary") == "Original session summary.", (
+            "Session summary preview returns summary"
         )
 
         memory_update = self.call_api(
-            f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}",
+            f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}",
             method="PUT",
             data={
-                "summary": "Edited memory summary.",
+                "summary": "Edited session summary.",
                 "domain": "integration testing",
-                "work_product": "manual memory editing",
-                "user_intent": "verify session memory editing",
+                "work_product": "manual session summary editing",
+                "user_intent": "verify session summary editing",
                 "named_entities": "IntegrationApiVault",
                 "source_summary": "No external sources.",
                 "metadata": {"source": "manual_api_edit"},
             },
         )
-        assert memory_update.status_code == 200, "Session memory update endpoint succeeds"
-        assert memory_update.json().get("summary") == "Edited memory summary.", (
-            "Session memory update replaces summary"
+        assert memory_update.status_code == 200, "Session summary update endpoint succeeds"
+        assert memory_update.json().get("summary") == "Edited session summary.", (
+            "Session summary update replaces summary"
         )
 
         title_update = self.call_api(
@@ -343,16 +343,16 @@ class ApiEndpointsScenario(BaseScenario):
         assert 'title: "Exported Session"' in exported_markdown, (
             "Export frontmatter includes the user session title"
         )
-        assert "memory_summary: |-\n  Edited memory summary." in exported_markdown, (
-            "Export frontmatter includes the memory summary"
+        assert "session_summary: |-\n  Edited session summary." in exported_markdown, (
+            "Export frontmatter includes the session summary"
         )
 
         memory_delete = self.call_api(
-            f"/api/chat/sessions/{session_id}/memory?vault_name={vault.name}",
+            f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}",
             method="DELETE",
         )
-        assert memory_delete.status_code == 200, "Session memory delete endpoint succeeds"
-        assert memory_delete.json().get("deleted") is True, "Session memory delete reports deletion"
+        assert memory_delete.status_code == 200, "Session summary delete endpoint succeeds"
+        assert memory_delete.json().get("deleted") is True, "Session summary delete reports deletion"
 
         chat_second = self.call_api(
             "/api/chat/execute",

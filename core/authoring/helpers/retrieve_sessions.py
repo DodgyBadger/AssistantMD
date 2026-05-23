@@ -14,14 +14,14 @@ from core.authoring.contracts import (
 from core.authoring.helpers.common import build_capability
 from core.chat.chat_store import ChatStore, StoredChatSession
 from core.logger import UnifiedLogger
-from core.memory.session_memory import SessionMemoryStore
-from core.settings import get_stale_memory_min_new_messages
+from core.memory.session_summary import SessionSummaryStore
+from core.settings import get_stale_summary_min_new_messages
 
 
 logger = UnifiedLogger(tag="authoring-host")
 
-PENDING_OR_STALE_MEMORY_SELECTION = "pending_or_stale_memory"
-STALE_MEMORY_GRACE_MINUTES = 30
+PENDING_OR_STALE_SUMMARY_SELECTION = "pending_or_stale_summary"
+STALE_SUMMARY_GRACE_MINUTES = 30
 
 
 def build_definition() -> AuthoringCapabilityDefinition:
@@ -51,8 +51,8 @@ async def execute(
     )
 
     chat_store = ChatStore()
-    memory_store = SessionMemoryStore()
-    stale_memory_min_new_messages = get_stale_memory_min_new_messages()
+    summary_store = SessionSummaryStore()
+    stale_summary_min_new_messages = get_stale_summary_min_new_messages()
     sessions = chat_store.list_sessions(vault_name)
     items: list[RetrievedItem] = []
     for session in sessions:
@@ -62,18 +62,18 @@ async def execute(
             session_id=session.session_id,
             vault_name=vault_name,
         )
-        if selection == PENDING_OR_STALE_MEMORY_SELECTION:
-            memory = memory_store.get_session_memory(
+        if selection == PENDING_OR_STALE_SUMMARY_SELECTION:
+            session_summary = summary_store.get_session_summary(
                 vault_name=vault_name,
                 session_id=session.session_id,
             )
-            memory_status = _memory_status(
+            summary_status = _summary_status(
                 session,
-                memory,
+                session_summary,
                 message_count=message_count,
-                stale_memory_min_new_messages=stale_memory_min_new_messages,
+                stale_summary_min_new_messages=stale_summary_min_new_messages,
             )
-            if memory_status["memory_status"] == "current":
+            if summary_status["summary_status"] == "current":
                 continue
         else:  # pragma: no cover - guarded by _parse_call
             raise ValueError(f"Unsupported retrieve_sessions selection: {selection}")
@@ -81,8 +81,8 @@ async def execute(
             _session_item(
                 session,
                 message_count=message_count,
-                has_memory=memory is not None,
-                memory_status=memory_status,
+                has_summary=session_summary is not None,
+                summary_status=summary_status,
             )
         )
 
@@ -114,10 +114,10 @@ def _parse_call(call: AuthoringCapabilityCall) -> tuple[str, int | str]:
     if call.args:
         raise ValueError("retrieve_sessions only supports keyword arguments")
     selection = str(
-        call.kwargs.get("selection") or PENDING_OR_STALE_MEMORY_SELECTION
+        call.kwargs.get("selection") or PENDING_OR_STALE_SUMMARY_SELECTION
     ).strip().lower()
-    if selection != PENDING_OR_STALE_MEMORY_SELECTION:
-        raise ValueError("retrieve_sessions selection must be 'pending_or_stale_memory'")
+    if selection != PENDING_OR_STALE_SUMMARY_SELECTION:
+        raise ValueError("retrieve_sessions selection must be 'pending_or_stale_summary'")
     return selection, _parse_limit(call.kwargs.get("limit", "all"))
 
 
@@ -150,8 +150,8 @@ def _session_item(
     session: StoredChatSession,
     *,
     message_count: int,
-    has_memory: bool,
-    memory_status: dict[str, object],
+    has_summary: bool,
+    summary_status: dict[str, object],
 ) -> RetrievedItem:
     title = session.title or ""
     content = title or session.session_id
@@ -162,8 +162,8 @@ def _session_item(
         "created_at": session.created_at,
         "last_activity_at": session.last_activity_at,
         "message_count": message_count,
-        "has_memory": has_memory,
-        **memory_status,
+        "has_summary": has_summary,
+        **summary_status,
     }
     return RetrievedItem(
         ref=f"chat_session:{session.session_id}",
@@ -173,53 +173,53 @@ def _session_item(
     )
 
 
-def _memory_status(
+def _summary_status(
     session: StoredChatSession,
-    memory: object | None,
+    session_summary: object | None,
     *,
     message_count: int,
-    stale_memory_min_new_messages: int,
+    stale_summary_min_new_messages: int,
 ) -> dict[str, object]:
-    if memory is None:
+    if session_summary is None:
         return {
-            "memory_status": "pending",
-            "memory_updated_at": None,
-            "memory_message_count": None,
+            "summary_status": "pending",
+            "summary_updated_at": None,
+            "summary_message_count": None,
             "new_message_count": message_count,
         }
 
-    memory_updated_at = str(getattr(memory, "updated_at", "") or "")
-    memory_message_count = _memory_message_count(getattr(memory, "metadata", {}) or {})
+    summary_updated_at = str(getattr(session_summary, "updated_at", "") or "")
+    summary_message_count = _summary_message_count(getattr(session_summary, "metadata", {}) or {})
     new_message_count = (
-        max(message_count - memory_message_count, 0)
-        if memory_message_count is not None
+        max(message_count - summary_message_count, 0)
+        if summary_message_count is not None
         else None
     )
     session_last_activity = _parse_timestamp(session.last_activity_at)
-    memory_updated = _parse_timestamp(memory_updated_at)
+    memory_updated = _parse_timestamp(summary_updated_at)
     if session_last_activity is None or memory_updated is None:
-        stale = new_message_count is None or new_message_count >= stale_memory_min_new_messages
+        stale = new_message_count is None or new_message_count >= stale_summary_min_new_messages
     else:
-        grace_cutoff = memory_updated + timedelta(minutes=STALE_MEMORY_GRACE_MINUTES)
+        grace_cutoff = memory_updated + timedelta(minutes=STALE_SUMMARY_GRACE_MINUTES)
         stale = (
             session_last_activity > grace_cutoff
             and (
                 new_message_count is None
-                or new_message_count >= stale_memory_min_new_messages
+                or new_message_count >= stale_summary_min_new_messages
             )
         )
 
     return {
-        "memory_status": "stale" if stale else "current",
-        "memory_updated_at": memory_updated_at,
-        "memory_message_count": memory_message_count,
+        "summary_status": "stale" if stale else "current",
+        "summary_updated_at": summary_updated_at,
+        "summary_message_count": summary_message_count,
         "new_message_count": new_message_count,
-        "stale_memory_grace_minutes": STALE_MEMORY_GRACE_MINUTES,
-        "stale_memory_min_new_messages": stale_memory_min_new_messages,
+        "stale_summary_grace_minutes": STALE_SUMMARY_GRACE_MINUTES,
+        "stale_summary_min_new_messages": stale_summary_min_new_messages,
     }
 
 
-def _memory_message_count(metadata: dict[str, object]) -> int | None:
+def _summary_message_count(metadata: dict[str, object]) -> int | None:
     raw = metadata.get("message_count")
     try:
         count = int(raw)
@@ -246,18 +246,18 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 
 def _contract() -> dict[str, object]:
     return {
-        "signature": "retrieve_sessions(*, selection: str = 'pending_or_stale_memory', limit: int | str = 'all')",
+        "signature": "retrieve_sessions(*, selection: str = 'pending_or_stale_summary', limit: int | str = 'all')",
         "summary": (
             "Retrieve chat-session metadata for the current vault. "
-            "The 'pending_or_stale_memory' selection returns sessions without "
-            "memory or with memory older than recent session activity. "
-            "Stale selection respects the stale_memory_min_new_messages setting."
+            "The 'pending_or_stale_summary' selection returns sessions without "
+            "a session summary or with a summary older than recent session activity. "
+            "Stale selection respects the stale_summary_min_new_messages setting."
         ),
         "arguments": {
             "selection": {
                 "type": "string",
                 "required": False,
-                "description": "Selection to return. Currently only 'pending_or_stale_memory' is supported.",
+                "description": "Selection to return. Currently only 'pending_or_stale_summary' is supported.",
             },
             "limit": {
                 "type": "int|string",
@@ -272,21 +272,21 @@ def _contract() -> dict[str, object]:
             "items": (
                 "Session metadata items. Each item has ref, content, exists, and metadata "
                 "including session_id, vault_name, title, created_at, last_activity_at, "
-                "message_count, has_memory, memory_status, memory_updated_at, "
-                "memory_message_count, new_message_count, stale_memory_grace_minutes, "
-                "and stale_memory_min_new_messages."
+                "message_count, has_summary, summary_status, summary_updated_at, "
+                "summary_message_count, new_message_count, stale_summary_grace_minutes, "
+                "and stale_summary_min_new_messages."
             ),
             "metadata": "Retrieval metadata.",
         },
         "examples": [
             {
                 "code": (
-                    "sessions = await retrieve_sessions(selection='pending_or_stale_memory', limit=100)\n"
+                    "sessions = await retrieve_sessions(selection='pending_or_stale_summary', limit=100)\n"
                     "for item in sessions.items:\n"
-                    "    await memory_ops(operation='extract_session_memory', "
+                    "    await session_ops(operation='summarize_session', "
                     "session_id=item.metadata['session_id'])"
                 ),
-                "description": "Find sessions with missing or stale memory and extract them in a workflow.",
+                "description": "Find sessions with missing or stale summaries and summarize them in a workflow.",
             }
         ],
     }

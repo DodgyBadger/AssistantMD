@@ -190,7 +190,7 @@ structured, and directly useful to the next assistant turn.
 """.strip()
 
 
-SESSION_MEMORY_SUMMARY_INTENT_PROMPT = """
+SESSION_SUMMARY_INTENT_PROMPT = """
 You are distilling what happened in an AssistantMD chat session.
 
 You have been provided with:
@@ -230,7 +230,7 @@ Conversation:
 """.strip()
 
 
-SESSION_MEMORY_CLASSIFICATION_PROMPT = """
+SESSION_SUMMARY_CLASSIFICATION_PROMPT = """
 You are turning a distilled AssistantMD chat-session summary into retrieval
 labels.
 
@@ -272,7 +272,7 @@ User intent:
 """.strip()
 
 
-SESSION_MEMORY_SOURCE_SUMMARY_PROMPT = """
+SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT = """
 You are identifying the direct source materials used in an AssistantMD chat
 session.
 

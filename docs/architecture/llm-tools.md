@@ -10,7 +10,7 @@ This subsystem builds agents, resolves model aliases, binds settings-backed tool
 - `core/authoring/shared/tool_binding.py`
 - `core/tools/`
 
-Configured built-in tools include vault file access (`file_ops_safe`, `file_ops_unsafe`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), memory operations (`memory_ops`), and web search/extraction (`web_search_*`, `tavily_extract`, `tavily_crawl`, `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
+Configured built-in tools include vault file access (`file_ops_safe`, `file_ops_unsafe`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), session lookup and summarization (`session_ops`), and web search/extraction (`web_search_*`, `tavily_extract`, `tavily_crawl`, `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
 
 ## Responsibilities
 

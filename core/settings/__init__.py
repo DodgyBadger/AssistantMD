@@ -375,15 +375,23 @@ def get_max_concurrent_workflows() -> int:
     return limit if limit > 0 else 0
 
 
-def get_stale_memory_min_new_messages() -> int:
-    """Return minimum new messages before existing session memory is stale."""
-    entry = get_general_settings().get("stale_memory_min_new_messages")
+def get_stale_summary_min_new_messages() -> int:
+    """Return minimum new messages before existing session summary is stale."""
+    settings = get_general_settings()
+    entry = settings.get("stale_summary_min_new_messages") or settings.get(
+        "stale_memory_min_new_messages"
+    )
     value = getattr(entry, "value", None) if entry is not None else None
     try:
         count = int(value)
     except (TypeError, ValueError):
         return 3
     return count if count > 0 else 1
+
+
+def get_stale_memory_min_new_messages() -> int:
+    """Return minimum new messages before existing session summary is stale."""
+    return get_stale_summary_min_new_messages()
 
 
 def get_browser_navigation_timeout_seconds() -> float:

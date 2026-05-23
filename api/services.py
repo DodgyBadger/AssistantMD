@@ -58,7 +58,7 @@ from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.compaction import compact_chat_history, get_compaction_status
-from core.memory.session_memory import SessionMemoryStore
+from core.memory.session_summary import SessionSummaryStore
 from core.vector import VectorService
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -531,14 +531,14 @@ def list_context_templates(vault_name: str) -> List[TemplateInfo]:
 def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
     """List persisted chat sessions for a vault ordered by latest activity."""
     sessions = _chat_store.list_sessions(vault_name)
-    memory_store = SessionMemoryStore()
+    summary_store = SessionSummaryStore()
     return [
         ChatSessionInfo(
             session_id=session.session_id,
             created_at=session.created_at,
             last_activity_at=session.last_activity_at,
             title=session.title or None,
-            has_memory=memory_store.get_session_memory(
+            has_summary=summary_store.get_session_summary(
                 vault_name=vault_name,
                 session_id=session.session_id,
             )
@@ -548,17 +548,17 @@ def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
     ]
 
 
-def get_chat_session_memory_summary(vault_name: str, session_id: str) -> dict:
-    """Return a lightweight memory preview for one chat session."""
-    memory = SessionMemoryStore().get_session_memory(
+def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
+    """Return a lightweight summary preview for one chat session."""
+    session_summary = SessionSummaryStore().get_session_summary(
         vault_name=vault_name,
         session_id=session_id,
     )
-    if memory is None:
+    if session_summary is None:
         return {
             "session_id": session_id,
             "vault_name": vault_name,
-            "has_memory": False,
+            "has_summary": False,
             "summary": None,
             "user_intent": None,
             "created_at": None,
@@ -570,26 +570,26 @@ def get_chat_session_memory_summary(vault_name: str, session_id: str) -> dict:
             "metadata": {},
             "artifacts": [],
         }
-    return _session_memory_response(memory)
+    return _session_summary_response(session_summary)
 
 
-async def update_chat_session_memory(
+async def update_chat_session_summary(
     *,
     vault_name: str,
     session_id: str,
     data: dict[str, Any],
 ) -> dict:
-    """Manually update one session memory record and refresh search indexes."""
-    store = SessionMemoryStore()
-    existing = store.get_session_memory(vault_name=vault_name, session_id=session_id)
+    """Manually update one session summary record and refresh search indexes."""
+    store = SessionSummaryStore()
+    existing = store.get_session_summary(vault_name=vault_name, session_id=session_id)
     if existing is None:
         raise APIException(
             status_code=404,
-            error_type="SessionMemoryNotFound",
-            message=f"Session memory not found: {session_id}",
+            error_type="SessionSummaryNotFound",
+            message=f"Session summary not found: {session_id}",
             details={"session_id": session_id, "vault_name": vault_name},
         )
-    memory = store.update_session_memory_fields(
+    session_summary = store.update_session_summary_fields(
         vault_name=vault_name,
         session_id=session_id,
         summary=data.get("summary"),
@@ -600,19 +600,19 @@ async def update_chat_session_memory(
         source_summary=data.get("source_summary"),
         metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
     )
-    indexed_fields = await _maybe_index_session_memory_for_api(
+    indexed_fields = await _maybe_index_session_summary_for_api(
         store,
         vault_name=vault_name,
         session_id=session_id,
     )
-    response = _session_memory_response(memory)
+    response = _session_summary_response(session_summary)
     response["indexed_fields"] = indexed_fields
     return response
 
 
-def delete_chat_session_memory(vault_name: str, session_id: str) -> dict:
-    """Delete one session memory record without deleting the chat session."""
-    deleted = SessionMemoryStore().delete_session_memory(
+def delete_chat_session_summary(vault_name: str, session_id: str) -> dict:
+    """Delete one session summary record without deleting the chat session."""
+    deleted = SessionSummaryStore().delete_session_summary(
         vault_name=vault_name,
         session_id=session_id,
     )
@@ -623,21 +623,21 @@ def delete_chat_session_memory(vault_name: str, session_id: str) -> dict:
     }
 
 
-async def _maybe_index_session_memory_for_api(
-    store: SessionMemoryStore,
+async def _maybe_index_session_summary_for_api(
+    store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
 ) -> int:
     try:
-        return await store.index_session_memory_fields(
+        return await store.index_session_summary_fields(
             vault_name=vault_name,
             session_id=session_id,
             vector_service=VectorService(),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "session_memory_field_indexing_skipped",
+            "session_summary_field_indexing_skipped",
             data={
                 "source": "api",
                 "vault_name": vault_name,
@@ -649,21 +649,21 @@ async def _maybe_index_session_memory_for_api(
         return 0
 
 
-def _session_memory_response(memory) -> dict:
+def _session_summary_response(session_summary) -> dict:
     return {
-        "session_id": memory.session_id,
-        "vault_name": memory.vault_name,
-        "has_memory": True,
-        "summary": memory.summary,
-        "user_intent": memory.user_intent,
-        "created_at": memory.created_at,
-        "updated_at": memory.updated_at,
-        "domain": memory.domain,
-        "work_product": memory.work_product,
-        "named_entities": memory.named_entities,
-        "source_summary": memory.source_summary,
-        "metadata": memory.metadata,
-        "artifacts": [artifact.to_dict() for artifact in memory.artifacts],
+        "session_id": session_summary.session_id,
+        "vault_name": session_summary.vault_name,
+        "has_summary": True,
+        "summary": session_summary.summary,
+        "user_intent": session_summary.user_intent,
+        "created_at": session_summary.created_at,
+        "updated_at": session_summary.updated_at,
+        "domain": session_summary.domain,
+        "work_product": session_summary.work_product,
+        "named_entities": session_summary.named_entities,
+        "source_summary": session_summary.source_summary,
+        "metadata": session_summary.metadata,
+        "artifacts": [artifact.to_dict() for artifact in session_summary.artifacts],
     }
 
 
@@ -708,7 +708,7 @@ def set_chat_session_title(vault_name: str, session_id: str, title: str | None) 
 
 def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: str) -> ChatSessionExportResponse:
     """Export one chat session transcript to the vault on demand."""
-    memory = SessionMemoryStore().get_session_memory(
+    session_summary = SessionSummaryStore().get_session_summary(
         vault_name=vault_name,
         session_id=session_id,
     )
@@ -717,7 +717,7 @@ def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: s
         vault_path=vault_path,
         vault_name=vault_name,
         session_id=session_id,
-        memory_summary=memory.summary if memory else None,
+        session_summary=session_summary.summary if session_summary else None,
     )
     return ChatSessionExportResponse(
         session_id=session_id,
@@ -769,10 +769,10 @@ async def compact_chat_session_history(
 
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
-    """Delete one chat session and its session memory."""
+    """Delete one chat session and its session summary."""
     del vault_path
     _chat_store.delete_sessions(vault_name, session_id=session_id)
-    SessionMemoryStore().delete_session_memory(vault_name=vault_name, session_id=session_id)
+    SessionSummaryStore().delete_session_summary(vault_name=vault_name, session_id=session_id)
 
 
 def purge_chat_sessions(
@@ -783,9 +783,9 @@ def purge_chat_sessions(
 ) -> ChatSessionsPurgeResponse:
     """Delete old chat sessions and their transcript files for a vault."""
     deleted_ids = _chat_store.delete_sessions(vault_name, older_than_days=older_than_days)
-    memory_store = SessionMemoryStore()
+    summary_store = SessionSummaryStore()
     for session_id in deleted_ids:
-        memory_store.delete_session_memory(vault_name=vault_name, session_id=session_id)
+        summary_store.delete_session_summary(vault_name=vault_name, session_id=session_id)
     remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted_ids)
 
     n = len(deleted_ids)

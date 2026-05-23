@@ -1,21 +1,21 @@
-"""Derived session-memory storage and retrieval primitives."""
+"""Derived session-summary storage and retrieval primitives."""
 
-from core.memory.session_memory import (
+from core.memory.session_summary import (
     RelatedSessionContribution,
     RelatedSessionResult,
-    SessionMemory,
-    SessionMemoryArtifact,
-    SessionMemorySearchResult,
-    SessionMemoryStore,
+    SessionSummary,
+    SessionSummaryArtifact,
+    SessionSummarySearchResult,
+    SessionSummaryStore,
     normalize_field_value,
 )
 
 __all__ = [
     "RelatedSessionContribution",
     "RelatedSessionResult",
-    "SessionMemory",
-    "SessionMemoryArtifact",
-    "SessionMemorySearchResult",
-    "SessionMemoryStore",
+    "SessionSummary",
+    "SessionSummaryArtifact",
+    "SessionSummarySearchResult",
+    "SessionSummaryStore",
     "normalize_field_value",
 ]

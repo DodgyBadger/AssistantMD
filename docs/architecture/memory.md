@@ -1,29 +1,29 @@
 # Memory Subsystem
 
-The memory subsystem stores and retrieves derived session memory. Chat history
-brokering lives in the chat subsystem so memory records remain distinct from the
-conversation history they are derived from.
+The memory subsystem stores and retrieves derived session summaries. Chat
+history brokering lives in the chat subsystem so derived summary records remain
+distinct from the conversation history they are derived from.
 
 ## Primary code
 
-- `core/memory/session_memory.py` — session-memory storage, indexing, and retrieval
-- `core/memory/schema.py` — SQLite schema bootstrap for `system/memory.db`
+- `core/memory/session_summary.py` — session-summary storage, indexing, and retrieval
+- `core/memory/schema.py` — SQLite schema bootstrap for `system/session_summaries.db`
 - `core/chat/history_service.py` — chat-history broker, providers, normalized result types
 - `core/authoring/helpers/history/retrieve.py` — Monty `retrieve_history(...)` adapter
 - `core/authoring/helpers/retrieve_sessions.py` — Monty `retrieve_sessions(...)` adapter
 - `core/authoring/helpers/history/assemble.py` — Monty `assemble_context(...)` adapter
-- `core/tools/memory_ops.py` — LLM-facing memory tool adapter
+- `core/tools/session_ops.py` — LLM-facing session lookup and summarization adapter
 - `core/chat/chat_store.py` — persisted SQLite-backed message source
 
 ## Responsibilities
 
-- Store extracted memory fields for chat sessions.
-- Index retrieval-oriented memory fields for lexical and vector retrieval.
+- Store derived summary fields for chat sessions.
+- Index retrieval-oriented summary fields for lexical and vector retrieval.
 - Store source provenance separately from indexed retrieval fields so source
-  details can ground returned memories without dominating candidate selection.
+  details can ground returned summaries without dominating candidate selection.
 - Attach output artifacts discovered from chat-scoped vault mutations.
-- Expose session-memory creation, update, lookup, and search through `memory_ops`.
-- Use the chat-history broker when memory extraction needs source conversation history.
+- Expose session-summary creation, update, lookup, and search through `session_ops`.
+- Use the chat-history broker when session summarization needs source conversation history.
 
 ## Provider Model
 
@@ -49,13 +49,13 @@ Context scripts should use `retrieve_history(...)` rather than reading chat stor
 
 `assemble_context(...)` accepts those safe units and preserves provider-native message fidelity for downstream chat context. The latest active message is not appended by scripts; the chat runtime adds it once after assembled history.
 
-Workflow scripts can use `retrieve_sessions(selection="pending_or_stale_memory")`
-to enumerate current-vault chat sessions that either lack a derived
-session-memory row or have stale memory. The helper returns session metadata
-only; it does not retrieve transcript messages or perform extraction. Workflows
-should compose it with `memory_ops` when they need to extract memory for
-selected sessions. Stale-memory selection uses a fixed grace window after the
-last extraction and the `stale_memory_min_new_messages` general setting before
+Workflow scripts can use `retrieve_sessions(selection="pending_or_stale_summary")`
+to enumerate current-vault chat sessions that either lack a stored summary or
+have a stale summary. The helper returns session metadata only; it does not
+retrieve transcript messages or perform summarization. Workflows should compose
+it with `session_ops` when they need to summarize selected sessions. Stale
+summary selection uses a fixed grace window after the last summary update and
+the `stale_summary_min_new_messages` general setting before
 including an already-indexed session again.
 
 During active context assembly, the context manager passes curated prior history in
@@ -67,24 +67,24 @@ including after process restart.
 
 ## Tool Contract
 
-`memory_ops` is the LLM-facing adapter for session memory operations. It is
-available through the normal configured tool path, so chat agents and authored
-scripts use the same operation surface for session memory lookup, updates, and
-search. Conversation history is not exposed through `memory_ops`; if chat
-history should become memory, it should first be exported or extracted into
-vault artifacts or direct session memory fields. `extract_session_memory` uses
-the shared chat-history broker to read conversation history before deriving session
-memory fields. Context scripts should use `retrieve_history(...)` and
-`assemble_context(...)` for context reassembly. If a
-lower-level caller needs direct access to individual provider-native parts, it
-should use a lower-level service/provider interface rather than the
-general-purpose LLM tool.
+`session_ops` is the LLM-facing adapter for prior-session lookup and
+summarization. It is available through the normal configured tool path, so chat
+agents and authored scripts use the same operation surface for session-summary
+lookup, updates, and search. Conversation history is not exposed through
+`session_ops`; if chat history should become a summary, use
+`summarize_session` or write explicit summary fields through
+`upsert_session_summary`. `summarize_session` uses the shared chat-history
+broker to read conversation history before deriving session-summary fields.
+Context scripts should use `retrieve_history(...)` and `assemble_context(...)`
+for context reassembly. If a lower-level caller needs direct access to
+individual provider-native parts, it should use a lower-level service/provider
+interface rather than the general-purpose LLM tool.
 
 Session retrieval is exposed as `search_sessions` with modes rather than direct
 field selection. `related` compares the current or specified session against
-stored memory; `search` fans a user query across memory fields using FTS/BM25
-and vector evidence; `deep` adds FTS/BM25 over raw chat transcripts. Field-aware
-storage and scoring remain internal implementation details.
+stored summaries; `search` fans a user query across summary fields using
+FTS/BM25 and vector evidence; `deep` adds FTS/BM25 over raw chat transcripts.
+Field-aware storage and scoring remain internal implementation details.
 
 ## Design Notes
 

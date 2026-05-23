@@ -1,4 +1,4 @@
-"""SQLite schema helpers for session memory."""
+"""SQLite schema helpers for session summaries."""
 
 from __future__ import annotations
 
@@ -6,32 +6,32 @@ from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
 
-DB_NAME = "memory"
-MIGRATION_NAMESPACE = "memory"
+DB_NAME = "session_summaries"
+MIGRATION_NAMESPACE = "session_summaries"
 
-MEMORY_MIGRATIONS = (
+SESSION_SUMMARY_MIGRATIONS = (
     SQLiteMigration(
         version=1,
-        name="add_session_memory_source_summary",
+        name="add_session_summary_source_summary",
         apply=lambda conn: _migrate_source_summary(conn),
     ),
     SQLiteMigration(
         version=2,
-        name="remove_source_summary_from_session_memory_fts",
+        name="remove_source_summary_from_session_summary_fts",
         apply=lambda conn: _migrate_source_summary_out_of_retrieval(conn),
     ),
 )
 
 
-def ensure_memory_schema(system_root: str | None = None) -> None:
-    """Create session memory tables when they do not already exist."""
+def ensure_session_summary_schema(system_root: str | None = None) -> None:
+    """Create session summary tables when they do not already exist."""
     conn = connect_sqlite_from_system_db(DB_NAME, system_root)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
-        _drop_obsolete_memory_tables(conn)
+        _drop_obsolete_summary_tables(conn)
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS session_memories (
+            CREATE TABLE IF NOT EXISTS session_summaries (
                 session_id TEXT NOT NULL,
                 vault_name TEXT NOT NULL,
                 title TEXT,
@@ -50,19 +50,19 @@ def ensure_memory_schema(system_root: str | None = None) -> None:
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_session_memories_vault_updated
-            ON session_memories(vault_name, updated_at)
+            CREATE INDEX IF NOT EXISTS idx_session_summaries_vault_updated
+            ON session_summaries(vault_name, updated_at)
             """
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_session_memories_vault_domain
-            ON session_memories(vault_name, domain)
+            CREATE INDEX IF NOT EXISTS idx_session_summaries_vault_domain
+            ON session_summaries(vault_name, domain)
             """
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS session_memory_artifacts (
+            CREATE TABLE IF NOT EXISTS session_summary_artifacts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
                 vault_name TEXT NOT NULL,
@@ -71,7 +71,7 @@ def ensure_memory_schema(system_root: str | None = None) -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 metadata_json TEXT,
                 FOREIGN KEY (session_id, vault_name)
-                    REFERENCES session_memories(session_id, vault_name)
+                    REFERENCES session_summaries(session_id, vault_name)
                     ON DELETE CASCADE,
                 UNIQUE (session_id, vault_name, path, artifact_role)
             )
@@ -79,21 +79,21 @@ def ensure_memory_schema(system_root: str | None = None) -> None:
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_session_memory_artifacts_path
-            ON session_memory_artifacts(vault_name, path)
+            CREATE INDEX IF NOT EXISTS idx_session_summary_artifacts_path
+            ON session_summary_artifacts(vault_name, path)
             """
         )
-        _create_session_memories_fts(conn)
+        _create_session_summaries_fts(conn)
         conn.commit()
-        apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=MEMORY_MIGRATIONS)
-        _backfill_session_memories_fts(conn)
+        apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=SESSION_SUMMARY_MIGRATIONS)
+        _backfill_session_summaries_fts(conn)
         conn.commit()
     finally:
         conn.close()
 
 
-def _drop_obsolete_memory_tables(conn) -> None:
-    """Remove abandoned prototype tables from memory.db."""
+def _drop_obsolete_summary_tables(conn) -> None:
+    """Remove abandoned prototype tables from session_summaries.db."""
     for table_name in (
         "workstream_artifacts",
         "workstream_sessions",
@@ -105,36 +105,36 @@ def _drop_obsolete_memory_tables(conn) -> None:
 
 def _migrate_source_summary(conn) -> None:
     """Add source_summary and rebuild the FTS table."""
-    columns = _table_columns(conn, "session_memories")
+    columns = _table_columns(conn, "session_summaries")
     if "source_summary" not in columns:
-        conn.execute("ALTER TABLE session_memories ADD COLUMN source_summary TEXT")
-    _rebuild_session_memories_fts(conn)
+        conn.execute("ALTER TABLE session_summaries ADD COLUMN source_summary TEXT")
+    _rebuild_session_summaries_fts(conn)
 
 
 def _migrate_source_summary_out_of_retrieval(conn) -> None:
     """Remove source_summary from retrieval indexes while preserving the field."""
-    _rebuild_session_memories_fts(conn)
+    _rebuild_session_summaries_fts(conn)
     vector_table_exists = conn.execute(
         """
         SELECT 1
         FROM sqlite_master
         WHERE type = 'table'
-          AND name = 'session_memory_field_vectors'
+          AND name = 'session_summary_field_vectors'
         """
     ).fetchone()
     if vector_table_exists:
         conn.execute(
             """
-            DELETE FROM session_memory_field_vectors
+            DELETE FROM session_summary_field_vectors
             WHERE metadata_json LIKE '%"field_type": "source_summary"%'
             """
         )
 
 
-def _create_session_memories_fts(conn) -> None:
+def _create_session_summaries_fts(conn) -> None:
     conn.execute(
         """
-        CREATE VIRTUAL TABLE IF NOT EXISTS session_memories_fts USING fts5(
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_summaries_fts USING fts5(
             session_id UNINDEXED,
             vault_name UNINDEXED,
             title,
@@ -149,25 +149,25 @@ def _create_session_memories_fts(conn) -> None:
     )
 
 
-def _rebuild_session_memories_fts(conn) -> None:
-    conn.execute("DROP TABLE IF EXISTS session_memories_fts")
-    _create_session_memories_fts(conn)
-    _insert_session_memories_fts_rows(conn)
+def _rebuild_session_summaries_fts(conn) -> None:
+    conn.execute("DROP TABLE IF EXISTS session_summaries_fts")
+    _create_session_summaries_fts(conn)
+    _insert_session_summaries_fts_rows(conn)
 
 
-def _backfill_session_memories_fts(conn) -> None:
-    """Populate the FTS table for existing memory rows when first introduced."""
-    memory_count = conn.execute("SELECT COUNT(*) FROM session_memories").fetchone()[0]
-    fts_count = conn.execute("SELECT COUNT(*) FROM session_memories_fts").fetchone()[0]
-    if memory_count == 0 or fts_count > 0:
+def _backfill_session_summaries_fts(conn) -> None:
+    """Populate the FTS table for existing summary rows when first introduced."""
+    summary_count = conn.execute("SELECT COUNT(*) FROM session_summaries").fetchone()[0]
+    fts_count = conn.execute("SELECT COUNT(*) FROM session_summaries_fts").fetchone()[0]
+    if summary_count == 0 or fts_count > 0:
         return
-    _insert_session_memories_fts_rows(conn)
+    _insert_session_summaries_fts_rows(conn)
 
 
-def _insert_session_memories_fts_rows(conn) -> None:
+def _insert_session_summaries_fts_rows(conn) -> None:
     conn.execute(
         """
-        INSERT INTO session_memories_fts (
+        INSERT INTO session_summaries_fts (
             session_id, vault_name, title, summary, domain,
             work_product, user_intent, named_entities
         )
@@ -175,7 +175,7 @@ def _insert_session_memories_fts_rows(conn) -> None:
             session_id, vault_name, COALESCE(title, ''), COALESCE(summary, ''),
             COALESCE(domain, ''), COALESCE(work_product, ''),
             COALESCE(user_intent, ''), COALESCE(named_entities, '')
-        FROM session_memories
+        FROM session_summaries
         """
     )
 

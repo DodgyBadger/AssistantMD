@@ -113,22 +113,22 @@ class VectorEmbeddingServiceProbeScenario(BaseScenario):
             table_name="validation_vectors",
         )
         vector_store.upsert(
-            namespace="session_memory_fields",
+            namespace="session_summary_fields",
             item_id="session-wetlands:domain",
             embedding=documents.vectors[0],
         )
         vector_store.upsert(
-            namespace="session_memory_fields",
+            namespace="session_summary_fields",
             item_id="session-watershed:domain",
             embedding=documents.vectors[1],
         )
         vector_store.upsert(
-            namespace="session_memory_fields",
+            namespace="session_summary_fields",
             item_id="session-other-space:domain",
             embedding=other_space_query.vectors[0],
         )
         results = vector_store.search_similar(
-            namespace="session_memory_fields",
+            namespace="session_summary_fields",
             query=query.vectors[0],
             limit=5,
         )

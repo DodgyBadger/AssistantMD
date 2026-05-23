@@ -1,31 +1,32 @@
-# `memory_ops`
+# `session_ops`
 
 ## Purpose
 
-Manage memory extracted from chat sessions.
+Search prior chat sessions and create or update lightweight session summaries.
 
 This tool is available to chat and context scripts as the direct operation
-surface for session memory lookup, search, and session-memory updates.
+surface for prior-session lookup, transcript search, and session-summary
+updates.
 
 The selected runtime vault is always the scope. Do not pass or infer a vault
 parameter.
 
 ## Parameters
 
-- `operation`: required. Supported values are `extract_session_memory`,
-  `upsert_session_memory`, `get_session_memory`, and `search_sessions`.
+- `operation`: required. Supported values are `summarize_session`,
+  `upsert_session_summary`, `get_session_summary`, and `search_sessions`.
 - `session_id`: optional explicit session id. Defaults to the active session
   when available.
 - `mode`: optional search mode for `search_sessions`. Supported values are
   `search`, `deep`, and `related`. Defaults to `search`.
 - `query`: search phrase for the default `search` mode and for `deep` mode.
 - `limit`: optional positive integer result limit for `search_sessions`.
-- `data`: optional object for `upsert_session_memory`. Supported keys are
+- `data`: optional object for `upsert_session_summary`. Supported keys are
   `summary`, `domain`, `work_product`, `user_intent`, `named_entities`,
   `source_summary`, `artifacts`, and `metadata`.
-- `extraction_model`: optional model alias for `extract_session_memory`.
+- `summarization_model`: optional model alias for `summarize_session`.
 
-## Session Memory Field Contract
+## Session Summary Field Contract
 
 Use these fields as short summaries of one chat session. Prefer durable
 descriptions of the user's work over momentary prompt phrasing.
@@ -60,60 +61,61 @@ descriptions of the user's work over momentary prompt phrasing.
 
 For manual writes, put these fields inside `data`. `data.artifacts` is an
 optional list of artifact objects with `path`, optional `artifact_role`, and
-`metadata`. `data.metadata` is optional JSON object metadata for the memory row.
+`metadata`. `data.metadata` is optional JSON object metadata for the stored
+session summary row.
 
 ## Output Shape
 
 Returns pretty-printed JSON text. Successful operations include a stable
 `status` and `operation` value, plus operation-specific data such as
-`session_memory` or ranked `matches`.
+`session_summary` or ranked `matches`.
 
 ## Notes
 
-- `get_session_memory` is read-only. It fetches the memory row for the current
+- `get_session_summary` is read-only. It fetches the stored summary for the current
   or specified session and returns `status: "found"` or `status: "not_found"`.
-- `extract_session_memory` reads the transcript and structured tool events for
+- `summarize_session` reads the transcript and structured tool events for
   the current or specified session, runs AssistantMD's standard extraction
-  policy, upserts the resulting memory fields, attaches any vault files mutated
+  policy, upserts the resulting summary fields, attaches any vault files mutated
   by that chat session as artifacts, and indexes vector-searchable fields.
-- `upsert_session_memory` manually stores the `data` values supplied by the
+- `upsert_session_summary` manually stores the `data` values supplied by the
   caller for the current or specified session. It does not read the transcript
   or infer missing fields.
 - `search_sessions` finds candidate prior sessions.
-  - `mode: "search"` is the default. It searches the supplied `query` across memory fields using
+  - `mode: "search"` is the default. It searches the supplied `query` across session-summary fields using
     lexical FTS/BM25 evidence plus semantic vector evidence.
-  - `mode: "deep"` searches memory fields plus raw chat transcripts.
+  - `mode: "deep"` searches session-summary fields plus raw chat transcripts.
   - `mode: "related"` compares an already-extracted current or specified session
-    against prior sessions using stored memory fields.
+    against prior sessions using stored summary fields.
 - Use `search` for normal live-chat lookup when the current session does not
-  yet have stored memory, or when the user names a specific word, phrase, topic,
+  yet have a stored summary, or when the user names a specific word, phrase, topic,
   or concept.
 - Use `deep` when the user asks for a broader or transcript-level search.
 - Use `related` only when investigating an existing session that already has
-  stored memory and you want to find neighboring sessions.
+  a stored summary and you want to find neighboring sessions.
 - For `search` and `deep`, include `query` as a plain natural-language phrase.
   Do not use explicit boolean syntax such as uppercase `AND`/`OR`. Use a
   positive integer `limit`.
 
 ## Common Calls
 
-Fetch memory for the current session:
+Fetch the stored summary for the current session:
 
 ```json
-{"operation": "get_session_memory"}
+{"operation": "get_session_summary"}
 ```
 
-Extract memory for the current session:
+Summarize the current session:
 
 ```json
-{"operation": "extract_session_memory"}
+{"operation": "summarize_session"}
 ```
 
-Manually store memory fields for the current session:
+Manually store summary fields for the current session:
 
 ```json
 {
-  "operation": "upsert_session_memory",
+  "operation": "upsert_session_summary",
   "data": {
     "summary": "Drafted a donor update about wetland restoration.",
     "domain": "conservation fundraising",
@@ -129,13 +131,13 @@ Manually store memory fields for the current session:
 }
 ```
 
-Search memory fields for a user-named concept:
+Search session-summary fields for a user-named concept:
 
 ```json
 {"operation": "search_sessions", "query": "greenhouse gas accounting", "limit": 5}
 ```
 
-Search memory fields and raw transcripts:
+Search session-summary fields and raw transcripts:
 
 ```json
 {"operation": "search_sessions", "mode": "deep", "query": "greenhouse gas accounting", "limit": 5}

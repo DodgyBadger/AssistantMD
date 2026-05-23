@@ -1,5 +1,5 @@
 """
-Experiment scenario for the memory_ops session memory contract.
+Experiment scenario for the session_ops session operations contract.
 """
 
 import json
@@ -18,32 +18,32 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from pydantic_ai.usage import RequestUsage
 
 from core.chat.chat_store import ChatStore
-from core.memory.session_memory import SessionMemoryStore
+from core.memory.session_summary import SessionSummaryStore
 from core.runtime.execution_tasks import chat_session_scope
-from core.tools.memory_ops import MemoryOps
+from core.tools.session_ops import SessionOps
 from core.vector import VectorService
 from core.vault_state.service import VaultStateService
 from validation.core.base_scenario import BaseScenario
 
 
-class MemoryOpsSessionProbeScenario(BaseScenario):
-    """Probe memory_ops session memory operations without chat tool registration."""
+class SessionOpsSessionProbeScenario(BaseScenario):
+    """Probe session_ops session operations without chat tool registration."""
 
     async def test_scenario(self):
         controller = self._get_system_controller()
         system_root = controller._system_root
-        vault_name = "MemoryOpsProbeVault"
+        vault_name = "SessionOpsProbeVault"
 
-        store = SessionMemoryStore(system_root=str(system_root))
+        store = SessionSummaryStore(system_root=str(system_root))
         chat_store = ChatStore(system_root=str(system_root))
         VaultStateService()
         _insert_chat_mutation_rows(
             system_root=system_root,
-            vault_id="memory-ops-probe-vault-id",
+            vault_id="session-ops-probe-vault-id",
             vault_name=vault_name,
             session_id="extract-session",
         )
-        store.upsert_session_memory(
+        store.upsert_session_summary(
             session_id="session-donor-wetlands",
             vault_name=vault_name,
             title="Wetlands donor report",
@@ -108,13 +108,13 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             result_metadata={"token_count": 5},
         )
 
-        import core.tools.memory_ops as memory_ops_module
+        import core.tools.session_ops as session_ops_module
 
-        original_vector_service = memory_ops_module.VectorService
-        original_create_agent = memory_ops_module.create_agent
-        original_generate_response = memory_ops_module.generate_response
-        original_build_model_instance = memory_ops_module.build_model_instance
-        memory_ops_module.VectorService = lambda: VectorService(
+        original_vector_service = session_ops_module.VectorService
+        original_create_agent = session_ops_module.create_agent
+        original_generate_response = session_ops_module.generate_response
+        original_build_model_instance = session_ops_module.build_model_instance
+        session_ops_module.VectorService = lambda: VectorService(
             embedding_model_overrides={
                 "embeddings": SemanticProbeEmbeddingModel(dimensions=1536)
             }
@@ -159,31 +159,31 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                     "Do not create bullets named `Session summary`, `Tool log`" in prompt,
                     "source_summary prompt should forbid meta-source labels",
                 )
-            if agent is memory_ops_module._SessionSummaryIntent:
-                return memory_ops_module._SessionSummaryIntent(
+            if agent is session_ops_module._SessionSummaryIntent:
+                return session_ops_module._SessionSummaryIntent(
                     summary="Drafted a donor update about wetland restoration.",
                     user_intent="Prepare a donor-facing update about wetland restoration progress.",
                 )
-            if agent is memory_ops_module._SessionClassification:
-                return memory_ops_module._SessionClassification(
+            if agent is session_ops_module._SessionClassification:
+                return session_ops_module._SessionClassification(
                     domain="conservation fundraising",
                     work_product="donor update",
                     named_entities="",
                 )
-            return memory_ops_module._SessionSourceSummary(
+            return session_ops_module._SessionSourceSummary(
                 source_summary="Read Sources/Wetlands/source-note.md for wetland restoration progress and donor-facing outcomes.",
             )
 
-        memory_ops_module.create_agent = _fake_create_agent
-        memory_ops_module.generate_response = _fake_generate_response
-        memory_ops_module.build_model_instance = lambda value: value
+        session_ops_module.create_agent = _fake_create_agent
+        session_ops_module.generate_response = _fake_generate_response
+        session_ops_module.build_model_instance = lambda value: value
         try:
-            await store.index_session_memory_fields(
+            await store.index_session_summary_fields(
                 vault_name=vault_name,
                 session_id="session-donor-wetlands",
-                vector_service=memory_ops_module.VectorService(),
+                vector_service=session_ops_module.VectorService(),
             )
-            tool = MemoryOps.get_tool()
+            tool = SessionOps.get_tool()
             ctx = SimpleNamespace(
                 deps=SimpleNamespace(
                     session_id="riparian-grant-session",
@@ -202,13 +202,13 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             extracted = await _call(
                 tool,
                 extract_ctx,
-                operation="extract_session_memory",
+                operation="summarize_session",
             )
 
             upserted = await _call(
                 tool,
                 ctx,
-                operation="upsert_session_memory",
+                operation="upsert_session_summary",
                 data={
                     "summary": "Drafting a grant proposal about riparian restoration.",
                     "domain": "conservation fundraising",
@@ -224,11 +224,11 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 },
             )
 
-            current = await _call(tool, ctx, operation="get_session_memory")
+            current = await _call(tool, ctx, operation="get_session_summary")
             updated = await _call(
                 tool,
                 ctx,
-                operation="upsert_session_memory",
+                operation="upsert_session_summary",
                 data={
                     "summary": "Drafting a grant proposal about riparian restoration using a reusable grant narrative.",
                     "domain": "conservation fundraising",
@@ -252,7 +252,7 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             fetched = await _call(
                 tool,
                 ctx,
-                operation="get_session_memory",
+                operation="get_session_summary",
             )
             searched_by_type = await _call(
                 tool,
@@ -297,10 +297,10 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
                 mode="related",
             )
         finally:
-            memory_ops_module.VectorService = original_vector_service
-            memory_ops_module.create_agent = original_create_agent
-            memory_ops_module.generate_response = original_generate_response
-            memory_ops_module.build_model_instance = original_build_model_instance
+            session_ops_module.VectorService = original_vector_service
+            session_ops_module.create_agent = original_create_agent
+            session_ops_module.generate_response = original_generate_response
+            session_ops_module.build_model_instance = original_build_model_instance
 
         report = {
             "extracted": extracted,
@@ -317,43 +317,43 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             "no_query_search_error": no_query_search_error,
             "related": related,
         }
-        (self.artifacts_dir / "memory_ops_session_probe.json").write_text(
+        (self.artifacts_dir / "session_ops_session_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
 
-        self.soft_assert_equal(upserted["status"], "ok", "upsert_session_memory should succeed")
+        self.soft_assert_equal(upserted["status"], "ok", "upsert_session_summary should succeed")
         self.soft_assert_equal(
             extracted["status"],
             "ok",
-            "extract_session_memory should succeed",
+            "summarize_session should succeed",
         )
         self.soft_assert_equal(
-            extracted["session_memory"]["session_id"],
+            extracted["session_summary"]["session_id"],
             "extract-session",
-            "extract_session_memory should store memory for the active session",
+            "summarize_session should store a summary for the active session",
         )
         self.soft_assert_equal(
-            extracted["session_memory"]["summary"],
+            extracted["session_summary"]["summary"],
             "Drafted a donor update about wetland restoration.",
-            "extract_session_memory should persist extracted summary",
+            "summarize_session should persist extracted summary",
         )
         self.soft_assert_equal(
             extracted["indexed_fields"],
             4,
-            "extract_session_memory should index extracted vector-searchable fields",
+            "summarize_session should index extracted vector-searchable fields",
         )
         self.soft_assert_equal(
-            extracted["session_memory"]["source_summary"],
+            extracted["session_summary"]["source_summary"],
             "Read Sources/Wetlands/source-note.md for wetland restoration progress and donor-facing outcomes.",
-            "extract_session_memory should persist source_summary from tool events",
+            "summarize_session should persist source_summary from tool events",
         )
         self.soft_assert_equal(
             extracted["artifact_count"],
             2,
-            "extract_session_memory should attach artifacts from chat-scoped file mutations",
+            "summarize_session should attach artifacts from chat-scoped file mutations",
         )
-        extracted_artifacts = extracted["session_memory"]["artifacts"]
+        extracted_artifacts = extracted["session_summary"]["artifacts"]
         self.soft_assert_equal(
             {artifact["path"] for artifact in extracted_artifacts},
             {"Reports/Wetlands/update.md", "Reports/Wetlands/archive.md"},
@@ -373,29 +373,29 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         self.soft_assert_equal(
             upserted["indexed_fields"],
             4,
-            "upsert_session_memory should index vector-searchable fields",
+            "upsert_session_summary should index vector-searchable fields",
         )
         self.soft_assert_equal(current["status"], "found")
         self.soft_assert_equal(
-            current["session_memory"]["session_id"],
+            current["session_summary"]["session_id"],
             "riparian-grant-session",
         )
         self.soft_assert_equal(
             updated["indexed_fields"],
             4,
-            "upsert_session_memory should refresh vector-searchable fields",
+            "upsert_session_summary should refresh vector-searchable fields",
         )
         self.soft_assert(
-            updated["session_memory"]["summary"]
+            updated["session_summary"]["summary"]
             == "Drafting a grant proposal about riparian restoration using a reusable grant narrative.",
-            "upsert_session_memory should replace direct summary field",
+            "upsert_session_summary should replace direct summary field",
         )
         self.soft_assert(
             any(
                 match["session_id"] == "riparian-grant-session"
                 for match in searched["matches"]
             ),
-            "search_sessions should find created session memory",
+            "search_sessions should find created session summary",
         )
         self.soft_assert(
             any(
@@ -408,13 +408,13 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
             ),
             "search_sessions should use indexed field vectors for semantic matches",
         )
-        self.soft_assert_equal(len(fetched["session_memory"]["artifacts"]), 1)
+        self.soft_assert_equal(len(fetched["session_summary"]["artifacts"]), 1)
         self.soft_assert(
             any(
                 match["session_id"] == "session-donor-wetlands"
                 for match in searched_by_type["matches"]
             ),
-            "search_sessions should retrieve candidates across memory fields",
+            "search_sessions should retrieve candidates across session-summary fields",
         )
         self.soft_assert(
             "plain search phrase" in boolean_search_error,
@@ -436,14 +436,14 @@ class MemoryOpsSessionProbeScenario(BaseScenario):
         self.soft_assert_equal(related["status"], "ok")
         self.soft_assert(
             all(
-                match["session_memory"]["session_id"] != "riparian-grant-session"
+                match["session_summary"]["session_id"] != "riparian-grant-session"
                 for match in related["matches"]
             ),
             "related search should exclude the current session",
         )
         self.soft_assert(
             any(
-                match["session_memory"]["session_id"] == "session-donor-wetlands"
+                match["session_summary"]["session_id"] == "session-donor-wetlands"
                 for match in related["matches"]
             ),
             "related search should retrieve related prior sessions",
@@ -468,7 +468,7 @@ async def _call_model_retry(tool, ctx, **kwargs) -> str:
         await tool.function(ctx, **kwargs)
     except ModelRetry as exc:
         return str(exc)
-    raise AssertionError("Expected memory_ops call to raise ModelRetry")
+    raise AssertionError("Expected session_ops call to raise ModelRetry")
 
 
 def _insert_chat_mutation_rows(

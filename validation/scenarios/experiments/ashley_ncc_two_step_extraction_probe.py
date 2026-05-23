@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from core.llm.agents import create_agent, generate_response
 from core.llm.model_factory import build_model_instance
-from core.memory.session_memory import SessionMemoryStore
+from core.memory.session_summary import SessionSummaryStore
 from core.vector import VectorService
 from validation.core.base_scenario import BaseScenario
 
@@ -98,7 +98,7 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
         data = json.loads(INPUT_PATH.read_text(encoding="utf-8"))
         sessions_by_id = {session["session_id"]: session for session in data["sessions"]}
         selected_sessions = [sessions_by_id[session_id] for session_id in SESSION_IDS]
-        store = SessionMemoryStore(system_root=str(controller._system_root))
+        store = SessionSummaryStore(system_root=str(controller._system_root))
         vector_service = VectorService()
         summary_agent = await create_agent(
             model=build_model_instance(MODEL_ALIAS),
@@ -131,7 +131,7 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
                 "work_product": classification["work_product"],
             }
 
-            store.upsert_session_memory(
+            store.upsert_session_summary(
                 vault_name=session["vault_name"],
                 session_id=session["session_id"],
                 title=session["title"],
@@ -150,7 +150,7 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
                     "tool_event_count": session["tool_event_count"],
                 },
             )
-            indexed_fields = await store.index_session_memory_fields(
+            indexed_fields = await store.index_session_summary_fields(
                 vault_name=session["vault_name"],
                 session_id=session["session_id"],
                 vector_service=vector_service,
@@ -180,7 +180,7 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
         artifact = {
             "model": MODEL_ALIAS,
             "input_path": str(INPUT_PATH),
-            "memory_db": str(controller._system_root / "memory.db"),
+            "memory_db": str(controller._system_root / "session_summaries.db"),
             "vault_name": data["vault_name"],
             "session_count": len(results),
             "session_ids": list(SESSION_IDS),
@@ -225,7 +225,7 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
         )
         self.soft_assert(
             all(result["indexed_fields"] > 0 for result in results),
-            "Each extracted session memory should index vector-searchable fields",
+            "Each extracted session summary should index vector-searchable fields",
         )
         self.teardown_scenario()
         self.assert_no_failures()
@@ -284,7 +284,7 @@ Fields:
 Rules:
 - Keep fields concise but specific enough to support later retrieval.
 - For `work_product`, do not use phrases like `memory entry`,
-  `memory record`, or `session memory` unless the user's actual task was
+  `summary record`, or `session summary` unless the user's actual task was
   to build memory-system documentation or code.
 - Keep `work_product` under 8 words when possible.
 - Return only the structured output.
@@ -340,7 +340,7 @@ def _render_markdown(artifact: dict) -> str:
 
 async def _run_field_similarity_probes(
     *,
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     vector_service: VectorService,
     results: list[dict],
     vault_name: str,
@@ -351,7 +351,7 @@ async def _run_field_similarity_probes(
             value = current["extraction"].get(field_type, "").strip()
             matches = ()
             if value:
-                matches = await store.search_session_memories_by_field(
+                matches = await store.search_session_summaries_by_field(
                     vault_name=vault_name,
                     field_type=field_type,
                     value=value,
@@ -362,7 +362,7 @@ async def _run_field_similarity_probes(
             other_matches = [
                 match.to_dict()
                 for match in matches
-                if match.session_memory.session_id != current["session_id"]
+                if match.session_summary.session_id != current["session_id"]
             ][:FIELD_SIMILARITY_LIMIT]
             probes.append(
                 {
@@ -384,7 +384,7 @@ async def _run_field_similarity_probes(
 
 async def _run_compound_similarity_probes(
     *,
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     vector_service: VectorService,
     results: list[dict],
     vault_name: str,
@@ -399,7 +399,7 @@ async def _run_compound_similarity_probes(
                 value = current["extraction"].get(field_type, "").strip()
                 if not value:
                     continue
-                matches = await store.search_session_memories_by_field(
+                matches = await store.search_session_summaries_by_field(
                     vault_name=vault_name,
                     field_type=field_type,
                     value=value,
@@ -408,13 +408,13 @@ async def _run_compound_similarity_probes(
                     min_score=policy["field_min_score"],
                 )
                 for match in matches:
-                    session_memory = match.session_memory
-                    if session_memory.session_id == current["session_id"]:
+                    session_summary = match.session_summary
+                    if session_summary.session_id == current["session_id"]:
                         continue
                     candidate = candidates.setdefault(
-                        session_memory.session_id,
+                        session_summary.session_id,
                         {
-                            "session_memory": match.to_dict()["session_memory"],
+                            "session_summary": match.to_dict()["session_summary"],
                             "score": 0.0,
                             "matched_field_count": 0,
                             "contributions": [],
@@ -431,7 +431,7 @@ async def _run_compound_similarity_probes(
                             "score": round(field_score, 6),
                             "weight": weight,
                             "weighted_score": round(weighted_score, 6),
-                            "matched_value": session_memory.field_value(field_type),
+                            "matched_value": session_summary.field_value(field_type),
                         }
                     )
             ranked_matches = sorted(
@@ -599,19 +599,19 @@ def _render_field_similarity_report(probe: dict) -> str:
         "| ---: | --- | ---: | --- | --- | --- | --- |",
     ]
     for rank, match in enumerate(probe["matches"], start=1):
-        session_memory = match["session_memory"]
+        session_summary = match["session_summary"]
         lines.append(
             "| "
             f"{rank} | "
             f"{_cell(match['match_type'])} | "
             f"{_cell(_format_score(match.get('score')))} | "
-            f"{_cell(session_memory['session_id'])} | "
-            f"{_cell(session_memory.get('domain'))} | "
-            f"{_cell(session_memory.get('work_product'))} | "
-            f"{_cell(session_memory.get('user_intent'))} |"
+            f"{_cell(session_summary['session_id'])} | "
+            f"{_cell(session_summary.get('domain'))} | "
+            f"{_cell(session_summary.get('work_product'))} | "
+            f"{_cell(session_summary.get('user_intent'))} |"
         )
     if not probe["matches"]:
-        lines.append("|  |  |  |  | No other session memories above threshold |  |  |  |")
+        lines.append("|  |  |  |  | No other session summaries above threshold |  |  |  |")
     return "\n".join(lines)
 
 
@@ -647,25 +647,25 @@ def _render_compound_similarity_report(probe: dict) -> str:
         "| ---: | --- | ---: | ---: | --- | --- | --- | --- |",
     ]
     for rank, match in enumerate(probe["matches"], start=1):
-        session_memory = match["session_memory"]
+        session_summary = match["session_summary"]
         lines.append(
             "| "
             f"{rank} | "
             f"{_cell(match['band'])} | "
             f"{_cell(_format_score(match['score']))} | "
             f"{match['matched_field_count']} | "
-            f"{_cell(session_memory['session_id'])} | "
-            f"{_cell(session_memory.get('domain'))} | "
-            f"{_cell(session_memory.get('work_product'))} | "
-            f"{_cell(session_memory.get('user_intent'))} |"
+            f"{_cell(session_summary['session_id'])} | "
+            f"{_cell(session_summary.get('domain'))} | "
+            f"{_cell(session_summary.get('work_product'))} | "
+            f"{_cell(session_summary.get('user_intent'))} |"
         )
     if not probe["matches"]:
-        lines.append("|  |  |  | No other session memories above threshold |  |  |  |")
+        lines.append("|  |  |  | No other session summaries above threshold |  |  |  |")
     lines.extend(["", "## Contributions", ""])
     for rank, match in enumerate(probe["matches"], start=1):
         lines.extend(
             [
-                f"### {rank}. {match['session_memory']['session_id']}",
+                f"### {rank}. {match['session_summary']['session_id']}",
                 "",
                 "| Field | Match | Score | Weight | Weighted | Matched Value |",
                 "| --- | --- | ---: | ---: | ---: | --- |",

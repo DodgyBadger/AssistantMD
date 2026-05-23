@@ -64,7 +64,7 @@ Available helpers and reserved inputs:
 
 - direct tool functions such as `file_ops_safe(...)`, `delegate(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
-- `retrieve_sessions(...)`: select current-vault chat session metadata, such as sessions pending memory extraction
+- `retrieve_sessions(...)`: select current-vault chat session metadata, such as sessions pending summarization
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
 - `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
@@ -113,10 +113,10 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### `retrieve_sessions`
 
-- `retrieve_sessions(selection="pending_or_stale_memory")` returns current-vault chat sessions that do not yet have derived memory or whose memory is stale
-- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, `has_memory`, `memory_status`, `memory_updated_at`, and `new_message_count`
-- stale memory is gated by a grace window and the `stale_memory_min_new_messages` general setting
-- use this helper to select sessions, then call `memory_ops(operation="extract_session_memory", session_id=...)` when a workflow should extract memory for selected sessions
+- `retrieve_sessions(selection="pending_or_stale_summary")` returns current-vault chat sessions that do not yet have a stored summary or whose summary is stale
+- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, `has_summary`, `summary_status`, `summary_updated_at`, and `new_message_count`
+- stale summary selection is gated by a grace window and the `stale_summary_min_new_messages` general setting
+- use this helper to select sessions, then call `session_ops(operation="summarize_session", session_id=...)` when a workflow should summarize selected sessions
 
 ### `parse_markdown`
 

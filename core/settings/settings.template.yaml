@@ -27,7 +27,7 @@ settings:
       - code_execution
       - delegate
       - chat_history_compact
-      - memory_ops
+      - session_ops
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   chat_tool_calls_limit:
@@ -46,9 +46,9 @@ settings:
     value: 0
     description: "Maximum number of workflows allowed to run at the same time across all vaults. 0 disables the global workflow concurrency limit."
     restart_required: false
-  stale_memory_min_new_messages:
+  stale_summary_min_new_messages:
     value: 3
-    description: "Minimum number of new chat messages required before existing session memory is treated as stale."
+    description: "Minimum number of new chat messages required before an existing session summary is treated as stale."
     restart_required: false
   browser_navigation_timeout_seconds:
     value: 20
@@ -383,9 +383,9 @@ tools:
     requires_secrets: []
     user_editable: false
     chat_visible: true
-  memory_ops:
-    module: core.tools.memory_ops
-    description: "Manage session memory"
+  session_ops:
+    module: core.tools.session_ops
+    description: "Search and summarize chat sessions"
     requires_secrets: []
     user_editable: false
     chat_visible: true

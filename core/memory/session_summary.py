@@ -1,4 +1,4 @@
-"""Session memory persistence and field-aware retrieval."""
+"""Session summary persistence and field-aware retrieval."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core.database import connect_sqlite_from_system_db
-from core.memory.schema import DB_NAME, ensure_memory_schema
+from core.memory.schema import DB_NAME, ensure_session_summary_schema
 from core.vector import SQLitePythonVectorStore, VectorService, VectorStore
 
 
-SESSION_MEMORY_TEXT_FIELDS = (
+SESSION_SUMMARY_TEXT_FIELDS = (
     "summary",
     "domain",
     "work_product",
@@ -24,22 +24,22 @@ SESSION_MEMORY_TEXT_FIELDS = (
 )
 VECTOR_FIELD_TYPES = {"summary", "domain", "work_product", "user_intent"}
 WILDCARD_FIELD_TYPES = {"named_entities"}
-MEMORY_VECTOR_MIN_SCORE = 0.50
-FIELD_VECTOR_NAMESPACE = "session_memory_fields"
-FIELD_VECTOR_TABLE = "session_memory_field_vectors"
+SUMMARY_VECTOR_MIN_SCORE = 0.50
+FIELD_VECTOR_NAMESPACE = "session_summary_fields"
+FIELD_VECTOR_TABLE = "session_summary_field_vectors"
 RELATED_SESSION_FIELD_WEIGHTS = {
     "domain": 0.45,
     "work_product": 0.35,
     "user_intent": 0.20,
 }
-RELATED_SESSION_FIELD_MIN_SCORE = MEMORY_VECTOR_MIN_SCORE
+RELATED_SESSION_FIELD_MIN_SCORE = SUMMARY_VECTOR_MIN_SCORE
 RELATED_SESSION_AUTOMATIC_THRESHOLD = 0.70
 RELATED_SESSION_POSSIBLE_THRESHOLD = 0.55
 
 
 @dataclass(frozen=True)
-class SessionMemoryArtifact:
-    """One vault artifact associated with a chat session memory."""
+class SessionSummaryArtifact:
+    """One vault artifact associated with a chat session summary."""
 
     path: str
     artifact_role: str
@@ -52,8 +52,8 @@ class SessionMemoryArtifact:
 
 
 @dataclass(frozen=True)
-class SessionMemory:
-    """Stored memory extracted from one chat session."""
+class SessionSummary:
+    """Stored summary extracted from one chat session."""
 
     session_id: str
     vault_name: str
@@ -67,7 +67,7 @@ class SessionMemory:
     named_entities: str | None = None
     source_summary: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    artifacts: tuple[SessionMemoryArtifact, ...] = ()
+    artifacts: tuple[SessionSummaryArtifact, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Render as a JSON-compatible dictionary."""
@@ -88,17 +88,17 @@ class SessionMemory:
         }
 
     def field_value(self, field_type: str) -> str | None:
-        """Return a queryable session memory field value by name."""
+        """Return a queryable session summary field value by name."""
         _validate_field_type(field_type)
         value = getattr(self, field_type)
         return str(value) if value else None
 
 
 @dataclass(frozen=True)
-class SessionMemorySearchResult:
-    """One field-aware session memory search result."""
+class SessionSummarySearchResult:
+    """One field-aware session summary search result."""
 
-    session_memory: SessionMemory
+    session_summary: SessionSummary
     match_type: str
     matched_fields: tuple[dict[str, Any], ...]
     score: float | None = None
@@ -107,7 +107,7 @@ class SessionMemorySearchResult:
     def to_dict(self) -> dict[str, Any]:
         """Render as a JSON-compatible dictionary."""
         return {
-            "session_memory": self.session_memory.to_dict(),
+            "session_summary": self.session_summary.to_dict(),
             "match_type": self.match_type,
             "matched_fields": list(self.matched_fields),
             "score": self.score,
@@ -136,7 +136,7 @@ class RelatedSessionContribution:
 class RelatedSessionResult:
     """One compound related-session retrieval result."""
 
-    session_memory: SessionMemory
+    session_summary: SessionSummary
     band: str
     score: float
     matched_field_count: int
@@ -145,7 +145,7 @@ class RelatedSessionResult:
     def to_dict(self) -> dict[str, Any]:
         """Render as a JSON-compatible dictionary."""
         return {
-            "session_memory": self.session_memory.to_dict(),
+            "session_summary": self.session_summary.to_dict(),
             "band": self.band,
             "score": self.score,
             "matched_field_count": self.matched_field_count,
@@ -156,14 +156,14 @@ class RelatedSessionResult:
         }
 
 
-class SessionMemoryStore:
-    """SQLite-backed store for session memory."""
+class SessionSummaryStore:
+    """SQLite-backed store for session summary."""
 
     def __init__(self, system_root: str | None = None):
         self.system_root = system_root
-        ensure_memory_schema(system_root)
+        ensure_session_summary_schema(system_root)
 
-    def upsert_session_memory(
+    def upsert_session_summary(
         self,
         *,
         vault_name: str,
@@ -176,13 +176,13 @@ class SessionMemoryStore:
         named_entities: str | None = None,
         source_summary: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> SessionMemory:
-        """Create or replace the memory fields for one chat session."""
+    ) -> SessionSummary:
+        """Create or replace the summary fields for one chat session."""
         now = _utc_now()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO session_memories (
+                INSERT INTO session_summaries (
                     session_id, vault_name, title,
                     summary, domain, work_product, user_intent, named_entities,
                     source_summary,
@@ -191,23 +191,23 @@ class SessionMemoryStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id, vault_name)
                 DO UPDATE SET
-                    title = COALESCE(excluded.title, session_memories.title),
-                    summary = COALESCE(excluded.summary, session_memories.summary),
-                    domain = COALESCE(excluded.domain, session_memories.domain),
-                    work_product = COALESCE(excluded.work_product, session_memories.work_product),
-                    user_intent = COALESCE(excluded.user_intent, session_memories.user_intent),
+                    title = COALESCE(excluded.title, session_summaries.title),
+                    summary = COALESCE(excluded.summary, session_summaries.summary),
+                    domain = COALESCE(excluded.domain, session_summaries.domain),
+                    work_product = COALESCE(excluded.work_product, session_summaries.work_product),
+                    user_intent = COALESCE(excluded.user_intent, session_summaries.user_intent),
                     named_entities = COALESCE(
                         excluded.named_entities,
-                        session_memories.named_entities
+                        session_summaries.named_entities
                     ),
                     source_summary = COALESCE(
                         excluded.source_summary,
-                        session_memories.source_summary
+                        session_summaries.source_summary
                     ),
                     updated_at = excluded.updated_at,
                     metadata_json = COALESCE(
                         excluded.metadata_json,
-                        session_memories.metadata_json
+                        session_summaries.metadata_json
                     )
                 """,
                 (
@@ -227,24 +227,24 @@ class SessionMemoryStore:
             )
             row = conn.execute(
                 f"""
-                SELECT {self._session_memory_select_columns()}
-                FROM session_memories
+                SELECT {self._session_summary_select_columns()}
+                FROM session_summaries
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
             ).fetchone()
             if row is None:
-                raise RuntimeError(f"Failed to upsert session memory {session_id}")
+                raise RuntimeError(f"Failed to upsert session summary {session_id}")
             self._upsert_fts_row(conn, row)
-        session_memory = self.get_session_memory(
+        session_summary = self.get_session_summary(
             vault_name=vault_name,
             session_id=session_id,
         )
-        if session_memory is None:
-            raise RuntimeError(f"Failed to upsert session memory {session_id}")
-        return session_memory
+        if session_summary is None:
+            raise RuntimeError(f"Failed to upsert session summary {session_id}")
+        return session_summary
 
-    def update_session_memory_fields(
+    def update_session_summary_fields(
         self,
         *,
         vault_name: str,
@@ -256,13 +256,13 @@ class SessionMemoryStore:
         named_entities: str | None = None,
         source_summary: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> SessionMemory:
-        """Replace editable memory fields for one existing session memory."""
+    ) -> SessionSummary:
+        """Replace editable summary fields for one existing session summary."""
         now = _utc_now()
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                UPDATE session_memories
+                UPDATE session_summaries
                 SET summary = ?,
                     domain = ?,
                     work_product = ?,
@@ -287,60 +287,60 @@ class SessionMemoryStore:
                 ),
             )
             if cursor.rowcount <= 0:
-                raise ValueError(f"Unknown session memory: {session_id}")
+                raise ValueError(f"Unknown session summary: {session_id}")
             row = conn.execute(
                 f"""
-                SELECT {self._session_memory_select_columns()}
-                FROM session_memories
+                SELECT {self._session_summary_select_columns()}
+                FROM session_summaries
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
             ).fetchone()
             if row is None:
-                raise RuntimeError(f"Failed to update session memory {session_id}")
+                raise RuntimeError(f"Failed to update session summary {session_id}")
             self._upsert_fts_row(conn, row)
 
-        session_memory = self.get_session_memory(
+        session_summary = self.get_session_summary(
             vault_name=vault_name,
             session_id=session_id,
         )
-        if session_memory is None:
-            raise RuntimeError(f"Failed to update session memory {session_id}")
-        return session_memory
+        if session_summary is None:
+            raise RuntimeError(f"Failed to update session summary {session_id}")
+        return session_summary
 
-    def get_session_memory(
+    def get_session_summary(
         self,
         *,
         vault_name: str,
         session_id: str,
-    ) -> SessionMemory | None:
-        """Return one session memory by vault and session id."""
+    ) -> SessionSummary | None:
+        """Return one session summary by vault and session id."""
         with self._connect() as conn:
             row = conn.execute(
                 f"""
-                SELECT {self._session_memory_select_columns()}
-                FROM session_memories
+                SELECT {self._session_summary_select_columns()}
+                FROM session_summaries
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
             ).fetchone()
             if row is None:
                 return None
-            return self._session_memory_from_row(conn, row)
+            return self._session_summary_from_row(conn, row)
 
-    def delete_session_memory(self, *, vault_name: str, session_id: str) -> bool:
-        """Delete one session memory row and associated artifacts."""
+    def delete_session_summary(self, *, vault_name: str, session_id: str) -> bool:
+        """Delete one session summary row and associated artifacts."""
         with self._connect() as conn:
             conn.execute(
                 """
-                DELETE FROM session_memories_fts
+                DELETE FROM session_summaries_fts
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
             )
             cursor = conn.execute(
                 """
-                DELETE FROM session_memories
+                DELETE FROM session_summaries
                 WHERE session_id = ? AND vault_name = ?
                 """,
                 (session_id, vault_name),
@@ -350,14 +350,14 @@ class SessionMemoryStore:
             self._delete_field_vectors(vault_name=vault_name, session_id=session_id)
         return deleted
 
-    def search_session_memories_fts(
+    def search_session_summaries_fts(
         self,
         *,
         vault_name: str,
         query: str,
         limit: int = 20,
-    ) -> tuple[SessionMemorySearchResult, ...]:
-        """Search session memory fields with SQLite FTS5/BM25."""
+    ) -> tuple[SessionSummarySearchResult, ...]:
+        """Search session summary fields with SQLite FTS5/BM25."""
         fts_query = build_fts_query(query)
         if not fts_query or limit <= 0:
             return ()
@@ -365,38 +365,38 @@ class SessionMemoryStore:
             rows = conn.execute(
                 """
                 SELECT session_id, bm25(
-                    session_memories_fts,
+                    session_summaries_fts,
                     0.0, 0.0, 1.0, 0.8, 0.75, 0.95, 0.6, 0.5
                 ) AS rank
-                FROM session_memories_fts
+                FROM session_summaries_fts
                 WHERE vault_name = ?
-                  AND session_memories_fts MATCH ?
+                  AND session_summaries_fts MATCH ?
                 ORDER BY rank ASC
                 LIMIT ?
                 """,
                 (vault_name, fts_query, limit),
             ).fetchall()
-            results: list[SessionMemorySearchResult] = []
+            results: list[SessionSummarySearchResult] = []
             for row in rows:
                 session_id = str(row["session_id"])
-                session_memory = self.get_session_memory(
+                session_summary = self.get_session_summary(
                     vault_name=vault_name,
                     session_id=session_id,
                 )
-                if session_memory is None:
+                if session_summary is None:
                     continue
                 rank = float(row["rank"])
-                coverage = _fts_query_coverage(query, session_memory)
+                coverage = _fts_query_coverage(query, session_summary)
                 score = round(_bm25_score(rank) * max(coverage, 0.5), 6)
                 if score <= 0.0:
                     continue
                 results.append(
-                    SessionMemorySearchResult(
-                        session_memory=session_memory,
+                    SessionSummarySearchResult(
+                        session_summary=session_summary,
                         match_type="lexical",
                         matched_fields=(
                             {
-                                "field_type": "session_memory",
+                                "field_type": "session_summary",
                                 "query_value": query,
                                 "matched_value": None,
                                 "match_type": "lexical",
@@ -415,17 +415,17 @@ class SessionMemoryStore:
         *,
         vault_name: str,
         session_id: str,
-        artifacts: list[SessionMemoryArtifact] | tuple[SessionMemoryArtifact, ...],
+        artifacts: list[SessionSummaryArtifact] | tuple[SessionSummaryArtifact, ...],
     ) -> None:
-        """Upsert vault artifacts for one session memory."""
+        """Upsert vault artifacts for one session summary."""
         with self._connect() as conn:
-            if not self._session_memory_exists(conn, vault_name=vault_name, session_id=session_id):
-                raise ValueError(f"Unknown session memory: {session_id}")
+            if not self._session_summary_exists(conn, vault_name=vault_name, session_id=session_id):
+                raise ValueError(f"Unknown session summary: {session_id}")
             now = _utc_now()
             for artifact in artifacts:
                 conn.execute(
                     """
-                    INSERT INTO session_memory_artifacts (
+                    INSERT INTO session_summary_artifacts (
                         session_id, vault_name, path, artifact_role,
                         created_at, metadata_json
                     )
@@ -444,15 +444,15 @@ class SessionMemoryStore:
                     ),
                 )
 
-    def search_session_memories(
+    def search_session_summaries(
         self,
         *,
         vault_name: str,
         field_type: str | None = None,
         value: str | None = None,
         limit: int = 20,
-    ) -> tuple[SessionMemory, ...]:
-        """Search session memories by vault and optionally one substring field value."""
+    ) -> tuple[SessionSummary, ...]:
+        """Search session summaries by vault and optionally one substring field value."""
         with self._connect() as conn:
             if field_type and value:
                 _validate_field_type(field_type)
@@ -460,8 +460,8 @@ class SessionMemoryStore:
                 field_value = f"%{_escape_like(value.lower().strip())}%"
                 rows = conn.execute(
                     f"""
-                    SELECT {self._session_memory_select_columns()}
-                    FROM session_memories
+                    SELECT {self._session_summary_select_columns()}
+                    FROM session_summaries
                     WHERE vault_name = ?
                       AND {where_clause}
                     ORDER BY updated_at DESC
@@ -472,17 +472,17 @@ class SessionMemoryStore:
             else:
                 rows = conn.execute(
                     f"""
-                    SELECT {self._session_memory_select_columns()}
-                    FROM session_memories
+                    SELECT {self._session_summary_select_columns()}
+                    FROM session_summaries
                     WHERE vault_name = ?
                     ORDER BY updated_at DESC
                     LIMIT ?
                     """,
                     (vault_name, limit),
                 ).fetchall()
-            return tuple(self._session_memory_from_row(conn, row) for row in rows)
+            return tuple(self._session_summary_from_row(conn, row) for row in rows)
 
-    async def search_session_memories_by_field(
+    async def search_session_summaries_by_field(
         self,
         *,
         vault_name: str,
@@ -494,20 +494,20 @@ class SessionMemoryStore:
         min_score: float = 0.0,
         model_alias: str = "embeddings",
         include_direct: bool = True,
-    ) -> tuple[SessionMemorySearchResult, ...]:
-        """Search one session memory field using optional substring plus vectors."""
+    ) -> tuple[SessionSummarySearchResult, ...]:
+        """Search one session summary field using optional substring plus vectors."""
         _validate_field_type(field_type)
-        results: list[SessionMemorySearchResult] = []
+        results: list[SessionSummarySearchResult] = []
         if include_direct:
-            direct_matches = self.search_session_memories(
+            direct_matches = self.search_session_summaries(
                 vault_name=vault_name,
                 field_type=field_type,
                 value=value,
                 limit=limit,
             )
             results.extend(
-                SessionMemorySearchResult(
-                    session_memory=memory,
+                SessionSummarySearchResult(
+                    session_summary=memory,
                     match_type=_direct_match_type(field_type),
                     matched_fields=(
                         {
@@ -545,18 +545,18 @@ class SessionMemoryStore:
             session_id = str(metadata.get("session_id") or "")
             if not session_id:
                 continue
-            session_memory = self.get_session_memory(
+            session_summary = self.get_session_summary(
                 vault_name=vault_name,
                 session_id=session_id,
             )
-            if session_memory is None:
+            if session_summary is None:
                 continue
-            current_value = session_memory.field_value(field_type)
+            current_value = session_summary.field_value(field_type)
             if not current_value:
                 continue
             results.append(
-                SessionMemorySearchResult(
-                    session_memory=session_memory,
+                SessionSummarySearchResult(
+                    session_summary=session_summary,
                     match_type="semantic",
                     matched_fields=(
                         {
@@ -585,17 +585,17 @@ class SessionMemoryStore:
         vector_store: VectorStore | None = None,
         model_alias: str = "embeddings",
     ) -> tuple[RelatedSessionResult, ...]:
-        """Find related session memories using the current compound policy."""
+        """Find related session summaries using the current compound policy."""
         if limit <= 0:
             return ()
-        query_memory: SessionMemory | None = None
+        query_memory: SessionSummary | None = None
         if session_id:
-            query_memory = self.get_session_memory(
+            query_memory = self.get_session_summary(
                 vault_name=vault_name,
                 session_id=session_id,
             )
             if query_memory is None and not any((domain, work_product, user_intent)):
-                raise ValueError(f"Unknown session memory: {session_id}")
+                raise ValueError(f"Unknown session summary: {session_id}")
 
         query_fields = {
             "domain": _clean_text(domain)
@@ -615,7 +615,7 @@ class SessionMemoryStore:
 
         candidates: dict[tuple[str, str], dict[str, Any]] = {}
         for field_type, value in populated_fields.items():
-            matches = await self.search_session_memories_by_field(
+            matches = await self.search_session_summaries_by_field(
                 vault_name=vault_name,
                 field_type=field_type,
                 value=value,
@@ -627,14 +627,14 @@ class SessionMemoryStore:
             )
             weight = RELATED_SESSION_FIELD_WEIGHTS[field_type]
             for match in matches:
-                memory = match.session_memory
+                memory = match.session_summary
                 if query_memory is not None and memory.session_id == query_memory.session_id:
                     continue
                 key = (memory.session_id, memory.vault_name)
                 candidate = candidates.setdefault(
                     key,
                     {
-                        "session_memory": memory,
+                        "session_summary": memory,
                         "field_scores": {},
                         "contributions": [],
                     },
@@ -671,7 +671,7 @@ class SessionMemoryStore:
             )
             results.append(
                 RelatedSessionResult(
-                    session_memory=candidate["session_memory"],
+                    session_summary=candidate["session_summary"],
                     band=_related_session_band(score),
                     score=score,
                     matched_field_count=len(candidate["field_scores"]),
@@ -684,7 +684,7 @@ class SessionMemoryStore:
         )
         return tuple(results[:limit])
 
-    async def index_session_memory_fields(
+    async def index_session_summary_fields(
         self,
         *,
         vault_name: str,
@@ -693,10 +693,10 @@ class SessionMemoryStore:
         vector_store: VectorStore | None = None,
         model_alias: str = "embeddings",
     ) -> int:
-        """Embed vector-searchable direct fields for one session memory."""
-        session_memory = self.get_session_memory(vault_name=vault_name, session_id=session_id)
-        if session_memory is None:
-            raise ValueError(f"Unknown session memory: {session_id}")
+        """Embed vector-searchable direct fields for one session summary."""
+        session_summary = self.get_session_summary(vault_name=vault_name, session_id=session_id)
+        if session_summary is None:
+            raise ValueError(f"Unknown session summary: {session_id}")
         store = vector_store or self._field_vector_store()
         self._delete_field_vectors(
             vault_name=vault_name,
@@ -705,8 +705,8 @@ class SessionMemoryStore:
         )
         fields = tuple(
             field_type
-            for field_type in SESSION_MEMORY_TEXT_FIELDS
-            if field_type in VECTOR_FIELD_TYPES and session_memory.field_value(field_type)
+            for field_type in SESSION_SUMMARY_TEXT_FIELDS
+            if field_type in VECTOR_FIELD_TYPES and session_summary.field_value(field_type)
         )
         if not fields:
             return 0
@@ -714,20 +714,20 @@ class SessionMemoryStore:
         inputs = [
             _field_embedding_text(
                 field_type=field_type,
-                value=session_memory.field_value(field_type) or "",
+                value=session_summary.field_value(field_type) or "",
             )
             for field_type in fields
         ]
         embedding_result = await vector_service.embed_documents(inputs, model_alias=model_alias)
         for field_type, embedding in zip(fields, embedding_result.vectors, strict=True):
-            value = session_memory.field_value(field_type) or ""
+            value = session_summary.field_value(field_type) or ""
             store.upsert(
                 namespace=FIELD_VECTOR_NAMESPACE,
-                item_id=f"{session_memory.vault_name}:{session_memory.session_id}:{field_type}",
+                item_id=f"{session_summary.vault_name}:{session_summary.session_id}:{field_type}",
                 embedding=embedding,
                 metadata={
-                    "session_id": session_memory.session_id,
-                    "vault_name": session_memory.vault_name,
+                    "session_id": session_summary.session_id,
+                    "vault_name": session_summary.vault_name,
                     "field_type": field_type,
                     "field_value": value,
                     "normalized_value": normalize_field_value(value),
@@ -750,7 +750,7 @@ class SessionMemoryStore:
         store.delete_items(namespace=FIELD_VECTOR_NAMESPACE, item_ids=item_ids)
 
     def _connect(self) -> sqlite3.Connection:
-        ensure_memory_schema(self.system_root)
+        ensure_session_summary_schema(self.system_root)
         conn = connect_sqlite_from_system_db(DB_NAME, self.system_root)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -766,14 +766,14 @@ class SessionMemoryStore:
     def _upsert_fts_row(self, conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         conn.execute(
             """
-            DELETE FROM session_memories_fts
+            DELETE FROM session_summaries_fts
             WHERE session_id = ? AND vault_name = ?
             """,
             (row["session_id"], row["vault_name"]),
         )
         conn.execute(
             """
-            INSERT INTO session_memories_fts (
+            INSERT INTO session_summaries_fts (
                 session_id, vault_name, title, summary, domain,
                 work_product, user_intent, named_entities
             )
@@ -791,14 +791,14 @@ class SessionMemoryStore:
             ),
         )
 
-    def _session_memory_from_row(
+    def _session_summary_from_row(
         self,
         conn: sqlite3.Connection,
         row: sqlite3.Row,
-    ) -> SessionMemory:
+    ) -> SessionSummary:
         session_id = str(row["session_id"])
         vault_name = str(row["vault_name"])
-        return SessionMemory(
+        return SessionSummary(
             session_id=session_id,
             vault_name=vault_name,
             title=_optional_text(row["title"]),
@@ -824,18 +824,18 @@ class SessionMemoryStore:
         *,
         vault_name: str,
         session_id: str,
-    ) -> tuple[SessionMemoryArtifact, ...]:
+    ) -> tuple[SessionSummaryArtifact, ...]:
         rows = conn.execute(
             """
             SELECT vault_name, path, artifact_role, metadata_json
-            FROM session_memory_artifacts
+            FROM session_summary_artifacts
             WHERE session_id = ? AND vault_name = ?
             ORDER BY path ASC, artifact_role ASC
             """,
             (session_id, vault_name),
         ).fetchall()
         return tuple(
-            SessionMemoryArtifact(
+            SessionSummaryArtifact(
                 vault_name=str(row["vault_name"]),
                 path=str(row["path"]),
                 artifact_role=str(row["artifact_role"]),
@@ -844,7 +844,7 @@ class SessionMemoryStore:
             for row in rows
         )
 
-    def _session_memory_exists(
+    def _session_summary_exists(
         self,
         conn: sqlite3.Connection,
         *,
@@ -853,7 +853,7 @@ class SessionMemoryStore:
     ) -> bool:
         row = conn.execute(
             """
-            SELECT 1 FROM session_memories
+            SELECT 1 FROM session_summaries
             WHERE session_id = ? AND vault_name = ?
             LIMIT 1
             """,
@@ -862,7 +862,7 @@ class SessionMemoryStore:
         return row is not None
 
     @staticmethod
-    def _session_memory_select_columns(alias: str | None = None) -> str:
+    def _session_summary_select_columns(alias: str | None = None) -> str:
         columns = (
             "session_id",
             "vault_name",
@@ -915,19 +915,19 @@ def _fts_query_terms(value: str, *, max_terms: int = 12) -> list[str]:
     return deduped
 
 
-def _fts_query_coverage(query: str, session_memory: SessionMemory) -> float:
+def _fts_query_coverage(query: str, session_summary: SessionSummary) -> float:
     terms = _fts_query_terms(query)
     if not terms:
         return 0.0
     haystack = " ".join(
         value.lower()
         for value in (
-            session_memory.title,
-            session_memory.summary,
-            session_memory.domain,
-            session_memory.work_product,
-            session_memory.user_intent,
-            session_memory.named_entities,
+            session_summary.title,
+            session_summary.summary,
+            session_summary.domain,
+            session_summary.work_product,
+            session_summary.user_intent,
+            session_summary.named_entities,
         )
         if value
     )
@@ -952,9 +952,9 @@ def _field_embedding_text(*, field_type: str, value: str) -> str:
 
 
 def _validate_field_type(field_type: str) -> None:
-    if field_type not in SESSION_MEMORY_TEXT_FIELDS:
-        allowed = ", ".join(SESSION_MEMORY_TEXT_FIELDS)
-        raise ValueError(f"Unsupported session memory field_type '{field_type}'. Allowed: {allowed}")
+    if field_type not in SESSION_SUMMARY_TEXT_FIELDS:
+        allowed = ", ".join(SESSION_SUMMARY_TEXT_FIELDS)
+        raise ValueError(f"Unsupported session summary field_type '{field_type}'. Allowed: {allowed}")
 
 
 def _direct_match_type(field_type: str) -> str:

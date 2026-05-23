@@ -1,4 +1,4 @@
-"""Session memory operations tool."""
+"""Chat session operations tool."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ from pydantic_ai.tools import Tool
 
 from core.chat.chat_store import ChatStore, StoredChatSession
 from core.constants import (
-    SESSION_MEMORY_CLASSIFICATION_PROMPT,
-    SESSION_MEMORY_SOURCE_SUMMARY_PROMPT,
-    SESSION_MEMORY_SUMMARY_INTENT_PROMPT,
+    SESSION_SUMMARY_CLASSIFICATION_PROMPT,
+    SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT,
+    SESSION_SUMMARY_INTENT_PROMPT,
 )
 from core.llm.agents import create_agent, generate_response
 from core.llm.model_factory import build_model_instance
@@ -26,13 +26,13 @@ from core.chat.history_service import (
     ConversationHistoryItem,
     ConversationToolEventItem,
 )
-from core.memory.session_memory import (
-    MEMORY_VECTOR_MIN_SCORE,
+from core.memory.session_summary import (
+    SUMMARY_VECTOR_MIN_SCORE,
     RELATED_SESSION_AUTOMATIC_THRESHOLD,
     RELATED_SESSION_FIELD_WEIGHTS,
     VECTOR_FIELD_TYPES,
-    SessionMemoryArtifact,
-    SessionMemoryStore,
+    SessionSummaryArtifact,
+    SessionSummaryStore,
     build_fts_query,
 )
 from core.vector import VectorService
@@ -41,7 +41,7 @@ from core.vault_state.service import VaultStateService
 from .base import BaseTool
 
 
-logger = UnifiedLogger(tag="memory-ops-tool")
+logger = UnifiedLogger(tag="session-ops-tool")
 
 SESSION_SEARCH_FIELD_WEIGHTS = {
     "domain": 0.25,
@@ -54,14 +54,14 @@ TRANSCRIPT_LEXICAL_WEIGHT = 0.35
 SESSION_SEARCH_MIN_SCORE = 0.05
 
 
-class MemoryOps(BaseTool):
-    """Manage session memory."""
+class SessionOps(BaseTool):
+    """Search and summarize chat sessions."""
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None):
-        """Get the memory operations tool."""
+        """Get the session operations tool."""
 
-        async def memory_ops(
+        async def session_ops(
             ctx: RunContext,
             *,
             operation: str,
@@ -70,17 +70,17 @@ class MemoryOps(BaseTool):
             query: str = "",
             limit: int | str = 5,
             data: dict[str, Any] | None = None,
-            extraction_model: str = "gpt-mini",
+            summarization_model: str = "gpt-mini",
         ) -> str:
-            """Manage memory extracted from chat sessions.
+            """Search and summarize chat sessions.
 
             :param operation: Operation name.
             :param session_id: Optional explicit session id. Defaults to the active session when available.
             :param mode: Search mode for search_sessions: search, deep, or related. Defaults to search.
             :param query: User-provided search phrase for search and deep modes.
             :param limit: Positive integer result limit for search_sessions.
-            :param data: Memory record payload for upsert_session_memory.
-            :param extraction_model: Model alias used by extract_session_memory.
+            :param data: Summary field payload for upsert_session_summary.
+            :param summarization_model: Model alias used by summarize_session.
             """
             try:
                 deps = getattr(ctx, "deps", None)
@@ -89,22 +89,22 @@ class MemoryOps(BaseTool):
                 history_context = ChatHistoryContext.from_deps(deps)
                 active_session_id = requested_session_id or history_context.session_id
                 active_vault_name = history_context.vault_name
-                store = SessionMemoryStore()
+                store = SessionSummaryStore()
 
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
                     data={
-                        "tool": "memory_ops",
+                        "tool": "session_ops",
                         "operation": op,
                     },
                 )
 
                 resolved_limit = cls._parse_limit(limit)
-                if op == "upsert_session_memory":
+                if op == "upsert_session_summary":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
                     memory_data = _upsert_data(data)
-                    session_memory = store.upsert_session_memory(
+                    session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                         title=_session_title(
@@ -125,30 +125,30 @@ class MemoryOps(BaseTool):
                         session_id=active_session_id,
                         artifacts=memory_data.get("artifacts"),
                     )
-                    indexed_fields = await _maybe_index_session_memory_fields(
+                    indexed_fields = await _maybe_index_session_summary_fields(
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
-                    refreshed = store.get_session_memory(
-                        vault_name=session_memory.vault_name,
-                        session_id=session_memory.session_id,
+                    refreshed = store.get_session_summary(
+                        vault_name=session_summary.vault_name,
+                        session_id=session_summary.session_id,
                     )
                     result = {
                         "status": "ok",
                         "operation": op,
                         "indexed_fields": indexed_fields,
-                        "session_memory": refreshed.to_dict() if refreshed else None,
+                        "session_summary": refreshed.to_dict() if refreshed else None,
                     }
-                elif op == "extract_session_memory":
+                elif op == "summarize_session":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
-                    extraction = await _extract_session_memory(
+                    extraction = await _summarize_session(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        extraction_model=extraction_model,
+                        summarization_model=summarization_model,
                     )
-                    session_memory = store.upsert_session_memory(
+                    session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                         title=extraction["title"],
@@ -161,7 +161,7 @@ class MemoryOps(BaseTool):
                         metadata={
                             "source": "chat_session_extraction",
                             "extraction_policy": "summary_intent_classification_source_summary",
-                            "extraction_model": extraction_model,
+                            "summarization_model": summarization_model,
                             "message_count": extraction["message_count"],
                             "tool_event_count": extraction["tool_event_count"],
                         },
@@ -171,14 +171,14 @@ class MemoryOps(BaseTool):
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
-                    indexed_fields = await _maybe_index_session_memory_fields(
+                    indexed_fields = await _maybe_index_session_summary_fields(
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
-                    refreshed = store.get_session_memory(
-                        vault_name=session_memory.vault_name,
-                        session_id=session_memory.session_id,
+                    refreshed = store.get_session_summary(
+                        vault_name=session_summary.vault_name,
+                        session_id=session_summary.session_id,
                     )
                     result = {
                         "status": "ok",
@@ -186,22 +186,22 @@ class MemoryOps(BaseTool):
                         "indexed_fields": indexed_fields,
                         "artifact_count": artifact_count,
                         "extraction": extraction,
-                        "session_memory": refreshed.to_dict() if refreshed else None,
+                        "session_summary": refreshed.to_dict() if refreshed else None,
                     }
-                elif op == "get_session_memory":
+                elif op == "get_session_summary":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
-                    session_memory = store.get_session_memory(
+                    session_summary = store.get_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
                     result = {
-                        "status": "found" if session_memory else "not_found",
+                        "status": "found" if session_summary else "not_found",
                         "operation": op,
                         "vault_name": active_vault_name,
                         "session_id": active_session_id,
-                        "session_memory": session_memory.to_dict()
-                        if session_memory
+                        "session_summary": session_summary.to_dict()
+                        if session_summary
                         else None,
                     }
                 elif op == "search_sessions":
@@ -223,9 +223,9 @@ class MemoryOps(BaseTool):
                     )
                 else:
                     return (
-                        "Unknown operation. Available: extract_session_memory, "
-                        "upsert_session_memory, "
-                        "get_session_memory, search_sessions"
+                        "Unknown operation. Available: summarize_session, "
+                        "upsert_session_summary, "
+                        "get_session_summary, search_sessions"
                     )
                 if hasattr(result, "to_dict"):
                     result = result.to_dict()
@@ -234,7 +234,7 @@ class MemoryOps(BaseTool):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.error(
-                    "memory_ops failed",
+                    "session_ops failed",
                     data={
                         "operation": operation,
                         "session_id": session_id,
@@ -245,16 +245,16 @@ class MemoryOps(BaseTool):
                 return f"Error performing '{operation}' operation: {exc}"
 
         return Tool(
-            memory_ops,
-            name="memory_ops",
-            description="Manage session memory.",
+            session_ops,
+            name="session_ops",
+            description="Search and summarize chat sessions.",
         )
 
     @classmethod
     def get_instructions(cls) -> str:
-        """Get usage instructions for session memory access."""
+        """Get usage instructions for session lookup and summarization."""
         return """
-Session memory field guidance:
+Session summary field guidance:
 - `summary`: compact plain-language summary of the session's durable outcome;
   target 500-800 characters and never exceed 1,000 characters.
 - `domain`: subject area or knowledge area.
@@ -263,10 +263,10 @@ Session memory field guidance:
   write 1-2 sentences and never exceed 500 characters.
 - `named_entities`: only named people, organizations, and places.
 - `source_summary`: concise description of source material or prior context
-  identifiable from tool use. This is provenance returned with a memory, not an
+  identifiable from tool use. This is provenance returned with a summary, not an
   indexed retrieval field.
 
-Use `upsert_session_memory` only when you already have field values to store.
+Use `upsert_session_summary` only when you already have field values to store.
 Pass those values in `data`; supported keys are `summary`, `domain`,
 `work_product`, `user_intent`, `named_entities`, `source_summary`, `artifacts`,
 and `metadata`.
@@ -274,20 +274,20 @@ It persists supplied values; it does not inspect the transcript or infer missing
 fields.
 
 Use `search_sessions` for caller-driven lookup across indexed chat-session
-memory. `search_sessions` has three modes:
-- `search`: default. Searches a user-provided query across all session-memory
+summaries. `search_sessions` has three modes:
+- `search`: default. Searches a user-provided query across all session-summary
   fields.
-- `deep`: searches a user-provided query across all session-memory fields and
+- `deep`: searches a user-provided query across all session-summary fields and
   raw chat transcripts.
 - `related`: compares an already-extracted current or specified session against
   prior sessions using the default compound related-work policy.
 
 Mode selection:
 - Use `search` for normal live-chat lookup when the current session does not
-  yet have stored memory.
+  yet have a stored summary.
 - Use `deep` when the user asks for a broader or transcript-level search.
 - Use `related` only when investigating an existing session that already has
-  stored memory and you want to find neighboring sessions.
+  a stored summary and you want to find neighboring sessions.
 
 For `search` and `deep`, write `query` as a plain natural-language phrase. Do
 not use explicit boolean syntax such as uppercase AND/OR. Use a positive
@@ -297,7 +297,7 @@ For manual writes, include only `data` fields supported by current context.
 Leave unknown fields empty.
 
 Full documentation:
-- `__virtual_docs__/tools/memory_ops.md`
+- `__virtual_docs__/tools/session_ops.md`
 """
 
     @staticmethod
@@ -318,14 +318,14 @@ Full documentation:
 
 
 class _SessionSummaryIntent(BaseModel):
-    """First-pass session memory extraction."""
+    """First-pass session summarization."""
 
     summary: str = Field(default="", max_length=1000)
     user_intent: str = Field(default="", max_length=500)
 
 
 class _SessionClassification(BaseModel):
-    """Second-pass session memory classification."""
+    """Second-pass session classification."""
 
     named_entities: str = Field(default="")
     domain: str = Field(default="")
@@ -354,7 +354,7 @@ def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ValueError("data must be an object for upsert_session_memory")
+        raise ValueError("data must be an object for upsert_session_summary")
     allowed_keys = {
         "summary",
         "domain",
@@ -368,7 +368,7 @@ def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
     unknown_keys = sorted(set(data) - allowed_keys)
     if unknown_keys:
         joined = ", ".join(unknown_keys)
-        raise ValueError(f"Unsupported upsert_session_memory data keys: {joined}")
+        raise ValueError(f"Unsupported upsert_session_summary data keys: {joined}")
 
     parsed = dict(data)
     if parsed.get("metadata") is not None and not isinstance(parsed["metadata"], dict):
@@ -403,9 +403,16 @@ def _has_boolean_operator(query: str) -> bool:
     return re.search(r"\b(?:AND|OR)\b", query) is not None
 
 
+def _related_match_to_dict(match: Any) -> dict[str, Any]:
+    payload = match.to_dict()
+    if "session_summary" in payload:
+        payload["session_summary"] = payload.pop("session_summary")
+    return payload
+
+
 async def _search_sessions(
     *,
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     vault_name: str,
     session_id: str | None,
     mode: str,
@@ -436,15 +443,15 @@ async def _search_sessions(
                     "automatic_threshold": RELATED_SESSION_AUTOMATIC_THRESHOLD,
                 },
             },
-            "matches": [match.to_dict() for match in matches],
-            "session_memories": [
-                match.session_memory.to_dict()
+            "matches": [_related_match_to_dict(match) for match in matches],
+            "session_summaries": [
+                match.session_summary.to_dict()
                 for match in matches
             ],
         }
 
     _require(query, "query is required for search and deep modes")
-    memory_matches = await _search_session_memory_fields(
+    memory_matches = await _search_session_summary_fields(
         store=store,
         vault_name=vault_name,
         query=query,
@@ -483,39 +490,39 @@ async def _search_sessions(
     }
 
 
-async def _search_session_memory_fields(
+async def _search_session_summary_fields(
     *,
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     vault_name: str,
     query: str,
     limit: int,
 ) -> dict[str, dict[str, Any]]:
     candidates: dict[str, dict[str, Any]] = {}
-    lexical_matches = store.search_session_memories_fts(
+    lexical_matches = store.search_session_summaries_fts(
         vault_name=vault_name,
         query=query,
         limit=max(limit * 4, limit),
     )
     for match in lexical_matches:
-        memory = match.session_memory
+        session_summary = match.session_summary
         weighted_score = round(float(match.score or 0.0) * SESSION_LEXICAL_WEIGHT, 6)
         candidate = candidates.setdefault(
-            memory.session_id,
+            session_summary.session_id,
             {
-                "session_id": memory.session_id,
-                "vault_name": memory.vault_name,
+                "session_id": session_summary.session_id,
+                "vault_name": session_summary.vault_name,
                 "field_scores": {},
-                "session_memory": memory.to_dict(),
+                "session_summary": session_summary.to_dict(),
                 "evidence": [],
             },
         )
-        candidate["field_scores"]["session_memory_fts"] = max(
-            float(candidate["field_scores"].get("session_memory_fts", 0.0)),
+        candidate["field_scores"]["session_summary_fts"] = max(
+            float(candidate["field_scores"].get("session_summary_fts", 0.0)),
             weighted_score,
         )
         candidate["evidence"].append(
             {
-                "source": "session_memory",
+                "source": "session_summary",
                 "match_type": "lexical",
                 "score": match.score,
                 "weighted_score": weighted_score,
@@ -525,27 +532,27 @@ async def _search_session_memory_fields(
         )
 
     for current_field in VECTOR_FIELD_TYPES:
-        matches = await store.search_session_memories_by_field(
+        matches = await store.search_session_summaries_by_field(
             vault_name=vault_name,
             field_type=current_field,
             value=query,
             vector_service=VectorService(),
             limit=max(limit * 3, limit),
-            min_score=MEMORY_VECTOR_MIN_SCORE,
+            min_score=SUMMARY_VECTOR_MIN_SCORE,
             include_direct=False,
         )
         field_weight = SESSION_SEARCH_FIELD_WEIGHTS.get(current_field, 0.5)
         for match in matches:
-            memory = match.session_memory
+            session_summary = match.session_summary
             normalized_score = _normalize_vector_score(float(match.score or 0.0))
             weighted_score = round(normalized_score * field_weight, 6)
             candidate = candidates.setdefault(
-                memory.session_id,
+                session_summary.session_id,
                 {
-                    "session_id": memory.session_id,
-                    "vault_name": memory.vault_name,
+                    "session_id": session_summary.session_id,
+                    "vault_name": session_summary.vault_name,
                     "field_scores": {},
-                    "session_memory": memory.to_dict(),
+                    "session_summary": session_summary.to_dict(),
                     "evidence": [],
                 },
             )
@@ -555,13 +562,13 @@ async def _search_session_memory_fields(
             )
             candidate["evidence"].append(
                 {
-                    "source": "session_memory",
+                    "source": "session_summary",
                     "field_type": current_field,
                     "match_type": match.match_type,
                     "score": match.score,
                     "normalized_score": normalized_score,
                     "weighted_score": weighted_score,
-                    "matched_value": _preview_text(memory.field_value(current_field)),
+                    "matched_value": _preview_text(session_summary.field_value(current_field)),
                 }
             )
     for candidate in candidates.values():
@@ -580,7 +587,7 @@ async def _search_session_memory_fields(
 def _merge_transcript_matches(
     candidates: dict[str, dict[str, Any]],
     *,
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     vault_name: str,
     query: str,
 ) -> None:
@@ -631,7 +638,7 @@ def _merge_transcript_matches(
         session = sessions_by_id.get(session_id)
         if session is None:
             continue
-        memory = store.get_session_memory(
+        session_summary = store.get_session_summary(
             vault_name=vault_name,
             session_id=session_id,
         )
@@ -644,7 +651,7 @@ def _merge_transcript_matches(
             {
                 "session_id": session_id,
                 "vault_name": session.vault_name,
-                "session_memory": memory.to_dict() if memory else None,
+                "session_summary": session_summary.to_dict() if session_summary else None,
                 "chat_session": {
                     "session_id": session_id,
                     "vault_name": session.vault_name,
@@ -655,8 +662,8 @@ def _merge_transcript_matches(
                 "evidence": [],
             },
         )
-        if memory is not None and candidate.get("session_memory") is None:
-            candidate["session_memory"] = memory.to_dict()
+        if session_summary is not None and candidate.get("session_summary") is None:
+            candidate["session_summary"] = session_summary.to_dict()
         candidate["score"] = round(
             min(float(candidate.get("score") or 0.0) + weighted_score, 1.0),
             6,
@@ -690,16 +697,16 @@ def _bm25_rank_score(rank: float) -> float:
 
 
 def _normalize_vector_score(score: float) -> float:
-    if score <= MEMORY_VECTOR_MIN_SCORE:
+    if score <= SUMMARY_VECTOR_MIN_SCORE:
         return 0.0
-    return round((score - MEMORY_VECTOR_MIN_SCORE) / (1.0 - MEMORY_VECTOR_MIN_SCORE), 6)
+    return round((score - SUMMARY_VECTOR_MIN_SCORE) / (1.0 - SUMMARY_VECTOR_MIN_SCORE), 6)
 
 
-async def _extract_session_memory(
+async def _summarize_session(
     *,
     vault_name: str,
     session_id: str,
-    extraction_model: str,
+    summarization_model: str,
 ) -> dict[str, Any]:
     chat_store = ChatStore()
     session = chat_store.get_session(session_id=session_id, vault_name=vault_name)
@@ -720,15 +727,15 @@ async def _extract_session_memory(
     if not history.items:
         raise ValueError(f"Chat session has no persisted messages: {session_id}")
     summary_agent = await create_agent(
-        model=build_model_instance(extraction_model),
+        model=build_model_instance(summarization_model),
         output_type=_SessionSummaryIntent,
     )
     classification_agent = await create_agent(
-        model=build_model_instance(extraction_model),
+        model=build_model_instance(summarization_model),
         output_type=_SessionClassification,
     )
     source_agent = await create_agent(
-        model=build_model_instance(extraction_model),
+        model=build_model_instance(summarization_model),
         output_type=_SessionSourceSummary,
     )
     summary_intent = await generate_response(
@@ -782,7 +789,7 @@ def _build_first_pass_prompt(
         for message in messages
     )
     title = session.title or ""
-    return SESSION_MEMORY_SUMMARY_INTENT_PROMPT.format(
+    return SESSION_SUMMARY_INTENT_PROMPT.format(
         session_id=session.session_id,
         vault_name=session.vault_name,
         title=title,
@@ -798,7 +805,7 @@ def _build_second_pass_prompt(
     summary_intent: dict[str, str],
 ) -> str:
     title = session.title or ""
-    return SESSION_MEMORY_CLASSIFICATION_PROMPT.format(
+    return SESSION_SUMMARY_CLASSIFICATION_PROMPT.format(
         session_id=session.session_id,
         title=title,
         summary=summary_intent["summary"],
@@ -813,7 +820,7 @@ def _build_source_summary_prompt(
     tool_event_log: str,
 ) -> str:
     title = session.title or ""
-    return SESSION_MEMORY_SOURCE_SUMMARY_PROMPT.format(
+    return SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT.format(
         session_id=session.session_id,
         title=title,
         summary=summary_intent["summary"],
@@ -886,21 +893,21 @@ def _extract_arg_paths(value: Any) -> list[str]:
     return paths
 
 
-async def _maybe_index_session_memory_fields(
-    store: SessionMemoryStore,
+async def _maybe_index_session_summary_fields(
+    store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
 ) -> int:
     try:
-        return await store.index_session_memory_fields(
+        return await store.index_session_summary_fields(
             vault_name=vault_name,
             session_id=session_id,
             vector_service=VectorService(),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "session_memory_field_indexing_skipped",
+            "session_summary_field_indexing_skipped",
             data={
                 "vault_name": vault_name,
                 "session_id": session_id,
@@ -912,18 +919,18 @@ async def _maybe_index_session_memory_fields(
 
 
 def _maybe_add_artifacts(
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
     artifacts: list[dict[str, Any]] | None,
 ) -> None:
-    parsed: list[SessionMemoryArtifact] = []
+    parsed: list[SessionSummaryArtifact] = []
     for raw in artifacts or []:
         path = str(raw.get("path") or "").strip()
         _require(path, "path is required for each artifact")
         parsed.append(
-            SessionMemoryArtifact(
+            SessionSummaryArtifact(
                 path=path,
                 artifact_role=str(raw.get("artifact_role") or raw.get("role") or "file_retrieved"),
                 vault_name=vault_name,
@@ -939,12 +946,12 @@ def _maybe_add_artifacts(
 
 
 def _add_chat_mutation_artifacts(
-    store: SessionMemoryStore,
+    store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
 ) -> int:
-    """Attach vault files mutated by this chat session to its memory row."""
+    """Attach vault files mutated by this chat session to its session summary row."""
     try:
         mutations = VaultStateService().list_chat_session_mutations(
             vault_name=vault_name,
@@ -952,7 +959,7 @@ def _add_chat_mutation_artifacts(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "session_memory_artifact_population_skipped",
+            "session_summary_artifact_population_skipped",
             data={
                 "vault_name": vault_name,
                 "session_id": session_id,
@@ -962,7 +969,7 @@ def _add_chat_mutation_artifacts(
         )
         return 0
 
-    artifacts_by_key: dict[tuple[str, str], SessionMemoryArtifact] = {}
+    artifacts_by_key: dict[tuple[str, str], SessionSummaryArtifact] = {}
     for mutation in mutations:
         role = _artifact_role_for_mutation(
             operation=mutation.operation,
@@ -986,7 +993,7 @@ def _add_chat_mutation_artifacts(
             "after_hash": mutation.after_hash,
             "created_at": _datetime_to_text(mutation.created_at),
         }
-        artifacts_by_key[key] = SessionMemoryArtifact(
+        artifacts_by_key[key] = SessionSummaryArtifact(
             path=mutation.path,
             artifact_role=role,
             vault_name=vault_name,

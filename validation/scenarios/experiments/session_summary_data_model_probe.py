@@ -1,5 +1,5 @@
 """
-Experiment scenario for session memory field storage and semantic search.
+Experiment scenario for session summary field storage and semantic search.
 """
 
 import json
@@ -13,72 +13,72 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from pydantic_ai.embeddings import EmbedInputType, EmbeddingModel, EmbeddingResult
 from pydantic_ai.usage import RequestUsage
 
-from core.memory.session_memory import (
-    SessionMemoryArtifact,
-    SessionMemoryStore,
+from core.memory.session_summary import (
+    SessionSummaryArtifact,
+    SessionSummaryStore,
 )
 from core.vector import VectorService
 from validation.core.base_scenario import BaseScenario
 
 
-class MemorySessionDataModelProbeScenario(BaseScenario):
-    """Probe the core session memory model and field-aware semantic retrieval."""
+class SessionSummaryDataModelProbeScenario(BaseScenario):
+    """Probe the core session summary model and field-aware semantic retrieval."""
 
     async def test_scenario(self):
         controller = self._get_system_controller()
-        _seed_legacy_memory_db(controller._system_root)
-        store = SessionMemoryStore(system_root=str(controller._system_root))
-        vault_name = "MemoryModelProbeVault"
+        _seed_legacy_summary_db(controller._system_root)
+        store = SessionSummaryStore(system_root=str(controller._system_root))
+        vault_name = "SessionSummaryModelProbeVault"
 
-        migrated_memory = store.get_session_memory(
+        migrated_summary = store.get_session_summary(
             vault_name=vault_name,
             session_id="legacy-session",
         )
-        self.soft_assert(migrated_memory is not None, "Legacy memory row should survive schema migration")
+        self.soft_assert(migrated_summary is not None, "Legacy summary row should survive schema migration")
         self.soft_assert(
-            migrated_memory is not None and migrated_memory.source_summary is None,
-            "Legacy memory row should have empty source_summary after migration",
+            migrated_summary is not None and migrated_summary.source_summary is None,
+            "Legacy summary row should have empty source_summary after migration",
         )
-        store.upsert_session_memory(
+        store.upsert_session_summary(
             session_id="legacy-session",
             vault_name=vault_name,
             source_summary="Read zirconium provenance notes before migration.",
         )
-        migrated_source_matches = store.search_session_memories_fts(
+        migrated_source_matches = store.search_session_summaries_fts(
             vault_name=vault_name,
             query="zirconium provenance notes",
         )
         self.soft_assert(
-            not any(result.session_memory.session_id == "legacy-session" for result in migrated_source_matches),
+            not any(result.session_summary.session_id == "legacy-session" for result in migrated_source_matches),
             "source_summary should be stored as provenance, not indexed for FTS retrieval",
         )
 
-        session_ids = _seed_session_memories(store, vault_name)
+        session_ids = _seed_session_summaries(store, vault_name)
         vector_service = VectorService(
             embedding_model_overrides={
                 "embeddings": SemanticProbeEmbeddingModel(dimensions=1536)
             }
         )
         for session_id in session_ids:
-            await store.index_session_memory_fields(
+            await store.index_session_summary_fields(
                 vault_name=vault_name,
                 session_id=session_id,
                 vector_service=vector_service,
             )
 
-        substring_riparian = store.search_session_memories(
+        substring_riparian = store.search_session_summaries(
             vault_name=vault_name,
             field_type="user_intent",
             value="riparian restoration",
         )
-        semantic_riparian = await store.search_session_memories_by_field(
+        semantic_riparian = await store.search_session_summaries_by_field(
             vault_name=vault_name,
             field_type="user_intent",
             value="riparian restoration",
             vector_service=vector_service,
             min_score=0.78,
         )
-        substring_donor = store.search_session_memories(
+        substring_donor = store.search_session_summaries(
             vault_name=vault_name,
             field_type="work_product",
             value="donor report",
@@ -99,7 +99,7 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
             "substring_donor": [memory.to_dict() for memory in substring_donor],
             "related_sessions": [result.to_dict() for result in related_sessions],
         }
-        (self.artifacts_dir / "memory_session_data_model_probe.json").write_text(
+        (self.artifacts_dir / "session_summary_data_model_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
@@ -114,7 +114,7 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
             "Substring search should retrieve the directly matching riparian proposal",
         )
         semantic_ids = [
-            result.session_memory.session_id for result in semantic_riparian
+            result.session_summary.session_id for result in semantic_riparian
         ]
         self.soft_assert(
             "session-wetlands-proposal" in semantic_ids,
@@ -130,21 +130,21 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
         )
         self.soft_assert(
             all(result.match_type in {"substring", "semantic"} for result in semantic_riparian),
-            "Search results should expose how each session memory matched",
+            "Search results should expose how each session summary matched",
         )
         self.soft_assert(
             any(memory.session_id == "session-donor-wetlands" for memory in substring_donor),
             "Substring field search should still retrieve direct field matches",
         )
         related_ids = [
-            result.session_memory.session_id for result in related_sessions
+            result.session_summary.session_id for result in related_sessions
         ]
         self.soft_assert(
             "session-wetlands-proposal" in related_ids,
             "Related-session retrieval should find adjacent proposal work",
         )
         self.soft_assert(
-            all(result.session_memory.session_id != "session-riparian-proposal"
+            all(result.session_summary.session_id != "session-riparian-proposal"
                 for result in related_sessions),
             "Related-session retrieval should exclude the query session",
         )
@@ -157,14 +157,14 @@ class MemorySessionDataModelProbeScenario(BaseScenario):
         self.assert_no_failures()
 
 
-def _seed_legacy_memory_db(system_root: Path) -> None:
-    """Create a pre-source_summary memory DB before SessionMemoryStore migrates it."""
+def _seed_legacy_summary_db(system_root: Path) -> None:
+    """Create a pre-source_summary DB before SessionSummaryStore migrates it."""
     system_root.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(system_root / "memory.db")
+    conn = sqlite3.connect(system_root / "session_summaries.db")
     try:
         conn.executescript(
             """
-            CREATE TABLE session_memories (
+            CREATE TABLE session_summaries (
                 session_id TEXT NOT NULL,
                 vault_name TEXT NOT NULL,
                 title TEXT,
@@ -178,7 +178,7 @@ def _seed_legacy_memory_db(system_root: Path) -> None:
                 metadata_json TEXT,
                 PRIMARY KEY (session_id, vault_name)
             );
-            CREATE VIRTUAL TABLE session_memories_fts USING fts5(
+            CREATE VIRTUAL TABLE session_summaries_fts USING fts5(
                 session_id UNINDEXED,
                 vault_name UNINDEXED,
                 title,
@@ -189,31 +189,31 @@ def _seed_legacy_memory_db(system_root: Path) -> None:
                 named_entities,
                 tokenize = 'unicode61'
             );
-            INSERT INTO session_memories (
+            INSERT INTO session_summaries (
                 session_id, vault_name, title, summary, domain,
                 work_product, user_intent, named_entities, metadata_json
             ) VALUES (
                 'legacy-session',
-                'MemoryModelProbeVault',
-                'Legacy memory',
-                'Existing memory row before source summary.',
+                'SessionSummaryModelProbeVault',
+                'Legacy summary',
+                'Existing summary row before source summary.',
                 'validation',
                 'migration probe',
-                'Validate memory schema migration.',
+                'Validate summary schema migration.',
                 '',
                 '{}'
             );
-            INSERT INTO session_memories_fts (
+            INSERT INTO session_summaries_fts (
                 session_id, vault_name, title, summary, domain,
                 work_product, user_intent, named_entities
             ) VALUES (
                 'legacy-session',
-                'MemoryModelProbeVault',
-                'Legacy memory',
-                'Existing memory row before source summary.',
+                'SessionSummaryModelProbeVault',
+                'Legacy summary',
+                'Existing summary row before source summary.',
                 'validation',
                 'migration probe',
-                'Validate memory schema migration.',
+                'Validate summary schema migration.',
                 ''
             );
             """
@@ -223,7 +223,7 @@ def _seed_legacy_memory_db(system_root: Path) -> None:
         conn.close()
 
 
-def _seed_session_memories(store: SessionMemoryStore, vault_name: str) -> tuple[str, ...]:
+def _seed_session_summaries(store: SessionSummaryStore, vault_name: str) -> tuple[str, ...]:
     seeds = [
         {
             "session_id": "session-donor-wetlands",
@@ -284,7 +284,7 @@ def _seed_session_memories(store: SessionMemoryStore, vault_name: str) -> tuple[
     ]
     session_ids: list[str] = []
     for seed in seeds:
-        session_memory = store.upsert_session_memory(
+        session_summary = store.upsert_session_summary(
             session_id=seed["session_id"],
             vault_name=vault_name,
             title=seed["title"],
@@ -296,9 +296,9 @@ def _seed_session_memories(store: SessionMemoryStore, vault_name: str) -> tuple[
         )
         store.add_session_artifacts(
             vault_name=vault_name,
-            session_id=session_memory.session_id,
+            session_id=session_summary.session_id,
             artifacts=tuple(
-                SessionMemoryArtifact(
+                SessionSummaryArtifact(
                     vault_name=vault_name,
                     path=path,
                     artifact_role=artifact_role,
@@ -306,7 +306,7 @@ def _seed_session_memories(store: SessionMemoryStore, vault_name: str) -> tuple[
                 for path, artifact_role in seed["artifacts"]
             ),
         )
-        session_ids.append(session_memory.session_id)
+        session_ids.append(session_summary.session_id)
     return tuple(session_ids)
 
 
