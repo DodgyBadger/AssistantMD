@@ -18,12 +18,10 @@ settings:
     restart_required: false
   default_chat_tools:
     value:
-      - web_search_tavily
+      - web_search_duckduckgo
       - browser
       - file_ops_safe
       - file_ops_unsafe
-      - tavily_extract
-      - tavily_crawl
       - code_execution
       - delegate
       - chat_history_compact
