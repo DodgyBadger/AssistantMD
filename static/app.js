@@ -1196,7 +1196,9 @@ function populateSelectors() {
         ? state.systemStatus.configuration_status.default_model
         : null;
 
-    state.metadata.models.forEach(model => {
+    const chatModels = state.metadata.models.filter(isChatSelectableModel);
+
+    chatModels.forEach(model => {
         const option = document.createElement('option');
         option.value = model.name;
         const displayModelName = model.model_string || model.model || model.provider;
@@ -1211,10 +1213,10 @@ function populateSelectors() {
 
     if (
         previousModel &&
-        state.metadata.models.some(m => m.name === previousModel && m.available !== false)
+        chatModels.some(m => m.name === previousModel && m.available !== false)
     ) {
         chatElements.modelSelector.value = previousModel;
-    } else if (envDefaultModel && state.metadata.models.some(m => m.name === envDefaultModel && m.available)) {
+    } else if (envDefaultModel && chatModels.some(m => m.name === envDefaultModel && m.available)) {
         chatElements.modelSelector.value = envDefaultModel;
     } else if (firstAvailableModel) {
         chatElements.modelSelector.value = firstAvailableModel;
@@ -1291,6 +1293,13 @@ function populateSelectors() {
     syncChatControlLocks();
 }
 
+function isChatSelectableModel(model) {
+    const capabilities = Array.isArray(model?.capabilities)
+        ? model.capabilities.map(capability => String(capability || '').trim().toLowerCase())
+        : [];
+    return !capabilities.includes('embedding');
+}
+
 // Fetch system status
 async function fetchSystemStatus() {
     try {
@@ -1302,7 +1311,9 @@ async function fetchSystemStatus() {
             ? state.systemStatus.configuration_status.default_model
             : null;
         if (envDefaultModel && state.metadata && chatElements.modelSelector) {
-            const availableModels = state.metadata.models.filter(m => m.available !== false);
+            const availableModels = state.metadata.models
+                .filter(isChatSelectableModel)
+                .filter(m => m.available !== false);
             const firstAvailableModel = availableModels.length ? availableModels[0].name : null;
             const currentValue = chatElements.modelSelector.value;
             const hasEnvDefault = availableModels.some(m => m.name === envDefaultModel);
