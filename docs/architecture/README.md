@@ -11,7 +11,7 @@ Runtime context (core/runtime/)
     ↓ scheduler + authoring loader + ingestion + execution tasks + vault state + shared services
 Chat execution (core/chat/) + Authoring execution (core/authoring/)
     ↓ Monty sandbox + tools + models
-Memory/history broker (core/memory/) + Chat store (core/chat/)
+Session summaries (core/memory/) + Chat/history services (core/chat/)
     ↓
 Vault files (data/) + system state/databases/snapshots (system/)
 ```
@@ -38,7 +38,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Authoring](authoring-engine.md) | Discover/parse/execute workflows and context templates in the Monty sandbox, including script helpers | `core/authoring/` |
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
 | [Chat Sessions](chat-sessions.md) | SQLite session store and markdown transcript rendering | `core/chat/` |
-| [Memory](memory.md) | Shared conversation-history broker for tool adapters and authoring helpers | `core/memory/` |
+| [Session Summaries](session-summaries.md) | Derived chat-session summary storage, indexing, and retrieval | `core/memory/`, `core/chat/history_service.py` |
 | [LLM + Tools](llm-tools.md) | Agent creation, settings-backed tool binding, capability composition, model resolution | `core/llm/`, `core/tools/` |
 | [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_ops_safe.py` |
 | [Settings + Secrets](settings-secrets.md) | Typed config store and YAML-backed secrets store | `core/settings/` |

@@ -1,8 +1,14 @@
-# Memory Subsystem
+# Session Summary Subsystem
 
-The memory subsystem stores and retrieves derived session summaries. Chat
-history brokering lives in the chat subsystem so derived summary records remain
-distinct from the conversation history they are derived from.
+AssistantMD uses "memory" as a broad composition pattern: users can combine
+tools, skills, workflows, context scripts, and vault files to preserve useful
+context over time. The concrete subsystem described here stores and retrieves
+derived session summaries.
+
+Session summaries are indexes over prior chat sessions. They are one memory
+primitive, not the whole memory model. Chat history brokering lives in the chat
+subsystem so derived summary records remain distinct from the conversation
+history they are derived from.
 
 ## Primary code
 
@@ -90,4 +96,7 @@ Field-aware storage and scoring remain internal implementation details.
 
 - The chat-history broker is intentionally flexible; policy belongs in callers such as the authoring helpers.
 - Protocol safety for context assembly is enforced by returning tool exchanges as atomic units in `retrieve_history(...)`.
-- Future derived-memory primitives, including vector retrieval, should live behind this subsystem rather than directly in chat or tool modules.
+- Future derived session-summary retrieval behavior should remain behind this
+  subsystem rather than being duplicated directly in chat or tool modules.
+- Other memory primitives may exist alongside session summaries; they should be
+  documented as separate contracts when they become concrete.

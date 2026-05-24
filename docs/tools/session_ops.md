@@ -13,14 +13,21 @@ parameter.
 
 ## Parameters
 
-- `operation`: required. Supported values are `summarize_session`,
+- `operation`: required. Supported values are `list_sessions`, `summarize_session`,
   `upsert_session_summary`, `get_session_summary`, and `search_sessions`.
 - `session_id`: optional explicit session id. Defaults to the active session
   when available.
 - `mode`: optional search mode for `search_sessions`. Supported values are
   `search`, `deep`, and `related`. Defaults to `search`.
 - `query`: search phrase for the default `search` mode and for `deep` mode.
-- `limit`: optional positive integer result limit for `search_sessions`.
+- `limit`: optional positive integer result limit. Defaults to 50 for
+  `list_sessions` and 5 for `search_sessions`. `list_sessions` rejects limits
+  above 100.
+- `cursor`: optional pagination cursor for `list_sessions`; use the
+  `next_cursor` returned by a prior `list_sessions` call.
+- `summary_status`: optional `list_sessions` filter. Defaults to `summarized`,
+  which includes only sessions with stored summaries. Supported values are
+  `summarized`, `any`, `current`, `pending`, and `stale`.
 - `data`: optional object for `upsert_session_summary`. Supported keys are
   `summary`, `domain`, `work_product`, `user_intent`, `named_entities`,
   `source_summary`, `artifacts`, and `metadata`.
@@ -59,7 +66,9 @@ descriptions of the user's work over momentary prompt phrasing.
   source labels. Do not judge source quality. `source_summary` is returned as
   provenance for grounding; it is not used as an indexed retrieval field.
 
-For manual writes, put these fields inside `data`. `data.artifacts` is an
+For manual writes, put these fields inside `data`. On an existing record,
+omitted fields are preserved; pass `null` or an empty string to explicitly clear
+a field. `data.artifacts` is an
 optional list of artifact objects with `path`, optional `artifact_role`, and
 `metadata`. `data.metadata` is optional JSON object metadata for the stored
 session summary row.
@@ -72,6 +81,13 @@ Returns pretty-printed JSON text. Successful operations include a stable
 
 ## Notes
 
+- `list_sessions` returns a compact page of summarized chat-session rows ordered
+  by latest activity. It is for browsing and overview work, not semantic
+  retrieval. Rows include `session_id`, title, timestamps, message count,
+  summary status, `domain`, and `user_intent`. It also returns
+  `total_count`, `returned_count`, and `next_cursor` so callers do not mistake a
+  page for the whole available summary set. Use `summary_status: "pending"`
+  only when explicitly looking for sessions that still need summarization.
 - `get_session_summary` is read-only. It fetches the stored summary for the current
   or specified session and returns `status: "found"` or `status: "not_found"`.
 - `summarize_session` reads the transcript and structured tool events for
@@ -80,7 +96,8 @@ Returns pretty-printed JSON text. Successful operations include a stable
   by that chat session as artifacts, and indexes vector-searchable fields.
 - `upsert_session_summary` manually stores the `data` values supplied by the
   caller for the current or specified session. It does not read the transcript
-  or infer missing fields.
+  or infer missing fields. When updating an existing summary, omitted fields are
+  preserved; pass `null` or an empty string to explicitly clear a field.
 - `search_sessions` finds candidate prior sessions.
   - `mode: "search"` is the default. It searches the supplied `query` across session-summary fields using
     lexical FTS/BM25 evidence plus semantic vector evidence.
@@ -98,6 +115,18 @@ Returns pretty-printed JSON text. Successful operations include a stable
   positive integer `limit`.
 
 ## Common Calls
+
+List recent sessions:
+
+```json
+{"operation": "list_sessions", "limit": 50}
+```
+
+List sessions with missing summaries:
+
+```json
+{"operation": "list_sessions", "summary_status": "pending", "limit": 50}
+```
 
 Fetch the stored summary for the current session:
 

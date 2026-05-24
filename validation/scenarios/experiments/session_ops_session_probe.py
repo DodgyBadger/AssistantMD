@@ -73,6 +73,20 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                 ),
             ],
         )
+        chat_store.add_messages(
+            "session-donor-wetlands",
+            vault_name,
+            [
+                ModelRequest(parts=[UserPromptPart(content="Draft the wetlands donor report.")]),
+            ],
+        )
+        chat_store.add_messages(
+            "unsummarized-session",
+            vault_name,
+            [
+                ModelRequest(parts=[UserPromptPart(content="A short unsummarized planning note.")]),
+            ],
+        )
         chat_store.add_tool_event(
             session_id="extract-session",
             vault_name=vault_name,
@@ -214,6 +228,8 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                     "domain": "conservation fundraising",
                     "work_product": "funding proposal",
                     "user_intent": "Create a funding proposal for riparian restoration work.",
+                    "named_entities": "Riparian Funders Network",
+                    "source_summary": "Read prior riparian proposal notes.",
                     "artifacts": [
                         {
                             "path": "Proposals/Riparian/grant.md",
@@ -235,6 +251,35 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                     "work_product": "funding proposal",
                     "user_intent": "Create a funding proposal for riparian restoration work.",
                 },
+            )
+            cleared = await _call(
+                tool,
+                ctx,
+                operation="upsert_session_summary",
+                data={
+                    "named_entities": None,
+                    "source_summary": "",
+                },
+            )
+            listed = await _call(
+                tool,
+                ctx,
+                operation="list_sessions",
+                limit=2,
+            )
+            listed_next = await _call(
+                tool,
+                ctx,
+                operation="list_sessions",
+                limit=2,
+                cursor=listed.get("next_cursor") or "",
+            )
+            listed_pending = await _call(
+                tool,
+                ctx,
+                operation="list_sessions",
+                summary_status="pending",
+                limit=10,
             )
             searched = await _call(
                 tool,
@@ -307,6 +352,10 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "upserted": upserted,
             "current": current,
             "updated": updated,
+            "cleared": cleared,
+            "listed": listed,
+            "listed_next": listed_next,
+            "listed_pending": listed_pending,
             "searched": searched,
             "semantic_search": semantic_search,
             "fetched": fetched,
@@ -390,6 +439,67 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             == "Drafting a grant proposal about riparian restoration using a reusable grant narrative.",
             "upsert_session_summary should replace direct summary field",
         )
+        self.soft_assert_equal(
+            updated["session_summary"]["named_entities"],
+            "Riparian Funders Network",
+            "upsert_session_summary should preserve omitted fields",
+        )
+        self.soft_assert_equal(
+            updated["session_summary"]["source_summary"],
+            "Read prior riparian proposal notes.",
+            "upsert_session_summary should preserve omitted provenance",
+        )
+        self.soft_assert_equal(
+            cleared["session_summary"]["summary"],
+            "Drafting a grant proposal about riparian restoration using a reusable grant narrative.",
+            "upsert_session_summary should preserve omitted vector fields during targeted clears",
+        )
+        self.soft_assert_equal(
+            cleared["session_summary"]["named_entities"],
+            None,
+            "upsert_session_summary should clear explicit null fields",
+        )
+        self.soft_assert_equal(
+            cleared["session_summary"]["source_summary"],
+            None,
+            "upsert_session_summary should clear stale provenance when empty",
+        )
+        self.soft_assert_equal(
+            listed["status"],
+            "ok",
+            "list_sessions should succeed",
+        )
+        self.soft_assert_equal(
+            listed["total_count"],
+            3,
+            "list_sessions should default to summarized sessions",
+        )
+        self.soft_assert_equal(
+            listed["returned_count"],
+            2,
+            "list_sessions should return one compact page",
+        )
+        self.soft_assert(
+            listed["next_cursor"] is not None,
+            "list_sessions should provide a cursor when more rows exist",
+        )
+        self.soft_assert_equal(
+            len(listed["sessions"] + listed_next["sessions"]),
+            3,
+            "list_sessions cursor should page through the full compact listing",
+        )
+        self.soft_assert(
+            all(item["has_summary"] for item in listed["sessions"]),
+            "list_sessions should only return summarized sessions by default",
+        )
+        self.soft_assert(
+            all("summary" not in item for item in listed["sessions"]),
+            "list_sessions should not return full summaries",
+        )
+        self.soft_assert(
+            any(item["session_id"] == "unsummarized-session" for item in listed_pending["sessions"]),
+            "list_sessions should support pending summary exploration",
+        )
         self.soft_assert(
             any(
                 match["session_id"] == "riparian-grant-session"
@@ -434,6 +544,10 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "default search mode should require a query",
         )
         self.soft_assert_equal(related["status"], "ok")
+        self.soft_assert(
+            "session_summaries" not in related,
+            "related search should expose matches as the canonical result list",
+        )
         self.soft_assert(
             all(
                 match["session_summary"]["session_id"] != "riparian-grant-session"

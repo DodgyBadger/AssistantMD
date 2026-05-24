@@ -37,6 +37,15 @@ RELATED_SESSION_AUTOMATIC_THRESHOLD = 0.70
 RELATED_SESSION_POSSIBLE_THRESHOLD = 0.55
 
 
+class _UnsetValue:
+    """Sentinel for omitted session summary fields."""
+
+
+SESSION_SUMMARY_FIELD_UNSET = _UnsetValue()
+SessionSummaryTextInput = str | None | _UnsetValue
+SessionSummaryMetadataInput = dict[str, Any] | None | _UnsetValue
+
+
 @dataclass(frozen=True)
 class SessionSummaryArtifact:
     """One vault artifact associated with a chat session summary."""
@@ -169,15 +178,15 @@ class SessionSummaryStore:
         vault_name: str,
         session_id: str,
         title: str | None = None,
-        summary: str | None = None,
-        domain: str | None = None,
-        work_product: str | None = None,
-        user_intent: str | None = None,
-        named_entities: str | None = None,
-        source_summary: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        summary: SessionSummaryTextInput = SESSION_SUMMARY_FIELD_UNSET,
+        domain: SessionSummaryTextInput = SESSION_SUMMARY_FIELD_UNSET,
+        work_product: SessionSummaryTextInput = SESSION_SUMMARY_FIELD_UNSET,
+        user_intent: SessionSummaryTextInput = SESSION_SUMMARY_FIELD_UNSET,
+        named_entities: SessionSummaryTextInput = SESSION_SUMMARY_FIELD_UNSET,
+        source_summary: SessionSummaryTextInput = SESSION_SUMMARY_FIELD_UNSET,
+        metadata: SessionSummaryMetadataInput = SESSION_SUMMARY_FIELD_UNSET,
     ) -> SessionSummary:
-        """Create or replace the summary fields for one chat session."""
+        """Create or update summary fields for one chat session."""
         now = _utc_now()
         with self._connect() as conn:
             conn.execute(
@@ -192,37 +201,56 @@ class SessionSummaryStore:
                 ON CONFLICT(session_id, vault_name)
                 DO UPDATE SET
                     title = COALESCE(excluded.title, session_summaries.title),
-                    summary = COALESCE(excluded.summary, session_summaries.summary),
-                    domain = COALESCE(excluded.domain, session_summaries.domain),
-                    work_product = COALESCE(excluded.work_product, session_summaries.work_product),
-                    user_intent = COALESCE(excluded.user_intent, session_summaries.user_intent),
-                    named_entities = COALESCE(
-                        excluded.named_entities,
-                        session_summaries.named_entities
-                    ),
-                    source_summary = COALESCE(
-                        excluded.source_summary,
-                        session_summaries.source_summary
-                    ),
+                    summary = CASE
+                        WHEN ? THEN excluded.summary
+                        ELSE session_summaries.summary
+                    END,
+                    domain = CASE
+                        WHEN ? THEN excluded.domain
+                        ELSE session_summaries.domain
+                    END,
+                    work_product = CASE
+                        WHEN ? THEN excluded.work_product
+                        ELSE session_summaries.work_product
+                    END,
+                    user_intent = CASE
+                        WHEN ? THEN excluded.user_intent
+                        ELSE session_summaries.user_intent
+                    END,
+                    named_entities = CASE
+                        WHEN ? THEN excluded.named_entities
+                        ELSE session_summaries.named_entities
+                    END,
+                    source_summary = CASE
+                        WHEN ? THEN excluded.source_summary
+                        ELSE session_summaries.source_summary
+                    END,
                     updated_at = excluded.updated_at,
-                    metadata_json = COALESCE(
-                        excluded.metadata_json,
-                        session_summaries.metadata_json
-                    )
+                    metadata_json = CASE
+                        WHEN ? THEN excluded.metadata_json
+                        ELSE session_summaries.metadata_json
+                    END
                 """,
                 (
                     session_id,
                     vault_name,
                     _clean_text(title),
-                    _clean_text(summary),
-                    _clean_text(domain),
-                    _clean_text(work_product),
-                    _clean_text(user_intent),
-                    _clean_text(named_entities),
-                    _clean_text(source_summary),
+                    _clean_upsert_text(summary),
+                    _clean_upsert_text(domain),
+                    _clean_upsert_text(work_product),
+                    _clean_upsert_text(user_intent),
+                    _clean_upsert_text(named_entities),
+                    _clean_upsert_text(source_summary),
                     now,
                     now,
-                    _dump_json(metadata) if metadata is not None else None,
+                    _dump_upsert_metadata(metadata),
+                    _is_upsert_value_supplied(summary),
+                    _is_upsert_value_supplied(domain),
+                    _is_upsert_value_supplied(work_product),
+                    _is_upsert_value_supplied(user_intent),
+                    _is_upsert_value_supplied(named_entities),
+                    _is_upsert_value_supplied(source_summary),
+                    _is_upsert_value_supplied(metadata),
                 ),
             )
             row = conn.execute(
@@ -978,6 +1006,22 @@ def _clean_text(value: str | None) -> str | None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def _is_upsert_value_supplied(value: object) -> bool:
+    return value is not SESSION_SUMMARY_FIELD_UNSET
+
+
+def _clean_upsert_text(value: SessionSummaryTextInput) -> str | None:
+    if value is SESSION_SUMMARY_FIELD_UNSET:
+        return None
+    return _clean_text(value)
+
+
+def _dump_upsert_metadata(value: SessionSummaryMetadataInput) -> str | None:
+    if value is SESSION_SUMMARY_FIELD_UNSET or value is None:
+        return None
+    return _dump_json(value)
 
 
 def _optional_text(value: object) -> str | None:

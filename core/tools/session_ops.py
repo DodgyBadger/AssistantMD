@@ -31,10 +31,13 @@ from core.memory.session_summary import (
     RELATED_SESSION_AUTOMATIC_THRESHOLD,
     RELATED_SESSION_FIELD_WEIGHTS,
     VECTOR_FIELD_TYPES,
+    SESSION_SUMMARY_FIELD_UNSET,
     SessionSummaryArtifact,
     SessionSummaryStore,
     build_fts_query,
 )
+from core.memory.session_summary_status import session_summary_status
+from core.settings import get_stale_summary_min_new_messages
 from core.vector import VectorService
 from core.vault_state.service import VaultStateService
 
@@ -68,7 +71,9 @@ class SessionOps(BaseTool):
             session_id: str = "",
             mode: str = "search",
             query: str = "",
-            limit: int | str = 5,
+            limit: int | str = "",
+            cursor: str = "",
+            summary_status: str = "summarized",
             data: dict[str, Any] | None = None,
             summarization_model: str = "gpt-mini",
         ) -> str:
@@ -78,7 +83,9 @@ class SessionOps(BaseTool):
             :param session_id: Optional explicit session id. Defaults to the active session when available.
             :param mode: Search mode for search_sessions: search, deep, or related. Defaults to search.
             :param query: User-provided search phrase for search and deep modes.
-            :param limit: Positive integer result limit for search_sessions.
+            :param limit: Positive integer result limit. Defaults to 5 for search_sessions and 50 for list_sessions.
+            :param cursor: Opaque pagination cursor for list_sessions.
+            :param summary_status: Optional list_sessions filter: summarized, any, current, pending, or stale.
             :param data: Summary field payload for upsert_session_summary.
             :param summarization_model: Model alias used by summarize_session.
             """
@@ -99,11 +106,22 @@ class SessionOps(BaseTool):
                     },
                 )
 
-                resolved_limit = cls._parse_limit(limit)
-                if op == "upsert_session_summary":
+                resolved_limit = cls._parse_limit(
+                    limit,
+                    default=50 if op == "list_sessions" else 5,
+                )
+                if op == "list_sessions":
+                    _require(active_vault_name, "vault_name is required")
+                    result = _list_sessions(
+                        vault_name=active_vault_name,
+                        limit=_require_integer_limit(resolved_limit, operation="list_sessions"),
+                        cursor=cursor,
+                        summary_status=summary_status,
+                    )
+                elif op == "upsert_session_summary":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
-                    memory_data = _upsert_data(data)
+                    summary_data = _upsert_data(data)
                     session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
@@ -111,19 +129,19 @@ class SessionOps(BaseTool):
                             vault_name=active_vault_name,
                             session_id=active_session_id,
                         ),
-                        summary=memory_data.get("summary"),
-                        domain=memory_data.get("domain"),
-                        work_product=memory_data.get("work_product"),
-                        user_intent=memory_data.get("user_intent"),
-                        named_entities=memory_data.get("named_entities"),
-                        source_summary=memory_data.get("source_summary"),
-                        metadata=memory_data.get("metadata"),
+                        summary=_summary_data_value(summary_data, "summary"),
+                        domain=_summary_data_value(summary_data, "domain"),
+                        work_product=_summary_data_value(summary_data, "work_product"),
+                        user_intent=_summary_data_value(summary_data, "user_intent"),
+                        named_entities=_summary_data_value(summary_data, "named_entities"),
+                        source_summary=_summary_data_value(summary_data, "source_summary"),
+                        metadata=_summary_data_value(summary_data, "metadata"),
                     )
                     _maybe_add_artifacts(
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        artifacts=memory_data.get("artifacts"),
+                        artifacts=summary_data.get("artifacts"),
                     )
                     indexed_fields = await _maybe_index_session_summary_fields(
                         store,
@@ -223,7 +241,7 @@ class SessionOps(BaseTool):
                     )
                 else:
                     return (
-                        "Unknown operation. Available: summarize_session, "
+                        "Unknown operation. Available: list_sessions, summarize_session, "
                         "upsert_session_summary, "
                         "get_session_summary, search_sessions"
                     )
@@ -266,12 +284,23 @@ Session summary field guidance:
   identifiable from tool use. This is provenance returned with a summary, not an
   indexed retrieval field.
 
-Use `upsert_session_summary` only when you already have field values to store.
+Use `list_sessions` for a compact browseable overview of chat sessions in the
+current vault. It returns one page of lightweight rows ordered by most recent
+activity, plus `total_count` and `next_cursor`. Use it when the user asks for an
+overview, inventory, recent sessions, or sessions with missing/stale summaries.
+By default, it lists only sessions with stored summaries. Rows include title,
+timestamps, message count, summary status, domain, and user_intent. It does not
+return full summaries or transcripts; call
+`get_session_summary` for full details about one selected session.
+
+Use `upsert_session_summary` only when you already have the field values to store
+as the current session summary.
 Pass those values in `data`; supported keys are `summary`, `domain`,
 `work_product`, `user_intent`, `named_entities`, `source_summary`, `artifacts`,
 and `metadata`.
 It persists supplied values; it does not inspect the transcript or infer missing
-fields.
+fields. When updating an existing summary, omitted fields are preserved; pass
+null or an empty string to explicitly clear a field.
 
 Use `search_sessions` for caller-driven lookup across indexed chat-session
 summaries. `search_sessions` has three modes:
@@ -293,21 +322,23 @@ For `search` and `deep`, write `query` as a plain natural-language phrase. Do
 not use explicit boolean syntax such as uppercase AND/OR. Use a positive
 integer `limit`. Search and deep modes require a query.
 
-For manual writes, include only `data` fields supported by current context.
-Leave unknown fields empty.
+For manual writes, include only fields you intend to create, replace, or clear.
+Leave unsupported or unchanged fields out of `data`.
 
 Full documentation:
 - `__virtual_docs__/tools/session_ops.md`
 """
 
     @staticmethod
-    def _parse_limit(value: int | str) -> int | str:
+    def _parse_limit(value: int | str, *, default: int) -> int | str:
         if isinstance(value, int):
             if value <= 0:
                 raise ValueError("limit must be a positive integer or 'all'")
             return value
         normalized = str(value or "").strip().lower()
-        if not normalized or normalized == "all":
+        if not normalized:
+            return default
+        if normalized == "all":
             return "all"
         if normalized.isdigit():
             parsed = int(normalized)
@@ -350,6 +381,97 @@ def _session_title(*, vault_name: str, session_id: str) -> str | None:
     return session.title if session is not None else None
 
 
+def _list_sessions(
+    *,
+    vault_name: str,
+    limit: int,
+    cursor: str,
+    summary_status: str,
+) -> dict[str, Any]:
+    chat_store = ChatStore()
+    summary_store = SessionSummaryStore()
+    normalized_status = _normalize_summary_status_filter(summary_status)
+    offset = _parse_cursor(cursor)
+    stale_summary_min_new_messages = get_stale_summary_min_new_messages()
+    rows: list[dict[str, Any]] = []
+    for session in chat_store.list_sessions(vault_name):
+        message_count = chat_store.get_message_count(
+            session_id=session.session_id,
+            vault_name=vault_name,
+        )
+        session_summary = summary_store.get_session_summary(
+            vault_name=vault_name,
+            session_id=session.session_id,
+        )
+        status = session_summary_status(
+            session,
+            session_summary,
+            message_count=message_count,
+            stale_summary_min_new_messages=stale_summary_min_new_messages,
+        )
+        if normalized_status == "summarized" and session_summary is None:
+            continue
+        if (
+            normalized_status not in {"any", "summarized"}
+            and status["summary_status"] != normalized_status
+        ):
+            continue
+        rows.append(
+            {
+                "session_id": session.session_id,
+                "title": session.title,
+                "created_at": session.created_at,
+                "last_activity_at": session.last_activity_at,
+                "message_count": message_count,
+                "has_summary": session_summary is not None,
+                "summary_status": status["summary_status"],
+                "summary_updated_at": status["summary_updated_at"],
+                "domain": session_summary.domain if session_summary else None,
+                "user_intent": session_summary.user_intent if session_summary else None,
+            }
+        )
+
+    page = rows[offset : offset + limit]
+    next_offset = offset + len(page)
+    return {
+        "status": "ok",
+        "operation": "list_sessions",
+        "vault_name": vault_name,
+        "summary_status": normalized_status,
+        "total_count": len(rows),
+        "returned_count": len(page),
+        "cursor": str(offset) if offset else None,
+        "next_cursor": str(next_offset) if next_offset < len(rows) else None,
+        "sessions": page,
+    }
+
+
+def _normalize_summary_status_filter(value: str) -> str:
+    normalized = str(value or "summarized").strip().lower()
+    if normalized not in {"summarized", "any", "current", "pending", "stale"}:
+        raise ModelRetry(
+            "list_sessions summary_status must be one of: summarized, any, current, pending, stale."
+        )
+    return normalized
+
+
+def _parse_cursor(value: str) -> int:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return 0
+    if not normalized.isdigit():
+        raise ModelRetry("list_sessions cursor must be the next_cursor value from a previous list_sessions result.")
+    return int(normalized)
+
+
+def _require_integer_limit(value: int | str, *, operation: str) -> int:
+    if isinstance(value, int):
+        if operation == "list_sessions" and value > 100:
+            raise ModelRetry("list_sessions limit must be 100 or less.")
+        return value
+    raise ModelRetry(f"{operation} requires a positive integer limit.")
+
+
 def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
     if data is None:
         return {}
@@ -376,6 +498,12 @@ def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
     if parsed.get("artifacts") is not None and not isinstance(parsed["artifacts"], list):
         raise ValueError("data.artifacts must be a list")
     return parsed
+
+
+def _summary_data_value(data: dict[str, Any], key: str) -> Any:
+    if key not in data:
+        return SESSION_SUMMARY_FIELD_UNSET
+    return data[key]
 
 
 def _validate_search_sessions_request(
@@ -444,10 +572,6 @@ async def _search_sessions(
                 },
             },
             "matches": [_related_match_to_dict(match) for match in matches],
-            "session_summaries": [
-                match.session_summary.to_dict()
-                for match in matches
-            ],
         }
 
     _require(query, "query is required for search and deep modes")
