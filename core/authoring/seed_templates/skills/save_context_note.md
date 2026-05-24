@@ -41,16 +41,13 @@ Do not save:
 Use this structure when creating `AssistantMD/context_notes.md`:
 
 ```markdown
-# Context Notes
-
 ## User
 
 - Name, role, occupation, location, and other durable user facts.
 
-## Chat And Work Preferences
+## Work Preferences
 
-- Response style, collaboration preferences, tooling preferences, and recurring
-  workflow expectations.
+- Collaboration preferences, tooling preferences, and recurring workflow expectations.
 
 ## Projects And Domains
 
@@ -77,7 +74,3 @@ notes. Keep confirmed notes in the topical sections above it.
    intended edit and ask before proceeding.
 6. If the file is getting long, propose a curation pass instead of appending
    indefinitely.
-
-Use `file_ops_safe` for writes. Avoid destructive operations. If a full rewrite
-is needed, preserve the existing file first, for example by moving it to an
-archive path, then write a curated replacement.
