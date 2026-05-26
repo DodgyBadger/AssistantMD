@@ -139,8 +139,104 @@
             height: 100%;
             margin: 0;
         }
+        body.chat-focus-mode {
+            overflow: hidden;
+        }
         .tab-content {
             height: calc(100vh - 70px);
+        }
+        #chat-workspace {
+            min-height: 0;
+        }
+        .chat-focus-divider {
+            display: none;
+        }
+        body.chat-focus-mode #app-shell {
+            max-width: none;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+            padding: 0;
+        }
+        body.chat-focus-mode .app-tabs {
+            display: none;
+        }
+        body.chat-focus-mode #chat-content {
+            position: fixed;
+            inset: 0;
+            z-index: 45;
+            height: 100vh;
+            height: 100dvh;
+            padding: 0;
+            background: rgb(var(--bg-app));
+        }
+        body.chat-focus-mode #chat-settings-panel {
+            display: none;
+        }
+        body.chat-focus-mode #chat-workspace {
+            flex: 1 1 auto;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+        }
+        body.chat-focus-mode #chat-messages {
+            min-height: 8rem;
+        }
+        body.chat-focus-mode #chat-composer {
+            height: var(--chat-compose-height, 18rem);
+            min-height: 8rem;
+            max-height: min(70vh, 42rem);
+            flex: 0 0 auto;
+            padding: 0.75rem;
+        }
+        body.chat-focus-mode .chat-composer-row {
+            height: 100%;
+            min-height: 0;
+            align-items: stretch;
+        }
+        body.chat-focus-mode .chat-composer-main {
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        body.chat-focus-mode .chat-compose-wrap {
+            min-height: 0;
+            flex: 1 1 auto;
+        }
+        body.chat-focus-mode #chat-input {
+            height: 100%;
+            min-height: 0;
+            resize: none;
+        }
+        body.chat-focus-mode .chat-focus-divider {
+            display: flex;
+            flex: 0 0 0.75rem;
+            align-items: center;
+            justify-content: center;
+            border-top: 1px solid rgb(var(--border-primary));
+            border-bottom: 1px solid rgb(var(--border-primary));
+            background: rgb(var(--bg-elevated));
+            cursor: row-resize;
+            touch-action: none;
+        }
+        body.chat-focus-mode .chat-focus-divider::before {
+            content: "";
+            width: 3rem;
+            height: 0.2rem;
+            border-radius: 9999px;
+            background: rgb(var(--text-tertiary));
+        }
+        @media (max-width: 639px) {
+            body.chat-focus-mode #chat-composer {
+                height: var(--chat-compose-height, 42vh);
+                max-height: 72vh;
+            }
+            body.chat-focus-mode .chat-composer-row {
+                flex-direction: column;
+            }
+            body.chat-focus-mode #send-btn {
+                width: 100%;
+            }
         }
         details summary {
             cursor: pointer;
@@ -983,6 +1079,26 @@
             border-color: transparent;
             background: transparent;
         }
+        .chat-focus-inline-btn {
+            position: absolute;
+            right: 1rem;
+            top: 0.5rem;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 9999px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: rgb(var(--text-secondary));
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .chat-focus-inline-btn:hover,
+        .chat-focus-inline-btn[aria-pressed="true"] {
+            color: rgb(var(--accent-primary));
+        }
         .chat-stop-btn {
             background: rgb(var(--state-error)) !important;
         }
@@ -1064,9 +1180,9 @@
     </style>
 </head>
 <body class="bg-app-bg transition-colors duration-200">
-    <div class="container mx-auto max-w-6xl px-4 pt-2 pb-0">
+    <div id="app-shell" class="container mx-auto max-w-6xl px-4 pt-2 pb-0">
         <!-- Tabs -->
-        <div class="mb-4">
+        <div class="app-tabs mb-4">
             <div class="border-b border-border-primary">
                 <div class="flex items-center justify-between">
                     <nav class="-mb-px flex flex-wrap space-x-4 min-w-0">
@@ -1092,7 +1208,7 @@
         <!-- Chat Tab Content -->
         <div id="chat-content" class="tab-content flex flex-col">
             <!-- Chat Settings Section -->
-            <details class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm flex-shrink-0">
+            <details id="chat-settings-panel" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm flex-shrink-0">
                 <summary class="collapsible-summary">
                     <div class="summary-text">
                         <span class="summary-title">Chat Settings</span>
@@ -1182,15 +1298,16 @@
             </details>
 
             <!-- Chat Container -->
-            <div class="bg-app-card border border-border-primary rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
+            <div id="chat-workspace" class="bg-app-card border border-border-primary rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
                 <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-4">
                     <div class="text-center text-txt-secondary text-sm">
                         Start a conversation...
                     </div>
                 </div>
-                <div class="border-t border-border-primary p-4">
-                    <div class="flex gap-2">
-                        <div class="flex-1">
+                <div id="chat-focus-divider" class="chat-focus-divider" role="separator" aria-orientation="horizontal" aria-label="Resize chat composer" tabindex="0"></div>
+                <div id="chat-composer" class="border-t border-border-primary p-4">
+                    <div class="chat-composer-row flex gap-2">
+                        <div class="chat-composer-main flex-1">
                             <div class="chat-compose-wrap">
                                 <textarea
                                     id="chat-input"
@@ -1201,6 +1318,9 @@
                                 <button id="attach-btn" type="button" class="chat-attach-btn" title="Attach image(s)" aria-label="Attach image(s)" aria-expanded="false" aria-controls="chat-attachment-popover">
                                     📎
                                     <span id="attach-count-badge" class="chat-attach-badge" style="display:none"></span>
+                                </button>
+                                <button id="chat-focus-toggle-inline" type="button" class="chat-focus-inline-btn" title="Focus chat workspace" aria-label="Focus chat workspace" aria-pressed="false">
+                                    ⛶
                                 </button>
                                 <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
                                 <div id="chat-attachment-popover" class="chat-attachment-popover hidden" role="menu" aria-label="Pending attachments"></div>

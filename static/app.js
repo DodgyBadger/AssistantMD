@@ -23,6 +23,9 @@ const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
 // State management
 const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
 const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
+const CHAT_COMPOSE_HEIGHT_STORAGE_KEY = 'assistantmd_chat_compose_height';
+const CHAT_COMPOSE_DEFAULT_HEIGHT = 288;
+const CHAT_COMPOSE_MIN_HEIGHT = 128;
 
 const state = {
     sessionId: null,
@@ -45,7 +48,9 @@ const state = {
     vaultActivityMutationSort: { column: 'time', direction: 'desc' },
     restartRequired: false,
     shouldAutoScroll: true,
-    compactionStatusRequestId: 0
+    compactionStatusRequestId: 0,
+    isChatFocusMode: false,
+    chatComposerResize: null
 };
 const chatComposeState = {
     pendingAttachments: [],
@@ -75,6 +80,9 @@ const chatElements = {
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
     sendBtn: document.getElementById('send-btn'),
+    focusToggleInline: document.getElementById('chat-focus-toggle-inline'),
+    focusDivider: document.getElementById('chat-focus-divider'),
+    composer: document.getElementById('chat-composer'),
     compactionTrack: document.getElementById('chat-compaction-track'),
     compactionFill: document.getElementById('chat-compaction-fill'),
     sessionTitleRow: document.getElementById('session-title-row'),
@@ -119,6 +127,141 @@ function scrollChatToBottom(force = false) {
     if (force || state.shouldAutoScroll) {
         container.scrollTop = container.scrollHeight;
     }
+}
+
+function getViewportHeight() {
+    return window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 800;
+}
+
+function getChatComposerMaxHeight() {
+    return Math.max(CHAT_COMPOSE_MIN_HEIGHT, Math.floor(getViewportHeight() * 0.72));
+}
+
+function clampChatComposerHeight(value) {
+    const parsed = Number(value);
+    const fallback = Math.min(CHAT_COMPOSE_DEFAULT_HEIGHT, getChatComposerMaxHeight());
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(Math.max(parsed, CHAT_COMPOSE_MIN_HEIGHT), getChatComposerMaxHeight());
+}
+
+function persistChatComposerHeight(height) {
+    try {
+        localStorage.setItem(CHAT_COMPOSE_HEIGHT_STORAGE_KEY, String(Math.round(height)));
+    } catch (error) {
+        console.warn('Failed to persist chat composer height:', error);
+    }
+}
+
+function readStoredChatComposerHeight() {
+    try {
+        return localStorage.getItem(CHAT_COMPOSE_HEIGHT_STORAGE_KEY);
+    } catch (error) {
+        console.warn('Failed to read chat composer height:', error);
+        return null;
+    }
+}
+
+function setChatComposerHeight(height, { persist = true } = {}) {
+    const clamped = clampChatComposerHeight(height);
+    document.documentElement.style.setProperty('--chat-compose-height', `${clamped}px`);
+
+    if (chatElements.focusDivider) {
+        chatElements.focusDivider.setAttribute('aria-valuemin', String(CHAT_COMPOSE_MIN_HEIGHT));
+        chatElements.focusDivider.setAttribute('aria-valuemax', String(getChatComposerMaxHeight()));
+        chatElements.focusDivider.setAttribute('aria-valuenow', String(Math.round(clamped)));
+    }
+
+    if (persist) {
+        persistChatComposerHeight(clamped);
+    }
+
+    return clamped;
+}
+
+function restoreChatComposerHeight() {
+    setChatComposerHeight(readStoredChatComposerHeight(), { persist: false });
+}
+
+function syncChatFocusToggle() {
+    const toggle = chatElements.focusToggleInline;
+    if (!toggle) return;
+
+    toggle.setAttribute('aria-pressed', state.isChatFocusMode ? 'true' : 'false');
+    toggle.title = state.isChatFocusMode ? 'Return to normal chat layout' : 'Focus the chat workspace';
+    toggle.setAttribute(
+        'aria-label',
+        state.isChatFocusMode ? 'Exit chat focus mode' : 'Focus chat workspace'
+    );
+}
+
+function setChatFocusMode(enabled) {
+    const nextValue = Boolean(enabled);
+    if (state.isChatFocusMode === nextValue) return;
+
+    state.isChatFocusMode = nextValue;
+    document.body.classList.toggle('chat-focus-mode', state.isChatFocusMode);
+    syncChatFocusToggle();
+
+    if (state.isChatFocusMode) {
+        restoreChatComposerHeight();
+        window.requestAnimationFrame(() => {
+            scrollChatToBottom();
+            chatElements.chatInput?.focus();
+        });
+    } else {
+        state.chatComposerResize = null;
+    }
+}
+
+function toggleChatFocusMode() {
+    setChatFocusMode(!state.isChatFocusMode);
+}
+
+function resizeFocusedChatComposerFromPointer(clientY) {
+    if (!state.isChatFocusMode) return;
+    const height = getViewportHeight() - Number(clientY || 0);
+    setChatComposerHeight(height);
+}
+
+function handleChatFocusDividerPointerDown(event) {
+    if (!state.isChatFocusMode || !chatElements.focusDivider) return;
+    event.preventDefault();
+    state.chatComposerResize = { pointerId: event.pointerId };
+    chatElements.focusDivider.setPointerCapture?.(event.pointerId);
+    resizeFocusedChatComposerFromPointer(event.clientY);
+}
+
+function handleChatFocusDividerPointerMove(event) {
+    if (!state.chatComposerResize || state.chatComposerResize.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    resizeFocusedChatComposerFromPointer(event.clientY);
+}
+
+function stopChatFocusDividerResize(event) {
+    if (!state.chatComposerResize) return;
+    if (event?.pointerId !== undefined && state.chatComposerResize.pointerId !== event.pointerId) return;
+
+    if (event?.pointerId !== undefined) {
+        chatElements.focusDivider?.releasePointerCapture?.(event.pointerId);
+    }
+    state.chatComposerResize = null;
+}
+
+function handleChatFocusDividerKeydown(event) {
+    if (!state.isChatFocusMode) return;
+
+    const current = clampChatComposerHeight(chatElements.composer?.getBoundingClientRect().height);
+    const step = event.shiftKey ? 64 : 24;
+    let nextHeight = null;
+
+    if (event.key === 'ArrowUp') nextHeight = current + step;
+    if (event.key === 'ArrowDown') nextHeight = current - step;
+    if (event.key === 'Home') nextHeight = CHAT_COMPOSE_MIN_HEIGHT;
+    if (event.key === 'End') nextHeight = getChatComposerMaxHeight();
+
+    if (nextHeight === null) return;
+    event.preventDefault();
+    setChatComposerHeight(nextHeight);
 }
 
 function handleChatScroll() {
@@ -1081,6 +1224,8 @@ async function init() {
     await fetchSystemStatus();
     setupEventListeners();
     renderPendingAttachments();
+    restoreChatComposerHeight();
+    syncChatFocusToggle();
     updateCollapsibleArrows();
 }
 
@@ -2144,6 +2289,10 @@ function closeVaultActivityDetails() {
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+        if (state.isChatFocusMode) {
+            setChatFocusMode(false);
+            return;
+        }
         closeVaultActivityDetails();
     }
 });
@@ -2197,6 +2346,24 @@ function setupEventListeners() {
             }
         });
     }
+
+    if (chatElements.focusToggleInline) {
+        chatElements.focusToggleInline.addEventListener('click', toggleChatFocusMode);
+    }
+
+    if (chatElements.focusDivider) {
+        chatElements.focusDivider.addEventListener('pointerdown', handleChatFocusDividerPointerDown);
+        chatElements.focusDivider.addEventListener('pointermove', handleChatFocusDividerPointerMove);
+        chatElements.focusDivider.addEventListener('pointerup', stopChatFocusDividerResize);
+        chatElements.focusDivider.addEventListener('pointercancel', stopChatFocusDividerResize);
+        chatElements.focusDivider.addEventListener('keydown', handleChatFocusDividerKeydown);
+    }
+
+    window.addEventListener('resize', () => {
+        if (!state.isChatFocusMode) return;
+        const current = chatElements.composer?.getBoundingClientRect().height;
+        setChatComposerHeight(current, { persist: false });
+    });
 
     if (chatElements.sessionSelector) {
         chatElements.sessionSelector.addEventListener('change', async (event) => {
