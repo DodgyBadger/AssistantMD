@@ -307,6 +307,85 @@
             border-color: rgb(var(--accent-primary));
             box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
         }
+        .session-title-row {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .session-title-row.hidden {
+            display: none;
+        }
+        .session-title-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .session-title-row input {
+            min-width: 0;
+        }
+        .session-title-actions > button {
+            flex: 1 1 5.5rem;
+        }
+        @media (min-width: 640px) {
+            .session-title-row {
+                flex-direction: row;
+            }
+            .session-title-actions {
+                flex-wrap: nowrap;
+            }
+            .session-title-actions > button {
+                flex: 0 0 auto;
+            }
+        }
+        .app-modal-overlay {
+            align-items: stretch;
+            justify-content: flex-end;
+        }
+        .app-modal-panel {
+            width: 100%;
+            height: 100%;
+            max-width: 48rem;
+            background: rgb(var(--bg-card));
+            border-left: 1px solid rgb(var(--border-primary));
+            box-shadow: 0 20px 45px rgb(0 0 0 / 0.25);
+        }
+        .app-modal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid rgb(var(--border-primary));
+            background: rgb(var(--bg-card));
+            z-index: 1;
+        }
+        .app-modal-title-block {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        .app-modal-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+        @media (max-width: 639px) {
+            .app-modal-panel {
+                max-width: none;
+                border-left: 0;
+            }
+            .app-modal-header {
+                flex-direction: column;
+            }
+            .app-modal-actions {
+                width: 100%;
+                justify-content: stretch;
+            }
+            .app-modal-actions > button {
+                flex: 1 1 auto;
+            }
+        }
         .tab-button.text-amber-600 {
             font-weight: 600;
         }
@@ -1080,22 +1159,24 @@
                             🧠
                         </button>
                     </div>
-                    <div id="session-title-row" class="flex gap-2 hidden">
+                    <div id="session-title-row" class="session-title-row hidden">
                         <input id="session-title-input" type="text" maxlength="120"
                             placeholder="Add a title…"
-                            class="flex-1 px-3 py-1.5 text-sm border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
-                        <button id="session-title-save" type="button"
-                            class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                            Save
-                        </button>
-                        <button id="session-export-btn" type="button"
-                            class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                            Export
-                        </button>
-                        <button id="session-delete-btn" type="button"
-                            class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed">
-                            Delete
-                        </button>
+                            class="min-w-0 flex-1 px-3 py-1.5 text-sm border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
+                        <div class="session-title-actions">
+                            <button id="session-title-save" type="button"
+                                class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                Save
+                            </button>
+                            <button id="session-export-btn" type="button"
+                                class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
+                                Export
+                            </button>
+                            <button id="session-delete-btn" type="button"
+                                class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed">
+                                Delete
+                            </button>
+                        </div>
                     </div>
                 </div>
             </details>

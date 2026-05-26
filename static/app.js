@@ -578,16 +578,16 @@ async function openSelectedSessionSummaryModal() {
     closeSessionSummaryModal();
     const popover = document.createElement('div');
     popover.id = 'session-summary-modal';
-    popover.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    popover.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
     popover.innerHTML = `
         <div class="absolute inset-0" data-session-summary-close="true"></div>
-        <section class="relative h-full w-full max-w-3xl bg-app-card border-l border-border-primary shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="session-summary-modal-title">
-            <div class="sticky top-0 bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3">
-                <div>
+        <section class="app-modal-panel relative overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="session-summary-modal-title">
+            <div class="app-modal-header sticky top-0">
+                <div class="app-modal-title-block">
                     <h2 id="session-summary-modal-title" class="text-lg font-semibold text-txt-primary">🧠 Session Summary</h2>
                     <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(session.session_id)}</p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="app-modal-actions">
                     <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error" data-session-summary-delete="true">
                         Delete Summary
                     </button>
@@ -2017,17 +2017,19 @@ function openVaultActivityDetails(vaultName, activityId) {
 
     const overlay = document.createElement('div');
     overlay.id = 'vault-activity-modal';
-    overlay.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
     overlay.innerHTML = `
         <div class="absolute inset-0" data-vault-activity-close="true"></div>
-        <section class="relative h-full w-full max-w-3xl bg-app-card border-l border-border-primary shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="vault-activity-modal-title">
-            <div class="sticky top-0 bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3">
-                <div>
+        <section class="app-modal-panel relative overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="vault-activity-modal-title">
+            <div class="app-modal-header sticky top-0">
+                <div class="app-modal-title-block">
                     <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${renderActivityKindEmoji(group)} ${escapeHtml(renderActivityTaskTitle(group))}</h2>
                 </div>
-                <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
-                    Close
-                </button>
+                <div class="app-modal-actions">
+                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
+                        Close
+                    </button>
+                </div>
             </div>
             <div class="p-4">
                 <div class="text-sm text-txt-secondary mb-3">
@@ -3661,16 +3663,16 @@ async function openWorkflowFileEditor(globalId) {
     closeWorkflowFileEditor();
     const overlay = document.createElement('div');
     overlay.id = 'workflow-file-modal';
-    overlay.className = 'fixed inset-0 z-50 flex items-stretch justify-end bg-black/40';
+    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
     overlay.innerHTML = `
         <div class="absolute inset-0" data-workflow-file-close="true"></div>
-        <section class="relative h-full bg-app-card border-l border-border-primary shadow-xl flex flex-col" style="width: min(48rem, calc(100vw - 2rem));" role="dialog" aria-modal="true" aria-labelledby="workflow-file-modal-title">
-            <div class="bg-app-card border-b border-border-primary px-4 py-3 flex items-start justify-between gap-3 flex-none">
-                <div>
+        <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="workflow-file-modal-title">
+            <div class="app-modal-header flex-none">
+                <div class="app-modal-title-block">
                     <h2 id="workflow-file-modal-title" class="text-lg font-semibold text-txt-primary">Workflow: ${escapeHtml(globalId)}</h2>
                     <p id="workflow-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">Loading...</p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="app-modal-actions">
                     <button type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-workflow-file-save="true" disabled>
                         Save
                     </button>
