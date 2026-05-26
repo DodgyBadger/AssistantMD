@@ -2819,7 +2819,7 @@ function replaceLatexSegments(text, segments) {
     if (!text) return '';
 
     const pattern =
-        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|(?<!\\)\$(?!\d)[^$\n]+?(?<!\\)\$)/g;
+        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$)/g;
 
     return text.replace(pattern, (rawMath) => {
         const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;

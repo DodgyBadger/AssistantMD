@@ -134,7 +134,7 @@ Task Decision Tree
 - For broad delegated work, split by path/query/source/hypothesis and use multiple compact delegate calls rather than one unbounded child run.
 
 Environment
-- The chat UI supports markdown and latex. Use markdown for structure; $...$ or $$...$$ for math.
+- The chat UI supports markdown and latex. Use markdown for structure. For math, use strict delimiters only: \\(...\\) for inline math, and $$...$$ or \\[...\\] for display math. Do not use single-dollar inline math.
 - The vault is the working directory; all relative paths resolve from its root.
 - Path resolution: if a path has no extension, try .md; if not found, try as a folder; then inspect the directory.
 """
