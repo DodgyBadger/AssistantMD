@@ -1083,6 +1083,7 @@
             position: absolute;
             right: 1rem;
             top: 0.5rem;
+            z-index: 2;
             width: 2rem;
             height: 2rem;
             border-radius: 9999px;
@@ -1093,6 +1094,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
             transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
         }
         .chat-focus-inline-btn:hover,
