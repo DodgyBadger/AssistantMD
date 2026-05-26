@@ -1214,6 +1214,9 @@ const themeManager = {
 async function init() {
     themeManager.init();
     setupTabs();
+    setupEventListeners();
+    restoreChatComposerHeight();
+    syncChatFocusToggle();
     if (window.ConfigurationPanel) {
         window.ConfigurationPanel.init({
             refreshMetadata: () => fetchMetadata(),
@@ -1222,10 +1225,7 @@ async function init() {
     }
     await fetchMetadata();
     await fetchSystemStatus();
-    setupEventListeners();
     renderPendingAttachments();
-    restoreChatComposerHeight();
-    syncChatFocusToggle();
     updateCollapsibleArrows();
 }
 
