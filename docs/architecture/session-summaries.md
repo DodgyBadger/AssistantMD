@@ -60,9 +60,10 @@ to enumerate current-vault chat sessions that either lack a stored summary or
 have a stale summary. The helper returns session metadata only; it does not
 retrieve transcript messages or perform summarization. Workflows should compose
 it with `session_ops` when they need to summarize selected sessions. Stale
-summary selection uses a fixed grace window after the last summary update and
-the `stale_summary_min_new_messages` general setting before
-including an already-indexed session again.
+summary selection compares the current persisted session message count with the
+message count recorded when the summary was extracted; any count difference is
+treated as stale so appended turns and compaction rewrites both trigger
+resummarization.
 
 During active context assembly, the context manager passes curated prior history in
 `message_history` and exposes the current user prompt through `latest_message`. That path

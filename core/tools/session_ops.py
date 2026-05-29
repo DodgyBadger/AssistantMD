@@ -37,7 +37,6 @@ from core.memory.session_summary import (
     build_fts_query,
 )
 from core.memory.session_summary_status import session_summary_status
-from core.settings import get_stale_summary_min_new_messages
 from core.vector import VectorService
 from core.vault_state.service import VaultStateService
 
@@ -392,7 +391,6 @@ def _list_sessions(
     summary_store = SessionSummaryStore()
     normalized_status = _normalize_summary_status_filter(summary_status)
     offset = _parse_cursor(cursor)
-    stale_summary_min_new_messages = get_stale_summary_min_new_messages()
     rows: list[dict[str, Any]] = []
     for session in chat_store.list_sessions(vault_name):
         message_count = chat_store.get_message_count(
@@ -407,7 +405,6 @@ def _list_sessions(
             session,
             session_summary,
             message_count=message_count,
-            stale_summary_min_new_messages=stale_summary_min_new_messages,
         )
         if normalized_status == "summarized" and session_summary is None:
             continue

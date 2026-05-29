@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import sys
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
-
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -16,7 +12,6 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 
 from core.chat.chat_store import ChatStore
 from core.memory.session_summary import SessionSummaryStore
-from core.settings.store import SETTINGS_TEMPLATE, refresh_settings_cache
 from validation.core.base_scenario import BaseScenario
 
 
@@ -27,7 +22,6 @@ class RetrieveSessionsHelperScenario(BaseScenario):
         vault = self.create_vault("RetrieveSessionsVault")
         controller = self._get_system_controller()
         system_root = str(controller._system_root)
-        self._write_stale_summary_min_new_messages(controller._system_root, 2)
         chat_store = ChatStore(system_root=system_root)
         summary_store = SessionSummaryStore(system_root=system_root)
 
@@ -35,8 +29,8 @@ class RetrieveSessionsHelperScenario(BaseScenario):
         self._seed_session(chat_store, vault.name, "has-summary", title="Has summary")
         self._seed_session(chat_store, vault.name, "pending-two", title="Pending two")
         self._seed_session(chat_store, vault.name, "stale-summary", title="Stale summary", message_count=5)
-        self._seed_session(chat_store, vault.name, "minor-update", title="Minor update", message_count=4)
-        self._seed_session(chat_store, vault.name, "inside-grace", title="Inside grace", message_count=5)
+        self._seed_session(chat_store, vault.name, "compacted-summary", title="Compacted summary", message_count=3)
+        self._seed_session(chat_store, vault.name, "current-summary", title="Current summary", message_count=4)
         summary_store.upsert_session_summary(
             vault_name=vault.name,
             session_id="has-summary",
@@ -46,28 +40,35 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             work_product="test",
             user_intent="Validate pending summary selection.",
         )
-        for session_id in ("stale-summary", "minor-update", "inside-grace"):
-            summary_store.upsert_session_summary(
-                vault_name=vault.name,
-                session_id=session_id,
-                title=session_id,
-                summary="Existing summary row.",
-                domain="validation",
-                work_product="test",
-                user_intent="Validate stale summary selection.",
-                metadata={"message_count": 2},
-            )
-        self._set_summary_updated_at(
-            controller._system_root,
-            vault.name,
-            "stale-summary",
-            datetime.now(UTC) - timedelta(hours=2),
+        summary_store.upsert_session_summary(
+            vault_name=vault.name,
+            session_id="stale-summary",
+            title="Stale summary",
+            summary="Existing summary row.",
+            domain="validation",
+            work_product="test",
+            user_intent="Validate stale summary selection.",
+            metadata={"message_count": 2},
         )
-        self._set_summary_updated_at(
-            controller._system_root,
-            vault.name,
-            "minor-update",
-            datetime.now(UTC) - timedelta(hours=2),
+        summary_store.upsert_session_summary(
+            vault_name=vault.name,
+            session_id="compacted-summary",
+            title="Compacted summary",
+            summary="Existing summary row.",
+            domain="validation",
+            work_product="test",
+            user_intent="Validate stale summary selection after compaction.",
+            metadata={"message_count": 6},
+        )
+        summary_store.upsert_session_summary(
+            vault_name=vault.name,
+            session_id="current-summary",
+            title="Current summary",
+            summary="Existing summary row.",
+            domain="validation",
+            work_product="test",
+            user_intent="Validate current summary selection.",
+            metadata={"message_count": 4},
         )
 
         self.create_file(vault, "AssistantMD/Authoring/retrieve_sessions_probe.md", WORKFLOW)
@@ -82,11 +83,11 @@ class RetrieveSessionsHelperScenario(BaseScenario):
         session_ids = {item["session_id"] for item in payload["items"]}
         self.soft_assert_equal(
             session_ids,
-            {"pending-one", "pending-two", "stale-summary", "minor-update"},
+            {"pending-one", "pending-two", "stale-summary", "compacted-summary"},
             "retrieve_sessions pending_or_stale_summary selection should include pending and stale sessions",
         )
         self.soft_assert(
-            all(item["message_count"] in {2, 4, 5} for item in payload["items"]),
+            all(item["message_count"] in {2, 3, 5} for item in payload["items"]),
             "retrieve_sessions should include message counts",
         )
         self.soft_assert(
@@ -98,16 +99,23 @@ class RetrieveSessionsHelperScenario(BaseScenario):
                 "pending-one": "pending",
                 "pending-two": "pending",
                 "stale-summary": "stale",
-                "minor-update": "stale",
+                "compacted-summary": "stale",
             },
             "retrieve_sessions should report pending and stale summary statuses",
         )
-        stale_items = [
-            item for item in payload["items"] if item["summary_status"] == "stale"
-        ]
-        self.soft_assert(
-            all(item["stale_summary_min_new_messages"] == 2 for item in stale_items),
-            "retrieve_sessions should use the configured stale summary message threshold",
+        deltas = {
+            item["session_id"]: item.get("message_count_delta")
+            for item in payload["items"]
+        }
+        self.soft_assert_equal(
+            deltas.get("stale-summary"),
+            3,
+            "retrieve_sessions should report positive message count deltas",
+        )
+        self.soft_assert_equal(
+            deltas.get("compacted-summary"),
+            -3,
+            "retrieve_sessions should report negative message count deltas after compaction",
         )
         await self.stop_system()
         self.teardown_scenario()
@@ -139,42 +147,6 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             ],
         )
         chat_store.set_session_title(session_id, vault_name, title)
-
-    def _set_summary_updated_at(
-        self,
-        system_root: Path,
-        vault_name: str,
-        session_id: str,
-        updated_at: datetime,
-    ) -> None:
-        conn = sqlite3.connect(system_root / "session_summaries.db")
-        try:
-            conn.execute(
-                """
-                UPDATE session_summaries
-                SET updated_at = ?
-                WHERE vault_name = ? AND session_id = ?
-                """,
-                (updated_at.isoformat(), vault_name, session_id),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    def _write_stale_summary_min_new_messages(
-        self,
-        system_root: Path,
-        threshold: int,
-    ) -> None:
-        settings_path = system_root / "settings.yaml"
-        raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
-        raw["settings"]["stale_summary_min_new_messages"]["value"] = threshold
-        settings_path.write_text(
-            yaml.safe_dump(raw, sort_keys=False, allow_unicode=False),
-            encoding="utf-8",
-        )
-        refresh_settings_cache()
-
 
 WORKFLOW = """---
 run_type: workflow

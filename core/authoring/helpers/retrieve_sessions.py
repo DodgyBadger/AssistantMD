@@ -14,7 +14,6 @@ from core.chat.chat_store import ChatStore, StoredChatSession
 from core.logger import UnifiedLogger
 from core.memory.session_summary import SessionSummaryStore
 from core.memory.session_summary_status import session_summary_status
-from core.settings import get_stale_summary_min_new_messages
 
 
 logger = UnifiedLogger(tag="authoring-host")
@@ -50,7 +49,6 @@ async def execute(
 
     chat_store = ChatStore()
     summary_store = SessionSummaryStore()
-    stale_summary_min_new_messages = get_stale_summary_min_new_messages()
     sessions = chat_store.list_sessions(vault_name)
     items: list[RetrievedItem] = []
     for session in sessions:
@@ -69,7 +67,6 @@ async def execute(
                 session,
                 session_summary,
                 message_count=message_count,
-                stale_summary_min_new_messages=stale_summary_min_new_messages,
             )
             if summary_status["summary_status"] == "current":
                 continue
@@ -177,8 +174,8 @@ def _contract() -> dict[str, object]:
         "summary": (
             "Retrieve chat-session metadata for the current vault. "
             "The 'pending_or_stale_summary' selection returns sessions without "
-            "a session summary or with a summary older than recent session activity. "
-            "Stale selection respects the stale_summary_min_new_messages setting."
+            "a session summary or with a summary message count that differs from "
+            "the current persisted session message count."
         ),
         "arguments": {
             "selection": {
@@ -200,8 +197,7 @@ def _contract() -> dict[str, object]:
                 "Session metadata items. Each item has ref, content, exists, and metadata "
                 "including session_id, vault_name, title, created_at, last_activity_at, "
                 "message_count, has_summary, summary_status, summary_updated_at, "
-                "summary_message_count, new_message_count, stale_summary_grace_minutes, "
-                "and stale_summary_min_new_messages."
+                "summary_message_count, message_count_delta, and new_message_count."
             ),
             "metadata": "Retrieval metadata.",
         },
