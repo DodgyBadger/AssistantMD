@@ -615,7 +615,7 @@ def _insert_chat_mutation_rows(
             None,
             None,
             now.isoformat(),
-            (now + timedelta(days=7)).isoformat(),
+            (now + timedelta(days=365)).isoformat(),
         ),
         (
             "memory-extract-chat-task-2",
@@ -637,7 +637,7 @@ def _insert_chat_mutation_rows(
             None,
             None,
             (now + timedelta(seconds=1)).isoformat(),
-            (now + timedelta(days=7)).isoformat(),
+            (now + timedelta(days=365)).isoformat(),
         ),
     ]
     conn = sqlite3.connect(db_path)

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from core.database import get_system_database_path
 from core.logger import UnifiedLogger
-from core.settings import get_task_snapshot_retention_days
+from core.settings import get_task_mutation_retention_days, get_task_snapshot_retention_days
 from core.vault_state.models import FileSnapshot, SnapshotSet
 
 
@@ -170,8 +170,16 @@ def ensure_task_file_snapshot(
 
 
 def compute_snapshot_expiration(created_at: datetime) -> datetime | None:
-    """Return snapshot expiration using task retention settings."""
-    retention_days = get_task_snapshot_retention_days()
+    """Return snapshot expiration using task snapshot retention settings."""
+    return _compute_expiration(created_at, get_task_snapshot_retention_days())
+
+
+def compute_task_mutation_expiration(created_at: datetime) -> datetime | None:
+    """Return mutation audit row expiration using task mutation retention settings."""
+    return _compute_expiration(created_at, get_task_mutation_retention_days())
+
+
+def _compute_expiration(created_at: datetime, retention_days: int) -> datetime | None:
     if retention_days <= 0:
         return created_at
     return created_at + timedelta(days=retention_days)

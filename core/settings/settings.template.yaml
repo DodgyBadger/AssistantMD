@@ -104,8 +104,12 @@ settings:
     value: true
     description: "Enable task-scoped mutation snapshots for supported rollback operations."
     restart_required: false
+  task_mutation_retention_days:
+    value: 365
+    description: "Days to retain task mutation audit rows before cleanup."
+    restart_required: false
   task_snapshot_retention_days:
-    value: 7
+    value: 30
     description: "Days to retain task snapshot metadata and files before cleanup."
     restart_required: false
   chunking_max_images_per_prompt:

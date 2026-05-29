@@ -95,7 +95,8 @@ Snapshot behavior:
 - new files record a `file_snapshots` row with `exists=false` and no file payload
 - the first `task_file_mutations` row for a task/path carries `before_snapshot_id` and the retained `snapshot_ref`
 - later mutations to the same path in the same task reuse the first file snapshot
-- expiration is computed from `task_snapshot_retention_days`
+- snapshot expiration is computed from `task_snapshot_retention_days`, which defaults to 30 days
+- mutation audit row expiration is computed from `task_mutation_retention_days`, which defaults to 365 days
 
 Snapshot sets also support processed baselines for `pending_files(...)`. When a workflow marks pending items complete, `pending_files` captures the current file contents in a `snapshot_sets` row with `purpose="pending_complete"` and per-file rows with `source="pending_files.complete"`. Later `pending_files(operation="get", ...)` calls can attach diff metadata for pending files by comparing the current file to the workflow's last completed baseline.
 
@@ -151,6 +152,7 @@ Vault-state behavior is controlled by general settings in `system/settings.yaml`
 - `vault_state_excluded_patterns`
 - `vault_scan_interval_seconds`
 - `task_rollback_enabled`
+- `task_mutation_retention_days`
 - `task_snapshot_retention_days`
 
 Startup background refresh, mutation-triggered refresh, manual rescan, and
