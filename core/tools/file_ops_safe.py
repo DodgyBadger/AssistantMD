@@ -230,21 +230,77 @@ Full documentation:
     @classmethod
     def _read_file(cls, path: str, vault_path: str) -> str | ToolReturn:
         """Read file contents."""
+        path = path.strip()
         full_path = cls._validate_read_path(path, vault_path)
 
+        if cls._should_try_markdown_file(path):
+            markdown_path = f"{path}.md"
+            markdown_full_path = cls._validate_read_path(markdown_path, vault_path)
+            if os.path.isfile(markdown_full_path):
+                path = markdown_path
+                full_path = markdown_full_path
+
         if os.path.isdir(full_path):
+            if cls._should_try_markdown_file(path):
+                return cls._list_files(
+                    path,
+                    vault_path,
+                    include_all=False,
+                    recursive=False,
+                    max_results=get_file_ops_safe_list_max_results(),
+                )
+            return cls._directory_read_error(path)
+
+        if not os.path.exists(full_path) and cls._should_try_markdown_file(path):
+            directory_full_path = cls._validate_read_path(path, vault_path)
+            if os.path.isdir(directory_full_path):
+                return cls._list_files(
+                    path,
+                    vault_path,
+                    include_all=False,
+                    recursive=False,
+                    max_results=get_file_ops_safe_list_max_results(),
+                )
+
+        if not os.path.exists(full_path):
             return cls._result(
                 message=(
-                    f"Cannot read '{path}' - this is a directory, not a file. "
-                    f"Use file_ops_safe(operation='list', path='{path}') to see files in this directory."
+                    f"Cannot read '{path}' - file does not exist. "
+                    "Use file_ops_safe(operation='list') to see available files."
                 ),
                 operation="read",
                 path=path,
-                status="invalid_target",
-                exists=True,
-                error_type="is_directory",
+                status="not_found",
+                exists=False,
+                error_type="file_not_found",
             )
 
+        return cls._read_existing_file(path, full_path, vault_path)
+
+    @classmethod
+    def _should_try_markdown_file(cls, path: str) -> bool:
+        """Return whether a vault path should try .md before directory handling."""
+        if not path or path in {".", "/"} or path.endswith("/"):
+            return False
+        return "." not in os.path.basename(path)
+
+    @classmethod
+    def _directory_read_error(cls, path: str) -> ToolReturn:
+        return cls._result(
+            message=(
+                f"Cannot read '{path}' - this is a directory, not a file. "
+                f"Use file_ops_safe(operation='list', path='{path}') to see files in this directory."
+            ),
+            operation="read",
+            path=path,
+            status="invalid_target",
+            exists=True,
+            error_type="is_directory",
+        )
+
+    @classmethod
+    def _read_existing_file(cls, path: str, full_path: str, vault_path: str) -> str | ToolReturn:
+        """Read a resolved non-directory file path."""
         if not os.path.exists(full_path):
             return cls._result(
                 message=(
