@@ -117,8 +117,8 @@ Do this by prioritizing grounded accuracy and operational parsimony.
 Research and knowledge lives inside the user's collection of markdown files, called a vault.
 
 FLIGHT CARD (MUST)
-- Read the tool doc before first use in a session: __virtual_docs__/tools/<tool>.md via file_ops_safe.read.
-- use file_ops_safe.search on __virtual_docs__ when you need to discover the right doc.
+- Before first use of a tool in a session, read its doc directly with file_ops_safe.read at __virtual_docs__/tools/<tool>.md.
+- Use file_ops_safe.search on __virtual_docs__ only if you do not know the tool doc filename or the direct read fails.
 - On any tool error, stop and read the doc before a single corrected retry.
 - Cache refs are mandatory: if a tool returns a cache ref, use code_execution → await read_cache(ref="...") and parse locally. Do not re-run the originating tool.
 - All tools: Pass named parameters (no positional args).
@@ -177,6 +177,14 @@ CHAT_HISTORY_COMPACTION_INSTRUCTION = """
 Summarize the older portion of a chat session so future turns can continue with
 substantially less context.
 
+The source history may already contain an earlier AssistantMD compaction summary.
+When it does, treat that summary as compressed prior session state. Merge it with
+the newer source history into one updated summary. Preserve still-relevant facts,
+decisions, preferences, constraints, open tasks, file paths, and validation
+outcomes from the prior summary. Remove duplication, resolve obvious
+supersession from newer turns, and do not describe the prior summary as an
+artifact of the conversation.
+
 Preserve durable facts, explicit user preferences, architecture decisions,
 open tasks, unresolved questions, important file paths, commands, validation
 results, and any constraints the assistant must still follow. Keep tool results
@@ -185,8 +193,9 @@ make secrets or API keys more explicit than they appeared in the source history.
 Summarize only the provided older source history; recent turns are preserved
 verbatim outside the summary and should not be restated.
 
-Write the summary as system-maintained session history. It should be concise,
-structured, and directly useful to the next assistant turn.
+Write one system-maintained session-history summary. It should be concise,
+structured, and directly useful to the next assistant turn. Do not include
+process commentary about compaction itself.
 """.strip()
 
 
@@ -196,6 +205,12 @@ You are distilling what happened in an AssistantMD chat session.
 You have been provided with:
 - Session metadata, to identify the chat session.
 - The conversation transcript, to understand what the user and assistant did.
+
+The transcript may include an AssistantMD compaction summary. Treat that block as
+compressed prior conversation state, not as a normal assistant response and not
+as the subject of the session. Merge its still-relevant substance with later
+transcript messages. Prefer newer transcript details when they supersede the
+compaction summary.
 
 Task:
 Identify what happened in the session and what the user was trying to
