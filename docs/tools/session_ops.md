@@ -51,9 +51,10 @@ descriptions of the user's work over momentary prompt phrasing.
   as `Python script`, `recipe`, `article summary`, `stacked bar chart`,
   `rewrite`, `donor email`, or `factual answer`.
 - `user_intent`: the user's underlying goal or intent after clarification,
-  repetition, or topic drift. Write this as a dense search phrase, not a
-  sentence. Omit boilerplate such as `the user wanted to`; target 8-18 words
-  and never exceed 140 characters.
+  repetition, or topic drift. Write this as a concise intent phrase that keeps
+  the action-purpose relationship. Choose one primary durable goal rather than
+  listing every sub-task. Omit boilerplate such as `the user wanted to`; target
+  10-22 words and never exceed 140 characters.
 - `named_entities`: only named people, organizations, and places. Use a concise
   comma- or semicolon-separated text list. Leave empty if there are no named
   people, organizations, or places.

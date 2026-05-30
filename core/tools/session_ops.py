@@ -284,7 +284,7 @@ Session summary field guidance:
   noun phrases.
 - `work_product`: concrete thing the user wanted produced or answered.
 - `user_intent`: user's underlying goal or intent after clarification or drift;
-  write a dense search phrase and never exceed 140 characters.
+  write one concise primary intent phrase and never exceed 140 characters.
 - `named_entities`: only named people, organizations, and places.
 - `source_summary`: concise description of source material or prior context
   identifiable from tool use. This is provenance returned with a summary, not an

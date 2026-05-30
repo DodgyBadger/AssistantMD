@@ -223,10 +223,12 @@ Fields:
   human to decide whether this session is relevant; do not preserve a full
   process log. Target 500-800 characters; never exceed 1,000 characters.
 - `user_intent`: what the user was trying to accomplish after clarification,
-  repetition, or topic drift. Write one dense search phrase, not a sentence.
-  Omit boilerplate such as "the user wanted to" or "the goal was to". Include
-  the strongest nouns, named programs, artifacts, and action words. Target 8-18
-  words; never exceed 140 characters.
+  repetition, or topic drift. Write one concise intent phrase that preserves
+  the action-purpose relationship. Choose the primary durable user goal, not a
+  list of every request or tool operation. Omit boilerplate such as "the user
+  wanted to" or "the goal was to". Include the strongest nouns, named programs,
+  artifacts, and action words without making an unordered keyword list. Target
+  10-22 words; never exceed 140 characters.
 
 Rules:
 - Use only the conversation text and session metadata shown here.
@@ -234,7 +236,10 @@ Rules:
 - Do not make `summary` a restatement of `user_intent`; `summary` should say
   what happened, while `user_intent` should say why the user wanted it.
 - Keep both fields concise but specific enough to support later retrieval.
-- `user_intent` should read like a search query a future user might type.
+- `user_intent` should read like a compact phrase a future user might type,
+  with enough connective wording to show what the user was trying to do.
+- If the session contains several sub-tasks, collapse them into the broader
+  purpose instead of separating intents with commas, semicolons, or `and`.
 - Return only the structured output.
 
 Session:
