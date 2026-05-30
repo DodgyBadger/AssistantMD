@@ -27,6 +27,7 @@ class ChatHistoryCompactionScenario(BaseScenario):
         await self.start_system()
 
         import core.chat.compaction as compaction
+        import core.tools.session_ops as session_ops
         from core.chat.chat_store import ChatStore
         from core.chat.history_service import ChatHistoryContext, ChatHistoryService
         from core.runtime.state import get_runtime_context
@@ -224,6 +225,63 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         assert all(item.content != "First user decision." for item in broker_history.items), (
             "History broker does not expose pre-checkpoint raw messages by default"
+        )
+
+        class _SummaryAgentStub:
+            def __init__(self, output_type):
+                self.output_type = output_type
+
+        async def _create_summary_agent_stub(*, output_type=None, **kwargs):
+            return _SummaryAgentStub(output_type)
+
+        def _build_model_stub(model_name):
+            return model_name
+
+        async def _generate_summary_response_stub(agent, prompt, **kwargs):
+            if agent.output_type is session_ops._SessionSummaryIntent:
+                assert "AssistantMD compacted chat history" in prompt, (
+                    "Session summarization prompt should include effective checkpoint summary"
+                )
+                assert "Post-compaction follow-up." in prompt, (
+                    "Session summarization prompt should include post-checkpoint raw turns"
+                )
+                assert "First user decision." not in prompt, (
+                    "Session summarization prompt should not include archival pre-checkpoint raw history"
+                )
+                return agent.output_type(
+                    summary="Effective summary prompt only.",
+                    user_intent="Validate effective summarization.",
+                )
+            if agent.output_type is session_ops._SessionClassification:
+                return agent.output_type(
+                    named_entities="AssistantMD",
+                    domain="validation",
+                    work_product="checkpoint compaction",
+                )
+            return agent.output_type(source_summary="")
+
+        original_create_agent = session_ops.create_agent
+        original_build_model = session_ops.build_model_instance
+        original_generate_response = session_ops.generate_response
+        session_ops.create_agent = _create_summary_agent_stub
+        session_ops.build_model_instance = _build_model_stub
+        session_ops.generate_response = _generate_summary_response_stub
+        try:
+            extraction = await session_ops._summarize_session(
+                vault_name=vault.name,
+                session_id=session_id,
+                summarization_model="stub-model",
+            )
+        finally:
+            session_ops.create_agent = original_create_agent
+            session_ops.build_model_instance = original_build_model
+            session_ops.generate_response = original_generate_response
+
+        assert extraction["message_count"] == 5, (
+            "Session summarization should count effective history, not raw archival history"
+        )
+        assert extraction["history_revision"] == 4, (
+            "Session summarization should report current history revision"
         )
 
         await self.stop_system()
