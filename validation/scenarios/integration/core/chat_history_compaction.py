@@ -80,9 +80,7 @@ class ChatHistoryCompactionScenario(BaseScenario):
             status_payload = status_response.json()
             assert status_payload["messages_before"] == 6, "Status reports current message count"
             assert status_payload["recommended"] is True, "Status recommends compaction past threshold"
-            assert status_payload["export_recommended"] is False, (
-                "Compaction status does not recommend transcript export"
-            )
+            assert "export_recommended" not in status_payload, "Status response omits export fields"
 
             async def _summary_stub(*args, **kwargs):
                 return "Preserve first decision and the probe result outcome."
@@ -117,9 +115,9 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert compact_payload["messages_before"] == 6, "Compaction reports original count"
         assert compact_payload["messages_after"] == 4, "Compaction keeps summary plus adjusted recent slice"
         assert compact_payload["kept_recent"] == 3, "Recent slice shifts backward to preserve tool pair"
-        assert compact_payload["export_recommended"] is False, "Compaction does not recommend transcript export"
-        assert compact_payload["export_created"] is False, "Compaction does not create transcript exports"
-        assert compact_payload["export_path"] is None, "Compaction does not return transcript export paths"
+        assert "export_recommended" not in compact_payload, "Compaction response omits export fields"
+        assert "export_created" not in compact_payload, "Compaction response omits export fields"
+        assert "export_path" not in compact_payload, "Compaction response omits export fields"
 
         raw_messages = store.get_stored_messages(session_id, vault.name, mode="raw")
         assert len(raw_messages) == 6, "Compaction preserves original raw chat_messages rows"

@@ -492,7 +492,6 @@ class ChatHistoryCompactionStatusResponse(BaseModel):
     compaction_token_threshold: int = Field(..., description="Configured compaction threshold")
     compaction_keep_recent: int = Field(..., description="Target recent message count to keep")
     recommended: bool = Field(..., description="Whether compaction is currently recommended")
-    export_recommended: bool = Field(..., description="Always false; compaction does not create transcript exports")
     already_compacted: bool = Field(..., description="Whether this session has prior compaction metadata")
 
 
@@ -508,9 +507,6 @@ class ChatHistoryCompactionResponse(BaseModel):
     estimated_tokens_after: int = Field(..., description="Estimated tokens after compaction")
     kept_recent: int = Field(..., description="Recent raw messages preserved verbatim")
     summary_message_index: int = Field(..., description="Stored summary message index")
-    export_recommended: bool = Field(..., description="Always false; compaction does not create transcript exports")
-    export_created: bool = Field(..., description="Always false; compaction does not create transcript exports")
-    export_path: Optional[str] = Field(None, description="Always null; manual transcript export is separate")
     compaction_id: str = Field(..., description="Compaction audit identifier")
     compacted_at: str = Field(..., description="Compaction timestamp")
     source: str = Field(..., description="Compaction source")

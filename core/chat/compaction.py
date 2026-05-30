@@ -59,7 +59,6 @@ class ChatHistoryCompactionStatus:
     compaction_token_threshold: int
     compaction_keep_recent: int
     recommended: bool
-    export_recommended: bool
     already_compacted: bool
 
 
@@ -76,9 +75,6 @@ class ChatHistoryCompactionResult:
     estimated_tokens_after: int
     kept_recent: int
     summary_message_index: int
-    export_recommended: bool
-    export_created: bool
-    export_path: str | None
     compaction_id: str
     compacted_at: str
     source: str
@@ -88,10 +84,8 @@ class ChatHistoryCompactionResult:
         return asdict(self)
 
     def as_tool_dict(self) -> dict[str, Any]:
-        """Return chat-agent-safe result fields without transcript paths."""
-        payload = asdict(self)
-        payload.pop("export_path", None)
-        return payload
+        """Return chat-agent-safe result fields."""
+        return asdict(self)
 
 
 @asynccontextmanager
@@ -123,7 +117,6 @@ async def get_compaction_status(
         compaction_token_threshold=threshold,
         compaction_keep_recent=get_compaction_keep_recent(),
         recommended=estimated_tokens >= threshold,
-        export_recommended=False,
         already_compacted=bool(metadata.get("last_compaction")),
     )
 
@@ -207,7 +200,6 @@ async def compact_chat_history(
                     "messages_after": len(replacement),
                     "estimated_tokens_before": estimated_before,
                     "estimated_tokens_after": estimated_after,
-                    "export_created": False,
                     "last_message_sequence_index": last_message_sequence_index,
                 }
             }
@@ -238,9 +230,6 @@ async def compact_chat_history(
                 estimated_tokens_after=estimated_after,
                 kept_recent=len(recent_messages),
                 summary_message_index=0,
-                export_recommended=False,
-                export_created=False,
-                export_path=None,
                 compaction_id=compaction_id,
                 compacted_at=compacted_at,
                 source=source_value,
