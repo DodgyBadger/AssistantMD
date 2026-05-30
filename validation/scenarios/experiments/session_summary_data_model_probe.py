@@ -83,13 +83,6 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             field_type="work_product",
             value="donor report",
         )
-        related_sessions = await store.find_related_sessions(
-            vault_name=vault_name,
-            session_id="session-riparian-proposal",
-            vector_service=vector_service,
-            limit=5,
-        )
-
         report = {
             "vault_name": vault_name,
             "session_ids": session_ids,
@@ -97,7 +90,6 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             "substring_riparian": [memory.to_dict() for memory in substring_riparian],
             "semantic_riparian": [result.to_dict() for result in semantic_riparian],
             "substring_donor": [memory.to_dict() for memory in substring_donor],
-            "related_sessions": [result.to_dict() for result in related_sessions],
         }
         (self.artifacts_dir / "session_summary_data_model_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
@@ -136,23 +128,6 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             any(memory.session_id == "session-donor-wetlands" for memory in substring_donor),
             "Substring field search should still retrieve direct field matches",
         )
-        related_ids = [
-            result.session_summary.session_id for result in related_sessions
-        ]
-        self.soft_assert(
-            "session-wetlands-proposal" in related_ids,
-            "Related-session retrieval should find adjacent proposal work",
-        )
-        self.soft_assert(
-            all(result.session_summary.session_id != "session-riparian-proposal"
-                for result in related_sessions),
-            "Related-session retrieval should exclude the query session",
-        )
-        self.soft_assert(
-            all(result.contributions for result in related_sessions),
-            "Related-session results should include field contribution evidence",
-        )
-
         self.teardown_scenario()
         self.assert_no_failures()
 

@@ -28,8 +28,6 @@ from core.chat.history_service import (
 )
 from core.memory.session_summary import (
     SUMMARY_VECTOR_MIN_SCORE,
-    RELATED_SESSION_AUTOMATIC_THRESHOLD,
-    RELATED_SESSION_FIELD_WEIGHTS,
     VECTOR_FIELD_TYPES,
     SESSION_SUMMARY_FIELD_UNSET,
     SessionSummaryArtifact,
@@ -80,7 +78,7 @@ class SessionOps(BaseTool):
 
             :param operation: Operation name.
             :param session_id: Optional explicit session id. Defaults to the active session when available.
-            :param mode: Search mode for search_sessions: search, deep, or related. Defaults to search.
+            :param mode: Search mode for search_sessions: search or deep. Defaults to search.
             :param query: User-provided search phrase for search and deep modes.
             :param limit: Positive integer result limit. Defaults to 5 for search_sessions and 50 for list_sessions.
             :param cursor: Opaque pagination cursor for list_sessions.
@@ -239,7 +237,6 @@ class SessionOps(BaseTool):
                     result = await _search_sessions(
                         store=store,
                         vault_name=active_vault_name,
-                        session_id=active_session_id,
                         mode=normalized_mode,
                         query=query,
                         limit=resolved_search_limit,
@@ -309,24 +306,18 @@ fields. When updating an existing summary, omitted fields are preserved; pass
 null or an empty string to explicitly clear a field.
 
 Use `search_sessions` for caller-driven lookup across indexed chat-session
-summaries. `search_sessions` has three modes:
+summaries. `search_sessions` has two modes:
 - `search`: default. Searches a user-provided query across all session-summary
   fields.
 - `deep`: searches a user-provided query across all session-summary fields and
   raw chat transcripts.
-- `related`: compares an already-extracted current or specified session against
-  prior sessions using the default compound related-work policy.
-
 Mode selection:
 - Use `search` for normal live-chat lookup when the current session does not
   yet have a stored summary.
 - Use `deep` when the user asks for a broader or transcript-level search.
-- Use `related` only when investigating an existing session that already has
-  a stored summary and you want to find neighboring sessions.
-
-For `search` and `deep`, write `query` as a plain natural-language phrase. Do
-not use explicit boolean syntax such as uppercase AND/OR. Use a positive
-integer `limit`. Search and deep modes require a query.
+Write `query` as a plain natural-language phrase. Do not use explicit boolean
+syntax such as uppercase AND/OR. Use a positive integer `limit`. Search and
+deep modes require a query.
 
 For manual writes, include only fields you intend to create, replace, or clear.
 Leave unsupported or unchanged fields out of `data`.
@@ -558,13 +549,15 @@ def _validate_search_sessions_request(
         raise ModelRetry(
             "search_sessions requires a positive integer limit. Retry with a numeric limit such as 5 or 10."
         )
-    if normalized_mode in {"search", "deep"} and not str(query or "").strip():
+    if normalized_mode not in {"search", "deep"}:
+        raise ModelRetry("search_sessions mode must be 'search' or 'deep'.")
+    if not str(query or "").strip():
         raise ModelRetry(
             "search_sessions requires a plain natural-language query for search and deep modes."
         )
-    if normalized_mode in {"search", "deep"} and _has_boolean_operator(query):
+    if _has_boolean_operator(query):
         raise ModelRetry(
-            "search_sessions query must be a plain search phrase. Retry without AND/OR; combine related terms with spaces."
+            "search_sessions query must be a plain search phrase. Retry without AND/OR; combine terms with spaces."
         )
 
 
@@ -572,48 +565,17 @@ def _has_boolean_operator(query: str) -> bool:
     return re.search(r"\b(?:AND|OR)\b", query) is not None
 
 
-def _related_match_to_dict(match: Any) -> dict[str, Any]:
-    payload = match.to_dict()
-    if "session_summary" in payload:
-        payload["session_summary"] = payload.pop("session_summary")
-    return payload
-
-
 async def _search_sessions(
     *,
     store: SessionSummaryStore,
     vault_name: str,
-    session_id: str | None,
     mode: str,
     query: str,
     limit: int,
 ) -> dict[str, Any]:
     normalized_mode = (mode or "search").strip().lower()
-    if normalized_mode not in {"related", "search", "deep"}:
-        raise ValueError("mode must be one of: related, search, deep")
-
-    if normalized_mode == "related":
-        _require(session_id, "session_id is required for related mode")
-        matches = await store.find_related_sessions(
-            vault_name=vault_name,
-            session_id=session_id,
-            vector_service=VectorService(),
-            limit=limit,
-        )
-        return {
-            "status": "ok",
-            "operation": "search_sessions",
-            "mode": normalized_mode,
-            "query": {
-                "vault_name": vault_name,
-                "session_id": session_id,
-                "policy": {
-                    "weights": RELATED_SESSION_FIELD_WEIGHTS,
-                    "automatic_threshold": RELATED_SESSION_AUTOMATIC_THRESHOLD,
-                },
-            },
-            "matches": [_related_match_to_dict(match) for match in matches],
-        }
+    if normalized_mode not in {"search", "deep"}:
+        raise ValueError("mode must be one of: search, deep")
 
     _require(query, "query is required for search and deep modes")
     memory_matches = await _search_session_summary_fields(

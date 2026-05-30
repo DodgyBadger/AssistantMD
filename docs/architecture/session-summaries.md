@@ -88,10 +88,9 @@ individual provider-native parts, it should use a lower-level service/provider
 interface rather than the general-purpose LLM tool.
 
 Session retrieval is exposed as `search_sessions` with modes rather than direct
-field selection. `related` compares the current or specified session against
-stored summaries; `search` fans a user query across summary fields using
-FTS/BM25 and vector evidence; `deep` adds FTS/BM25 over raw chat transcripts.
-Field-aware storage and scoring remain internal implementation details.
+field selection. `search` fans a user query across summary fields using FTS/BM25
+and vector evidence; `deep` adds FTS/BM25 over raw chat transcripts. Field-aware
+storage and scoring remain internal implementation details.
 
 ## Design Notes
 

@@ -27,14 +27,6 @@ WILDCARD_FIELD_TYPES = {"named_entities"}
 SUMMARY_VECTOR_MIN_SCORE = 0.50
 FIELD_VECTOR_NAMESPACE = "session_summary_fields"
 FIELD_VECTOR_TABLE = "session_summary_field_vectors"
-RELATED_SESSION_FIELD_WEIGHTS = {
-    "domain": 0.45,
-    "work_product": 0.35,
-    "user_intent": 0.20,
-}
-RELATED_SESSION_FIELD_MIN_SCORE = SUMMARY_VECTOR_MIN_SCORE
-RELATED_SESSION_AUTOMATIC_THRESHOLD = 0.70
-RELATED_SESSION_POSSIBLE_THRESHOLD = 0.55
 
 
 class _UnsetValue:
@@ -121,47 +113,6 @@ class SessionSummarySearchResult:
             "matched_fields": list(self.matched_fields),
             "score": self.score,
             "rank": self.rank,
-        }
-
-
-@dataclass(frozen=True)
-class RelatedSessionContribution:
-    """One field contribution to a related-session score."""
-
-    field_type: str
-    match_type: str
-    score: float
-    weight: float
-    weighted_score: float
-    query_value: str
-    matched_value: str | None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Render as a JSON-compatible dictionary."""
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class RelatedSessionResult:
-    """One compound related-session retrieval result."""
-
-    session_summary: SessionSummary
-    band: str
-    score: float
-    matched_field_count: int
-    contributions: tuple[RelatedSessionContribution, ...]
-
-    def to_dict(self) -> dict[str, Any]:
-        """Render as a JSON-compatible dictionary."""
-        return {
-            "session_summary": self.session_summary.to_dict(),
-            "band": self.band,
-            "score": self.score,
-            "matched_field_count": self.matched_field_count,
-            "contributions": [
-                contribution.to_dict()
-                for contribution in self.contributions
-            ],
         }
 
 
@@ -599,120 +550,6 @@ class SessionSummaryStore:
             )
         return tuple(results)
 
-    async def find_related_sessions(
-        self,
-        *,
-        vault_name: str,
-        vector_service: VectorService,
-        session_id: str | None = None,
-        domain: str | None = None,
-        work_product: str | None = None,
-        user_intent: str | None = None,
-        limit: int = 5,
-        min_score: float = RELATED_SESSION_POSSIBLE_THRESHOLD,
-        vector_store: VectorStore | None = None,
-        model_alias: str = "embeddings",
-    ) -> tuple[RelatedSessionResult, ...]:
-        """Find related session summaries using the current compound policy."""
-        if limit <= 0:
-            return ()
-        query_memory: SessionSummary | None = None
-        if session_id:
-            query_memory = self.get_session_summary(
-                vault_name=vault_name,
-                session_id=session_id,
-            )
-            if query_memory is None and not any((domain, work_product, user_intent)):
-                raise ValueError(f"Unknown session summary: {session_id}")
-
-        query_fields = {
-            "domain": _clean_text(domain)
-            or (query_memory.domain if query_memory is not None else None),
-            "work_product": _clean_text(work_product)
-            or (query_memory.work_product if query_memory is not None else None),
-            "user_intent": _clean_text(user_intent)
-            or (query_memory.user_intent if query_memory is not None else None),
-        }
-        populated_fields = {
-            field_type: value
-            for field_type, value in query_fields.items()
-            if value
-        }
-        if not populated_fields:
-            return ()
-
-        candidates: dict[tuple[str, str], dict[str, Any]] = {}
-        for field_type, value in populated_fields.items():
-            for search_value in _field_search_values(field_type=field_type, value=value):
-                matches = await self.search_session_summaries_by_field(
-                    vault_name=vault_name,
-                    field_type=field_type,
-                    value=search_value,
-                    vector_service=vector_service,
-                    vector_store=vector_store,
-                    limit=max(limit * 4, limit),
-                    min_score=RELATED_SESSION_FIELD_MIN_SCORE,
-                    model_alias=model_alias,
-                )
-                weight = RELATED_SESSION_FIELD_WEIGHTS[field_type]
-                for match in matches:
-                    memory = match.session_summary
-                    if query_memory is not None and memory.session_id == query_memory.session_id:
-                        continue
-                    key = (memory.session_id, memory.vault_name)
-                    candidate = candidates.setdefault(
-                        key,
-                        {
-                            "session_summary": memory,
-                            "field_scores": {},
-                            "contributions": [],
-                        },
-                    )
-                    field_score = float(match.score or 0.0)
-                    weighted_score = weight * field_score
-                    candidate["field_scores"][field_type] = max(
-                        float(candidate["field_scores"].get(field_type, 0.0)),
-                        weighted_score,
-                    )
-                    candidate["contributions"].append(
-                        RelatedSessionContribution(
-                            field_type=field_type,
-                            match_type=match.match_type,
-                            score=round(field_score, 6),
-                            weight=weight,
-                            weighted_score=round(weighted_score, 6),
-                            query_value=search_value,
-                            matched_value=memory.field_value(field_type),
-                        )
-                    )
-
-        results: list[RelatedSessionResult] = []
-        for candidate in candidates.values():
-            score = round(sum(float(value) for value in candidate["field_scores"].values()), 6)
-            if score < min_score:
-                continue
-            contributions = tuple(
-                sorted(
-                    candidate["contributions"],
-                    key=lambda contribution: contribution.weighted_score,
-                    reverse=True,
-                )
-            )
-            results.append(
-                RelatedSessionResult(
-                    session_summary=candidate["session_summary"],
-                    band=_related_session_band(score),
-                    score=score,
-                    matched_field_count=len(candidate["field_scores"]),
-                    contributions=contributions,
-                )
-            )
-        results.sort(
-            key=lambda result: (result.score, result.matched_field_count),
-            reverse=True,
-        )
-        return tuple(results[:limit])
-
     async def index_session_summary_fields(
         self,
         *,
@@ -989,12 +826,6 @@ def _field_index_value(*, field_type: str, value: str) -> str:
     return "\n".join(_domain_search_values(value))
 
 
-def _field_search_values(*, field_type: str, value: str) -> tuple[str, ...]:
-    if field_type != "domain":
-        return (value,)
-    return _domain_search_values(value)
-
-
 def _domain_search_values(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
@@ -1018,14 +849,6 @@ def _validate_field_type(field_type: str) -> None:
 
 def _direct_match_type(field_type: str) -> str:
     return "wildcard" if field_type in WILDCARD_FIELD_TYPES else "substring"
-
-
-def _related_session_band(score: float) -> str:
-    if score >= RELATED_SESSION_AUTOMATIC_THRESHOLD:
-        return "automatic_recommendation"
-    if score >= RELATED_SESSION_POSSIBLE_THRESHOLD:
-        return "possible_related"
-    return "below_threshold"
 
 
 def _escape_like(value: str) -> str:

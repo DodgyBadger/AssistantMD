@@ -18,7 +18,7 @@ parameter.
 - `session_id`: optional explicit session id. Defaults to the active session
   when available.
 - `mode`: optional search mode for `search_sessions`. Supported values are
-  `search`, `deep`, and `related`. Defaults to `search`.
+  `search` and `deep`. Defaults to `search`.
 - `query`: search phrase for the default `search` mode and for `deep` mode.
 - `limit`: optional positive integer result limit. Defaults to 50 for
   `list_sessions` and 5 for `search_sessions`. `list_sessions` rejects limits
@@ -104,14 +104,10 @@ Returns pretty-printed JSON text. Successful operations include a stable
   - `mode: "search"` is the default. It searches the supplied `query` across session-summary fields using
     lexical FTS/BM25 evidence plus semantic vector evidence.
   - `mode: "deep"` searches session-summary fields plus raw chat transcripts.
-  - `mode: "related"` compares an already-extracted current or specified session
-    against prior sessions using stored summary fields.
 - Use `search` for normal live-chat lookup when the current session does not
   yet have a stored summary, or when the user names a specific word, phrase, topic,
   or concept.
 - Use `deep` when the user asks for a broader or transcript-level search.
-- Use `related` only when investigating an existing session that already has
-  a stored summary and you want to find neighboring sessions.
 - For `search` and `deep`, include `query` as a plain natural-language phrase.
   Do not use explicit boolean syntax such as uppercase `AND`/`OR`. Use a
   positive integer `limit`.
@@ -172,10 +168,4 @@ Search session-summary fields and raw transcripts:
 
 ```json
 {"operation": "search_sessions", "mode": "deep", "query": "greenhouse gas accounting", "limit": 5}
-```
-
-Find sessions related to an already-extracted session:
-
-```json
-{"operation": "search_sessions", "mode": "related", "session_id": "existing-session-id", "limit": 5}
 ```

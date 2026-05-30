@@ -335,12 +335,6 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                 ctx,
                 operation="search_sessions",
             )
-            related = await _call(
-                tool,
-                ctx,
-                operation="search_sessions",
-                mode="related",
-            )
         finally:
             session_ops_module.VectorService = original_vector_service
             session_ops_module.create_agent = original_create_agent
@@ -364,7 +358,6 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "natural_language_search": natural_language_search,
             "all_limit_error": all_limit_error,
             "no_query_search_error": no_query_search_error,
-            "related": related,
         }
         (self.artifacts_dir / "session_ops_session_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
@@ -542,29 +535,6 @@ class SessionOpsSessionProbeScenario(BaseScenario):
         self.soft_assert(
             "plain natural-language query" in no_query_search_error,
             "default search mode should require a query",
-        )
-        self.soft_assert_equal(related["status"], "ok")
-        self.soft_assert(
-            "session_summaries" not in related,
-            "related search should expose matches as the canonical result list",
-        )
-        self.soft_assert(
-            all(
-                match["session_summary"]["session_id"] != "riparian-grant-session"
-                for match in related["matches"]
-            ),
-            "related search should exclude the current session",
-        )
-        self.soft_assert(
-            any(
-                match["session_summary"]["session_id"] == "session-donor-wetlands"
-                for match in related["matches"]
-            ),
-            "related search should retrieve related prior sessions",
-        )
-        self.soft_assert(
-            all(match["contributions"] for match in related["matches"]),
-            "related search should explain field contributions",
         )
         self.teardown_scenario()
         self.assert_no_failures()
