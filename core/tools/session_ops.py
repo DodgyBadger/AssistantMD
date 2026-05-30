@@ -526,7 +526,14 @@ def _with_current_history_metadata(
     vault_name: str,
     session_id: str,
 ) -> dict[str, Any]:
-    base = dict(metadata) if isinstance(metadata, dict) else {}
+    if isinstance(metadata, dict):
+        base = dict(metadata)
+    else:
+        existing = SessionSummaryStore().get_session_summary(
+            vault_name=vault_name,
+            session_id=session_id,
+        )
+        base = dict(existing.metadata) if existing is not None else {}
     chat_store = ChatStore()
     base["message_count"] = chat_store.get_message_count(
         session_id=session_id,
