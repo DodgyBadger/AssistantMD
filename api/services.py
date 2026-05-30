@@ -59,6 +59,10 @@ from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.memory.session_summary import SessionSummaryStore
+from core.system_migrations import (
+    get_system_migration_status as get_registered_system_migration_status,
+    run_system_migrations as run_registered_system_migrations,
+)
 from core.vector import VectorService
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -90,6 +94,9 @@ from .models import (
     ProviderConfigRequest,
     CachePurgeResponse,
     SystemTemplateSeedResponse,
+    SystemMigrationRunResponse,
+    SystemMigrationStatusResponse,
+    SystemMigrationTargetInfo,
     OperationResult,
     SecretInfo,
     SecretUpdateRequest,
@@ -429,6 +436,79 @@ def purge_expired_cache() -> CachePurgeResponse:
         success=True,
         message=f"Purged {purged_count} expired cache artifact(s).",
         purged_count=purged_count,
+    )
+
+
+def get_system_database_migration_status() -> SystemMigrationStatusResponse:
+    """Return registered system database migration status."""
+    try:
+        status = get_registered_system_migration_status(get_system_root())
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to inspect system database migrations: {exc}") from exc
+
+    return _build_system_migration_status_response(status)
+
+
+def run_system_database_migrations(backup: bool = True) -> SystemMigrationRunResponse:
+    """Run registered system database migrations on demand."""
+    try:
+        status = run_registered_system_migrations(get_system_root(), backup=backup)
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to run system database migrations: {exc}") from exc
+
+    backups_created = [
+        target.backup_path
+        for target in status.targets
+        if target.backup_path
+    ]
+    message = (
+        "System database migrations completed."
+        if status.pending_count == 0
+        else f"System database migrations completed with {status.pending_count} migration(s) still pending."
+    )
+    logger.info(
+        "Manual system database migration run completed",
+        data={
+            "pending_count": status.pending_count,
+            "backups_created": len(backups_created),
+            "backup": backup,
+        },
+    )
+    response = _build_system_migration_status_response(status, message=message)
+    return SystemMigrationRunResponse(
+        **response.model_dump(),
+        backups_created=backups_created,
+    )
+
+
+def _build_system_migration_status_response(
+    status,
+    *,
+    message: str | None = None,
+) -> SystemMigrationStatusResponse:
+    pending_count = status.pending_count
+    summary = message or (
+        "All registered system database migrations are applied."
+        if pending_count == 0
+        else f"{pending_count} system database migration(s) pending."
+    )
+    return SystemMigrationStatusResponse(
+        success=True,
+        message=summary,
+        system_root=status.system_root,
+        pending_count=pending_count,
+        targets=[
+            SystemMigrationTargetInfo(
+                db_name=target.db_name,
+                namespace=target.namespace,
+                db_path=target.db_path,
+                exists=target.exists,
+                applied_versions=list(target.applied_versions),
+                pending_versions=list(target.pending_versions),
+                backup_path=target.backup_path,
+            )
+            for target in status.targets
+        ],
     )
 
 

@@ -339,3 +339,15 @@ to effective replay history. The remaining follow-up consumers are:
 Move to Feature Development after this plan is accepted. Start with the schema
 and store API changes, then update compaction writes, then adjust validation and
 docs.
+
+## Release Migration Runner
+
+Add one registered system database migration runner for release upgrades:
+
+- expose pending migration status for managed system databases without mutating
+  database files
+- run all registered migrations through in-process schema helpers rather than
+  shelling out to migration scripts
+- create timestamped backups for existing databases that have pending migrations
+- provide `scripts/run_system_migrations.py` for live-server upgrades
+- expose the same runner under System / Misc for manual UI-triggered upgrades

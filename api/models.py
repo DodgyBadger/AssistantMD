@@ -567,6 +567,40 @@ class SystemTemplateSeedResponse(BaseModel):
     errors: List[str] = Field(default_factory=list, description="Copy errors encountered during refresh")
 
 
+class SystemMigrationTargetInfo(BaseModel):
+    """Migration status for one managed system database."""
+
+    db_name: str = Field(..., description="System database name")
+    namespace: str = Field(..., description="Migration namespace tracked inside the database")
+    db_path: str = Field(..., description="Filesystem path to the database")
+    exists: bool = Field(..., description="Whether the database file currently exists")
+    applied_versions: List[int] = Field(default_factory=list, description="Applied migration versions")
+    pending_versions: List[int] = Field(default_factory=list, description="Pending migration versions")
+    backup_path: Optional[str] = Field(None, description="Backup created during the latest migration run")
+
+
+class SystemMigrationStatusResponse(BaseModel):
+    """Response containing system database migration status."""
+
+    success: bool = Field(True, description="Whether the status request completed successfully")
+    message: str = Field(..., description="Human-readable migration status summary")
+    system_root: str = Field(..., description="Filesystem path to the active system directory")
+    pending_count: int = Field(..., description="Total pending migration versions")
+    targets: List[SystemMigrationTargetInfo] = Field(default_factory=list)
+
+
+class SystemMigrationRunRequest(BaseModel):
+    """Request payload for running system database migrations."""
+
+    backup: bool = Field(True, description="Create timestamped backups before applying pending migrations")
+
+
+class SystemMigrationRunResponse(SystemMigrationStatusResponse):
+    """Response containing final status after running system database migrations."""
+
+    backups_created: List[str] = Field(default_factory=list, description="Backup files created during the run")
+
+
 class SecretInfo(BaseModel):
     """Information about a stored secret without revealing its value."""
 

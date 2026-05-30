@@ -26,6 +26,9 @@ from .models import (
     WorkflowLoadErrorsResponse,
     CachePurgeResponse,
     SystemTemplateSeedResponse,
+    SystemMigrationRunRequest,
+    SystemMigrationRunResponse,
+    SystemMigrationStatusResponse,
     VaultRescanRequest,
     VaultRescanResponse,
     VaultTaskMutationsResponse,
@@ -117,6 +120,8 @@ from .services import (
     import_url_direct,
     get_workflow_load_errors,
     purge_expired_cache,
+    get_system_database_migration_status,
+    run_system_database_migrations,
     refresh_system_authoring_templates,
     cancel_chat_session_task,
     cancel_execution_task,
@@ -674,6 +679,24 @@ async def purge_expired_cache_endpoint():
     """Manually delete expired cache artifacts."""
     try:
         return purge_expired_cache()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/system/migrations/status", response_model=SystemMigrationStatusResponse)
+async def get_system_database_migration_status_endpoint():
+    """Inspect registered system database migrations."""
+    try:
+        return get_system_database_migration_status()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/migrations/run", response_model=SystemMigrationRunResponse)
+async def run_system_database_migrations_endpoint(request: SystemMigrationRunRequest = SystemMigrationRunRequest()):
+    """Run registered system database migrations."""
+    try:
+        return run_system_database_migrations(backup=request.backup)
     except Exception as e:
         return create_error_response(e)
 
