@@ -72,10 +72,6 @@ settings:
     value: 80000
     description: "Estimated chat-history token threshold for suggested or automatic compaction."
     restart_required: false
-  compaction_export_before:
-    value: false
-    description: "When true, export a transcript before compacting canonical chat history by default."
-    restart_required: false
   file_search_timeout_seconds:
     value: 10
     description: "Timeout in seconds for file_ops_safe search operations."

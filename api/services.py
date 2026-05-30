@@ -745,7 +745,6 @@ async def compact_chat_session_history(
     session_id: str,
     *,
     focus: str | None,
-    export_before: bool | None,
 ) -> ChatHistoryCompactionResponse:
     """Compact one chat session through the shared compaction service."""
     runtime = get_runtime_context()
@@ -761,7 +760,6 @@ async def compact_chat_session_history(
             vault_name=vault_name,
             vault_path=vault_path,
             focus=focus,
-            export_before=export_before,
             source=ExecutionTaskSource.API,
             store=_chat_store,
         )

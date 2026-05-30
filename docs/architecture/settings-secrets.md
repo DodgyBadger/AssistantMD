@@ -39,7 +39,6 @@ Runtime-relevant general settings include:
 - `compaction_type`: chat history compaction policy (`none`, `suggested`, or `auto`).
 - `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.
 - `compaction_token_threshold`: estimated-token threshold for suggesting or automatically running compaction.
-- `compaction_export_before`: whether compaction exports a transcript before rewriting canonical history by default.
 
 ## Secrets Store
 

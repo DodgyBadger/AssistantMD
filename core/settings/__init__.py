@@ -467,17 +467,6 @@ def get_compaction_token_threshold() -> int:
     return parsed if parsed > 0 else template_default
 
 
-def get_compaction_export_before() -> bool:
-    """Return whether compaction should export transcripts by default."""
-    entry = get_general_settings().get("compaction_export_before")
-    value = getattr(entry, "value", None) if entry is not None else None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
-
-
 def get_file_search_timeout_seconds() -> float:
     """Return file search timeout seconds, falling back to 10 seconds."""
     entry = get_general_settings().get("file_search_timeout_seconds")

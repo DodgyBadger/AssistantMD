@@ -30,7 +30,6 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.settings import (
-    get_compaction_export_before,
     get_compaction_keep_recent,
     get_compaction_token_threshold,
     get_compaction_type,
@@ -38,7 +37,6 @@ from core.settings import (
 from core.tools.utils import estimate_token_count
 
 from .chat_store import ChatStore
-from .transcript_writer import export_chat_transcript
 
 
 logger = UnifiedLogger(tag="chat-compaction")
@@ -125,7 +123,7 @@ async def get_compaction_status(
         compaction_token_threshold=threshold,
         compaction_keep_recent=get_compaction_keep_recent(),
         recommended=estimated_tokens >= threshold,
-        export_recommended=bool(messages),
+        export_recommended=False,
         already_compacted=bool(metadata.get("last_compaction")),
     )
 
@@ -136,7 +134,6 @@ async def compact_chat_history(
     vault_name: str,
     vault_path: str | None = None,
     focus: str | None = None,
-    export_before: bool | None = None,
     source: ExecutionTaskSource = ExecutionTaskSource.API,
     store: ChatStore | None = None,
 ) -> ChatHistoryCompactionResult:
@@ -151,7 +148,6 @@ async def compact_chat_history(
             "vault_name": vault_name,
             "source": source_value,
             "focus_provided": bool((focus or "").strip()),
-            "export_before_override": export_before,
         },
     )
     try:
@@ -169,13 +165,6 @@ async def compact_chat_history(
                 raise ValueError("Chat session does not have older history to compact.")
 
             estimated_before = estimate_history_tokens(messages)
-            export_created = False
-            export_path: str | None = None
-            should_export = (
-                get_compaction_export_before()
-                if export_before is None
-                else bool(export_before)
-            )
             logger.info(
                 "chat_compaction_plan_selected",
                 data={
@@ -189,20 +178,9 @@ async def compact_chat_history(
                     "recent_messages": len(recent_messages),
                     "configured_keep_recent": keep_recent,
                     "estimated_tokens_before": estimated_before,
-                    "export_before": should_export,
+                    "transcript_export": "manual_only",
                 },
             )
-            if should_export:
-                if not vault_path:
-                    raise ValueError("vault_path is required when export_before is true.")
-                exported = export_chat_transcript(
-                    store=chat_store,
-                    vault_path=vault_path,
-                    vault_name=vault_name,
-                    session_id=session_id,
-                )
-                export_created = True
-                export_path = exported.path
 
             summary = await _generate_compaction_summary(
                 older_messages=older_messages,
@@ -229,7 +207,7 @@ async def compact_chat_history(
                     "messages_after": len(replacement),
                     "estimated_tokens_before": estimated_before,
                     "estimated_tokens_after": estimated_after,
-                    "export_created": export_created,
+                    "export_created": False,
                     "last_message_sequence_index": last_message_sequence_index,
                 }
             }
@@ -260,9 +238,9 @@ async def compact_chat_history(
                 estimated_tokens_after=estimated_after,
                 kept_recent=len(recent_messages),
                 summary_message_index=0,
-                export_recommended=True,
-                export_created=export_created,
-                export_path=export_path,
+                export_recommended=False,
+                export_created=False,
+                export_path=None,
                 compaction_id=compaction_id,
                 compacted_at=compacted_at,
                 source=source_value,

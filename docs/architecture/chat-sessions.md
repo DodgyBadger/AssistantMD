@@ -66,9 +66,9 @@ history starts with:
 1. A system-maintained summary message marked with `AssistantMD compacted chat history`.
 2. A recent raw message slice preserved verbatim.
 
-The compaction split preserves tool call/return pairs in the recent slice. If
-transcript export is requested or configured, compaction exports the current
-effective transcript before recording the checkpoint.
+The compaction split preserves tool call/return pairs in the recent slice.
+Compaction does not create transcript exports; users can export chat transcripts
+manually from the UI when needed.
 
 Compaction leaves existing `chat_messages` rows intact, records the raw-message
 high-water mark covered by the checkpoint, and writes audit metadata under the

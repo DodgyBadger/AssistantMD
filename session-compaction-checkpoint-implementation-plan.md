@@ -146,17 +146,18 @@ Update `compact_chat_history(...)`:
 
 1. Read current effective history through `chat_store.get_history(...)`.
 2. Split effective history into older and recent slices.
-3. Optionally export the current effective transcript before compaction.
-4. Generate the summary message and replacement history.
-5. Read the current highest raw `sequence_index`.
-6. Insert one checkpoint with:
+3. Generate the summary message and replacement history.
+4. Read the current highest raw `sequence_index`.
+5. Insert one checkpoint with:
    - `checkpoint_id` equal to the existing `compaction_id`
    - `last_message_sequence_index` equal to the raw high-water mark
    - `summary_message_json`
    - full `replacement_history_json`
    - metadata containing current response/audit fields
-7. Update session metadata under `last_compaction`.
-8. Do not delete or insert any `chat_messages` rows.
+6. Update session metadata under `last_compaction`.
+7. Do not delete or insert any `chat_messages` rows.
+8. Do not create transcript exports; transcript export remains a separate
+   manual UI/API operation.
 
 `messages_before`, `messages_after`, token estimates, `kept_recent`, and
 `summary_message_index` should continue to describe effective history, matching
@@ -276,9 +277,10 @@ Avoid documenting old behavior as a migration narrative in product docs.
   post-checkpoint turns.
   **Mitigation:** preserve dense indices for checkpoint replacement rows and raw
   indices for appended rows; do not expose sequence density as a contract.
-- **Risk:** transcript export before compaction changes content.
-  **Mitigation:** export effective history before inserting the new checkpoint,
-  matching today's user-visible transcript.
+- **Risk:** old compaction export settings or tool arguments create vault noise.
+  **Mitigation:** compaction ignores export policy, returns false/null export
+  result fields for compatibility, and leaves transcript export to the manual
+  session export flow.
 - **Risk:** session-summary stale detection becomes misleading once raw count
   differs from effective count.
   **Mitigation:** keep list/summarization consumers on effective counts for this

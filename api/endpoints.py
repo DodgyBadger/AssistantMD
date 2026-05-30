@@ -1048,7 +1048,6 @@ async def compact_chat_history_endpoint(session_id: str, request: ChatHistoryCom
             vault_path,
             session_id,
             focus=request.focus,
-            export_before=request.export_before,
         )
     except Exception as e:
         return create_error_response(e)
