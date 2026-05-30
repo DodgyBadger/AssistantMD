@@ -121,6 +121,11 @@ class SessionOps(BaseTool):
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
                     summary_data = _upsert_data(data)
+                    summary_metadata = _with_current_history_metadata(
+                        _summary_data_value(summary_data, "metadata"),
+                        vault_name=active_vault_name,
+                        session_id=active_session_id,
+                    )
                     session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
@@ -134,7 +139,7 @@ class SessionOps(BaseTool):
                         user_intent=_summary_data_value(summary_data, "user_intent"),
                         named_entities=_summary_data_value(summary_data, "named_entities"),
                         source_summary=_summary_data_value(summary_data, "source_summary"),
-                        metadata=_summary_data_value(summary_data, "metadata"),
+                        metadata=summary_metadata,
                     )
                     _maybe_add_artifacts(
                         store,
@@ -180,6 +185,7 @@ class SessionOps(BaseTool):
                             "extraction_policy": "summary_intent_classification_source_summary",
                             "summarization_model": summarization_model,
                             "message_count": extraction["message_count"],
+                            "history_revision": extraction["history_revision"],
                             "tool_event_count": extraction["tool_event_count"],
                         },
                     )
@@ -397,6 +403,10 @@ def _list_sessions(
             session_id=session.session_id,
             vault_name=vault_name,
         )
+        history_revision = chat_store.get_session_history_revision(
+            session_id=session.session_id,
+            vault_name=vault_name,
+        )
         session_summary = summary_store.get_session_summary(
             vault_name=vault_name,
             session_id=session.session_id,
@@ -405,6 +415,7 @@ def _list_sessions(
             session,
             session_summary,
             message_count=message_count,
+            history_revision=history_revision,
         )
         if normalized_status == "summarized" and session_summary is None:
             continue
@@ -420,9 +431,15 @@ def _list_sessions(
                 "created_at": session.created_at,
                 "last_activity_at": session.last_activity_at,
                 "message_count": message_count,
+                "history_revision": history_revision,
                 "has_summary": session_summary is not None,
                 "summary_status": status["summary_status"],
                 "summary_updated_at": status["summary_updated_at"],
+                "summary_message_count": status["summary_message_count"],
+                "message_count_delta": status["message_count_delta"],
+                "new_message_count": status["new_message_count"],
+                "summary_history_revision": status["summary_history_revision"],
+                "history_revision_delta": status["history_revision_delta"],
                 "domain": session_summary.domain if session_summary else None,
                 "user_intent": session_summary.user_intent if session_summary else None,
             }
@@ -501,6 +518,25 @@ def _summary_data_value(data: dict[str, Any], key: str) -> Any:
     if key not in data:
         return SESSION_SUMMARY_FIELD_UNSET
     return data[key]
+
+
+def _with_current_history_metadata(
+    metadata: Any,
+    *,
+    vault_name: str,
+    session_id: str,
+) -> dict[str, Any]:
+    base = dict(metadata) if isinstance(metadata, dict) else {}
+    chat_store = ChatStore()
+    base["message_count"] = chat_store.get_message_count(
+        session_id=session_id,
+        vault_name=vault_name,
+    )
+    base["history_revision"] = chat_store.get_session_history_revision(
+        session_id=session_id,
+        vault_name=vault_name,
+    )
+    return base
 
 
 def _validate_search_sessions_request(
@@ -896,6 +932,10 @@ async def _summarize_session(
         "named_entities": classification_data["named_entities"],
         "source_summary": source_summary_data["source_summary"],
         "message_count": history.item_count,
+        "history_revision": chat_store.get_session_history_revision(
+            session_id=session_id,
+            vault_name=vault_name,
+        ),
         "tool_event_count": tool_events.item_count,
     }
 

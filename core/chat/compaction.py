@@ -183,6 +183,7 @@ async def compact_chat_history(
                     "session_id": session_id,
                     "vault_name": vault_name,
                     "source": source_value,
+                    "history_mode": "effective",
                     "messages_before": len(messages),
                     "older_messages": len(older_messages),
                     "recent_messages": len(recent_messages),
@@ -215,6 +216,10 @@ async def compact_chat_history(
             estimated_after = estimate_history_tokens(replacement)
             compacted_at = datetime.now(UTC).isoformat()
             compaction_id = uuid.uuid4().hex
+            last_message_sequence_index = chat_store.get_highest_message_sequence_index(
+                session_id,
+                vault_name,
+            )
             metadata_update = {
                 "last_compaction": {
                     "compaction_id": compaction_id,
@@ -225,12 +230,24 @@ async def compact_chat_history(
                     "estimated_tokens_before": estimated_before,
                     "estimated_tokens_after": estimated_after,
                     "export_created": export_created,
+                    "last_message_sequence_index": last_message_sequence_index,
                 }
             }
-            chat_store.replace_session_messages(
-                session_id,
-                vault_name,
-                replacement,
+            checkpoint_metadata = {
+                **metadata_update["last_compaction"],
+                "history_mode": "effective",
+                "raw_messages_preserved": True,
+            }
+            chat_store.add_compaction_checkpoint(
+                session_id=session_id,
+                vault_name=vault_name,
+                checkpoint_id=compaction_id,
+                source=source_value,
+                message_count_before=len(messages),
+                last_message_sequence_index=last_message_sequence_index,
+                summary_message=summary_message,
+                replacement_history=replacement,
+                metadata=checkpoint_metadata,
                 metadata_update=metadata_update,
             )
             result = ChatHistoryCompactionResult(
@@ -255,6 +272,10 @@ async def compact_chat_history(
                 data={
                     "event": "chat_compaction_completed",
                     **result.as_tool_dict(),
+                    "history_mode": "effective",
+                    "raw_messages_preserved": True,
+                    "checkpoint_id": compaction_id,
+                    "last_message_sequence_index": last_message_sequence_index,
                     "token_delta": estimated_before - estimated_after,
                 },
             )

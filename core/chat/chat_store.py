@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -27,6 +27,8 @@ from .schema import DB_NAME, ensure_chat_sessions_schema
 logger = UnifiedLogger(tag="chat-store")
 
 _MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
+_MODEL_MESSAGE_LIST_ADAPTER = TypeAdapter(list[ModelMessage])
+HistoryMode = Literal["effective", "raw"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,23 @@ class StoredChatMessage:
     created_at: str
     message_json: str
     message: ModelMessage
+
+
+@dataclass(frozen=True)
+class StoredCompactionCheckpoint:
+    """One stored chat compaction checkpoint."""
+
+    id: int
+    checkpoint_id: str
+    session_id: str
+    vault_name: str
+    created_at: str
+    source: str
+    message_count_before: int
+    last_message_sequence_index: int
+    summary_message_json: str
+    replacement_history_json: str
+    metadata_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,9 +95,19 @@ class ChatStore:
         self.system_root = system_root
         ensure_chat_sessions_schema(system_root)
 
-    def get_history(self, session_id: str, vault_name: str) -> list[ModelMessage] | None:
-        """Return the full provider-native message history for one session."""
-        rows = self._fetch_messages(session_id=session_id, vault_name=vault_name)
+    def get_history(
+        self,
+        session_id: str,
+        vault_name: str,
+        *,
+        mode: HistoryMode = "effective",
+    ) -> list[ModelMessage] | None:
+        """Return provider-native message history for one session."""
+        rows = self._fetch_messages(
+            session_id=session_id,
+            vault_name=vault_name,
+            mode=mode,
+        )
         if not rows:
             return None
         return [row.message for row in rows]
@@ -89,9 +118,15 @@ class ChatStore:
         vault_name: str,
         *,
         limit: int | None = None,
+        mode: HistoryMode = "effective",
     ) -> list[StoredChatMessage]:
         """Return stored chat messages with persistence metadata."""
-        return self._fetch_messages(session_id=session_id, vault_name=vault_name, limit=limit)
+        return self._fetch_messages(
+            session_id=session_id,
+            vault_name=vault_name,
+            limit=limit,
+            mode=mode,
+        )
 
     def add_messages(
         self,
@@ -134,13 +169,11 @@ class ChatStore:
                         _MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
                     ),
                 )
-            conn.execute(
-                """
-                UPDATE chat_sessions
-                SET last_activity_at = CURRENT_TIMESTAMP
-                WHERE session_id = ? AND vault_name = ?
-                """,
-                (session_id, vault_name),
+            self._touch_session(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+                advance_history_revision=True,
             )
             conn.commit()
         finally:
@@ -172,6 +205,13 @@ class ChatStore:
         try:
             conn.execute("PRAGMA foreign_keys = ON")
             self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            conn.execute(
+                """
+                DELETE FROM chat_compaction_checkpoints
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (session_id, vault_name),
+            )
             conn.execute(
                 """
                 DELETE FROM chat_messages
@@ -206,32 +246,13 @@ class ChatStore:
                         _MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
                     ),
                 )
-            metadata_json = None
-            if metadata_update:
-                metadata_json = self._merged_session_metadata_json(
-                    conn,
-                    session_id=session_id,
-                    vault_name=vault_name,
-                    metadata_update=metadata_update,
-                )
-            if metadata_json is None:
-                conn.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET last_activity_at = CURRENT_TIMESTAMP
-                    WHERE session_id = ? AND vault_name = ?
-                    """,
-                    (session_id, vault_name),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
-                    WHERE session_id = ? AND vault_name = ?
-                    """,
-                    (metadata_json, session_id, vault_name),
-                )
+            self._touch_session(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+                metadata_update=metadata_update,
+                advance_history_revision=True,
+            )
             conn.commit()
         finally:
             conn.close()
@@ -306,8 +327,17 @@ class ChatStore:
             conn.close()
         return [str(row[0]) for row in rows]
 
-    def get_message_count(self, session_id: str, vault_name: str) -> int:
-        """Return the number of stored messages for one session."""
+    def get_message_count(
+        self,
+        session_id: str,
+        vault_name: str,
+        *,
+        mode: HistoryMode = "effective",
+    ) -> int:
+        """Return the number of messages for one session."""
+        _validate_history_mode(mode)
+        if mode == "effective":
+            return len(self.get_stored_messages(session_id, vault_name))
         conn = self._connect()
         try:
             row = conn.execute(
@@ -322,7 +352,14 @@ class ChatStore:
         finally:
             conn.close()
 
-    def get_recent(self, session_id: str, vault_name: str, limit: int) -> list[ModelMessage]:
+    def get_recent(
+        self,
+        session_id: str,
+        vault_name: str,
+        limit: int,
+        *,
+        mode: HistoryMode = "effective",
+    ) -> list[ModelMessage]:
         """Return the last N messages in chronological order."""
         if limit <= 0:
             return []
@@ -330,6 +367,7 @@ class ChatStore:
             session_id=session_id,
             vault_name=vault_name,
             limit=limit,
+            mode=mode,
         )
         return [row.message for row in rows]
 
@@ -404,14 +442,7 @@ class ChatStore:
                     artifact_ref,
                 ),
             )
-            conn.execute(
-                """
-                UPDATE chat_sessions
-                SET last_activity_at = CURRENT_TIMESTAMP
-                WHERE session_id = ? AND vault_name = ?
-                """,
-                (session_id, vault_name),
-            )
+            self._touch_session(conn, session_id=session_id, vault_name=vault_name)
             conn.commit()
         finally:
             conn.close()
@@ -580,43 +611,254 @@ class ChatStore:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def get_session_history_revision(self, session_id: str, vault_name: str) -> int:
+        """Return the monotonic effective-history revision for one session."""
+        return _metadata_history_revision(self.get_session_metadata(session_id, vault_name))
+
+    def get_latest_compaction_checkpoint(
+        self,
+        session_id: str,
+        vault_name: str,
+    ) -> StoredCompactionCheckpoint | None:
+        """Return the latest compaction checkpoint for one session."""
+        conn = self._connect()
+        try:
+            checkpoint = self._latest_compaction_checkpoint(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+        finally:
+            conn.close()
+        return checkpoint
+
+    def get_highest_message_sequence_index(self, session_id: str, vault_name: str) -> int:
+        """Return the current raw message high-water mark for one session."""
+        conn = self._connect()
+        try:
+            return self._highest_message_sequence_index(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+        finally:
+            conn.close()
+
+    def add_compaction_checkpoint(
+        self,
+        *,
+        session_id: str,
+        vault_name: str,
+        checkpoint_id: str,
+        source: str,
+        message_count_before: int,
+        last_message_sequence_index: int,
+        summary_message: ModelMessage,
+        replacement_history: list[ModelMessage],
+        metadata: dict[str, Any] | None = None,
+        metadata_update: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a compaction checkpoint without mutating raw chat messages."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            conn.execute(
+                """
+                INSERT INTO chat_compaction_checkpoints (
+                    checkpoint_id,
+                    session_id,
+                    vault_name,
+                    source,
+                    message_count_before,
+                    last_message_sequence_index,
+                    summary_message_json,
+                    replacement_history_json,
+                    metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    checkpoint_id,
+                    session_id,
+                    vault_name,
+                    source,
+                    message_count_before,
+                    last_message_sequence_index,
+                    _MODEL_MESSAGE_ADAPTER.dump_json(summary_message).decode("utf-8"),
+                    _MODEL_MESSAGE_LIST_ADAPTER.dump_json(replacement_history).decode("utf-8"),
+                    None if metadata is None else json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            self._touch_session(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+                metadata_update=metadata_update,
+                advance_history_revision=True,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def _fetch_messages(
         self,
         *,
         session_id: str,
         vault_name: str,
         limit: int | None = None,
+        mode: HistoryMode = "effective",
     ) -> list[StoredChatMessage]:
+        _validate_history_mode(mode)
         conn = self._connect()
         try:
-            if limit is None:
-                rows = conn.execute(
-                    """
-                    SELECT sequence_index, direction, message_type, role, content_text, created_at, message_json
-                    FROM chat_messages
-                    WHERE session_id = ? AND vault_name = ?
-                    ORDER BY sequence_index ASC
-                    """,
-                    (session_id, vault_name),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT sequence_index, direction, message_type, role, content_text, created_at, message_json
-                    FROM (
-                        SELECT sequence_index, direction, message_type, role, content_text, created_at, message_json
-                        FROM chat_messages
-                        WHERE session_id = ? AND vault_name = ?
-                        ORDER BY sequence_index DESC
-                        LIMIT ?
-                    ) recent
-                    ORDER BY sequence_index ASC
-                    """,
-                    (session_id, vault_name, limit),
-                ).fetchall()
+            if mode == "raw":
+                return self._fetch_raw_messages_from_conn(
+                    conn,
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    limit=limit,
+                )
+            return self._fetch_effective_messages_from_conn(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+                limit=limit,
+            )
         finally:
             conn.close()
 
+    def _fetch_effective_messages_from_conn(
+        self,
+        conn,
+        *,
+        session_id: str,
+        vault_name: str,
+        limit: int | None = None,
+    ) -> list[StoredChatMessage]:
+        checkpoint = self._latest_compaction_checkpoint(
+            conn,
+            session_id=session_id,
+            vault_name=vault_name,
+        )
+        if checkpoint is None:
+            return self._fetch_raw_messages_from_conn(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+                limit=limit,
+            )
+        replacement = self._checkpoint_replacement_messages(
+            checkpoint,
+            session_id=session_id,
+            vault_name=vault_name,
+        )
+        raw_after = self._fetch_raw_messages_from_conn(
+            conn,
+            session_id=session_id,
+            vault_name=vault_name,
+            after_sequence_index=checkpoint.last_message_sequence_index,
+        )
+        messages = [*replacement, *raw_after]
+        if limit is not None:
+            messages = messages[-limit:]
+        return messages
+
+    def _fetch_raw_messages_from_conn(
+        self,
+        conn,
+        *,
+        session_id: str,
+        vault_name: str,
+        limit: int | None = None,
+        after_sequence_index: int | None = None,
+    ) -> list[StoredChatMessage]:
+        sequence_filter = ""
+        params: list[Any] = [session_id, vault_name]
+        if after_sequence_index is not None:
+            sequence_filter = "AND sequence_index > ?"
+            params.append(after_sequence_index)
+
+        if limit is None:
+            rows = conn.execute(
+                f"""
+                SELECT sequence_index, direction, message_type, role, content_text, created_at, message_json
+                FROM chat_messages
+                WHERE session_id = ? AND vault_name = ?
+                {sequence_filter}
+                ORDER BY sequence_index ASC
+                """,
+                params,
+            ).fetchall()
+        else:
+            params.append(limit)
+            rows = conn.execute(
+                f"""
+                SELECT sequence_index, direction, message_type, role, content_text, created_at, message_json
+                FROM (
+                    SELECT sequence_index, direction, message_type, role, content_text, created_at, message_json
+                    FROM chat_messages
+                    WHERE session_id = ? AND vault_name = ?
+                    {sequence_filter}
+                    ORDER BY sequence_index DESC
+                    LIMIT ?
+                ) recent
+                ORDER BY sequence_index ASC
+                """,
+                params,
+            ).fetchall()
+        return self._stored_messages_from_rows(
+            rows,
+            session_id=session_id,
+            vault_name=vault_name,
+        )
+
+    def _checkpoint_replacement_messages(
+        self,
+        checkpoint: StoredCompactionCheckpoint,
+        *,
+        session_id: str,
+        vault_name: str,
+    ) -> list[StoredChatMessage]:
+        try:
+            messages = _MODEL_MESSAGE_LIST_ADAPTER.validate_json(checkpoint.replacement_history_json)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to deserialize compaction checkpoint replacement history",
+                data={
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return []
+
+        stored_messages: list[StoredChatMessage] = []
+        for sequence_index, message in enumerate(messages):
+            role, content_text = _extract_role_and_text(message)
+            direction = "response" if type(message).__name__ == "ModelResponse" else "request"
+            stored_messages.append(
+                StoredChatMessage(
+                    sequence_index=sequence_index,
+                    direction=direction,
+                    message_type=type(message).__name__,
+                    role=role,
+                    content_text=content_text,
+                    created_at=checkpoint.created_at,
+                    message_json=_MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
+                    message=message,
+                )
+            )
+        return stored_messages
+
+    def _stored_messages_from_rows(
+        self,
+        rows,
+        *,
+        session_id: str,
+        vault_name: str,
+    ) -> list[StoredChatMessage]:
         messages: list[StoredChatMessage] = []
         for row in rows:
             sequence_index, direction, message_type, role, content_text, created_at, message_json = row
@@ -648,6 +890,66 @@ class ChatStore:
             )
         return messages
 
+    @staticmethod
+    def _latest_compaction_checkpoint(
+        conn,
+        *,
+        session_id: str,
+        vault_name: str,
+    ) -> StoredCompactionCheckpoint | None:
+        row = conn.execute(
+            """
+            SELECT id, checkpoint_id, session_id, vault_name, created_at, source,
+                   message_count_before, last_message_sequence_index,
+                   summary_message_json, replacement_history_json, metadata_json
+            FROM chat_compaction_checkpoints
+            WHERE session_id = ? AND vault_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (session_id, vault_name),
+        ).fetchone()
+        if row is None:
+            return None
+        (
+            row_id,
+            checkpoint_id,
+            row_session_id,
+            row_vault_name,
+            created_at,
+            source,
+            message_count_before,
+            last_message_sequence_index,
+            summary_message_json,
+            replacement_history_json,
+            metadata_json,
+        ) = row
+        return StoredCompactionCheckpoint(
+            id=int(row_id),
+            checkpoint_id=str(checkpoint_id),
+            session_id=str(row_session_id),
+            vault_name=str(row_vault_name),
+            created_at=str(created_at or ""),
+            source=str(source),
+            message_count_before=int(message_count_before),
+            last_message_sequence_index=int(last_message_sequence_index),
+            summary_message_json=str(summary_message_json),
+            replacement_history_json=str(replacement_history_json),
+            metadata_json=None if metadata_json is None else str(metadata_json),
+        )
+
+    @staticmethod
+    def _highest_message_sequence_index(conn, *, session_id: str, vault_name: str) -> int:
+        row = conn.execute(
+            """
+            SELECT COALESCE(MAX(sequence_index), -1)
+            FROM chat_messages
+            WHERE session_id = ? AND vault_name = ?
+            """,
+            (session_id, vault_name),
+        ).fetchone()
+        return int(row[0] if row else -1)
+
     def _connect(self):
         # Re-ensure the schema at call time so long-lived store instances remain
         # correct when the active runtime root changes across validation/system boot.
@@ -665,6 +967,63 @@ class ChatStore:
             """,
             (session_id, vault_name),
         )
+
+    @staticmethod
+    def _touch_session(
+        conn,
+        *,
+        session_id: str,
+        vault_name: str,
+        metadata_update: dict[str, Any] | None = None,
+        advance_history_revision: bool = False,
+    ) -> None:
+        if metadata_update or advance_history_revision:
+            metadata = ChatStore._session_metadata(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+            if metadata_update:
+                metadata.update(metadata_update)
+            if advance_history_revision:
+                metadata["history_revision"] = _metadata_history_revision(metadata) + 1
+            conn.execute(
+                """
+                UPDATE chat_sessions
+                SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (json.dumps(metadata, ensure_ascii=False, sort_keys=True), session_id, vault_name),
+            )
+            return
+        conn.execute(
+            """
+            UPDATE chat_sessions
+            SET last_activity_at = CURRENT_TIMESTAMP
+            WHERE session_id = ? AND vault_name = ?
+            """,
+            (session_id, vault_name),
+        )
+
+    @staticmethod
+    def _session_metadata(conn, *, session_id: str, vault_name: str) -> dict[str, Any]:
+        row = conn.execute(
+            """
+            SELECT metadata_json
+            FROM chat_sessions
+            WHERE session_id = ? AND vault_name = ?
+            """,
+            (session_id, vault_name),
+        ).fetchone()
+        metadata: dict[str, Any] = {}
+        if row and row[0]:
+            try:
+                parsed = json.loads(str(row[0]))
+                if isinstance(parsed, dict):
+                    metadata = parsed
+            except Exception:
+                metadata = {}
+        return metadata
 
     @staticmethod
     def _next_sequence_index(conn, *, session_id: str, vault_name: str) -> int:
@@ -686,24 +1045,27 @@ class ChatStore:
         vault_name: str,
         metadata_update: dict[str, Any],
     ) -> str:
-        row = conn.execute(
-            """
-            SELECT metadata_json
-            FROM chat_sessions
-            WHERE session_id = ? AND vault_name = ?
-            """,
-            (session_id, vault_name),
-        ).fetchone()
-        metadata: dict[str, Any] = {}
-        if row and row[0]:
-            try:
-                parsed = json.loads(str(row[0]))
-                if isinstance(parsed, dict):
-                    metadata = parsed
-            except Exception:
-                metadata = {}
+        metadata = ChatStore._session_metadata(
+            conn,
+            session_id=session_id,
+            vault_name=vault_name,
+        )
         metadata.update(metadata_update)
         return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+
+
+def _validate_history_mode(mode: str) -> None:
+    if mode not in {"effective", "raw"}:
+        raise ValueError("history mode must be one of: effective, raw")
+
+
+def _metadata_history_revision(metadata: dict[str, Any]) -> int:
+    raw = metadata.get("history_revision")
+    try:
+        revision = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return max(revision, 0)
 
 
 def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:

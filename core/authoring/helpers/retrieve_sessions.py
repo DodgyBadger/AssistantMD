@@ -58,6 +58,10 @@ async def execute(
             session_id=session.session_id,
             vault_name=vault_name,
         )
+        history_revision = chat_store.get_session_history_revision(
+            session_id=session.session_id,
+            vault_name=vault_name,
+        )
         if selection == PENDING_OR_STALE_SUMMARY_SELECTION:
             session_summary = summary_store.get_session_summary(
                 vault_name=vault_name,
@@ -67,6 +71,7 @@ async def execute(
                 session,
                 session_summary,
                 message_count=message_count,
+                history_revision=history_revision,
             )
             if summary_status["summary_status"] == "current":
                 continue
@@ -76,6 +81,7 @@ async def execute(
             _session_item(
                 session,
                 message_count=message_count,
+                history_revision=history_revision,
                 has_summary=session_summary is not None,
                 summary_status=summary_status,
             )
@@ -145,6 +151,7 @@ def _session_item(
     session: StoredChatSession,
     *,
     message_count: int,
+    history_revision: int,
     has_summary: bool,
     summary_status: dict[str, object],
 ) -> RetrievedItem:
@@ -157,6 +164,7 @@ def _session_item(
         "created_at": session.created_at,
         "last_activity_at": session.last_activity_at,
         "message_count": message_count,
+        "history_revision": history_revision,
         "has_summary": has_summary,
         **summary_status,
     }
@@ -174,8 +182,8 @@ def _contract() -> dict[str, object]:
         "summary": (
             "Retrieve chat-session metadata for the current vault. "
             "The 'pending_or_stale_summary' selection returns sessions without "
-            "a session summary or with a summary message count that differs from "
-            "the current persisted session message count."
+            "a session summary or with a summary history revision that differs "
+            "from the current persisted session history revision."
         ),
         "arguments": {
             "selection": {
@@ -196,8 +204,9 @@ def _contract() -> dict[str, object]:
             "items": (
                 "Session metadata items. Each item has ref, content, exists, and metadata "
                 "including session_id, vault_name, title, created_at, last_activity_at, "
-                "message_count, has_summary, summary_status, summary_updated_at, "
-                "summary_message_count, message_count_delta, and new_message_count."
+                "message_count, history_revision, has_summary, summary_status, "
+                "summary_updated_at, summary_message_count, message_count_delta, "
+                "new_message_count, summary_history_revision, and history_revision_delta."
             ),
             "metadata": "Retrieval metadata.",
         },

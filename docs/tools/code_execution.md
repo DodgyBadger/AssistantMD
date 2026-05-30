@@ -114,8 +114,8 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 ### `retrieve_sessions`
 
 - `retrieve_sessions(selection="pending_or_stale_summary")` returns current-vault chat sessions that do not yet have a stored summary or whose summary is stale
-- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, `has_summary`, `summary_status`, `summary_updated_at`, `summary_message_count`, `message_count_delta`, and `new_message_count`
-- stale summary selection compares the current persisted message count with the message count recorded when the summary was extracted
+- returned items contain session metadata only, including `session_id`, `title`, `created_at`, `last_activity_at`, `message_count`, `history_revision`, `has_summary`, `summary_status`, `summary_updated_at`, `summary_message_count`, `message_count_delta`, `new_message_count`, `summary_history_revision`, and `history_revision_delta`
+- stale summary selection compares the current persisted history revision with the history revision recorded when the summary was extracted
 - use this helper to select sessions, then call `session_ops(operation="summarize_session", session_id=...)` when a workflow should summarize selected sessions
 
 ### `parse_markdown`

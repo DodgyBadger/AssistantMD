@@ -36,10 +36,10 @@ history they are derived from.
 `ChatHistoryService` in `core/chat/history_service.py` resolves one of two
 current providers:
 
-- `SQLiteConversationHistoryProvider`: used when the requested session has persisted messages in `system/chat_sessions.db`.
+- `SQLiteConversationHistoryProvider`: used when the requested session has persisted messages in `system/chat_sessions.db`; compacted sessions return effective replay history by default.
 - `InMemoryConversationHistoryProvider`: used for active in-flight history when persisted history is not yet available.
 
-Persisted session history is the default source when a requested session has stored messages.
+Persisted effective session history is the default source when a requested session has stored messages.
 Callers may explicitly opt into in-memory history for the active session when they have already
 curated the message list.
 
@@ -60,10 +60,10 @@ to enumerate current-vault chat sessions that either lack a stored summary or
 have a stale summary. The helper returns session metadata only; it does not
 retrieve transcript messages or perform summarization. Workflows should compose
 it with `session_ops` when they need to summarize selected sessions. Stale
-summary selection compares the current persisted session message count with the
-message count recorded when the summary was extracted; any count difference is
-treated as stale so appended turns and compaction rewrites both trigger
-resummarization.
+summary selection compares the current persisted session history revision with
+the revision recorded when the summary was extracted. Raw message appends and
+compaction checkpoints both advance that revision, so summary freshness does
+not depend on message-count changes.
 
 During active context assembly, the context manager passes curated prior history in
 `message_history` and exposes the current user prompt through `latest_message`. That path

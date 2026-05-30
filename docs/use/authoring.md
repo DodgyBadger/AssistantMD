@@ -91,7 +91,7 @@ The packaged default context script loads `AssistantMD/soul.md`,
 markdown files; customize or replace the context script when you want a
 different loading policy.
 
-Workflows can use `retrieve_sessions(selection="pending_or_stale_summary")` to select current-vault chat sessions that do not yet have a stored summary or whose summary is stale. It returns session metadata only; use `retrieve_history()` or `session_ops` when a workflow needs to process a specific session. Stale selection compares the current persisted message count with the count recorded when the summary was extracted.
+Workflows can use `retrieve_sessions(selection="pending_or_stale_summary")` to select current-vault chat sessions that do not yet have a stored summary or whose summary is stale. It returns session metadata only; use `retrieve_history()` or `session_ops` when a workflow needs to process a specific session. Stale selection compares the current persisted history revision with the revision recorded when the summary was extracted.
 
 Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
 

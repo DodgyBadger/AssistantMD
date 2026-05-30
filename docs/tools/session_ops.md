@@ -84,7 +84,7 @@ Returns pretty-printed JSON text. Successful operations include a stable
 - `list_sessions` returns a compact page of summarized chat-session rows ordered
   by latest activity. It is for browsing and overview work, not semantic
   retrieval. Rows include `session_id`, title, timestamps, message count,
-  summary status, `domain`, and `user_intent`. It also returns
+  history revision, summary status, `domain`, and `user_intent`. It also returns
   `total_count`, `returned_count`, and `next_cursor` so callers do not mistake a
   page for the whole available summary set. Use `summary_status: "pending"`
   only when explicitly looking for sessions that still need summarization.

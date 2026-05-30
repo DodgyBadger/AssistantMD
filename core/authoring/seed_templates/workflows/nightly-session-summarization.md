@@ -32,6 +32,7 @@ for item in sessions:
     session_id = metadata.get("session_id", "")
     title = metadata.get("title", "")
     message_count = metadata.get("message_count", 0)
+    history_revision = metadata.get("history_revision", 0)
     summary_status = metadata.get("summary_status", "")
 
     if not session_id:
@@ -49,6 +50,7 @@ for item in sessions:
                 "session_id": session_id,
                 "title": title,
                 "message_count": message_count,
+                "history_revision": history_revision,
                 "summary_status": summary_status,
                 "result": result.return_value,
             }
@@ -59,6 +61,7 @@ for item in sessions:
                 "session_id": session_id,
                 "title": title,
                 "message_count": message_count,
+                "history_revision": history_revision,
                 "summary_status": summary_status,
                 "error": str(exc),
             }

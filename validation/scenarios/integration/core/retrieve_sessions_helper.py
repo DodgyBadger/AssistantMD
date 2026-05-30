@@ -48,7 +48,7 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             domain="validation",
             work_product="test",
             user_intent="Validate stale summary selection.",
-            metadata={"message_count": 2},
+            metadata={"message_count": 2, "history_revision": 0},
         )
         summary_store.upsert_session_summary(
             vault_name=vault.name,
@@ -58,7 +58,7 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             domain="validation",
             work_product="test",
             user_intent="Validate stale summary selection after compaction.",
-            metadata={"message_count": 6},
+            metadata={"message_count": 6, "history_revision": 0},
         )
         summary_store.upsert_session_summary(
             vault_name=vault.name,
@@ -68,7 +68,7 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             domain="validation",
             work_product="test",
             user_intent="Validate current summary selection.",
-            metadata={"message_count": 4},
+            metadata={"message_count": 4, "history_revision": 1},
         )
 
         self.create_file(vault, "AssistantMD/Authoring/retrieve_sessions_probe.md", WORKFLOW)
@@ -87,8 +87,8 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             "retrieve_sessions pending_or_stale_summary selection should include pending and stale sessions",
         )
         self.soft_assert(
-            all(item["message_count"] in {2, 3, 5} for item in payload["items"]),
-            "retrieve_sessions should include message counts",
+            all(item["history_revision"] == 1 for item in payload["items"]),
+            "retrieve_sessions should include current history revisions",
         )
         self.soft_assert(
             {
@@ -104,18 +104,18 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             "retrieve_sessions should report pending and stale summary statuses",
         )
         deltas = {
-            item["session_id"]: item.get("message_count_delta")
+            item["session_id"]: item.get("history_revision_delta")
             for item in payload["items"]
         }
         self.soft_assert_equal(
             deltas.get("stale-summary"),
-            3,
-            "retrieve_sessions should report positive message count deltas",
+            1,
+            "retrieve_sessions should report positive history revision deltas",
         )
         self.soft_assert_equal(
             deltas.get("compacted-summary"),
-            -3,
-            "retrieve_sessions should report negative message count deltas after compaction",
+            1,
+            "retrieve_sessions should report history revision deltas after compaction",
         )
         await self.stop_system()
         self.teardown_scenario()
