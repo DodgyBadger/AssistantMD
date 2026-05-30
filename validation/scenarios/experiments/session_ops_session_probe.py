@@ -152,7 +152,7 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                 self.soft_assert(
                     "Target 500-800 characters" in prompt
                     and "never exceed 1,000 characters" in prompt
-                    and "never exceed 500 characters" in prompt,
+                    and "never exceed 140 characters" in prompt,
                     "summary/intent prompt should include field length contracts",
                 )
                 self.soft_assert(

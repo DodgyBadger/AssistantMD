@@ -643,47 +643,48 @@ class SessionSummaryStore:
 
         candidates: dict[tuple[str, str], dict[str, Any]] = {}
         for field_type, value in populated_fields.items():
-            matches = await self.search_session_summaries_by_field(
-                vault_name=vault_name,
-                field_type=field_type,
-                value=value,
-                vector_service=vector_service,
-                vector_store=vector_store,
-                limit=max(limit * 4, limit),
-                min_score=RELATED_SESSION_FIELD_MIN_SCORE,
-                model_alias=model_alias,
-            )
-            weight = RELATED_SESSION_FIELD_WEIGHTS[field_type]
-            for match in matches:
-                memory = match.session_summary
-                if query_memory is not None and memory.session_id == query_memory.session_id:
-                    continue
-                key = (memory.session_id, memory.vault_name)
-                candidate = candidates.setdefault(
-                    key,
-                    {
-                        "session_summary": memory,
-                        "field_scores": {},
-                        "contributions": [],
-                    },
+            for search_value in _field_search_values(field_type=field_type, value=value):
+                matches = await self.search_session_summaries_by_field(
+                    vault_name=vault_name,
+                    field_type=field_type,
+                    value=search_value,
+                    vector_service=vector_service,
+                    vector_store=vector_store,
+                    limit=max(limit * 4, limit),
+                    min_score=RELATED_SESSION_FIELD_MIN_SCORE,
+                    model_alias=model_alias,
                 )
-                field_score = float(match.score or 0.0)
-                weighted_score = weight * field_score
-                candidate["field_scores"][field_type] = max(
-                    float(candidate["field_scores"].get(field_type, 0.0)),
-                    weighted_score,
-                )
-                candidate["contributions"].append(
-                    RelatedSessionContribution(
-                        field_type=field_type,
-                        match_type=match.match_type,
-                        score=round(field_score, 6),
-                        weight=weight,
-                        weighted_score=round(weighted_score, 6),
-                        query_value=value,
-                        matched_value=memory.field_value(field_type),
+                weight = RELATED_SESSION_FIELD_WEIGHTS[field_type]
+                for match in matches:
+                    memory = match.session_summary
+                    if query_memory is not None and memory.session_id == query_memory.session_id:
+                        continue
+                    key = (memory.session_id, memory.vault_name)
+                    candidate = candidates.setdefault(
+                        key,
+                        {
+                            "session_summary": memory,
+                            "field_scores": {},
+                            "contributions": [],
+                        },
                     )
-                )
+                    field_score = float(match.score or 0.0)
+                    weighted_score = weight * field_score
+                    candidate["field_scores"][field_type] = max(
+                        float(candidate["field_scores"].get(field_type, 0.0)),
+                        weighted_score,
+                    )
+                    candidate["contributions"].append(
+                        RelatedSessionContribution(
+                            field_type=field_type,
+                            match_type=match.match_type,
+                            score=round(field_score, 6),
+                            weight=weight,
+                            weighted_score=round(weighted_score, 6),
+                            query_value=search_value,
+                            matched_value=memory.field_value(field_type),
+                        )
+                    )
 
         results: list[RelatedSessionResult] = []
         for candidate in candidates.values():
@@ -742,7 +743,10 @@ class SessionSummaryStore:
         inputs = [
             _field_embedding_text(
                 field_type=field_type,
-                value=session_summary.field_value(field_type) or "",
+                value=_field_index_value(
+                    field_type=field_type,
+                    value=session_summary.field_value(field_type) or "",
+                ),
             )
             for field_type in fields
         ]
@@ -977,6 +981,33 @@ def _bm25_score(rank: float) -> float:
 
 def _field_embedding_text(*, field_type: str, value: str) -> str:
     return f"{field_type}: {value}"
+
+
+def _field_index_value(*, field_type: str, value: str) -> str:
+    if field_type != "domain":
+        return value
+    return "\n".join(_domain_search_values(value))
+
+
+def _field_search_values(*, field_type: str, value: str) -> tuple[str, ...]:
+    if field_type != "domain":
+        return (value,)
+    return _domain_search_values(value)
+
+
+def _domain_search_values(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    deduped: list[str] = []
+    seen_normalized: set[str] = set()
+    for part in re.split(r"\s*;\s*", value):
+        domain = part.strip()
+        normalized = normalize_field_value(domain)
+        if not normalized or normalized in seen_normalized:
+            continue
+        deduped.append(domain)
+        seen_normalized.add(normalized)
+    return tuple(deduped)
 
 
 def _validate_field_type(field_type: str) -> None:

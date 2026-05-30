@@ -110,6 +110,7 @@ def ensure_chat_sessions_schema(
             ON chat_sessions(session_id)
             """
         )
+        _migrate_compaction_checkpoints(conn)
         conn.commit()
         if apply_migrations:
             apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS)

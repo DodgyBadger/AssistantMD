@@ -43,16 +43,17 @@ descriptions of the user's work over momentary prompt phrasing.
   unresolved follow-up. Include only enough detail for a human or future
   assistant to decide whether the session is relevant; do not preserve a full
   process log. Target 500-800 characters and never exceed 1,000 characters.
-- `domain`: the subject area or knowledge area of the work, such as
-  `data visualization`, `nutrition`, `ServiceNow administration`, `statistics`,
-  `research synthesis`, or `conservation fundraising`.
+- `domain`: semicolon-separated subject-area tags for the work. Use one to
+  three compact noun phrases, such as `NAWCA grant writing; conservation
+  proposal planning`, `data visualization`, `ServiceNow administration`, or
+  `research synthesis`.
 - `work_product`: the concrete thing the user wanted produced or answered, such
   as `Python script`, `recipe`, `article summary`, `stacked bar chart`,
   `rewrite`, `donor email`, or `factual answer`.
 - `user_intent`: the user's underlying goal or intent after clarification,
-  repetition, or topic drift. Write this as what the user wants to accomplish,
-  not what the assistant should do next. Use 1-2 sentences and never exceed 500
-  characters.
+  repetition, or topic drift. Write this as a dense search phrase, not a
+  sentence. Omit boilerplate such as `the user wanted to`; target 8-18 words
+  and never exceed 140 characters.
 - `named_entities`: only named people, organizations, and places. Use a concise
   comma- or semicolon-separated text list. Leave empty if there are no named
   people, organizations, or places.
@@ -149,7 +150,7 @@ Manually store summary fields for the current session:
     "summary": "Drafted a donor update about wetland restoration.",
     "domain": "conservation fundraising",
     "work_product": "donor update",
-    "user_intent": "Prepare a donor-facing update about restoration progress.",
+    "user_intent": "prepare donor-facing restoration progress update",
     "named_entities": "North Star Foundation",
     "source_summary": "Drew on wetland restoration progress notes and prior donor reporting context.",
     "artifacts": [

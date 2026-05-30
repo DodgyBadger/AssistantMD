@@ -223,7 +223,10 @@ Fields:
   human to decide whether this session is relevant; do not preserve a full
   process log. Target 500-800 characters; never exceed 1,000 characters.
 - `user_intent`: what the user was trying to accomplish after clarification,
-  repetition, or topic drift. Write 1-2 sentences; never exceed 500 characters.
+  repetition, or topic drift. Write one dense search phrase, not a sentence.
+  Omit boilerplate such as "the user wanted to" or "the goal was to". Include
+  the strongest nouns, named programs, artifacts, and action words. Target 8-18
+  words; never exceed 140 characters.
 
 Rules:
 - Use only the conversation text and session metadata shown here.
@@ -231,6 +234,7 @@ Rules:
 - Do not make `summary` a restatement of `user_intent`; `summary` should say
   what happened, while `user_intent` should say why the user wanted it.
 - Keep both fields concise but specific enough to support later retrieval.
+- `user_intent` should read like a search query a future user might type.
 - Return only the structured output.
 
 Session:
@@ -259,7 +263,9 @@ Create concise labels that would help future searches find sessions about
 similar work.
 
 Fields:
-- `domain`: the subject area or knowledge area of the user's work.
+- `domain`: semicolon-separated subject-area tags for the user's work. Use one
+  to three tags. Each tag should be a compact 2-5 word noun phrase, such as
+  `NAWCA grant writing; conservation proposal planning`.
 - `work_product`: the real deliverable, answer, document, artifact, or decision
   the user wanted from the session. Use a concise generalized category or short
   noun phrase, not a full sentence. Prefer labels such as `report draft`,
@@ -272,6 +278,7 @@ Fields:
 Rules:
 - Use only the summary, user intent, and session metadata shown here.
 - Keep fields concise but specific enough to support later retrieval.
+- Separate multiple `domain` tags with semicolons, not commas or full sentences.
 - Keep `work_product` under 8 words when possible.
 - Return only the structured output.
 

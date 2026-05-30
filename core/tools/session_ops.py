@@ -280,10 +280,11 @@ class SessionOps(BaseTool):
 Session summary field guidance:
 - `summary`: compact plain-language summary of the session's durable outcome;
   target 500-800 characters and never exceed 1,000 characters.
-- `domain`: subject area or knowledge area.
+- `domain`: semicolon-separated subject-area tags; use one to three compact
+  noun phrases.
 - `work_product`: concrete thing the user wanted produced or answered.
 - `user_intent`: user's underlying goal or intent after clarification or drift;
-  write 1-2 sentences and never exceed 500 characters.
+  write a dense search phrase and never exceed 140 characters.
 - `named_entities`: only named people, organizations, and places.
 - `source_summary`: concise description of source material or prior context
   identifiable from tool use. This is provenance returned with a summary, not an
@@ -357,7 +358,7 @@ class _SessionSummaryIntent(BaseModel):
     """First-pass session summarization."""
 
     summary: str = Field(default="", max_length=1000)
-    user_intent: str = Field(default="", max_length=500)
+    user_intent: str = Field(default="", max_length=140)
 
 
 class _SessionClassification(BaseModel):
