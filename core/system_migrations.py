@@ -70,13 +70,19 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
         db_name=CHAT_SESSIONS_DB_NAME,
         namespace=CHAT_SESSIONS_MIGRATION_NAMESPACE,
         migrations=CHAT_SESSION_MIGRATIONS,
-        ensure_schema=ensure_chat_sessions_schema,
+        ensure_schema=lambda system_root: ensure_chat_sessions_schema(
+            system_root,
+            apply_migrations=True,
+        ),
     ),
     SystemMigrationTarget(
         db_name=SESSION_SUMMARIES_DB_NAME,
         namespace=SESSION_SUMMARIES_MIGRATION_NAMESPACE,
         migrations=SESSION_SUMMARY_MIGRATIONS,
-        ensure_schema=ensure_session_summary_schema,
+        ensure_schema=lambda system_root: ensure_session_summary_schema(
+            system_root,
+            apply_migrations=True,
+        ),
     ),
 )
 

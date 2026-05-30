@@ -18,7 +18,11 @@ CHAT_SESSION_MIGRATIONS = (
 )
 
 
-def ensure_chat_sessions_schema(system_root: str | None = None) -> None:
+def ensure_chat_sessions_schema(
+    system_root: str | None = None,
+    *,
+    apply_migrations: bool = False,
+) -> None:
     """Create chat-session tables when they do not already exist."""
     conn = connect_sqlite_from_system_db(DB_NAME, system_root)
     try:
@@ -107,8 +111,9 @@ def ensure_chat_sessions_schema(system_root: str | None = None) -> None:
             """
         )
         conn.commit()
-        apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS)
-        conn.commit()
+        if apply_migrations:
+            apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS)
+            conn.commit()
     finally:
         conn.close()
 

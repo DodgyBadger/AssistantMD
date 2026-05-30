@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.chat import ChatStore
 from core.system_migrations import get_system_migration_status, run_system_migrations
 from validation.core.base_scenario import BaseScenario
 
@@ -21,8 +22,13 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         chat_db = system_root / "chat_sessions.db"
         self._create_legacy_chat_sessions_db(chat_db)
 
+        ChatStore(str(system_root))
         before = get_system_migration_status(system_root)
-        self.soft_assert_equal(before.pending_count, 3, "All registered migrations should be pending")
+        self.soft_assert_equal(
+            before.pending_count,
+            3,
+            "Store initialization should not apply registered release migrations",
+        )
 
         after = run_system_migrations(system_root, backup=True)
         self.soft_assert_equal(after.pending_count, 0, "Registered migrations should be applied")
