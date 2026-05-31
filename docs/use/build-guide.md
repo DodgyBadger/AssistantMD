@@ -50,7 +50,9 @@ Skills and workflow scripts can work together. A skill can instruct the agent to
 
 You don't need to write the Python yourself: describe what you want to the chat
 agent and it will draft the file for you. You can then run it manually, refine
-it, and enable scheduling when you're happy with it.
+it, and enable scheduling when you're happy with it. Manual and scheduled runs
+are tracked as Dashboard tasks, so long-running workflows can be checked or
+cancelled without blocking the chat.
 
 For the full authoring reference, see [Authoring](authoring.md).
 
@@ -77,15 +79,16 @@ runtime details.
 ## Session Summaries
 
 Session summaries are derived records of prior chat sessions. They help the
-agent find related past work without loading entire transcripts by default.
+agent find related past work without requiring entire transcripts by default.
 AssistantMD defines the summary fields that are extracted and the retrieval
 behavior used by `session_ops`, but it does not require session summaries to
 run at a particular time or be injected into chat context in a particular way.
 Those choices are part of your composition.
 
 The default setup includes an optional workflow that can summarize chats over
-time, and the `session_ops` tool can search those summaries when prior-work
-recall is useful.
+time, and the `session_ops` tool can search or refresh those summaries when
+prior-work recall is useful.
+
 ---
 
 ## How pieces combine
@@ -154,7 +157,8 @@ the chat agent knows how to maintain it.
 For a more advanced customization, edit the packaged workflows. The shipped
 workflows are global, disabled by default, and run across all mounted vaults
 when enabled. Enable the nightly session summary workflow if you want
-`session_ops` to retrieve past sessions; you can still customize when it runs,
-batch size, model, and the surrounding policy in the script itself. Enable or
-revise the context-note compaction workflow when you want the context-note file
-maintained automatically according to the policy in the context-note skill.
+prior sessions summarized automatically over time; you can still customize when
+it runs, batch size, model, and the surrounding policy in the script itself.
+Enable or revise the context-note compaction workflow when you want the
+context-note file maintained automatically according to the policy in the
+context-note skill.

@@ -32,12 +32,13 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - Config and secret updates trigger reload through runtime reload service.
 - Ingestion and workflow manual runs are surfaced via API services.
 - The Dashboard tab hosts vault overview, workflow controls, import controls, and vault activity.
-- The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, and system jobs.
+- The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, system jobs, system authoring refresh, and database migration status/manual fallback.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
 - `/api/vaults/{vault_name}/task-mutations` exposes grouped task file mutation activity for the Dashboard tab.
 - `/api/vault-state/snapshots/{snapshot_id}/content` serves retained vault-state snapshot files inline after resolving them under the managed snapshot root.
 - `/api/vault-state/cleanup` deletes expired vault-state mutation rows and retained task snapshot artifacts.
+- `/api/system/migrations/status` and `/api/system/migrations/run` expose registered system database migration status and manual execution.
 - `/api/chat/sessions/{session_id}/active-task` and `/api/chat/sessions/{session_id}/cancel` expose chat-session-scoped task lookup and cancellation.
 - `/api/chat/sessions/{session_id}/compaction-status` and `/api/chat/sessions/{session_id}/compact` expose chat history compaction status and execution.
 - Interactive API docs are available at `/docs` (Swagger UI) and `/openapi.json` (OpenAPI schema).

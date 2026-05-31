@@ -1,5 +1,62 @@
 # Release Notes
 
+## 2026-05-31 - v0.6.3
+
+### Composable session summaries
+
+AssistantMD now has session summaries as a composable long-term context building block.
+
+- Prior chat sessions can be summarized into compact records with a summary, user intent, domain tags, and work product details, designed for retrieval and composition.
+- The optional nightly workflow can maintain summaries over time, while context scripts, skills, and chat can decide when and how to use them.
+- `session_ops` lets chat agents and authored scripts search prior summaries or create/update summaries through the same tool surface.
+- Session summaries can be browsed from chat, edited when needed, included in manual transcript exports, and refreshed when they become stale.
+
+### Safer chat history compaction
+
+Chat history compaction is no longer destructive for newly compacted sessions.
+
+- Prior releases rewrote the stored chat history during compaction. This release preserves the original transcript and uses the compacted summary plus retained recent messages for future chat turns.
+- Session summaries and deep session search use the same compacted view that future chat turns see, so compacted sessions remain searchable without pulling in the full archived transcript.
+- Compaction no longer creates transcript export files automatically. Transcript export is now only a manual UI action, which avoids unwanted files appearing in vaults.
+- Purging chat sessions continues to clean up associated messages, tool events, compaction checkpoints, summaries, and transcript exports.
+
+### Workflows and dashboard controls
+
+Workflow management is more usable from the app UI.
+
+- Workflows can now run as managed background tasks with status updates and cancellation support.
+- Overlapping workflow runs are queued instead of racing each other.
+- Built-in system workflows can be opened and edited from the dashboard.
+
+### Shipped scripts and skills
+
+The packaged defaults now provide a stronger starting point for composable vault behavior.
+
+- Default context and built-in workflows now better support ongoing session notes and vault-first memory workflows.
+- Packaged scripts and skills are easier to inspect, customize, and reuse in your own setup.
+
+### Chat UI improvements
+
+The chat workspace received several practical UI fixes.
+
+- Added a focused chat workspace mode for a roomier writing and review surface.
+- Improved mobile chat controls, modals, and focus-mode tapping.
+- Improved LaTeX rendering.
+- Other UI bug fixes.
+
+### Database upgrades and maintenance
+
+System database upgrades are now handled directly by AssistantMD.
+
+- Registered database migrations run automatically on startup and create timestamped backups before changing existing databases.
+- System / Misc now includes a Database Migrations panel that shows migration status and provides a manual fallback button.
+
+### Other fixes
+
+- Extensionless file reads now resolve the intended markdown file before falling back to directory listing behavior.
+- Vault mutation history and snapshot retention settings are now separate controls.
+- Default tool settings were cleaned up to reduce unnecessary cache/tool noise.
+
 ## 2026-05-12 - v0.6.2
 
 ### Vault state, rollback, and incremental processing

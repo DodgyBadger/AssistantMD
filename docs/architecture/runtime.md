@@ -11,6 +11,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - `core/runtime/reload_service.py`
 - `core/runtime/execution_tasks.py`
 - `core/runtime/workflow_governor.py`
+- `core/system_migrations.py`
 
 ## Responsibilities
 
@@ -20,13 +21,14 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Track process-local execution tasks for chat, workflows, ingestion, and history compaction.
 - Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
+- Run registered system database migrations during startup.
 - Track reload metadata (`last_config_reload`).
 - Provide runtime summary/health context to API surfaces.
 
 ## Startup flow
 
 1. Build `RuntimeConfig`.
-2. `bootstrap_runtime(...)` seeds bootstrap roots and validates config.
+2. `bootstrap_runtime(...)` seeds bootstrap roots, runs registered system database migrations, and validates config.
 3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, and workflow governor.
 4. Register global runtime context.
 5. Sync workflows and reserved system jobs into the scheduler, then resume scheduler.

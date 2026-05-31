@@ -8,7 +8,7 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/schema.py` — SQLite schema bootstrap
 - `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
 - `core/chat/history_service.py` — broker over persisted and in-memory conversation history
-- `core/chat/compaction.py` — summarize and rewrite long canonical histories
+- `core/chat/compaction.py` — summarize long sessions and record replay checkpoints
 - `core/chat/executor.py` — register chat execution tasks and persist completed turns
 
 ## SQLite store
@@ -73,8 +73,8 @@ manually from the UI when needed.
 Compaction leaves existing `chat_messages` rows intact, records the raw-message
 high-water mark covered by the checkpoint, and writes audit metadata under the
 session's `last_compaction` metadata key, including compaction ID, timestamp,
-source, before/after effective message counts, token estimates, export status,
-and checkpoint boundary.
+source, before/after effective message counts, token estimates, and checkpoint
+boundary.
 
 Default session detail, transcript export, `retrieve_history(...)`,
 `assemble_context(...)`, and model-context assembly use effective history, not

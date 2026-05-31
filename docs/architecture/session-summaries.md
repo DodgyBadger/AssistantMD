@@ -89,8 +89,9 @@ interface rather than the general-purpose LLM tool.
 
 Session retrieval is exposed as `search_sessions` with modes rather than direct
 field selection. `search` fans a user query across summary fields using FTS/BM25
-and vector evidence; `deep` adds FTS/BM25 over raw chat transcripts. Field-aware
-storage and scoring remain internal implementation details.
+and vector evidence; `deep` adds FTS/BM25 over the same effective chat history
+used by normal session readers. Field-aware storage and scoring remain internal
+implementation details.
 
 ## Design Notes
 

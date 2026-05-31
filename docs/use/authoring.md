@@ -62,6 +62,8 @@ week_start_day: monday          # optional, default monday
 - `schedule` supports `cron: MINUTE HOUR DOM MONTH DOW` or `once: YYYY-MM-DD HH:MM`
 - `enabled: false` pauses scheduled runs; manual runs always work
 - Rescan your vault after changing `enabled` or `schedule`
+- Manual workflow runs appear as managed tasks in the Dashboard. Long-running
+  runs can be checked or cancelled there, and overlapping runs are queued.
 
 ---
 
@@ -93,6 +95,6 @@ different loading policy.
 
 Workflows can use `retrieve_sessions(selection="pending_or_stale_summary")` to select current-vault chat sessions that do not yet have a stored summary or whose summary is stale. It returns session metadata only; use `retrieve_history()` or `session_ops` when a workflow needs to process a specific session. Stale selection compares the current persisted history revision with the revision recorded when the summary was extracted.
 
-Select which script to use in the Chat UI. Set a default in **Configuration → Application Settings**.
+Select which script to use in the Chat UI. Set a default in **System → Application Settings**.
 
 Scripts are discovered from `AssistantMD/Authoring/` (vault) and `system/Authoring/` (global). Vault scripts take precedence. Startup creates missing system seed scripts, and **System → Misc** can refresh existing system seed scripts from packaged defaults.
