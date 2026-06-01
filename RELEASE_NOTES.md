@@ -51,8 +51,8 @@ System database upgrades are now handled directly by AssistantMD.
 - Registered database migrations run automatically on startup and create timestamped backups before changing existing databases.
 - System / Misc now includes a Database Migrations panel that shows migration status and provides a manual fallback button.
 
-### Other fixes
-
+### Other updates and fixes
+- OpenRouter is now available as a built-in model provider; add your own OpenRouter model aliases in System settings.
 - Extensionless file reads now resolve the intended markdown file before falling back to directory listing behavior.
 - Vault mutation history and snapshot retention settings are now separate controls.
 - Default tool settings were cleaned up to reduce unnecessary cache/tool noise.

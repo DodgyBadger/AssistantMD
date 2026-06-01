@@ -49,6 +49,7 @@
         GOOGLE_API_KEY: { label: 'Google API Key', description: 'Required for Google Gemini model aliases' },
         GROK_API_KEY: { label: 'Grok API Key', description: 'Required for Grok model aliases' },
         MISTRAL_API_KEY: { label: 'Mistral API Key', description: 'Required for Mistral model aliases' },
+        OPENROUTER_API_KEY: { label: 'OpenRouter API Key', description: 'Required for OpenRouter model aliases' },
         TAVILY_API_KEY: { label: 'Tavily API Key', description: 'Required for Tavily search/crawl tools' },
         LOGFIRE_TOKEN: { label: 'Logfire Token', description: 'Enables cloud telemetry when set' },
         LM_STUDIO_API_KEY: { label: 'LM Studio API Key', description: 'Optional key for LM Studio endpoints' },

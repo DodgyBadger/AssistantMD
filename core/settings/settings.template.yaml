@@ -306,6 +306,10 @@ providers:
     api_key: MISTRAL_API_KEY
     base_url: null
     user_editable: false
+  openrouter:
+    api_key: OPENROUTER_API_KEY
+    base_url: null
+    user_editable: false
   lm_studio:
     api_key: LM_STUDIO_API_KEY
     base_url: LM_STUDIO_BASE_URL
