@@ -2,6 +2,8 @@
 *   [Docker Engine](https://docs.docker.com/engine/install/) (Linux) or [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, Mac)
 *   An LLM endpoint (cloud API key or local model server)
 
+⚠️  AssistantMD has **no built-in auth or TLS**. Run it on a trusted network and/or add your own security layers. See [security.md](docs/setup/security.md).
+
 ⚠️ It is strongly recommended that you back up your vaults before deploying for the first time, or create a test vault and then migrate the mount path when you have verified that everything works as expected.
 
 ⚠️ These instructions are optimized for installing on Linux. See the end of this document for notes for Windows and Mac. I have only tested installation on Linux and Windows.
@@ -45,6 +47,15 @@ _Or alternate text editor if you don't have nano._
 `docker ps` should show assistantMD running. If you see "restarting", something is wrong. Run `docker logs assistantMD` to check for startup errors.
 
 Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file). Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required.
+
+When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
+
+- `AssistantMD/Skills/` — reusable procedures the agent can follow
+- `AssistantMD/Authoring/` — workflow and context assembly scripts
+- `AssistantMD/Chat_Sessions/` — exported chat transcripts
+- `AssistantMD/Import/` — drop PDFs and images here to import to markdown
+
+The default setup also looks for optional files such as `AssistantMD/soul.md`, `AssistantMD/playbook.md`, and `AssistantMD/user.md`.
 
 ## Optional Setup
 

@@ -2,24 +2,24 @@
 run_type: workflow
 schedule: "cron: 30 2 * * *"
 enabled: false
-description: Compact vault-native context_notes.md when it approaches the configured context notes character limit.
+description: Compact vault-native user.md when it approaches the configured user notes character limit.
 ---
 
-## Nightly context notes compaction
+## Nightly user notes compaction
 
-This workflow is disabled by default. Enable it after reviewing the `Save Context Note`
+This workflow is disabled by default. Enable it after reviewing the `Save User Note`
 skill policy and confirming you want nightly automatic curation of
-`AssistantMD/context_notes.md`.
+`AssistantMD/user.md`.
 
 ```python
-"""Compact vault-native context notes when they approach the configured limit."""
+"""Compact vault-native user notes when they approach the configured limit."""
 
-DEFAULT_CONTEXT_NOTES_FILE = "AssistantMD/context_notes.md"
+DEFAULT_CONTEXT_NOTES_FILE = "AssistantMD/user.md"
 DEFAULT_CONTEXT_NOTES_CHAR_LIMIT = 6000
 TRIGGER_RATIO = 0.8
 CURATION_MODEL = "gpt-mini"
-SKILL_PATH = "AssistantMD/Skills/save_context_note.md"
-ARCHIVE_DIR = "AssistantMD/context_notes_archive"
+SKILL_PATH = "AssistantMD/Skills/save_user_note.md"
+ARCHIVE_DIR = "AssistantMD/user_notes_archive"
 
 
 def frontmatter_value(result, key, default_value):
@@ -53,7 +53,7 @@ def strip_markdown_fence(value):
 
 def archive_path_for_today(index):
     suffix = "" if index == 0 else f"-{index}"
-    return f"{ARCHIVE_DIR}/context-notes-{date.today('%Y-%m-%d')}{suffix}.md"
+    return f"{ARCHIVE_DIR}/user-notes-{date.today('%Y-%m-%d')}{suffix}.md"
 
 
 def compaction_prompt(context_notes_text, skill_policy, context_notes_file, target_chars, previous_text=""):
@@ -65,16 +65,16 @@ def compaction_prompt(context_notes_text, skill_policy, context_notes_file, targ
             "aggressively while preserving durable facts and preferences."
         )
     return (
-        "Compact the following AssistantMD context notes file.\n\n"
-        "Use the Save Context Note skill policy as the context-notes contract. Preserve all durable "
+        "Compact the following AssistantMD user notes file.\n\n"
+        "Use the Save User Note skill policy as the user-notes contract. Preserve all durable "
         "facts and preferences. Remove duplicates, stale wording, and unnecessary prose. "
         f"Return only the complete replacement markdown for {context_notes_file}. "
         f"The replacement must be no more than {target_chars} characters so there is "
         "room for future updates before the context limit is reached."
         + retry_instruction
-        + "\n\n=== SAVE CONTEXT NOTE SKILL POLICY ===\n"
+        + "\n\n=== SAVE USER NOTE SKILL POLICY ===\n"
         + skill_policy
-        + "\n\n=== CURRENT CONTEXT NOTES FILE ===\n"
+        + "\n\n=== CURRENT USER NOTES FILE ===\n"
         + context_notes_text
     )
 
@@ -135,7 +135,7 @@ if curated_text and len(curated_text) > trigger_chars:
 if not curated_text:
     outcome = {
         "status": "completed_without_write",
-        "reason": "delegate returned empty context notes content",
+        "reason": "delegate returned empty user notes content",
         "context_notes_file": context_notes_file,
         "original_chars": len(context_notes_text),
         "trigger_chars": trigger_chars,
@@ -181,7 +181,7 @@ else:
         if moved.metadata.get("status") != "completed":
             outcome = {
                 "status": "completed_without_write",
-                "reason": "failed to archive original context notes file",
+                "reason": "failed to archive original user notes file",
                 "context_notes_file": context_notes_file,
                 "archive_path": archive_path,
                 "move_result": moved.return_value,

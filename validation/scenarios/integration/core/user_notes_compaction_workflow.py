@@ -1,5 +1,5 @@
 """
-Integration scenario for the packaged vault-native context notes compaction workflow.
+Integration scenario for the packaged vault-native user notes compaction workflow.
 
 Validates the deterministic skip path without invoking delegate model curation.
 """
@@ -13,15 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from validation.core.base_scenario import BaseScenario
 
 
-class ContextNotesCompactionWorkflowScenario(BaseScenario):
-    """Ensure context notes compaction reads skill settings and skips small files."""
+class UserNotesCompactionWorkflowScenario(BaseScenario):
+    """Ensure user notes compaction reads skill settings and skips small files."""
 
     async def test_scenario(self):
-        vault = self.create_vault("ContextNotesCompactionWorkflowVault")
+        vault = self.create_vault("UserNotesCompactionWorkflowVault")
         self.create_file(
             vault,
-            "AssistantMD/context_notes.md",
-            "# Context Notes\n\n## User\n\n- The user works on AssistantMD.\n",
+            "AssistantMD/user.md",
+            "# User Notes\n\n## User\n\n- The user works on AssistantMD.\n",
         )
 
         await self.start_system()
@@ -30,9 +30,9 @@ class ContextNotesCompactionWorkflowScenario(BaseScenario):
         from core.authoring.template_loader import load_authoring_template_file
 
         source = load_authoring_template_file(
-            "core/authoring/seed_templates/workflows/nightly-context-notes-compaction.md"
+            "core/authoring/seed_templates/workflows/nightly-user-notes-compaction.md"
         )
-        workflow_id = f"{vault.name}/system/nightly-context-notes-compaction"
+        workflow_id = f"{vault.name}/system/nightly-user-notes-compaction"
 
         result = await run_authoring_monty(
             workflow_id=workflow_id,
@@ -42,13 +42,13 @@ class ContextNotesCompactionWorkflowScenario(BaseScenario):
                 vault_path=str(vault),
                 reference_date=datetime(2026, 5, 23, 2, 30, 0),
             ),
-            script_name="nightly-context-notes-compaction.md",
+            script_name="nightly-user-notes-compaction.md",
         )
 
         self.soft_assert_equal(
             result.status,
             "skipped",
-            "Expected workflow to skip context notes files below the compaction trigger",
+            "Expected workflow to skip user notes files below the compaction trigger",
         )
         self.soft_assert(
             "trigger is" in result.reason,

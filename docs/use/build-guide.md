@@ -113,9 +113,9 @@ The default context assembly script (found in `system/Authoring/default.md`):
 - Loads `AssistantMD/soul.md` and `AssistantMD/playbook.md` as additional system instructions.
 - Discovers skills from `AssistantMD/Skills/`.
 - Packaged skills include authoring instructions and a skill for maintaining a
-  lightweight user-owned markdown context notes file.
+  lightweight user-owned markdown note file.
 - `session_ops` provides operations for searching and summarizing prior sessions.
-- Packaged workflows, disabled by default, summarize chat sessions and maintain context notes.
+- Packaged workflows, disabled by default, summarize chat sessions and maintain user notes.
 
 This is a working default composition made from the same parts you can edit,
 replace, or reuse in your own setup. Most customization happens in

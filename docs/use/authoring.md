@@ -87,8 +87,8 @@ description: Regular chat with full history
 Most context scripts use three core pieces: `retrieve_history()` to read completed prior session history, read-only `latest_message` to branch on the active message, and `assemble_context()` to hand the assembled context to the chat agent. `retrieve_history().items` counts safe units: user message = 1, assistant message = 1, matched tool call + return = 1. Do not append `latest_message` manually; the runtime adds it exactly once after the assembled context.
 
 The packaged default context script loads `AssistantMD/soul.md`,
-`AssistantMD/playbook.md`, lightweight context notes configured by
-`AssistantMD/Skills/save_context_note.md`, and the skill catalog from
+`AssistantMD/playbook.md`, lightweight user notes configured by
+`AssistantMD/Skills/save_user_note.md`, and the skill catalog from
 `AssistantMD/Skills/` when those files are present. These are vault-owned
 markdown files; customize or replace the context script when you want a
 different loading policy.

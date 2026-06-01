@@ -1,7 +1,7 @@
 """
-Integration scenario for default context loading of vault-native context notes.
+Integration scenario for default context loading of vault-native user notes.
 
-Validates that the packaged default context template reads AssistantMD/context_notes.md
+Validates that the packaged default context template reads AssistantMD/user.md
 as bounded context without depending on the file's internal structure.
 """
 
@@ -16,15 +16,15 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 from validation.core.base_scenario import BaseScenario
 
 
-class DefaultContextNotesScenario(BaseScenario):
-    """Ensure default.md loads context_notes.md and bounds oversized content."""
+class DefaultUserNotesScenario(BaseScenario):
+    """Ensure default.md loads user.md and bounds oversized content."""
 
     async def test_scenario(self):
-        vault = self.create_vault("DefaultContextNotesVault")
+        vault = self.create_vault("DefaultUserNotesVault")
         self.create_file(
             vault,
-            "AssistantMD/context_notes.md",
-            """# Context Notes
+            "AssistantMD/user.md",
+            """# User Notes
 
 ## User
 
@@ -50,7 +50,7 @@ class DefaultContextNotesScenario(BaseScenario):
 
         from core.authoring.context_manager import build_context_manager_history_processor
 
-        session_id = "default_context_notes_session"
+        session_id = "default_user_notes_session"
         processor = build_context_manager_history_processor(
             session_id=session_id,
             vault_name=vault.name,
@@ -64,7 +64,7 @@ class DefaultContextNotesScenario(BaseScenario):
             [
                 ModelRequest(
                     parts=[UserPromptPart(content="What do you remember?")],
-                    run_id="run-context-notes",
+                    run_id="run-user-notes",
                 )
             ],
         )
@@ -77,8 +77,8 @@ class DefaultContextNotesScenario(BaseScenario):
         )
 
         self.soft_assert(
-            "## Context Notes" in system_text,
-            "Expected default context instructions to include context notes section",
+            "## User Notes" in system_text,
+            "Expected default context instructions to include user notes section",
         )
         self.soft_assert(
             "The user works on AssistantMD." in system_text,
@@ -93,12 +93,12 @@ class DefaultContextNotesScenario(BaseScenario):
             "Expected default context to preserve custom context note sections",
         )
         self.soft_assert(
-            "[Context notes truncated by default context script.]" in system_text,
-            "Expected oversized context notes file to be bounded",
+            "[User notes truncated by default context script.]" in system_text,
+            "Expected oversized user notes file to be bounded",
         )
         self.soft_assert(
             system_text.count("Filler context note line") < 500,
-            "Expected default context to truncate oversized context notes content",
+            "Expected default context to truncate oversized user notes content",
         )
 
         await self.stop_system()

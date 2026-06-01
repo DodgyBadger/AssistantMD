@@ -1,9 +1,9 @@
 ---
 run_type: context
-description: Default template for regular chat. Passes full history. Loads soul.md, context_notes.md, and skill catalog if present.
+description: Default template for regular chat. Passes full history. Loads soul.md, user.md, and skill catalog if present.
 ---
 ```python
-"""Default chat context: pass history, inject soul.md instructions, context notes, and skills catalog if present."""
+"""Default chat context: pass history, inject soul.md instructions, user context, and skills catalog if present."""
 
 DEFAULT_PLAYBOOK = (
     "## Vault-First Work Policy\n"
@@ -39,6 +39,7 @@ soul_instructions = (
         "- Ask brief clarifying questions when intent, scope, or constraints are unclear.\n"
         "- Avoid long explanations until the user asks for depth.\n"
         "- Prefer next-step guidance over broad monologues.\n"
+        "- Use active voice. Avoid contrast / framing-by-negation. \n"
         "- Prefer tool-grounded answers when current facts or user files matter."
     )
 )
@@ -50,7 +51,7 @@ playbook_instructions = (
     else DEFAULT_PLAYBOOK
 )
 
-DEFAULT_CONTEXT_NOTES_FILE = "AssistantMD/context_notes.md"
+DEFAULT_CONTEXT_NOTES_FILE = "AssistantMD/user.md"
 DEFAULT_CONTEXT_NOTES_CHAR_LIMIT = 6000
 
 
@@ -58,7 +59,7 @@ def bounded_text(value, max_chars):
     text = value.strip()
     if len(text) <= max_chars:
         return text
-    return text[:max_chars].rstrip() + "\n\n[Context notes truncated by default context script.]"
+    return text[:max_chars].rstrip() + "\n\n[User notes truncated by default context script.]"
 
 
 def frontmatter_value(result, key, default_value):
@@ -82,7 +83,7 @@ def parse_positive_int(value, default_value):
 
 context_notes_skill_result = await file_ops_safe(
     operation="frontmatter",
-    path="AssistantMD/Skills/save_context_note.md",
+    path="AssistantMD/Skills/save_user_note.md",
     keys="context_notes_file,context_notes_char_limit",
 )
 context_notes_file = frontmatter_value(context_notes_skill_result, "context_notes_file", DEFAULT_CONTEXT_NOTES_FILE)
@@ -97,8 +98,8 @@ if context_notes_result.metadata.get("status") == "completed":
     context_notes_text = context_notes_result.return_value
     if context_notes_text.strip():
         context_notes_instructions = (
-            "## Context Notes\n"
-            f"The following user-maintained context notes were loaded from `{context_notes_file}`. "
+            "## User Notes\n"
+            f"The following user-maintained notes were loaded from `{context_notes_file}`. "
             "Treat them as editable context, not hidden authority.\n\n"
             + bounded_text(context_notes_text, context_notes_char_limit)
         )
@@ -146,7 +147,7 @@ if skills_lines:
         "\n\n## Skills\n"
         "The following skills are available. When a skill seems relevant to the user's request, "
         "read the full skill file before responding. For explicit requests to remember, save, "
-        "or persist facts for future chats, use the Save Context Note skill rather than `session_ops`; "
+        "or persist facts for future chats, use the Save User Note skill rather than `session_ops`; "
         "`session_ops` is for searching prior chat sessions.\n"
         + "\n".join(skills_lines)
     )

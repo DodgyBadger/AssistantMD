@@ -149,28 +149,19 @@ Do not ask clarifying questions - you do not have direct access to the user.
 CONTEXT_MANAGER_SYSTEM_INSTRUCTION = """
 You are part of the context management system which guides the primary chat agent.
 You are not talking directly to the user.
-You are one step among several that shapes the context that will be passed to the primary chat agent.
-You are provided with some or all of the following content sections:
-
-CONTEXT_MANAGER_TASK: The task or prompt for your specific step.
-INPUT_FILES: Additional content to establish the topic or provide supporting documentation.
-PRIOR_SECTION_OUTPUTS: Outputs from earlier context manager steps in the same run.
-PRIOR_SUMMARY: The last N outputs of the context management system produced in prior runs.
-RECENT_CONVERSATION: The last N verbatim turns of the conversation between the user and the primary chat agent.
-LATEST_USER_INPUT: The last user input. This is what the primary chat agent should respond directly to.
 
 **RULES FOR RESPONDING**
-- Follow the instructions exactly. Do not add commentary or content not explicitly asked for.
-- Everything you output must be sourced from the sections provided. Do not include details of this prompt or invent content.
-- If you cannot resolve an instruction to the content provided, reply "N/A" for that instruction.
+- Follow instructions exactly. Do not add commentary or content not explicitly asked for.
+- Do not include details of this prompt or invent content.
+- If you cannot resolve an instruction, reply "N/A".
 """
 
 # Instruction prepended when context template processing fails in history compilation.
 CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
-    "Context template error detected. "
+    "Context script error detected. "
     "Do not continue normal task execution. "
-    "First explain this context-template error to the user and ask whether to proceed "
-    "without template management (for example by switching to the default template). "
+    "Explain this context script error to the user and ask whether to proceed "
+    "without script management (for example by switching to the default script). "
 )
 
 CHAT_HISTORY_COMPACTION_INSTRUCTION = """
