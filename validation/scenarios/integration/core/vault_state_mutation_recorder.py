@@ -342,7 +342,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 "chat-after-hash-1",
                 None,
                 now.isoformat(),
-                (now + timedelta(days=7)).isoformat(),
+                (now + timedelta(days=365)).isoformat(),
             ),
             (
                 "chat-task-2",
@@ -361,7 +361,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 "chat-after-hash-2",
                 None,
                 (now + timedelta(seconds=1)).isoformat(),
-                (now + timedelta(days=7)).isoformat(),
+                (now + timedelta(days=365)).isoformat(),
             ),
         ]
         conn = sqlite3.connect(db_path)

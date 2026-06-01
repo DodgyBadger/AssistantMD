@@ -46,6 +46,12 @@ file_ops_safe(operation="read", path="notes/project.md")
 ```
 
 ```python
+file_ops_safe(operation="read", path="notes/project")
+```
+
+For extensionless vault paths, `read` first tries `path + ".md"`. If that file does not exist and `path` is a directory, it returns the non-recursive directory listing.
+
+```python
 file_ops_safe(
     operation="write",
     path="notes/output.md",

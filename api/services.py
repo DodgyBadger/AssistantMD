@@ -3,18 +3,23 @@ Service layer for API operations.
 Handles business logic for status reporting, vault management, etc.
 """
 
+import asyncio
+import contextvars
 import json
+import hashlib
 import mimetypes
 import re
 import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import List, Optional, Dict, Any
 
 import yaml
 from sqlalchemy import func, select
 
+from core.authoring.service import run_authoring_template
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
@@ -53,6 +58,12 @@ from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.memory.session_summary import SessionSummaryStore
+from core.system_migrations import (
+    get_system_migration_status as get_registered_system_migration_status,
+    run_system_migrations as run_registered_system_migrations,
+)
+from core.vector import VectorService
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSource,
@@ -62,13 +73,17 @@ from core.runtime.execution_tasks import (
 )
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
+from core.vault_state.file_mutations import replace_vault_file_content
 from core.vault_state.models import VaultFile, VaultFileEvent
 from .models import (
     VaultInfo,
     SchedulerInfo,
     SystemInfo,
     StatusResponse,
+    WorkflowEnabledResponse,
+    WorkflowFileResponse,
     WorkflowSummary,
+    SystemWorkflowTemplateSummary,
     ConfigurationError as APIConfigurationError,
     ModelInfo,
     ToolInfo,
@@ -79,6 +94,10 @@ from .models import (
     ModelConfigRequest,
     ProviderConfigRequest,
     CachePurgeResponse,
+    SystemTemplateSeedResponse,
+    SystemMigrationRunResponse,
+    SystemMigrationStatusResponse,
+    SystemMigrationTargetInfo,
     OperationResult,
     SecretInfo,
     SecretUpdateRequest,
@@ -111,7 +130,13 @@ from core.ingestion.service import IngestionService
 from core.ingestion.registry import importer_registry
 from core.ingestion.jobs import find_job_for_source
 from core.ingestion.task_execution import process_ingestion_job_in_task
-from core.authoring.template_discovery import list_templates
+from core.authoring.template_discovery import (
+    list_templates,
+    list_system_workflow_templates,
+    seed_system_templates,
+)
+from core.tools.workflow_run import WorkflowRun
+from core.utils.frontmatter import upsert_frontmatter_key
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -415,6 +440,120 @@ def purge_expired_cache() -> CachePurgeResponse:
     )
 
 
+def get_system_database_migration_status() -> SystemMigrationStatusResponse:
+    """Return registered system database migration status."""
+    try:
+        status = get_registered_system_migration_status(get_system_root())
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to inspect system database migrations: {exc}") from exc
+
+    return _build_system_migration_status_response(status)
+
+
+def run_system_database_migrations(backup: bool = True) -> SystemMigrationRunResponse:
+    """Run registered system database migrations on demand."""
+    try:
+        status = run_registered_system_migrations(get_system_root(), backup=backup)
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to run system database migrations: {exc}") from exc
+
+    backups_created = [
+        target.backup_path
+        for target in status.targets
+        if target.backup_path
+    ]
+    message = (
+        "System database migrations completed."
+        if status.pending_count == 0
+        else f"System database migrations completed with {status.pending_count} migration(s) still pending."
+    )
+    logger.info(
+        "Manual system database migration run completed",
+        data={
+            "pending_count": status.pending_count,
+            "backups_created": len(backups_created),
+            "backup": backup,
+        },
+    )
+    response = _build_system_migration_status_response(status, message=message)
+    return SystemMigrationRunResponse(
+        **response.model_dump(),
+        backups_created=backups_created,
+    )
+
+
+def _build_system_migration_status_response(
+    status,
+    *,
+    message: str | None = None,
+) -> SystemMigrationStatusResponse:
+    pending_count = status.pending_count
+    summary = message or (
+        "All registered system database migrations are applied."
+        if pending_count == 0
+        else f"{pending_count} system database migration(s) pending."
+    )
+    return SystemMigrationStatusResponse(
+        success=True,
+        message=summary,
+        system_root=status.system_root,
+        pending_count=pending_count,
+        targets=[
+            SystemMigrationTargetInfo(
+                db_name=target.db_name,
+                namespace=target.namespace,
+                db_path=target.db_path,
+                exists=target.exists,
+                applied_versions=list(target.applied_versions),
+                pending_versions=list(target.pending_versions),
+                backup_path=target.backup_path,
+            )
+            for target in status.targets
+        ],
+    )
+
+
+def refresh_system_authoring_templates() -> SystemTemplateSeedResponse:
+    """Refresh packaged system Authoring templates on demand."""
+    try:
+        result = seed_system_templates(get_system_root(), overwrite=True)
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to refresh system authoring templates: {exc}") from exc
+
+    created = result.get("created", [])
+    updated = result.get("updated", [])
+    skipped = result.get("skipped", [])
+    errors = result.get("errors", [])
+    success = bool(result.get("success", False))
+
+    logger.info(
+        "Manual system authoring template refresh completed",
+        data={
+            "created": len(created),
+            "updated": len(updated),
+            "skipped": len(skipped),
+            "errors": len(errors),
+            "success": success,
+        },
+    )
+
+    message = (
+        "System authoring templates refreshed: "
+        f"{len(created)} created, {len(updated)} updated, {len(skipped)} skipped."
+    )
+    if errors:
+        message += f" {len(errors)} error(s) occurred."
+
+    return SystemTemplateSeedResponse(
+        success=success,
+        message=message,
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+    )
+
+
 def get_workflow_load_errors(
     *,
     vault_name: str | None = None,
@@ -473,15 +612,140 @@ def list_context_templates(vault_name: str) -> List[TemplateInfo]:
 def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
     """List persisted chat sessions for a vault ordered by latest activity."""
     sessions = _chat_store.list_sessions(vault_name)
+    summary_store = SessionSummaryStore()
     return [
         ChatSessionInfo(
             session_id=session.session_id,
             created_at=session.created_at,
             last_activity_at=session.last_activity_at,
             title=session.title or None,
+            has_summary=summary_store.get_session_summary(
+                vault_name=vault_name,
+                session_id=session.session_id,
+            )
+            is not None,
         )
         for session in sessions
     ]
+
+
+def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
+    """Return a lightweight summary preview for one chat session."""
+    session_summary = SessionSummaryStore().get_session_summary(
+        vault_name=vault_name,
+        session_id=session_id,
+    )
+    if session_summary is None:
+        return {
+            "session_id": session_id,
+            "vault_name": vault_name,
+            "has_summary": False,
+            "summary": None,
+            "user_intent": None,
+            "created_at": None,
+            "updated_at": None,
+            "domain": None,
+            "work_product": None,
+            "named_entities": None,
+            "source_summary": None,
+            "metadata": {},
+            "artifacts": [],
+        }
+    return _session_summary_response(session_summary)
+
+
+async def update_chat_session_summary(
+    *,
+    vault_name: str,
+    session_id: str,
+    data: dict[str, Any],
+) -> dict:
+    """Manually update one session summary record and refresh search indexes."""
+    store = SessionSummaryStore()
+    existing = store.get_session_summary(vault_name=vault_name, session_id=session_id)
+    if existing is None:
+        raise APIException(
+            status_code=404,
+            error_type="SessionSummaryNotFound",
+            message=f"Session summary not found: {session_id}",
+            details={"session_id": session_id, "vault_name": vault_name},
+        )
+    session_summary = store.update_session_summary_fields(
+        vault_name=vault_name,
+        session_id=session_id,
+        summary=data.get("summary"),
+        domain=data.get("domain"),
+        work_product=data.get("work_product"),
+        user_intent=data.get("user_intent"),
+        named_entities=data.get("named_entities"),
+        source_summary=data.get("source_summary"),
+        metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+    )
+    indexed_fields = await _maybe_index_session_summary_for_api(
+        store,
+        vault_name=vault_name,
+        session_id=session_id,
+    )
+    response = _session_summary_response(session_summary)
+    response["indexed_fields"] = indexed_fields
+    return response
+
+
+def delete_chat_session_summary(vault_name: str, session_id: str) -> dict:
+    """Delete one session summary record without deleting the chat session."""
+    deleted = SessionSummaryStore().delete_session_summary(
+        vault_name=vault_name,
+        session_id=session_id,
+    )
+    return {
+        "session_id": session_id,
+        "vault_name": vault_name,
+        "deleted": deleted,
+    }
+
+
+async def _maybe_index_session_summary_for_api(
+    store: SessionSummaryStore,
+    *,
+    vault_name: str,
+    session_id: str,
+) -> int:
+    try:
+        return await store.index_session_summary_fields(
+            vault_name=vault_name,
+            session_id=session_id,
+            vector_service=VectorService(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "session_summary_field_indexing_skipped",
+            data={
+                "source": "api",
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return 0
+
+
+def _session_summary_response(session_summary) -> dict:
+    return {
+        "session_id": session_summary.session_id,
+        "vault_name": session_summary.vault_name,
+        "has_summary": True,
+        "summary": session_summary.summary,
+        "user_intent": session_summary.user_intent,
+        "created_at": session_summary.created_at,
+        "updated_at": session_summary.updated_at,
+        "domain": session_summary.domain,
+        "work_product": session_summary.work_product,
+        "named_entities": session_summary.named_entities,
+        "source_summary": session_summary.source_summary,
+        "metadata": session_summary.metadata,
+        "artifacts": [artifact.to_dict() for artifact in session_summary.artifacts],
+    }
 
 
 def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDetailResponse:
@@ -525,11 +789,16 @@ def set_chat_session_title(vault_name: str, session_id: str, title: str | None) 
 
 def export_chat_session_markdown(vault_name: str, vault_path: str, session_id: str) -> ChatSessionExportResponse:
     """Export one chat session transcript to the vault on demand."""
+    session_summary = SessionSummaryStore().get_session_summary(
+        vault_name=vault_name,
+        session_id=session_id,
+    )
     exported = export_chat_transcript(
         store=_chat_store,
         vault_path=vault_path,
         vault_name=vault_name,
         session_id=session_id,
+        session_summary=session_summary.summary if session_summary else None,
     )
     return ChatSessionExportResponse(
         session_id=session_id,
@@ -557,7 +826,6 @@ async def compact_chat_session_history(
     session_id: str,
     *,
     focus: str | None,
-    export_before: bool | None,
 ) -> ChatHistoryCompactionResponse:
     """Compact one chat session through the shared compaction service."""
     runtime = get_runtime_context()
@@ -573,7 +841,6 @@ async def compact_chat_session_history(
             vault_name=vault_name,
             vault_path=vault_path,
             focus=focus,
-            export_before=export_before,
             source=ExecutionTaskSource.API,
             store=_chat_store,
         )
@@ -581,9 +848,10 @@ async def compact_chat_session_history(
 
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
-    """Delete one chat session from the canonical store only."""
+    """Delete one chat session and its session summary."""
     del vault_path
     _chat_store.delete_sessions(vault_name, session_id=session_id)
+    SessionSummaryStore().delete_session_summary(vault_name=vault_name, session_id=session_id)
 
 
 def purge_chat_sessions(
@@ -594,6 +862,9 @@ def purge_chat_sessions(
 ) -> ChatSessionsPurgeResponse:
     """Delete old chat sessions and their transcript files for a vault."""
     deleted_ids = _chat_store.delete_sessions(vault_name, older_than_days=older_than_days)
+    summary_store = SessionSummaryStore()
+    for session_id in deleted_ids:
+        summary_store.delete_session_summary(vault_name=vault_name, session_id=session_id)
     remove_chat_transcript_exports(vault_path=vault_path, session_ids=deleted_ids)
 
     n = len(deleted_ids)
@@ -1019,6 +1290,7 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         workflow_summaries = get_workflow_summaries()
         enabled_workflows = [summary for summary in workflow_summaries if summary.enabled]
         disabled_workflows = [summary for summary in workflow_summaries if not summary.enabled]
+        system_workflow_templates = get_system_workflow_template_summaries()
 
         scheduler_info.enabled_workflows = len(enabled_workflows)
         scheduler_info.disabled_workflows = len(disabled_workflows)
@@ -1056,6 +1328,7 @@ async def get_system_status(scheduler=None) -> StatusResponse:
             total_workflows=total_workflows,
             enabled_workflows=enabled_workflows,
             disabled_workflows=disabled_workflows,
+            system_workflow_templates=system_workflow_templates,
             configuration_errors=configuration_errors,
             configuration_status=configuration_status,
         )
@@ -1080,6 +1353,8 @@ def get_workflow_summaries() -> List[WorkflowSummary]:
     all_workflows = getattr(workflow_loader, '_workflows', [])
 
     for workflow in all_workflows:
+        if workflow.name.startswith("system/"):
+            continue
         summary = WorkflowSummary(
             global_id=workflow.global_id,
             name=workflow.name,
@@ -1092,6 +1367,257 @@ def get_workflow_summaries() -> List[WorkflowSummary]:
         summaries.append(summary)
 
     return summaries
+
+
+def get_system_workflow_template_summaries() -> List[SystemWorkflowTemplateSummary]:
+    """Return packaged system workflow templates available to copy into a vault."""
+    summaries = []
+
+    for template in list_system_workflow_templates():
+        frontmatter = template.frontmatter
+        summaries.append(
+            SystemWorkflowTemplateSummary(
+                name=template.name[:-3] if template.name.endswith(".md") else template.name,
+                run_type=str(frontmatter.get("run_type") or "").strip().lower(),
+                enabled=bool(frontmatter.get("enabled", False)),
+                schedule_cron=str(frontmatter.get("schedule") or "").strip() or None,
+                description=str(frontmatter.get("description") or "").strip(),
+                path=str(template.path or ""),
+            )
+        )
+
+    return sorted(summaries, key=lambda item: item.name.lower())
+
+
+def get_workflow_file(global_id: str) -> WorkflowFileResponse:
+    """Return editable source content for a vault workflow or system workflow template."""
+    workflow_path, source = _resolve_workflow_file_path(global_id)
+    content = workflow_path.read_text(encoding="utf-8")
+    return WorkflowFileResponse(
+        global_id=str(global_id or "").strip(),
+        path=str(workflow_path),
+        source=source,
+        content=content,
+        sha256=_sha256_text(content),
+    )
+
+
+async def update_workflow_file(
+    global_id: str,
+    *,
+    content: str,
+    expected_sha256: str | None = None,
+) -> WorkflowFileResponse:
+    """Replace workflow source content and reload workflow definitions."""
+    normalized_id = str(global_id or "").strip()
+    workflow_path, source = _resolve_workflow_file_path(global_id)
+    current_content = workflow_path.read_text(encoding="utf-8")
+    current_sha256 = _sha256_text(current_content)
+    if expected_sha256 and expected_sha256 != current_sha256:
+        raise ValueError("Workflow file changed since it was opened. Refresh and retry.")
+
+    if source == "vault":
+        runtime = get_runtime_context()
+        vault_name, _workflow_name = normalized_id.split("/", 1)
+        vault_root = (Path(runtime.config.data_root) / vault_name).resolve()
+        relative_path = workflow_path.relative_to(vault_root).as_posix()
+        async with runtime.task_coordinator.track_current_task(
+            kind=ExecutionTaskKind.WORKFLOW,
+            scope=workflow_vault_scope(vault_name),
+            source=ExecutionTaskSource.API,
+            label=f"edit_workflow:{normalized_id}",
+            metadata={
+                "workflow_id": normalized_id,
+                "vault": vault_name,
+                "path": relative_path,
+            },
+        ):
+            replace_vault_file_content(
+                vault_path=vault_root,
+                path=relative_path,
+                content=content,
+                operation="update_workflow_file",
+                markdown_only=True,
+            )
+    else:
+        _write_system_workflow_file_content(workflow_path, content)
+
+    logger.info(
+        "Workflow file updated",
+        data={
+            "global_id": normalized_id,
+            "source": source,
+            "path": str(workflow_path),
+        },
+    )
+
+    try:
+        runtime = get_runtime_context()
+        await runtime.reload_workflows(manual=True)
+    except RuntimeStateError:
+        pass
+
+    return WorkflowFileResponse(
+        global_id=normalized_id,
+        path=str(workflow_path),
+        source=source,
+        content=content,
+        sha256=_sha256_text(content),
+        message=f"Saved workflow '{normalized_id}'.",
+    )
+
+
+def _resolve_workflow_file_path(global_id: str) -> tuple[Path, str]:
+    """Resolve an editable workflow ID to a file path under an allowed authoring root."""
+    normalized_id = str(global_id or "").strip()
+    if "/" not in normalized_id:
+        raise ValueError(f"Invalid global_id format. Expected 'vault/name' or 'system/name', got: {global_id}")
+
+    if normalized_id.startswith("system/"):
+        path = _resolve_system_workflow_file_path(normalized_id)
+        return path, "system"
+
+    runtime = get_runtime_context()
+    workflow = runtime.workflow_loader.get_workflow_by_global_id(normalized_id)
+    if workflow is None:
+        raise ValueError(f"Workflow not found: {normalized_id}")
+
+    data_root = Path(runtime.config.data_root).resolve()
+    workflow_path = Path(workflow.file_path).resolve()
+    vault_root = (data_root / workflow.vault).resolve()
+    vault_authoring_root = (vault_root / ASSISTANTMD_ROOT_DIR / "Authoring").resolve()
+    if not workflow_path.is_relative_to(vault_authoring_root):
+        raise ValueError("Workflow path escapes vault Authoring root")
+    if workflow_path.suffix.lower() != ".md":
+        raise ValueError("Workflow editing only supports markdown authoring files")
+    if not workflow_path.is_file():
+        raise ValueError(f"Workflow file not found: {normalized_id}")
+    return workflow_path, "vault"
+
+
+def _write_system_workflow_file_content(path: Path, content: str) -> None:
+    """Atomically replace a system workflow template file."""
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(content, encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _resolve_system_workflow_file_path(global_id: str) -> Path:
+    _system_prefix, template_name = global_id.split("/", 1)
+    if not template_name or template_name.startswith("/") or ".." in template_name:
+        raise ValueError("Invalid system workflow template name.")
+
+    system_root = get_system_root()
+    template = next(
+        (
+            record
+            for record in list_system_workflow_templates(system_root)
+            if (record.name[:-3] if record.name.endswith(".md") else record.name) == template_name
+        ),
+        None,
+    )
+    if template is None or not template.path:
+        raise ValueError(f"System workflow template not found: {global_id}")
+
+    template_path = Path(template.path).resolve()
+    system_authoring_root = (system_root / "Authoring").resolve()
+    if not template_path.is_relative_to(system_authoring_root):
+        raise ValueError("System workflow template path escapes system Authoring root")
+    if template_path.suffix.lower() != ".md":
+        raise ValueError("System workflow editing only supports markdown authoring files")
+    if not template_path.is_file():
+        raise ValueError(f"System workflow template file not found: {global_id}")
+    return template_path
+
+
+def _sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+async def set_workflow_enabled_state(global_id: str, enabled: bool) -> WorkflowEnabledResponse:
+    """Set one workflow or system workflow template enabled flag."""
+    normalized_id = str(global_id or "").strip()
+    if "/" not in normalized_id:
+        raise ValueError(f"Invalid global_id format. Expected 'vault/name' or 'system/name', got: {global_id}")
+
+    if normalized_id.startswith("system/"):
+        return await _set_system_workflow_enabled_state(normalized_id, enabled)
+
+    vault_name, workflow_name = normalized_id.split("/", 1)
+    if not vault_name or not workflow_name:
+        raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
+
+    operation = "enable_workflow" if enabled else "disable_workflow"
+    result = await WorkflowRun._set_workflow_enabled_state(
+        operation=operation,
+        vault_name=vault_name,
+        workflow_name=workflow_name,
+    )
+    if not result.get("success"):
+        raise ValueError(str(result.get("message") or f"Workflow not found: {normalized_id}"))
+
+    return WorkflowEnabledResponse(
+        success=True,
+        global_id=normalized_id,
+        enabled_before=bool(result.get("enabled_before", False)),
+        enabled_after=bool(result.get("enabled_after", enabled)),
+        message=str(result.get("message") or f"Workflow '{normalized_id}' updated."),
+    )
+
+
+async def _set_system_workflow_enabled_state(global_id: str, enabled: bool) -> WorkflowEnabledResponse:
+    """Set enabled frontmatter on a system workflow template."""
+    template_path = _resolve_system_workflow_file_path(global_id)
+    template_content = template_path.read_text(encoding="utf-8")
+    template_frontmatter = next(
+        (
+            record.frontmatter
+            for record in list_system_workflow_templates(get_system_root())
+            if Path(record.path or "").resolve() == template_path
+        ),
+        {},
+    )
+
+    enabled_before = _coerce_frontmatter_enabled(template_frontmatter)
+    content = template_content
+    updated_content = upsert_frontmatter_key(
+        content,
+        key="enabled",
+        value="true" if enabled else "false",
+    )
+    _write_system_workflow_file_content(template_path, updated_content)
+
+    logger.info(
+        "System workflow template enabled state changed",
+        data={
+            "global_id": global_id,
+            "enabled_before": enabled_before,
+            "enabled_after": enabled,
+        },
+    )
+
+    try:
+        runtime = get_runtime_context()
+        await runtime.reload_workflows(manual=True)
+    except RuntimeStateError:
+        pass
+
+    return WorkflowEnabledResponse(
+        success=True,
+        global_id=global_id,
+        enabled_before=enabled_before,
+        enabled_after=enabled,
+        message=f"Workflow '{global_id}' {'enabled' if enabled else 'disabled'} successfully.",
+    )
+
+
+def _coerce_frontmatter_enabled(frontmatter: dict[str, Any]) -> bool:
+    value = frontmatter.get("enabled")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "on", "1"}
+    return False
 
 
 def get_configuration_errors() -> List[APIConfigurationError]:
@@ -1427,12 +1953,14 @@ def _build_model_info(
         provider = config.provider
         model_string = config.model_string
         capabilities = list(getattr(config, "capabilities", ["text"]) or ["text"])
+        dimensions = getattr(config, "dimensions", None)
         user_editable = getattr(config, "user_editable", True)
         description = getattr(config, "description", None)
     else:
         provider = config['provider']
         model_string = config['model_string']
         capabilities = list(config.get("capabilities", ["text"]) or ["text"])
+        dimensions = config.get("dimensions")
         user_editable = config.get('user_editable', True)
         description = config.get('description')
 
@@ -1445,6 +1973,7 @@ def _build_model_info(
         provider=provider,
         model_string=model_string,
         capabilities=capabilities,
+        dimensions=dimensions,
         available=availability.get(name, True),
         user_editable=user_editable,
         description=description,
@@ -1526,6 +2055,7 @@ def upsert_configurable_model(model_name: str, payload: ModelConfigRequest) -> M
             provider=payload.provider,
             model_string=payload.model_string,
             capabilities=payload.capabilities,
+            dimensions=payload.dimensions,
             description=payload.description,
         )
     except SettingsError as exc:
@@ -1730,16 +2260,18 @@ def delete_secret_entry(name: str) -> OperationResult:
 async def execute_workflow_manually(
     global_id: str,
     expect_failure: bool = False,
+    *,
+    vault_name: str | None = None,
 ) -> Dict[str, Any]:
     """
-    Execute a specific workflow manually.
+    Start a specific workflow manually.
     
     Args:
         global_id: Workflow global ID in format "vault/name"
         expect_failure: Whether workflow-level failures are expected (validation hint)
         
     Returns:
-        Dictionary with execution results and timing information
+        Dictionary with execution task information
         
     Raises:
         SystemConfigurationError: If workflow not found or execution fails
@@ -1750,39 +2282,207 @@ async def execute_workflow_manually(
             "Workflow execution started",
             data={
                 "global_id": global_id,
+                "vault_name": vault_name or "",
             },
         )
 
+        if global_id.startswith("system/"):
+            task = await _start_system_workflow_template(
+                global_id=global_id,
+                vault_name=vault_name,
+                expect_failure=expect_failure,
+            )
+            logger.info(
+                "System workflow template execution started",
+                data={
+                    "global_id": global_id,
+                    "vault_name": vault_name or "",
+                    "task_id": task.task_id,
+                    "status": task.status,
+                },
+            )
+            return _workflow_started_response(global_id=global_id, task=task)
+
         try:
             runtime = get_runtime_context()
-            execution_result = await runtime.workflow_governor.execute_workflow(
+            task = await runtime.workflow_governor.start_workflow(
                 global_id=global_id,
                 source=ExecutionTaskSource.API,
                 expect_failure=expect_failure,
+                background_tasks=runtime.background_tasks,
             )
         except Exception as workflow_error:
             if isinstance(workflow_error, ValueError):
                 raise
             raise SystemConfigurationError(f"Workflow execution failed for '{global_id}': {str(workflow_error)}")
 
-        results = execution_result.to_dict()
         logger.info(
-            "Workflow execution finished",
+            "Workflow execution started",
             data={
                 "global_id": global_id,
-                "status": execution_result.status,
-                "reason": execution_result.reason or "",
-                "execution_time_seconds": execution_result.execution_time_seconds,
+                "task_id": task.task_id,
+                "status": task.status,
             },
         )
-        
-        return results
+        return _workflow_started_response(global_id=global_id, task=task)
         
     except (ValueError, SystemConfigurationError):
         raise  # Re-raise known errors
     except Exception as e:
         error_msg = f"Failed to execute workflow '{global_id}': {str(e)}"
         raise SystemConfigurationError(error_msg) from e
+
+
+def _workflow_started_response(
+    *,
+    global_id: str,
+    task,
+) -> Dict[str, Any]:
+    """Build the API response for an accepted manual workflow run."""
+    return {
+        "success": True,
+        "global_id": global_id,
+        "status": task.status,
+        "task": _execution_task_info(task).model_dump(mode="python"),
+        "message": f"Workflow '{global_id}' started as task {task.task_id}.",
+    }
+
+
+async def _start_system_workflow_template(
+    *,
+    global_id: str,
+    vault_name: str | None,
+    expect_failure: bool,
+) -> object:
+    """Start one system workflow template against an explicit vault scope."""
+    if not vault_name:
+        raise ValueError("vault_name is required to run a system workflow template.")
+    runtime = get_runtime_context()
+    task = await runtime.task_coordinator.create_queued_task(
+        kind=ExecutionTaskKind.WORKFLOW,
+        scope=workflow_vault_scope(vault_name),
+        source=ExecutionTaskSource.API,
+        label=global_id,
+        metadata={
+            "workflow_id": global_id,
+            "vault": vault_name,
+            "system_template": global_id.split("/", 1)[1] if "/" in global_id else global_id,
+        },
+    )
+
+    async def _run() -> None:
+        try:
+            await _execute_system_workflow_template(
+                global_id=global_id,
+                vault_name=vault_name,
+                expect_failure=expect_failure,
+                task_id=task.task_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            return
+
+    def _spawn() -> None:
+        background_task = asyncio.create_task(_run(), context=contextvars.Context())
+        runtime.background_tasks.add(background_task)
+        background_task.add_done_callback(runtime.background_tasks.discard)
+
+    asyncio.get_running_loop().call_soon(_spawn, context=contextvars.Context())
+    return task
+
+
+async def _execute_system_workflow_template(
+    *,
+    global_id: str,
+    vault_name: str | None,
+    expect_failure: bool,
+    task_id: str | None = None,
+) -> Dict[str, Any]:
+    """Execute one system workflow template against an explicit vault scope."""
+    if not vault_name:
+        raise ValueError("vault_name is required to run a system workflow template.")
+    if "/" not in global_id:
+        raise ValueError(f"Invalid global_id format. Expected 'system/name', got: {global_id}")
+
+    _system_prefix, template_name = global_id.split("/", 1)
+    if not template_name or template_name.startswith("/") or ".." in template_name:
+        raise ValueError("Invalid system workflow template name.")
+
+    runtime = get_runtime_context()
+    vault_path = Path(runtime.config.data_root) / vault_name
+    if not vault_path.exists() or not vault_path.is_dir():
+        raise ValueError(f"Vault not found: {vault_name}")
+
+    template = next(
+        (
+            record
+            for record in list_system_workflow_templates(runtime.config.system_root)
+            if (record.name[:-3] if record.name.endswith(".md") else record.name) == template_name
+        ),
+        None,
+    )
+    if template is None or not template.path:
+        raise ValueError(f"System workflow template not found: {global_id}")
+
+    scoped_workflow_id = f"{vault_name}/system/{template_name}"
+    started = perf_counter()
+    task_context = (
+        runtime.task_coordinator.track_existing_task(task_id)
+        if task_id
+        else runtime.task_coordinator.track_current_task(
+            kind=ExecutionTaskKind.WORKFLOW,
+            scope=workflow_vault_scope(vault_name),
+            source=ExecutionTaskSource.API,
+            label=global_id,
+            metadata={
+                "workflow_id": global_id,
+                "scoped_workflow_id": scoped_workflow_id,
+                "vault": vault_name,
+                "system_template": template_name,
+            },
+        )
+    )
+    async with task_context as task:
+        await runtime.task_coordinator.mark_started(task.task_id)
+        await runtime.task_coordinator.update_metadata(
+            task.task_id,
+            {"scoped_workflow_id": scoped_workflow_id},
+        )
+        execution_result = await run_authoring_template(
+            workflow_id=scoped_workflow_id,
+            file_path=str(template.path),
+            expect_failure=expect_failure,
+        )
+        elapsed = perf_counter() - started
+        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
+        terminal_reason = str(getattr(execution_result, "reason", "") or "")
+        result = {
+            "success": True,
+            "global_id": global_id,
+            "status": terminal_status,
+            "execution_time_seconds": elapsed,
+            "output_files": [],
+            "reason": terminal_reason or None,
+            "details": [f"task_id: {task.task_id}", f"vault_scope: {vault_name}"],
+            "message": (
+                f"System workflow template '{global_id}' executed for vault "
+                f"'{vault_name}' with status '{terminal_status}'."
+            ),
+        }
+        await runtime.task_coordinator.update_metadata(
+            task.task_id,
+            {"workflow_result": result},
+        )
+        if terminal_status == "skipped":
+            await runtime.task_coordinator.mark_skipped(task.task_id, reason=terminal_reason or None)
+        elif terminal_status == "failed":
+            await runtime.task_coordinator.mark_failed(task.task_id, reason=terminal_reason or None)
+        elif terminal_status == "cancelled":
+            await runtime.task_coordinator.mark_cancelled(task.task_id, reason=terminal_reason or None)
+        elif terminal_status == "timed_out":
+            await runtime.task_coordinator.mark_timed_out(task.task_id, reason=terminal_reason or None)
+        return result
 
 
 async def get_metadata() -> MetadataResponse:
@@ -1813,12 +2513,14 @@ async def get_metadata() -> MetadataResponse:
             provider = config.provider
             model_string = config.model_string
             capabilities = list(getattr(config, "capabilities", ["text"]) or ["text"])
+            dimensions = getattr(config, "dimensions", None)
             user_editable = getattr(config, "user_editable", True)
             description = getattr(config, "description", None)
         else:
             provider = config['provider']
             model_string = config['model_string']
             capabilities = list(config.get("capabilities", ["text"]) or ["text"])
+            dimensions = config.get("dimensions")
             user_editable = config.get('user_editable', True)
             description = config.get('description')
 
@@ -1828,6 +2530,7 @@ async def get_metadata() -> MetadataResponse:
                 provider=provider,
                 model_string=model_string,
                 capabilities=capabilities,
+                dimensions=dimensions,
                 available=config_status.model_availability.get(name, True),
                 user_editable=user_editable,
                 description=description,

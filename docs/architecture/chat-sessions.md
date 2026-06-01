@@ -7,7 +7,8 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/chat_store.py` — read/write sessions and messages
 - `core/chat/schema.py` — SQLite schema bootstrap
 - `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
-- `core/chat/compaction.py` — summarize and rewrite long canonical histories
+- `core/chat/history_service.py` — broker over persisted and in-memory conversation history
+- `core/chat/compaction.py` — summarize long sessions and record replay checkpoints
 - `core/chat/executor.py` — register chat execution tasks and persist completed turns
 
 ## SQLite store
@@ -19,6 +20,9 @@ It has three tables:
 - **`chat_sessions`** — one row per session: `session_id`, `vault_name`, `created_at`, `last_activity_at`, `title`
 - **`chat_messages`** — full provider-native message objects stored as JSON, plus extracted `content_text`, `role`, `direction`, and `sequence_index` for querying
 - **`chat_tool_events`** — structured tool call and result events keyed by `tool_call_id`, with `args_json`, `result_text`, and optional `artifact_ref`
+- **`chat_compaction_checkpoints`** — compaction replay checkpoints with a
+  system-maintained replacement history and the raw-message sequence boundary
+  covered by that checkpoint
 
 ## Markdown transcripts
 
@@ -26,11 +30,21 @@ It has three tables:
 
 ## History loading
 
-`ChatStore.get_history()` returns the full `list[ModelMessage]` for a session, which the chat executor passes directly to the model as prior context.
+`ChatStore.get_history()` returns the effective `list[ModelMessage]` for a session, which the chat executor passes directly to the model as prior context.
 
 Canonical history contains completed prior turns plus the accepted user request for an active chat run. The active user input is passed separately to Pydantic AI, and provider-native response messages are persisted after completion through `new_messages()` for that run. On cancellation, the accepted user request remains persisted and no assistant response is added.
 
-`core/memory/` is the shared broker over this store for tools and authoring helpers. Context scripts should access session history through `retrieve_history(...)`, which preserves tool call/return pairs as atomic units before `assemble_context(...)` hands curated history back to chat.
+For uncompacted sessions, effective history is the stored raw message sequence.
+For compacted sessions, effective history is reconstructed from the latest
+compaction checkpoint plus raw messages appended after that checkpoint. Raw
+pre-checkpoint messages remain in `chat_messages` for durability, but normal
+runtime readers use effective history by default.
+
+`core/chat/history_service.py` is the shared broker over this store for tools,
+session summarization, and authoring helpers. Context scripts should access
+session history through `retrieve_history(...)`, which preserves tool
+call/return pairs as atomic units before `assemble_context(...)` hands curated
+history back to chat.
 
 ## Execution tasks and cancellation
 
@@ -46,14 +60,25 @@ See [Execution Tasks](execution-tasks.md) for task lifecycle and cancellation se
 
 ## History compaction
 
-Chat history compaction rewrites one session's canonical provider-native history into:
+Chat history compaction records a replay checkpoint whose default effective
+history starts with:
 
 1. A system-maintained summary message marked with `AssistantMD compacted chat history`.
 2. A recent raw message slice preserved verbatim.
 
-The compaction split preserves tool call/return pairs in the recent slice. If transcript export is requested or configured, compaction exports the pre-rewrite transcript before replacing stored messages.
+The compaction split preserves tool call/return pairs in the recent slice.
+Compaction does not create transcript exports; users can export chat transcripts
+manually from the UI when needed.
 
-Compaction writes audit metadata under the session's `last_compaction` metadata key, including compaction ID, timestamp, source, before/after message counts, token estimates, and export status.
+Compaction leaves existing `chat_messages` rows intact, records the raw-message
+high-water mark covered by the checkpoint, and writes audit metadata under the
+session's `last_compaction` metadata key, including compaction ID, timestamp,
+source, before/after effective message counts, token estimates, and checkpoint
+boundary.
+
+Default session detail, transcript export, `retrieve_history(...)`,
+`assemble_context(...)`, and model-context assembly use effective history, not
+archival raw history.
 
 Compaction can be invoked by:
 

@@ -9,10 +9,12 @@ from pydantic_ai.models.openai import (
     OpenAIResponsesModel,
     OpenAIResponsesModelSettings,
 )
+from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.mistral import MistralProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.grok import GrokProvider
@@ -126,6 +128,16 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
             model_string,
             provider=MistralProvider(api_key=api_key),
             settings=ModelSettings(**settings_kwargs),
+        )
+
+    elif provider == "openrouter":
+        settings_kwargs = _base_settings_kwargs(thinking)
+        provider_config = get_provider_config(provider)
+        api_key = _resolve_config_value(provider_config.get("api_key"))
+        return OpenRouterModel(
+            model_string,
+            provider=OpenRouterProvider(api_key=api_key),
+            settings=OpenRouterModelSettings(**settings_kwargs),
         )
 
     else:

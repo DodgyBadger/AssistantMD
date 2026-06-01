@@ -364,6 +364,17 @@ def get_workflow_task_timeout_seconds() -> float:
     return timeout if timeout > 0 else 0.0
 
 
+def get_max_concurrent_workflows() -> int:
+    """Return max concurrent workflows across vaults, where 0 disables the limit."""
+    entry = get_general_settings().get("max_concurrent_workflows")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return limit if limit > 0 else 0
+
+
 def get_browser_navigation_timeout_seconds() -> float:
     """Return browser navigation timeout seconds, falling back to 20 seconds."""
     entry = get_general_settings().get("browser_navigation_timeout_seconds")
@@ -454,17 +465,6 @@ def get_compaction_token_threshold() -> int:
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed > 0 else template_default
-
-
-def get_compaction_export_before() -> bool:
-    """Return whether compaction should export transcripts by default."""
-    entry = get_general_settings().get("compaction_export_before")
-    value = getattr(entry, "value", None) if entry is not None else None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
 
 
 def get_file_search_timeout_seconds() -> float:
@@ -560,11 +560,23 @@ def get_vault_state_excluded_patterns() -> list[str]:
     return [item for item in raw_items if item and not item.startswith("#")]
 
 
+def get_task_mutation_retention_days() -> int:
+    """Return days to retain task mutation audit rows."""
+    entry = get_general_settings().get("task_mutation_retention_days")
+    value = getattr(entry, "value", None) if entry is not None else None
+    template_default = _get_template_setting_positive_int("task_mutation_retention_days", 365)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return template_default
+    return parsed if parsed >= 0 else template_default
+
+
 def get_task_snapshot_retention_days() -> int:
-    """Return days to retain task snapshot and mutation audit state."""
+    """Return days to retain task snapshot metadata and files."""
     entry = get_general_settings().get("task_snapshot_retention_days")
     value = getattr(entry, "value", None) if entry is not None else None
-    template_default = _get_template_setting_positive_int("task_snapshot_retention_days", 7)
+    template_default = _get_template_setting_positive_int("task_snapshot_retention_days", 30)
     try:
         parsed = int(value)
     except (TypeError, ValueError):

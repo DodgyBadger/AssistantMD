@@ -11,6 +11,7 @@ BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
         "read_cache",
         "pending_files",
+        "retrieve_sessions",
         "retrieve_history",
         "assemble_context",
         "parse_markdown",
@@ -205,6 +206,26 @@ class RetrievedHistoryResult:
                 self,
                 "text",
                 "\n\n".join(item.text for item in self.items if item.text.strip()),
+            )
+
+
+@dataclass(frozen=True)
+class RetrievedSessionsResult:
+    """Envelope for chat-session metadata retrieval into authored Python."""
+
+    selection: str
+    status: str
+    item_count: int
+    items: tuple[RetrievedItem, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.text:
+            object.__setattr__(
+                self,
+                "text",
+                "\n".join(item.content for item in self.items if item.content.strip()),
             )
 
 

@@ -18,15 +18,14 @@ settings:
     restart_required: false
   default_chat_tools:
     value:
-      - web_search_tavily
+      - web_search_duckduckgo
       - browser
       - file_ops_safe
       - file_ops_unsafe
-      - tavily_extract
-      - tavily_crawl
       - code_execution
       - delegate
       - chat_history_compact
+      - session_ops
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   chat_tool_calls_limit:
@@ -41,6 +40,10 @@ settings:
     value: 0
     description: "Maximum seconds for one workflow execution task. 0 disables the workflow task timeout."
     restart_required: false
+  max_concurrent_workflows:
+    value: 0
+    description: "Maximum number of workflows allowed to run at the same time across all vaults. 0 disables the global workflow concurrency limit."
+    restart_required: false
   browser_navigation_timeout_seconds:
     value: 20
     description: "Navigation timeout in seconds for the browser extraction tool."
@@ -54,7 +57,7 @@ settings:
     description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
     restart_required: false
   auto_cache_max_tokens:
-    value: 10000
+    value: 50000
     description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
     restart_required: false
   compaction_type:
@@ -68,10 +71,6 @@ settings:
   compaction_token_threshold:
     value: 80000
     description: "Estimated chat-history token threshold for suggested or automatic compaction."
-    restart_required: false
-  compaction_export_before:
-    value: false
-    description: "When true, export a transcript before compacting canonical chat history by default."
     restart_required: false
   file_search_timeout_seconds:
     value: 10
@@ -101,8 +100,12 @@ settings:
     value: true
     description: "Enable task-scoped mutation snapshots for supported rollback operations."
     restart_required: false
+  task_mutation_retention_days:
+    value: 365
+    description: "Days to retain task mutation audit rows before cleanup."
+    restart_required: false
   task_snapshot_retention_days:
-    value: 7
+    value: 30
     description: "Days to retain task snapshot metadata and files before cleanup."
     restart_required: false
   chunking_max_images_per_prompt:
@@ -274,6 +277,13 @@ models:
     capabilities: ["text"]
     description: null
     user_editable: true
+  embeddings:
+    provider: openai
+    model_string: text-embedding-3-small
+    capabilities: ["embedding"]
+    dimensions: 1536
+    description: "Default embedding model for vector search"
+    user_editable: true
 
 providers:
   google:
@@ -294,6 +304,10 @@ providers:
     user_editable: false
   mistral:
     api_key: MISTRAL_API_KEY
+    base_url: null
+    user_editable: false
+  openrouter:
+    api_key: OPENROUTER_API_KEY
     base_url: null
     user_editable: false
   lm_studio:
@@ -364,6 +378,12 @@ tools:
   chat_history_compact:
     module: core.tools.chat_history_compact
     description: "Check or compact the current chat session history"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true
+  session_ops:
+    module: core.tools.session_ops
+    description: "Search and summarize chat sessions"
     requires_secrets: []
     user_editable: false
     chat_visible: true

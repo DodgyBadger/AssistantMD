@@ -35,13 +35,11 @@ class ChatHistoryCompact(BaseTool):
             *,
             operation: str = "status",
             focus: str = "",
-            export_before: bool | None = None,
         ) -> str:
             """Check or compact the current chat session history.
 
             :param operation: status or compact
             :param focus: Optional user instructions for what the summary should preserve
-            :param export_before: Optional override for transcript export before compaction
             """
             deps = getattr(ctx, "deps", None)
             session_id = str(getattr(deps, "session_id", "") or "").strip()
@@ -77,7 +75,6 @@ class ChatHistoryCompact(BaseTool):
                     vault_name=vault_name,
                     vault_path=effective_vault_path,
                     focus=focus or None,
-                    export_before=export_before,
                     source=ExecutionTaskSource.TOOL,
                 )
             return json.dumps(result.as_tool_dict(), ensure_ascii=False, sort_keys=True)

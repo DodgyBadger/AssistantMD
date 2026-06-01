@@ -1,27 +1,17 @@
-"""Shared memory services and conversation-history abstractions."""
+"""Derived session-summary storage and retrieval primitives."""
 
-from core.memory.service import (
-    ConversationHistoryItem,
-    ConversationHistoryProvider,
-    ConversationHistoryResult,
-    ConversationToolEventItem,
-    ConversationToolEventResult,
-    InMemoryConversationHistoryProvider,
-    MemoryContext,
-    MemoryService,
-    SQLiteConversationHistoryProvider,
-    resolve_conversation_history_provider,
+from core.memory.session_summary import (
+    SessionSummary,
+    SessionSummaryArtifact,
+    SessionSummarySearchResult,
+    SessionSummaryStore,
+    normalize_field_value,
 )
 
 __all__ = [
-    "ConversationHistoryItem",
-    "ConversationHistoryProvider",
-    "ConversationHistoryResult",
-    "ConversationToolEventItem",
-    "ConversationToolEventResult",
-    "InMemoryConversationHistoryProvider",
-    "MemoryContext",
-    "MemoryService",
-    "SQLiteConversationHistoryProvider",
-    "resolve_conversation_history_provider",
+    "SessionSummary",
+    "SessionSummaryArtifact",
+    "SessionSummarySearchResult",
+    "SessionSummaryStore",
+    "normalize_field_value",
 ]

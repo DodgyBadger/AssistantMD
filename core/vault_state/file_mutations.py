@@ -16,7 +16,11 @@ from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import TaskFileMutation
 from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
 from core.vault_state.service import VaultStateService
-from core.vault_state.snapshots import compute_snapshot_expiration, ensure_task_file_snapshot
+from core.vault_state.snapshots import (
+    compute_snapshot_expiration,
+    compute_task_mutation_expiration,
+    ensure_task_file_snapshot,
+)
 
 
 logger = UnifiedLogger(tag="vault-mutations")
@@ -199,7 +203,8 @@ def move_vault_file(
     task = get_current_execution_task()
     service = VaultStateService()
     created_at = datetime.now(UTC)
-    expires_at = compute_snapshot_expiration(created_at)
+    snapshot_expires_at = compute_snapshot_expiration(created_at)
+    mutation_expires_at = compute_task_mutation_expiration(created_at)
     source_snapshot_ref = None
     source_snapshot_id = None
     destination_snapshot_ref = None
@@ -227,7 +232,7 @@ def move_vault_file(
                     scope_kind="task",
                     scope_id=task.task_id,
                     created_at=created_at,
-                    expires_at=expires_at,
+                    expires_at=snapshot_expires_at,
                 )
                 source_snapshot_ref = source_snapshot.snapshot_ref
                 source_snapshot_id = source_snapshot.file_snapshot_id
@@ -249,7 +254,7 @@ def move_vault_file(
                     scope_kind="task",
                     scope_id=task.task_id,
                     created_at=created_at,
-                    expires_at=expires_at,
+                    expires_at=snapshot_expires_at,
                 )
                 destination_snapshot_ref = destination_snapshot.snapshot_ref
                 destination_snapshot_id = destination_snapshot.file_snapshot_id
@@ -300,14 +305,14 @@ def move_vault_file(
             task=task,
             result=source_result,
             created_at=created_at,
-            expires_at=expires_at,
+            expires_at=mutation_expires_at,
         )
         _persist_or_log_mutation(
             service=service,
             task=task,
             result=destination_result,
             created_at=created_at,
-            expires_at=expires_at,
+            expires_at=mutation_expires_at,
         )
     except Exception as exc:
         _log_mutation_failed(
@@ -366,7 +371,8 @@ def mutate_vault_file(
     snapshot_ref = None
     before_snapshot_id = None
     created_at = datetime.now(UTC)
-    expires_at = compute_snapshot_expiration(created_at)
+    snapshot_expires_at = compute_snapshot_expiration(created_at)
+    mutation_expires_at = compute_task_mutation_expiration(created_at)
 
     stage = "snapshot"
     try:
@@ -390,7 +396,7 @@ def mutate_vault_file(
                     scope_kind="task",
                     scope_id=task.task_id,
                     created_at=created_at,
-                    expires_at=expires_at,
+                    expires_at=snapshot_expires_at,
                 )
                 snapshot_ref = snapshot.snapshot_ref
                 before_snapshot_id = snapshot.file_snapshot_id
@@ -429,7 +435,7 @@ def mutate_vault_file(
             task=task,
             result=result,
             created_at=created_at,
-            expires_at=expires_at,
+            expires_at=mutation_expires_at,
             warn_without_task=warn_without_task,
         )
     except Exception as exc:

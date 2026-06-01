@@ -132,6 +132,7 @@ dmypy.json
 
 # User-specific directory
 data/
+tmp/
 
 # Validation run outputs (keep directory, ignore contents)
 validation/runs/*

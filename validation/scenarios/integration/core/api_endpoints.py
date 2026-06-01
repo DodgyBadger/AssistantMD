@@ -10,6 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core.runtime.execution_tasks import ExecutionTaskSource
+from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
 
@@ -165,7 +167,14 @@ class ApiEndpointsScenario(BaseScenario):
         assert execute_response.status_code == 200, (
             "Manual workflow execution succeeds"
         )
-        assert execute_response.json().get("success") is True, "Workflow reports success"
+        execute_payload = execute_response.json()
+        assert execute_payload.get("success") is True, "Workflow start reports success"
+        assert execute_payload.get("task", {}).get("task_id"), "Workflow start returns a task id"
+
+        await get_runtime_context().workflow_governor.execute_workflow(
+            global_id=f"{vault.name}/status_probe",
+            source=ExecutionTaskSource.API,
+        )
 
         # Execution task status endpoints expose the completed workflow task.
         tasks_response = self.call_api("/api/tasks")
@@ -180,6 +189,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert workflow_tasks, "Workflow execution should create a task snapshot"
         workflow_task = workflow_tasks[-1]
         assert workflow_task.get("status") == "completed", "Workflow task should complete"
+        assert workflow_task.get("metadata", {}).get("workflow_result", {}).get("status") == "completed", (
+            "Workflow task metadata should include the terminal workflow result"
+        )
 
         task_detail = self.call_api(f"/api/tasks/{workflow_task['task_id']}")
         assert task_detail.status_code == 200, "Execution task detail succeeds"
@@ -215,7 +227,12 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert skipped_execute.status_code == 200, "Skipped workflow execution succeeds"
         skipped_payload = skipped_execute.json()
-        assert skipped_payload.get("status") == "skipped", "Workflow result should report skipped"
+        assert skipped_payload.get("success") is True, "Skipped workflow start reports success"
+        assert skipped_payload.get("task", {}).get("task_id"), "Skipped workflow start returns a task id"
+        await get_runtime_context().workflow_governor.execute_workflow(
+            global_id=f"{vault.name}/skipped_probe",
+            source=ExecutionTaskSource.API,
+        )
 
         skipped_tasks_response = self.call_api("/api/tasks")
         assert skipped_tasks_response.status_code == 200, "Execution task listing succeeds after skipped workflow"
@@ -250,10 +267,10 @@ class ApiEndpointsScenario(BaseScenario):
             tool.get("name") == "workflow_run"
             for tool in metadata_payload.get("tools", [])
         ), "workflow_run tool is exposed in metadata"
-        assert not any(
-            tool.get("name") == "memory_ops"
+        assert any(
+            tool.get("name") == "session_ops"
             for tool in metadata_payload.get("tools", [])
-        ), "Disabled memory_ops tool is not exposed in metadata"
+        ), "session_ops tool is exposed in metadata"
 
         chat_payload = {
             "vault_name": vault.name,
@@ -265,6 +282,77 @@ class ApiEndpointsScenario(BaseScenario):
         chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
         assert chat_first.status_code == 200, "Chat execution succeeds"
         session_id = chat_first.json()["session_id"]
+
+        from core.memory.session_summary import SessionSummaryStore
+
+        summary_store = SessionSummaryStore(system_root=str(self._get_system_controller()._system_root))
+        summary_store.upsert_session_summary(
+            vault_name=vault.name,
+            session_id=session_id,
+            summary="Original session summary.",
+            domain="integration testing",
+            work_product="api validation",
+            user_intent="verify session summary preview",
+            named_entities="IntegrationApiVault",
+            source_summary="No external sources.",
+            metadata={"source": "api_endpoint_validation"},
+        )
+
+        memory_preview = self.call_api(
+            f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}"
+        )
+        assert memory_preview.status_code == 200, "Session summary preview endpoint succeeds"
+        assert memory_preview.json().get("summary") == "Original session summary.", (
+            "Session summary preview returns summary"
+        )
+
+        memory_update = self.call_api(
+            f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}",
+            method="PUT",
+            data={
+                "summary": "Edited session summary.",
+                "domain": "integration testing",
+                "work_product": "manual session summary editing",
+                "user_intent": "verify session summary editing",
+                "named_entities": "IntegrationApiVault",
+                "source_summary": "No external sources.",
+                "metadata": {"source": "manual_api_edit"},
+            },
+        )
+        assert memory_update.status_code == 200, "Session summary update endpoint succeeds"
+        assert memory_update.json().get("summary") == "Edited session summary.", (
+            "Session summary update replaces summary"
+        )
+
+        title_update = self.call_api(
+            f"/api/chat/sessions/{session_id}/title",
+            method="PATCH",
+            data={"vault_name": vault.name, "title": "Exported Session"},
+        )
+        assert title_update.status_code == 200, "Session title update succeeds"
+
+        export_response = self.call_api(
+            f"/api/chat/sessions/{session_id}/export",
+            method="POST",
+            data={"vault_name": vault.name},
+        )
+        assert export_response.status_code == 200, "Chat transcript export succeeds"
+        export_path = Path(export_response.json()["path"])
+        exported_markdown = export_path.read_text(encoding="utf-8")
+        assert exported_markdown.startswith("---\n"), "Export includes frontmatter"
+        assert 'title: "Exported Session"' in exported_markdown, (
+            "Export frontmatter includes the user session title"
+        )
+        assert "session_summary: |-\n  Edited session summary." in exported_markdown, (
+            "Export frontmatter includes the session summary"
+        )
+
+        memory_delete = self.call_api(
+            f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}",
+            method="DELETE",
+        )
+        assert memory_delete.status_code == 200, "Session summary delete endpoint succeeds"
+        assert memory_delete.json().get("deleted") is True, "Session summary delete reports deletion"
 
         chat_second = self.call_api(
             "/api/chat/execute",

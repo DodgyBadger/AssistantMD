@@ -26,10 +26,52 @@ class VaultRescanRequest(BaseModel):
 class ExecuteWorkflowRequest(BaseModel):
     """Request model for manually executing a workflow."""
     global_id: str = Field(..., description="Workflow global ID (vault/name format)")
+    vault_name: Optional[str] = Field(
+        None,
+        description="Vault scope for system workflow templates.",
+    )
     expect_failure: bool = Field(
         False,
         description="Validation/testing hint: marks execution failures as expected in workflow logs.",
     )
+
+
+class WorkflowEnabledRequest(BaseModel):
+    """Request model for changing workflow enabled state."""
+
+    global_id: str = Field(..., description="Workflow global ID (vault/name or system/name format)")
+    enabled: bool = Field(..., description="Desired enabled state")
+
+
+class WorkflowEnabledResponse(BaseModel):
+    """Response model for workflow enabled-state changes."""
+
+    success: bool = Field(..., description="Whether the enabled state was updated")
+    global_id: str = Field(..., description="Workflow global ID")
+    enabled_before: bool = Field(..., description="Enabled state before the update")
+    enabled_after: bool = Field(..., description="Enabled state after the update")
+    message: str = Field(..., description="Human-readable update summary")
+
+
+class WorkflowFileUpdateRequest(BaseModel):
+    """Request model for replacing workflow source content."""
+
+    content: str = Field(..., description="Complete workflow file content")
+    expected_sha256: Optional[str] = Field(
+        None,
+        description="Optional hash from the last read response; rejects stale saves when provided.",
+    )
+
+
+class WorkflowFileResponse(BaseModel):
+    """Response model for workflow source content."""
+
+    global_id: str = Field(..., description="Workflow global ID")
+    path: str = Field(..., description="Filesystem path for display")
+    source: str = Field(..., description="Source scope: vault or system")
+    content: str = Field(..., description="Complete workflow file content")
+    sha256: str = Field(..., description="SHA-256 hash of the returned content")
+    message: Optional[str] = Field(None, description="Human-readable update summary")
 
 
 class ChatExecuteRequest(BaseModel):
@@ -110,6 +152,10 @@ class StatusResponse(BaseModel):
     total_workflows: int = Field(..., description="Total number of workflows across all vaults")
     enabled_workflows: List["WorkflowSummary"] = Field(default_factory=list, description="List of enabled workflows with details")
     disabled_workflows: List["WorkflowSummary"] = Field(default_factory=list, description="List of disabled workflows with details")
+    system_workflow_templates: List["SystemWorkflowTemplateSummary"] = Field(
+        default_factory=list,
+        description="Packaged system workflow templates available to copy into a vault",
+    )
     configuration_errors: List["ConfigurationError"] = Field(default_factory=list, description="Configuration errors encountered during loading")
     configuration_status: ConfigurationStatusInfo = Field(default_factory=ConfigurationStatusInfo, description="Aggregated configuration health information")
 
@@ -204,13 +250,12 @@ class VaultStateCleanupResponse(BaseModel):
 
 
 class ExecuteWorkflowResponse(BaseModel):
-    """Response model for manual workflow execution."""
-    success: bool = Field(..., description="Whether execution succeeded")
-    global_id: str = Field(..., description="Workflow global ID that was executed")
-    status: str = Field(..., description="Terminal workflow status such as completed or skipped")
-    execution_time_seconds: float = Field(..., description="Workflow execution time")
-    output_files: List[str] = Field(default_factory=list, description="Created output file paths")
-    reason: Optional[str] = Field(None, description="Optional structured reason for non-default termination")
+    """Response model for starting manual workflow execution."""
+
+    success: bool = Field(..., description="Whether workflow execution was started")
+    global_id: str = Field(..., description="Workflow global ID that was started")
+    status: str = Field(..., description="Current execution task status")
+    task: "ExecutionTaskInfo" = Field(..., description="Execution task created for this workflow run")
     message: str = Field(..., description="Human-readable execution summary")
 
 
@@ -263,6 +308,10 @@ class ModelInfo(BaseModel):
     capabilities: List[str] = Field(
         default_factory=lambda: ["text"],
         description="Declared model capabilities (e.g. text, vision)",
+    )
+    dimensions: Optional[int] = Field(
+        None,
+        description="Embedding vector dimensions when this is an embedding model alias",
     )
     available: bool = Field(True, description="Whether required credentials are configured")
     user_editable: bool = Field(True, description="If the model mapping is user-editable via UI")
@@ -324,6 +373,37 @@ class ChatSessionInfo(BaseModel):
     created_at: str = Field(..., description="Session creation timestamp")
     last_activity_at: str = Field(..., description="Most recent activity timestamp")
     title: Optional[str] = Field(None, description="User-defined title, if set")
+    has_summary: bool = Field(False, description="Whether a session summary record exists")
+
+
+class ChatSessionSummaryResponse(BaseModel):
+    """Lightweight session summary payload for UI previews."""
+
+    session_id: str = Field(..., description="Session identifier")
+    vault_name: str = Field(..., description="Owning vault name")
+    has_summary: bool = Field(..., description="Whether a session summary record exists")
+    summary: Optional[str] = Field(None, description="Extracted session summary")
+    user_intent: Optional[str] = Field(None, description="Extracted user intent")
+    created_at: Optional[str] = Field(None, description="Session summary creation timestamp")
+    updated_at: Optional[str] = Field(None, description="Session summary update timestamp")
+    domain: Optional[str] = Field(None, description="Extracted domain")
+    work_product: Optional[str] = Field(None, description="Extracted work product")
+    named_entities: Optional[str] = Field(None, description="Extracted named entities")
+    source_summary: Optional[str] = Field(None, description="Extracted source summary")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Summary metadata")
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list, description="Linked summary artifacts")
+
+
+class ChatSessionSummaryUpdateRequest(BaseModel):
+    """Request to manually update a session summary record."""
+
+    summary: Optional[str] = Field(None, description="Replacement summary")
+    domain: Optional[str] = Field(None, description="Replacement domain")
+    work_product: Optional[str] = Field(None, description="Replacement work product")
+    user_intent: Optional[str] = Field(None, description="Replacement user intent")
+    named_entities: Optional[str] = Field(None, description="Replacement named entities")
+    source_summary: Optional[str] = Field(None, description="Replacement source summary")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Replacement summary metadata")
 
 
 class ChatSessionTitleRequest(BaseModel):
@@ -399,7 +479,6 @@ class ChatHistoryCompactionRequest(BaseModel):
 
     vault_name: str = Field(..., description="Owning vault name")
     focus: Optional[str] = Field(None, description="Optional summary focus instructions")
-    export_before: Optional[bool] = Field(None, description="Override transcript export before rewrite")
 
 
 class ChatHistoryCompactionStatusResponse(BaseModel):
@@ -413,7 +492,6 @@ class ChatHistoryCompactionStatusResponse(BaseModel):
     compaction_token_threshold: int = Field(..., description="Configured compaction threshold")
     compaction_keep_recent: int = Field(..., description="Target recent message count to keep")
     recommended: bool = Field(..., description="Whether compaction is currently recommended")
-    export_recommended: bool = Field(..., description="Whether transcript export should be offered")
     already_compacted: bool = Field(..., description="Whether this session has prior compaction metadata")
 
 
@@ -429,9 +507,6 @@ class ChatHistoryCompactionResponse(BaseModel):
     estimated_tokens_after: int = Field(..., description="Estimated tokens after compaction")
     kept_recent: int = Field(..., description="Recent raw messages preserved verbatim")
     summary_message_index: int = Field(..., description="Stored summary message index")
-    export_recommended: bool = Field(..., description="Whether transcript export was recommended")
-    export_created: bool = Field(..., description="Whether a transcript export was created")
-    export_path: Optional[str] = Field(None, description="Exported transcript path for API/UI callers")
     compaction_id: str = Field(..., description="Compaction audit identifier")
     compacted_at: str = Field(..., description="Compaction timestamp")
     source: str = Field(..., description="Compaction source")
@@ -444,7 +519,11 @@ class ModelConfigRequest(BaseModel):
     model_string: str = Field(..., description="Provider-specific model identifier")
     capabilities: Optional[List[str]] = Field(
         None,
-        description="Optional model capabilities list (e.g. [\"text\", \"vision\"])",
+        description="Optional model capabilities list (e.g. [\"text\", \"vision\"] or [\"embedding\"])",
+    )
+    dimensions: Optional[int] = Field(
+        None,
+        description="Embedding vector dimensions for embedding-capable model aliases",
     )
     description: Optional[str] = Field(None, description="Optional description for UI display")
 
@@ -475,6 +554,51 @@ class CachePurgeResponse(BaseModel):
     success: bool = Field(True, description="Whether the purge completed successfully")
     message: str = Field(..., description="Human-readable purge summary")
     purged_count: int = Field(..., description="Number of expired cache artifacts removed")
+
+
+class SystemTemplateSeedResponse(BaseModel):
+    """Response model for manual system authoring template refresh."""
+
+    success: bool = Field(..., description="Whether the refresh completed without copy errors")
+    message: str = Field(..., description="Human-readable refresh summary")
+    created: List[str] = Field(default_factory=list, description="System template files created")
+    updated: List[str] = Field(default_factory=list, description="System template files overwritten")
+    skipped: List[str] = Field(default_factory=list, description="System template files left unchanged")
+    errors: List[str] = Field(default_factory=list, description="Copy errors encountered during refresh")
+
+
+class SystemMigrationTargetInfo(BaseModel):
+    """Migration status for one managed system database."""
+
+    db_name: str = Field(..., description="System database name")
+    namespace: str = Field(..., description="Migration namespace tracked inside the database")
+    db_path: str = Field(..., description="Filesystem path to the database")
+    exists: bool = Field(..., description="Whether the database file currently exists")
+    applied_versions: List[int] = Field(default_factory=list, description="Applied migration versions")
+    pending_versions: List[int] = Field(default_factory=list, description="Pending migration versions")
+    backup_path: Optional[str] = Field(None, description="Backup created during the latest migration run")
+
+
+class SystemMigrationStatusResponse(BaseModel):
+    """Response containing system database migration status."""
+
+    success: bool = Field(True, description="Whether the status request completed successfully")
+    message: str = Field(..., description="Human-readable migration status summary")
+    system_root: str = Field(..., description="Filesystem path to the active system directory")
+    pending_count: int = Field(..., description="Total pending migration versions")
+    targets: List[SystemMigrationTargetInfo] = Field(default_factory=list)
+
+
+class SystemMigrationRunRequest(BaseModel):
+    """Request payload for running system database migrations."""
+
+    backup: bool = Field(True, description="Create timestamped backups before applying pending migrations")
+
+
+class SystemMigrationRunResponse(SystemMigrationStatusResponse):
+    """Response containing final status after running system database migrations."""
+
+    backups_created: List[str] = Field(default_factory=list, description="Backup files created during the run")
 
 
 class SecretInfo(BaseModel):
@@ -558,6 +682,17 @@ class WorkflowSummary(BaseModel):
     run_type: str
     schedule_cron: Optional[str]
     description: str
+
+
+class SystemWorkflowTemplateSummary(BaseModel):
+    """Summary information about a packaged system workflow template."""
+
+    name: str
+    run_type: str
+    enabled: bool
+    schedule_cron: Optional[str]
+    description: str
+    path: str
 
 
 class ConfigurationError(BaseModel):

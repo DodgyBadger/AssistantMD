@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from core.chat.chat_store import ChatStore
-from core.memory import MemoryContext, MemoryService
+from core.chat.history_service import ChatHistoryContext, ChatHistoryService
 from core.utils.messages import extract_role_and_text
 from validation.core.base_scenario import BaseScenario
 
@@ -64,8 +64,8 @@ class ContextHistorySequenceProbeScenario(BaseScenario):
             list(history_plus_current_input),
         )
 
-        retrieved = MemoryService().get_conversation_history(
-            context=MemoryContext(
+        retrieved = ChatHistoryService().get_conversation_history(
+            context=ChatHistoryContext(
                 message_history=tuple(history_only_input),
                 session_id=session_id,
                 vault_name=vault.name,

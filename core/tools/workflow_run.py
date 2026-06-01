@@ -14,7 +14,12 @@ from core.authoring.contracts import AssembleContextResult, ContextMessage
 from core.authoring.service import run_authoring_template
 from core.authoring.template_discovery import discover_workflow_files
 from core.logger import UnifiedLogger
-from core.runtime.execution_tasks import ExecutionTaskSource
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    TERMINAL_STATUS_VALUES,
+    workflow_vault_scope,
+)
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
@@ -36,12 +41,22 @@ class WorkflowRun(BaseTool):
             operation: str,
             workflow_name: str = "",
             step_name: str = "",
+            task_id: str = "",
         ) -> str:
             """Run or list authored automations in the current vault.
 
-            :param operation: Operation name (list, run, enable_workflow, disable_workflow)
-            :param workflow_name: Workflow name relative to AssistantMD/Authoring (required for run/enable/disable)
-            :param step_name: Optional step name to execute (run only)
+            Use operation='run' by default for workflows expected to finish quickly.
+            It is synchronous and returns the final workflow result.
+
+            Use operation='start' only for long-running workflows or when the user
+            wants the run to continue in the background. It returns a task_id.
+            Use operation='status' with that task_id to check progress, and
+            operation='cancel' to stop a running background workflow.
+
+            :param operation: Operation name (list, run, start, status, cancel, enable_workflow, disable_workflow)
+            :param workflow_name: Workflow name relative to AssistantMD/Authoring (required for run/start/enable/disable)
+            :param step_name: Optional step name to execute (run/start only)
+            :param task_id: Execution task id for status/cancel
             """
             try:
                 op = (operation or "").strip().lower()
@@ -89,6 +104,56 @@ class WorkflowRun(BaseTool):
                         )
                         return cls._format_run_error(global_id, single_step, exc)
 
+                if op == "start":
+                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
+                    if error:
+                        return error
+                    run_type = cls._read_run_type(
+                        cls._resolve_workflow_file_path(
+                            vault_path=vault_path,
+                            workflow_name=name,
+                        )
+                    )
+                    if run_type == "context":
+                        return "operation='start' is only supported for run_type='workflow'. Use operation='run' to dry-run context templates."
+                    global_id = f"{vault_name}/{name}"
+                    single_step = (step_name or "").strip() or None
+                    task = await runtime.workflow_governor.start_workflow(
+                        global_id=global_id,
+                        source=ExecutionTaskSource.TOOL,
+                        step_name=single_step,
+                        include_load_errors=True,
+                        background_tasks=runtime.background_tasks,
+                    )
+                    return cls._format_task_start(task)
+
+                if op == "status":
+                    normalized_task_id = (task_id or "").strip()
+                    if not normalized_task_id:
+                        return "task_id is required for operation='status'."
+                    task, error = await cls._get_scoped_workflow_task(
+                        task_id=normalized_task_id,
+                        vault_name=vault_name,
+                    )
+                    if error:
+                        return error
+                    return cls._format_task_status(task)
+
+                if op == "cancel":
+                    normalized_task_id = (task_id or "").strip()
+                    if not normalized_task_id:
+                        return "task_id is required for operation='cancel'."
+                    _, error = await cls._get_scoped_workflow_task(
+                        task_id=normalized_task_id,
+                        vault_name=vault_name,
+                    )
+                    if error:
+                        return error
+                    cancellation = await runtime.task_coordinator.cancel_task(normalized_task_id)
+                    if cancellation is None:
+                        return f"Execution task not found: {normalized_task_id}"
+                    return cls._format_task_cancel(cancellation)
+
                 if op in {"enable_workflow", "disable_workflow"}:
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
@@ -108,7 +173,7 @@ class WorkflowRun(BaseTool):
                     )
                     return cls._format_lifecycle_result(result)
 
-                return "Unknown operation. Available: list, run, enable_workflow, disable_workflow"
+                return "Unknown operation. Available: list, run, start, status, cancel, enable_workflow, disable_workflow"
             except RuntimeStateError as exc:
                 return f"Runtime unavailable: {exc}"
             except Exception as exc:  # pylint: disable=broad-except
@@ -127,7 +192,7 @@ class WorkflowRun(BaseTool):
         return Tool(
             workflow_run,
             name="workflow_run",
-            description="List authored automations in the current vault and run, enable, or disable them.",
+            description="List authored automations in the current vault and run, start, check, cancel, enable, or disable them.",
         )
 
     @classmethod
@@ -271,6 +336,69 @@ Full documentation:
             lines.append("details:")
             lines.extend([f"- {line}" for line in extra_lines])
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_task_start(task) -> str:
+        return "\n".join(
+            [
+                "success: True",
+                "operation: start",
+                f"task_id: {task.task_id}",
+                f"status: {task.status}",
+                f"global_id: {task.metadata.get('workflow_id', task.label)}",
+                "message: Workflow started in the background. Use operation='status' with task_id before claiming it is complete.",
+            ]
+        )
+
+    @staticmethod
+    def _format_task_status(task) -> str:
+        lines = [
+            "success: True",
+            "operation: status",
+            f"task_id: {task.task_id}",
+            f"status: {task.status}",
+            f"cancel_requested: {task.cancel_requested}",
+            f"global_id: {task.metadata.get('workflow_id', task.label)}",
+        ]
+        if task.terminal_reason:
+            lines.append(f"reason: {task.terminal_reason}")
+        workflow_result = dict(task.metadata.get("workflow_result") or {})
+        if workflow_result:
+            lines.append("workflow_result:")
+            for key in ("success", "status", "reason", "message", "execution_time_seconds"):
+                if workflow_result.get(key) is not None:
+                    lines.append(f"- {key}: {workflow_result.get(key)}")
+        if task.status not in TERMINAL_STATUS_VALUES:
+            lines.append("message: Workflow is still running. Poll later before using its result.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_task_cancel(cancellation) -> str:
+        task = cancellation.snapshot
+        return "\n".join(
+            [
+                f"success: {cancellation.effective}",
+                "operation: cancel",
+                f"task_id: {task.task_id}",
+                f"status: {task.status}",
+                f"cancel_requested: {task.cancel_requested}",
+                f"global_id: {task.metadata.get('workflow_id', task.label)}",
+                "message: Cancellation requested. Use operation='status' with task_id to confirm terminal status and rollback.",
+            ]
+        )
+
+    @staticmethod
+    async def _get_scoped_workflow_task(task_id: str, vault_name: str):
+        runtime = get_runtime_context()
+        task = await runtime.task_coordinator.get_task(task_id)
+        if task is None:
+            return None, f"Execution task not found: {task_id}"
+        if task.kind != ExecutionTaskKind.WORKFLOW.value:
+            return None, f"Execution task is not a workflow task: {task_id}"
+        expected_scope = workflow_vault_scope(vault_name)
+        if task.scope != expected_scope:
+            return None, "Execution task is outside the current vault scope."
+        return task, None
 
     @staticmethod
     def _format_lifecycle_result(result: dict) -> str:

@@ -25,12 +25,20 @@ from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from .models import (
     WorkflowLoadErrorsResponse,
     CachePurgeResponse,
+    SystemTemplateSeedResponse,
+    SystemMigrationRunRequest,
+    SystemMigrationRunResponse,
+    SystemMigrationStatusResponse,
     VaultRescanRequest,
     VaultRescanResponse,
     VaultTaskMutationsResponse,
     VaultStateCleanupResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
+    WorkflowEnabledRequest,
+    WorkflowEnabledResponse,
+    WorkflowFileResponse,
+    WorkflowFileUpdateRequest,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
@@ -52,6 +60,8 @@ from .models import (
     MetadataResponse,
     TemplateInfo,
     ChatSessionInfo,
+    ChatSessionSummaryResponse,
+    ChatSessionSummaryUpdateRequest,
     ChatSessionDetailResponse,
     ChatSessionExportRequest,
     ChatSessionExportResponse,
@@ -75,9 +85,15 @@ from .services import (
     rescan_vaults_and_update_scheduler,
     get_system_status,
     execute_workflow_manually,
+    set_workflow_enabled_state,
+    get_workflow_file,
+    update_workflow_file,
     get_metadata,
     list_context_templates,
     list_chat_sessions,
+    get_chat_session_summary,
+    update_chat_session_summary,
+    delete_chat_session_summary,
     get_chat_session_detail,
     export_chat_session_markdown,
     compact_chat_session_history,
@@ -104,6 +120,9 @@ from .services import (
     import_url_direct,
     get_workflow_load_errors,
     purge_expired_cache,
+    get_system_database_migration_status,
+    run_system_database_migrations,
+    refresh_system_authoring_templates,
     cancel_chat_session_task,
     cancel_execution_task,
     get_active_chat_task,
@@ -664,6 +683,33 @@ async def purge_expired_cache_endpoint():
         return create_error_response(e)
 
 
+@router.get("/system/migrations/status", response_model=SystemMigrationStatusResponse)
+async def get_system_database_migration_status_endpoint():
+    """Inspect registered system database migrations."""
+    try:
+        return get_system_database_migration_status()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/migrations/run", response_model=SystemMigrationRunResponse)
+async def run_system_database_migrations_endpoint(request: SystemMigrationRunRequest = SystemMigrationRunRequest()):
+    """Run registered system database migrations."""
+    try:
+        return run_system_database_migrations(backup=request.backup)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/authoring/seed-refresh", response_model=SystemTemplateSeedResponse)
+async def refresh_system_authoring_templates_endpoint():
+    """Manually refresh packaged system Authoring templates."""
+    try:
+        return refresh_system_authoring_templates()
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.post("/vault-state/cleanup", response_model=VaultStateCleanupResponse)
 async def cleanup_vault_state_endpoint():
     """Manually delete expired vault-state task safety artifacts."""
@@ -762,9 +808,41 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
         result = await execute_workflow_manually(
             request.global_id,
             request.expect_failure,
+            vault_name=request.vault_name,
         )
         response = ExecuteWorkflowResponse(**result)
         return response
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/workflows/enabled", response_model=WorkflowEnabledResponse)
+async def set_workflow_enabled(request: WorkflowEnabledRequest):
+    """Set a workflow enabled flag in frontmatter."""
+    try:
+        return await set_workflow_enabled_state(request.global_id, request.enabled)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/workflows/file", response_model=WorkflowFileResponse)
+async def workflow_file(global_id: str):
+    """Return editable workflow file content."""
+    try:
+        return get_workflow_file(global_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put("/workflows/file", response_model=WorkflowFileResponse)
+async def save_workflow_file(global_id: str, request: WorkflowFileUpdateRequest):
+    """Replace workflow file content and reload workflows."""
+    try:
+        return await update_workflow_file(
+            global_id,
+            content=request.content,
+            expected_sha256=request.expected_sha256,
+        )
     except Exception as e:
         return create_error_response(e)
 
@@ -893,6 +971,41 @@ async def cancel_chat_session(session_id: str):
         return create_error_response(e)
 
 
+@router.get("/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse)
+async def chat_session_summary(session_id: str, vault_name: str):
+    """Return a lightweight summary preview for one chat session."""
+    try:
+        return get_chat_session_summary(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put("/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse)
+async def update_chat_session_summary_endpoint(
+    session_id: str,
+    vault_name: str,
+    request: ChatSessionSummaryUpdateRequest,
+):
+    """Manually update one session summary record."""
+    try:
+        return await update_chat_session_summary(
+            vault_name=vault_name,
+            session_id=session_id,
+            data=request.model_dump(mode="python"),
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete("/chat/sessions/{session_id}/summary")
+async def delete_chat_session_summary_endpoint(session_id: str, vault_name: str):
+    """Delete one session summary record without deleting the chat session."""
+    try:
+        return delete_chat_session_summary(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
 async def chat_session_detail(session_id: str, vault_name: str):
     """
@@ -958,7 +1071,6 @@ async def compact_chat_history_endpoint(session_id: str, request: ChatHistoryCom
             vault_path,
             session_id,
             focus=request.focus,
-            export_before=request.export_before,
         )
     except Exception as e:
         return create_error_response(e)

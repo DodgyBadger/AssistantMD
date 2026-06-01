@@ -15,7 +15,8 @@ from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.settings import validate_settings
-from core.settings.store import get_general_settings
+from core.settings.store import get_general_settings, refresh_settings_cache
+from core.system_migrations import run_system_migrations
 from core.vault_state.rollback import handle_task_terminal_for_rollback
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
@@ -58,8 +59,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
     try:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
+        refresh_settings_cache()
 
-        # Seed system templates if missing (non-fatal)
+        # Ensure packaged system templates exist without overwriting runtime edits.
         seed_system_templates(config.system_root)
 
         # Validate configuration before continuing bootstrap
@@ -78,6 +80,19 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         os.environ["CONTAINER_DATA_ROOT"] = str(config.data_root)
         os.environ["CONTAINER_SYSTEM_ROOT"] = str(config.system_root)
         os.environ.setdefault("SECRETS_PATH", str(Path(config.system_root) / "secrets.yaml"))
+
+        migration_status = run_system_migrations(config.system_root, backup=True)
+        logger.info(
+            "Startup system database migration check completed",
+            data={
+                "pending_after": migration_status.pending_count,
+                "backups_created": sum(
+                    1
+                    for target in migration_status.targets
+                    if target.backup_path
+                ),
+            },
+        )
 
         # Initialize workflow loader with configured data root
         workflow_loader = WorkflowLoader(

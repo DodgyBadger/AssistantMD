@@ -30,7 +30,8 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 | Function | Purpose |
 | --- | --- |
 | direct tool functions | Invoke configured tools by name, e.g. `file_ops_safe(...)` |
-| `retrieve_history` | Retrieve safe structured conversation-history units from the memory broker |
+| `retrieve_sessions` | Retrieve chat-session metadata selections for the current vault |
+| `retrieve_history` | Retrieve safe structured conversation-history units from the chat-history broker |
 | `assemble_context` | Build chat context from safe history units, context messages, and instructions |
 | `read_cache` | Read a cached value |
 | `pending_files` | List files awaiting processing |
@@ -51,7 +52,7 @@ This separation means the sandbox itself has no host imports — all side effect
 
 ## Context Assembly
 
-Context scripts execute as history processors for chat. They receive completed prior history through the shared memory broker and return an `AssembleContextResult` through `assemble_context(...)`.
+Context scripts execute as history processors for chat. They receive completed prior history through the shared chat-history broker and return an `AssembleContextResult` through `assemble_context(...)`.
 
 The active/latest message is not part of the retrieved history. Scripts may inspect read-only `latest_message` for branching, but they must not append it manually. The chat runtime appends it exactly once after the assembled context, including during subsequent tool-loop model calls in the same run.
 
@@ -60,7 +61,7 @@ The active/latest message is not part of the retrieved history. Scripts may insp
 ## Discovery and precedence
 
 - `template_discovery.py` scans `AssistantMD/Authoring/` (one level deep) per vault.
-- System templates in `system/Authoring/` provide defaults; packaged seed templates are refreshed on startup, so users should customize copies rather than editing seeded files in place.
+- System templates in `system/Authoring/` provide defaults. Startup creates missing packaged templates only; existing system templates are refreshed by an explicit maintenance action.
 - Vault files take precedence when names match.
 - On first access, `ensure_vault_directories()` creates `AssistantMD/Authoring/` and `AssistantMD/Skills/` for each vault, seeding starter files from `core/authoring/seed_templates/`.
 
@@ -87,6 +88,6 @@ Expired artifacts are purged on a schedule via `purge_expired_cache_artifacts`.
 
 - Runtime bootstrap creates the authoring registry and wires it to the scheduler.
 - Scheduler sync (`setup_scheduler_jobs`) loads workflow definitions and reconciles APScheduler jobs.
-- Workflow execution flows through `RuntimeContext.workflow_governor`, which registers process-local workflow tasks, serializes runs by vault, and returns `WorkflowExecutionResult`.
-- Manual API runs, scheduled jobs, and the `workflow_run` tool share the same workflow execution path.
+- Workflow execution flows through `RuntimeContext.workflow_governor`, which registers process-local workflow tasks, serializes runs by vault, and returns `WorkflowExecutionResult` to internal callers.
+- Manual API runs start a background workflow task and return the task snapshot immediately. The `workflow_run` tool keeps the blocking `run` operation for direct execution and exposes `start`, `status`, and `cancel` for task-based asynchronous workflow control. Scheduled jobs await the shared workflow execution path directly.
 - Chat sessions invoke the context manager, which runs the matching context template (or the default) to assemble the agent's starting context.

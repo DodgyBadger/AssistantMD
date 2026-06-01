@@ -95,6 +95,7 @@ def upsert_model_mapping(
     provider: str,
     model_string: str,
     capabilities: Optional[list[str]] = None,
+    dimensions: Optional[int] = None,
     description: Optional[str] = None,
 ) -> ModelConfig:
     """
@@ -105,6 +106,7 @@ def upsert_model_mapping(
         provider: Provider name the model depends on
         model_string: Provider-specific model identifier
         capabilities: Optional model capability list
+        dimensions: Optional embedding vector dimensions
         description: Optional human-readable description
 
     Returns:
@@ -134,6 +136,7 @@ def upsert_model_mapping(
         provider=provider,
         model_string=model_string,
         capabilities=resolved_capabilities,
+        dimensions=dimensions if dimensions is not None else getattr(existing, "dimensions", None),
         description=description,
         user_editable=user_editable,
     )

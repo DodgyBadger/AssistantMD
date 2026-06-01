@@ -13,11 +13,11 @@ from core.authoring.contracts import (
     ToolExchange,
 )
 from core.authoring.helpers.common import build_capability
-from core.memory import MemoryContext, MemoryService
+from core.chat.history_service import ChatHistoryContext, ChatHistoryService
 from core.logger import UnifiedLogger
 
 
-_MEMORY_SERVICE = MemoryService()
+_CHAT_HISTORY_SERVICE = ChatHistoryService()
 logger = UnifiedLogger(tag="authoring-host")
 
 
@@ -25,7 +25,7 @@ def build_definition() -> AuthoringCapabilityDefinition:
     return build_capability(
         name="retrieve_history",
         doc=(
-            "Retrieve structured conversation history directly from the shared memory broker. "
+            "Retrieve structured conversation history directly from the shared chat-history broker. "
             "Tool exchanges are returned as atomic units."
         ),
         contract=_contract(),
@@ -55,8 +55,8 @@ async def execute(
         host_message_history is not None
         and bool(getattr(host, "prefer_message_history", False))
     )
-    result = _MEMORY_SERVICE.get_conversation_history(
-        context=MemoryContext(
+    result = _CHAT_HISTORY_SERVICE.get_conversation_history(
+        context=ChatHistoryContext(
             message_history=tuple(host_message_history or ()),
             session_id=getattr(host, "chat_session_id", None) or getattr(host, "session_key", None),
             vault_name=workflow_id.split("/", 1)[0] if "/" in workflow_id else None,
@@ -209,7 +209,7 @@ def _contract() -> dict[str, object]:
             "limit: int | str = 'all', message_filter: str = 'all')"
         ),
         "summary": (
-            "Retrieve conversation history directly from the shared memory broker. "
+            "Retrieve conversation history directly from the shared chat-history broker. "
             "Items are safe units: user message, assistant message, or one atomic tool exchange."
         ),
         "arguments": {

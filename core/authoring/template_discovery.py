@@ -317,6 +317,31 @@ def discover_workflow_files(vault_path: str) -> List[str]:
     return sorted(_scan_md_files_one_level(authoring_dir))
 
 
+def list_system_workflow_templates(system_root: Optional[Path] = None) -> List[TemplateRecord]:
+    """List workflow templates from system/Authoring without treating them as active workflows."""
+    try:
+        sys_root = system_root or get_system_root()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"System root unavailable while listing workflow templates: {exc}")
+        return []
+
+    system_authoring_dir = Path(sys_root) / AUTHORING_DIR
+    if not system_authoring_dir.exists():
+        return []
+
+    records: List[TemplateRecord] = []
+    for path in _discover_template_files(system_authoring_dir):
+        try:
+            name = path.relative_to(system_authoring_dir).as_posix()
+            record = _read_template(path, name, "system")
+            if (record.frontmatter.get("run_type") or "").strip().lower() == "workflow":
+                records.append(record)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Failed to read system workflow template {path}: {exc}")
+
+    return records
+
+
 # ---------------------------------------------------------------------------
 # Workflow loading
 # ---------------------------------------------------------------------------
@@ -354,6 +379,23 @@ def load_workflow_from_file(
         description=validated_config["description"],
         enabled=validated_config["enabled"],
     )
+
+
+def _workflow_name_from_vault_file_path(data_root: str, file_path: str) -> tuple[str, str] | None:
+    path_parts = file_path.replace(data_root, "").strip("/").split("/")
+    if len(path_parts) < 4:
+        return None
+    if path_parts[1] != ASSISTANTMD_ROOT_DIR or path_parts[2] != AUTHORING_DIR:
+        return None
+
+    vault = path_parts[0]
+    if len(path_parts) == 4:
+        name = os.path.splitext(path_parts[3])[0]
+    elif len(path_parts) == 5:
+        name = f"{path_parts[3]}/{os.path.splitext(path_parts[4])[0]}"
+    else:
+        return None
+    return vault, name
 
 
 # ---------------------------------------------------------------------------
@@ -448,22 +490,38 @@ def list_templates(
     return records
 
 
-def seed_system_templates(system_root: Optional[Path] = None) -> None:
+def seed_system_templates(
+    system_root: Optional[Path] = None,
+    *,
+    overwrite: bool = False,
+) -> dict[str, Any]:
     """
     Seed system Authoring directory from seed_templates/context/ and seed_templates/workflows/.
 
-    Packaged seed templates are owned by the application and are refreshed on
-    startup. Users should customize by copying a seed to a new authoring file.
+    Startup should create missing files only. Explicit maintenance actions can
+    pass overwrite=True to refresh existing system templates from packaged
+    seeds.
     """
+    result: dict[str, Any] = {
+        "success": True,
+        "created": [],
+        "updated": [],
+        "skipped": [],
+        "errors": [],
+    }
     try:
         sys_root = system_root or get_system_root()
     except Exception as exc:  # pragma: no cover - defensive during bootstrap
         logger.warning(f"System root unavailable while seeding templates: {exc}")
-        return
+        result["success"] = False
+        result["errors"].append(str(exc))
+        return result
 
     if not SEED_TEMPLATE_DIR.exists():
         logger.warning(f"Seed template directory missing: {SEED_TEMPLATE_DIR}")
-        return
+        result["success"] = False
+        result["errors"].append(f"Seed template directory missing: {SEED_TEMPLATE_DIR}")
+        return result
 
     target_dir = Path(sys_root) / AUTHORING_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -476,11 +534,20 @@ def seed_system_templates(system_root: Optional[Path] = None) -> None:
             if not seed_path.is_file():
                 continue
             target_path = target_dir / seed_path.name
+            target_exists = target_path.exists()
+            if target_exists and not overwrite:
+                result["skipped"].append(str(target_path))
+                continue
             try:
                 shutil.copyfile(seed_path, target_path)
+                result["updated" if target_exists else "created"].append(str(target_path))
                 logger.info(f"Seeded template to {target_path}")
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(f"Failed to seed template {target_path}: {exc}")
+                result["success"] = False
+                result["errors"].append(f"{target_path}: {exc}")
+
+    return result
 
 
 def _seed_vault_skills(vault_path: str) -> None:
@@ -559,10 +626,12 @@ class WorkflowLoader:
         workflows: List[WorkflowDefinition] = []
         global_ids: set = set()
         vault_info: Dict[str, Any] = {}
+        system_workflow_templates = list_system_workflow_templates()
 
         for vault in vaults:
             vault_path = os.path.join(self._data_root, vault)
             workflow_files = discover_workflow_files(vault_path)
+            loaded_names_for_vault: set[str] = set()
 
             vault_info[vault] = {
                 "path": vault_path,
@@ -571,21 +640,13 @@ class WorkflowLoader:
             }
 
             for file_path in workflow_files:
+                name = None
                 try:
-                    path_parts = file_path.replace(self._data_root, "").strip("/").split("/")
-                    if len(path_parts) < 4:
-                        continue
-                    if path_parts[1] != ASSISTANTMD_ROOT_DIR or path_parts[2] != AUTHORING_DIR:
+                    resolved_name = _workflow_name_from_vault_file_path(self._data_root, file_path)
+                    if resolved_name is None:
                         continue
 
-                    vault = path_parts[0]
-
-                    if len(path_parts) == 4:
-                        name = os.path.splitext(path_parts[3])[0]
-                    elif len(path_parts) == 5:
-                        name = f"{path_parts[3]}/{os.path.splitext(path_parts[4])[0]}"
-                    else:
-                        continue
+                    vault, name = resolved_name
 
                     if target_name and name != target_name:
                         continue
@@ -606,6 +667,7 @@ class WorkflowLoader:
                         raise ValueError(f"Duplicate workflow global ID: {workflow.global_id}")
                     global_ids.add(workflow.global_id)
                     workflows.append(workflow)
+                    loaded_names_for_vault.add(workflow.name)
 
                     vault_info[vault]["workflows"].append(workflow.name)
                     logger.set_sinks(["validation"]).info(
@@ -641,6 +703,75 @@ class WorkflowLoader:
                             "error_type": type(e).__name__,
                             "error_message": str(e),
                             "vault_identifier": vault_identifier,
+                        },
+                    )
+                    continue
+
+            for record in system_workflow_templates:
+                system_template_name = record.name[:-3] if record.name.endswith(".md") else record.name
+                name = f"system/{system_template_name}"
+                file_path = str(record.path or "")
+                if not file_path:
+                    continue
+                if name in loaded_names_for_vault:
+                    continue
+                if target_name and name != target_name:
+                    continue
+
+                try:
+                    sections = _parse_workflow_file(file_path)
+                    raw_config = sections.get("__FRONTMATTER_CONFIG__", {})
+                    if not raw_config:
+                        raise ValueError("Missing YAML frontmatter configuration")
+
+                    run_type = str(raw_config.get("run_type") or "").strip().lower()
+                    if run_type == "context":
+                        continue
+
+                    validated_config = _validate_workflow_config(raw_config, vault, name)
+                    workflow = load_workflow_from_file(file_path, vault, name, validated_config, sections)
+
+                    if not workflow.enabled:
+                        continue
+
+                    if workflow.global_id in global_ids:
+                        raise ValueError(f"Duplicate workflow global ID: {workflow.global_id}")
+                    global_ids.add(workflow.global_id)
+                    workflows.append(workflow)
+
+                    logger.set_sinks(["validation"]).info(
+                        "system_workflow_loaded",
+                        data={
+                            "vault": vault,
+                            "workflow_id": workflow.global_id,
+                            "workflow_path": file_path,
+                            "enabled": workflow.enabled,
+                            "schedule": workflow.schedule_string,
+                            "run_type": workflow.run_type,
+                            "system_template": system_template_name,
+                        },
+                    )
+
+                except Exception as e:
+                    config_error = ConfigurationError(
+                        vault=vault,
+                        workflow_name=name,
+                        file_path=file_path,
+                        error_message=str(e),
+                        error_type=type(e).__name__,
+                        timestamp=datetime.now(),
+                    )
+                    self._config_errors.append(config_error)
+                    logger.add_sink("validation").error(
+                        f"Failed to load system workflow template {file_path}: {e}",
+                        data={
+                            "event": "system_workflow_load_failed",
+                            "vault": vault,
+                            "workflow_name": name,
+                            "workflow_path": file_path,
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "vault_identifier": f"{vault}/{name}",
                         },
                     )
                     continue

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ def export_chat_transcript(
     vault_path: str,
     vault_name: str,
     session_id: str,
+    session_summary: str | None = None,
 ) -> ExportedTranscript:
     """Write one markdown transcript for a persisted session, overwriting any prior export."""
     session = store.get_session(session_id=session_id, vault_name=vault_name)
@@ -38,7 +40,11 @@ def export_chat_transcript(
     _remove_prior_transcript_variants(sessions_dir=sessions_dir, session_id=session.session_id)
 
     messages = store.get_stored_messages(session_id=session_id, vault_name=vault_name)
-    lines = [f"Chat Session: {_build_session_export_stem(session)}", ""]
+    lines = [
+        *_build_frontmatter(session=session, session_summary=session_summary),
+        f"Chat Session: {_build_session_export_stem(session)}",
+        "",
+    ]
     for message in messages:
         rendered = _render_message_block(message)
         if rendered:
@@ -87,6 +93,23 @@ def _extract_transcript_role_and_text(message: StoredChatMessage) -> tuple[str, 
         return "assistant", "\n".join(part.rstrip() for part in visible_parts if part and part.rstrip()).strip()
 
     return "", ""
+
+
+def _build_frontmatter(*, session: StoredChatSession, session_summary: str | None) -> list[str]:
+    title = (session.title or "").strip()
+    summary = (session_summary or "").strip()
+    if not title and not summary:
+        return []
+
+    lines = ["---"]
+    if title:
+        lines.append(f"title: {json.dumps(title)}")
+    if summary:
+        lines.append("session_summary: |-")
+        for line in summary.splitlines():
+            lines.append(f"  {line}" if line else "  ")
+    lines.extend(["---", ""])
+    return lines
 
 
 def _resolve_sessions_dir(*, vault_path: str) -> Path:

@@ -49,6 +49,11 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.vault_state",
         description="Rebuildable vault file manifest, change feed, and task audit metadata.",
     ),
+    "session_summaries": SystemDatabaseDefinition(
+        name="session_summaries",
+        owner="core.memory",
+        description="Session summary records, fields, and artifacts.",
+    ),
     "ingestion_jobs": SystemDatabaseDefinition(
         name="ingestion_jobs",
         owner="core.ingestion.jobs",

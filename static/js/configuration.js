@@ -20,7 +20,10 @@
         isSavingSecret: false,
         isPurgingCache: false,
         isCleaningVaultState: false,
+        isRefreshingSystemAuthoring: false,
         isLoadingSystemJobs: false,
+        isLoadingSystemMigrations: false,
+        isRunningSystemMigrations: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
         isImportingUrl: false,
@@ -32,6 +35,7 @@
         importResults: null,
         importUrlResult: null,
         systemJobs: [],
+        systemMigrations: null,
         settingEditKey: null,
         settingDraftValue: '',
         modelEdit: null,
@@ -45,6 +49,7 @@
         GOOGLE_API_KEY: { label: 'Google API Key', description: 'Required for Google Gemini model aliases' },
         GROK_API_KEY: { label: 'Grok API Key', description: 'Required for Grok model aliases' },
         MISTRAL_API_KEY: { label: 'Mistral API Key', description: 'Required for Mistral model aliases' },
+        OPENROUTER_API_KEY: { label: 'OpenRouter API Key', description: 'Required for OpenRouter model aliases' },
         TAVILY_API_KEY: { label: 'Tavily API Key', description: 'Required for Tavily search/crawl tools' },
         LOGFIRE_TOKEN: { label: 'Logfire Token', description: 'Enables cloud telemetry when set' },
         LM_STUDIO_API_KEY: { label: 'LM Studio API Key', description: 'Optional key for LM Studio endpoints' },
@@ -88,11 +93,17 @@
         secretResetBtn: null,
 
         miscFeedback: null,
+        refreshSystemAuthoringBtn: null,
+        refreshSystemAuthoringFeedback: null,
         purgeExpiredCacheBtn: null,
         cleanupVaultStateBtn: null,
         cleanupVaultStateFeedback: null,
         systemJobsList: null,
         refreshSystemJobsBtn: null,
+        systemMigrationsStatus: null,
+        systemMigrationsFeedback: null,
+        refreshSystemMigrationsBtn: null,
+        runSystemMigrationsBtn: null,
         purgeSessionsVault: null,
         purgeSessionsAge: null,
         purgeSessionsBtn: null,
@@ -147,11 +158,17 @@
         elements.secretResetBtn = document.getElementById('secret-reset');
 
         elements.miscFeedback = document.getElementById('misc-feedback');
+        elements.refreshSystemAuthoringBtn = document.getElementById('refresh-system-authoring');
+        elements.refreshSystemAuthoringFeedback = document.getElementById('refresh-system-authoring-feedback');
         elements.purgeExpiredCacheBtn = document.getElementById('purge-expired-cache');
         elements.cleanupVaultStateBtn = document.getElementById('cleanup-vault-state');
         elements.cleanupVaultStateFeedback = document.getElementById('cleanup-vault-state-feedback');
         elements.systemJobsList = document.getElementById('system-jobs-list');
         elements.refreshSystemJobsBtn = document.getElementById('refresh-system-jobs');
+        elements.systemMigrationsStatus = document.getElementById('system-migrations-status');
+        elements.systemMigrationsFeedback = document.getElementById('system-migrations-feedback');
+        elements.refreshSystemMigrationsBtn = document.getElementById('refresh-system-migrations');
+        elements.runSystemMigrationsBtn = document.getElementById('run-system-migrations');
         elements.purgeSessionsVault = document.getElementById('purge-sessions-vault');
         elements.purgeSessionsAge = document.getElementById('purge-sessions-age');
         elements.purgeSessionsBtn = document.getElementById('purge-sessions-btn');
@@ -188,9 +205,12 @@
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
         elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
+        elements.refreshSystemAuthoringBtn?.addEventListener('click', handleRefreshSystemAuthoring);
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
         elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
         elements.refreshSystemJobsBtn?.addEventListener('click', loadSystemJobs);
+        elements.refreshSystemMigrationsBtn?.addEventListener('click', loadSystemMigrations);
+        elements.runSystemMigrationsBtn?.addEventListener('click', handleRunSystemMigrations);
         elements.purgeSessionsBtn?.addEventListener('click', handlePurgeSessions);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
@@ -1525,6 +1545,54 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    async function handleRefreshSystemAuthoring() {
+        if (!elements.refreshSystemAuthoringBtn || state.isRefreshingSystemAuthoring) return;
+
+        const confirmed = window.confirm(
+            'Refresh system authoring scripts?\n\n'
+            + 'This will overwrite scripts in system/Authoring. Use this if you have customized '
+            + 'the system scripts and want to return to baseline or update to the latest version '
+            + 'of system scripts. Vault scripts in AssistantMD/Authoring are not touched.'
+        );
+        if (!confirmed) return;
+
+        state.isRefreshingSystemAuthoring = true;
+        const button = elements.refreshSystemAuthoringBtn;
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Refreshing…';
+        setStatus(elements.refreshSystemAuthoringFeedback, 'Refreshing system authoring scripts…', 'info');
+
+        try {
+            const response = await fetch('api/system/authoring/seed-refresh', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            setStatus(
+                elements.refreshSystemAuthoringFeedback,
+                result?.message || 'System authoring scripts refreshed.',
+                result?.success === false ? 'warning' : 'success'
+            );
+            await callbacks.refreshStatus?.();
+        } catch (error) {
+            setStatus(
+                elements.refreshSystemAuthoringFeedback,
+                `Failed to refresh system authoring scripts: ${error.message}`,
+                'error'
+            );
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
+            state.isRefreshingSystemAuthoring = false;
+        }
+    }
+
     async function handleCleanupVaultState() {
         if (!elements.cleanupVaultStateBtn || state.isCleaningVaultState) return;
 
@@ -1644,6 +1712,163 @@ async function saveModelRow(rowKey) {
         `;
     }
 
+    async function loadSystemMigrations() {
+        if (!elements.systemMigrationsStatus || state.isLoadingSystemMigrations) return;
+
+        state.isLoadingSystemMigrations = true;
+        const button = elements.refreshSystemMigrationsBtn;
+        const originalLabel = button ? button.textContent : '';
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Refreshing…';
+        }
+
+        try {
+            const response = await fetch('api/system/migrations/status');
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            state.systemMigrations = await response.json();
+            renderSystemMigrations();
+            setStatus(elements.systemMigrationsFeedback, state.systemMigrations.message || '', 'info');
+        } catch (error) {
+            elements.systemMigrationsStatus.innerHTML = `
+                <div class="state-error">Failed to load database migrations: ${escapeHtml(error.message)}</div>
+            `;
+            updateSystemMigrationsButton(null);
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalLabel;
+            }
+            state.isLoadingSystemMigrations = false;
+        }
+    }
+
+    async function handleRunSystemMigrations() {
+        if (!elements.runSystemMigrationsBtn || state.isRunningSystemMigrations) return;
+        const pendingCount = Number(state.systemMigrations?.pending_count ?? 0);
+        if (pendingCount <= 0) return;
+
+        state.isRunningSystemMigrations = true;
+        const button = elements.runSystemMigrationsBtn;
+        button.disabled = true;
+        button.textContent = 'Running…';
+        if (elements.refreshSystemMigrationsBtn) {
+            elements.refreshSystemMigrationsBtn.disabled = true;
+        }
+        setStatus(elements.systemMigrationsFeedback, 'Running system database migrations…', 'info');
+
+        try {
+            const response = await fetch('api/system/migrations/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ backup: true }),
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            state.systemMigrations = result;
+            renderSystemMigrations();
+            const backupCount = Array.isArray(result.backups_created) ? result.backups_created.length : 0;
+            const backupText = backupCount > 0 ? ` ${backupCount} backup file(s) created.` : '';
+            setStatus(elements.systemMigrationsFeedback, `${result.message || 'System database migrations completed.'}${backupText}`, 'success');
+            await callbacks.refreshStatus?.();
+        } catch (error) {
+            setStatus(elements.systemMigrationsFeedback, `Failed to run database migrations: ${error.message}`, 'error');
+        } finally {
+            updateSystemMigrationsButton(state.systemMigrations);
+            if (elements.refreshSystemMigrationsBtn) {
+                elements.refreshSystemMigrationsBtn.disabled = false;
+            }
+            state.isRunningSystemMigrations = false;
+        }
+    }
+
+    function renderSystemMigrations() {
+        if (!elements.systemMigrationsStatus) return;
+
+        const payload = state.systemMigrations;
+        const targets = Array.isArray(payload?.targets) ? payload.targets : [];
+        if (!targets.length) {
+            elements.systemMigrationsStatus.innerHTML = `
+                <div class="text-sm text-txt-secondary">No registered system database migrations were found.</div>
+            `;
+            updateSystemMigrationsButton(payload);
+            return;
+        }
+
+        const rows = targets.map((target) => {
+            const applied = formatVersionList(target.applied_versions);
+            const pending = formatVersionList(target.pending_versions);
+            const exists = target.exists ? 'yes' : 'no';
+            const backup = target.backup_path
+                ? `<div class="cell-xs cell-mono subtle mt-1">backup: ${escapeHtml(target.backup_path)}</div>`
+                : '';
+            return `
+                <tr>
+                    <td>
+                        <strong>${escapeHtml(target.db_name)}</strong>
+                        <div class="cell-xs cell-mono subtle">${escapeHtml(target.namespace)}</div>
+                        ${backup}
+                    </td>
+                    <td class="cell-xs">${escapeHtml(exists)}</td>
+                    <td class="cell-xs">${escapeHtml(applied)}</td>
+                    <td class="cell-xs">${escapeHtml(pending)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        const pendingCount = Number(payload?.pending_count ?? 0);
+        const summaryTone = pendingCount > 0 ? 'state-warning' : 'state-success';
+        const summary = payload?.message || (
+            pendingCount > 0
+                ? `${pendingCount} system database migration(s) pending.`
+                : 'All registered system database migrations are applied.'
+        );
+
+        elements.systemMigrationsStatus.innerHTML = `
+            <div class="${summaryTone} mb-2">${escapeHtml(summary)}</div>
+            <div class="overflow-x-auto">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Database</th>
+                            <th>Exists</th>
+                            <th>Applied</th>
+                            <th>Pending</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+        updateSystemMigrationsButton(payload);
+    }
+
+    function formatVersionList(value) {
+        if (!Array.isArray(value) || value.length === 0) return 'none';
+        return value.map((version) => String(version)).join(', ');
+    }
+
+    function updateSystemMigrationsButton(payload) {
+        const button = elements.runSystemMigrationsBtn;
+        if (!button || state.isRunningSystemMigrations) return;
+
+        const pendingCount = Number(payload?.pending_count ?? 0);
+        const hasPending = pendingCount > 0;
+        button.disabled = !hasPending;
+        button.textContent = hasPending ? `Run ${pendingCount} Migration${pendingCount === 1 ? '' : 's'}` : 'Up to date';
+        button.classList.remove('btn-secondary', 'btn-warning');
+        button.classList.add(hasPending ? 'btn-warning' : 'btn-secondary');
+    }
+
     function formatDateTime(value) {
         if (!value) return '—';
         const date = new Date(value);
@@ -1689,6 +1914,7 @@ async function saveModelRow(rowKey) {
         await loadModels();
         await loadSecrets();
         await loadSystemJobs();
+        await loadSystemMigrations();
         await loadImportVaults();
         await loadPurgeSessionsVaults();
         state.hasLoadedOnce = true;

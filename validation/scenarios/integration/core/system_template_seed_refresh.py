@@ -1,7 +1,8 @@
 """
-Integration scenario for startup refresh of packaged system authoring seeds.
+Integration scenario for manual refresh of packaged system authoring seeds.
 
-Validates that system-generated templates are upgradeable without manual file
+Validates that startup preserves existing system templates and the explicit
+System / Misc refresh action upgrades generated copies without manual file
 deletion from system/Authoring.
 """
 
@@ -14,7 +15,7 @@ from validation.core.base_scenario import BaseScenario
 
 
 class SystemTemplateSeedRefreshScenario(BaseScenario):
-    """Validate packaged system templates overwrite stale generated copies."""
+    """Validate packaged system templates refresh through the explicit API."""
 
     async def test_scenario(self):
         controller = self._get_system_controller()
@@ -30,8 +31,25 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
 
         self.soft_assert_equal(
             target.read_text(encoding="utf-8"),
+            "STALE GENERATED DEFAULT",
+            "Startup should preserve existing system authoring files",
+        )
+
+        response = self.call_api("/api/system/authoring/seed-refresh", method="POST")
+        self.soft_assert_equal(
+            response.status_code,
+            200,
+            "Manual refresh should complete through the system API",
+        )
+        payload = response.json()
+        self.soft_assert(
+            target.as_posix() in payload.get("updated", []),
+            "Manual refresh should report the stale default template as updated",
+        )
+        self.soft_assert_equal(
+            target.read_text(encoding="utf-8"),
             expected,
-            "Startup should refresh packaged system authoring seed files",
+            "Manual refresh should update packaged system authoring seed files",
         )
 
         await self.stop_system()

@@ -1,4 +1,4 @@
-"""Shared memory service and conversation-history broker."""
+"""Shared chat-history service and conversation-history broker."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ _MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
 
 
 @dataclass(frozen=True)
-class MemoryContext:
-    """Runtime context for memory access adapters."""
+class ChatHistoryContext:
+    """Runtime context for chat-history access adapters."""
 
     message_history: tuple[ModelMessage, ...] = ()
     session_id: str | None = None
@@ -27,8 +27,8 @@ class MemoryContext:
     prefer_message_history: bool = False
 
     @classmethod
-    def from_deps(cls, deps: Any) -> "MemoryContext":
-        """Build memory context from a run deps object."""
+    def from_deps(cls, deps: Any) -> "ChatHistoryContext":
+        """Build chat-history context from a run deps object."""
         if deps is None:
             return cls()
         session_id = str(getattr(deps, "session_id", "") or "").strip() or None
@@ -161,7 +161,7 @@ class InMemoryConversationHistoryProvider:
         requested_session_id = (session_id or "").strip() or self.active_session_id
         if session_id and self.active_session_id and session_id != self.active_session_id:
             raise ValueError(
-                "The current memory provider only exposes the active in-memory chat session"
+                "The current chat-history provider only exposes the active in-memory chat session"
             )
 
         if limit == "all":
@@ -285,8 +285,8 @@ class SQLiteConversationHistoryProvider:
         )
 
 
-class MemoryService:
-    """Broker for memory access primitives shared across adapters."""
+class ChatHistoryService:
+    """Broker for chat-history access primitives shared across adapters."""
 
     def __init__(self, *, chat_store: ChatStore | None = None):
         self.chat_store = chat_store or ChatStore()
@@ -294,7 +294,7 @@ class MemoryService:
     def get_conversation_history(
         self,
         *,
-        context: MemoryContext,
+        context: ChatHistoryContext,
         scope: str,
         session_id: str | None = None,
         limit: int | str = "all",
@@ -314,7 +314,7 @@ class MemoryService:
     def get_conversation_tool_events(
         self,
         *,
-        context: MemoryContext,
+        context: ChatHistoryContext,
         scope: str,
         session_id: str | None = None,
         limit: int | str = "all",
@@ -332,7 +332,7 @@ class MemoryService:
     def resolve_conversation_history_provider(
         self,
         *,
-        context: MemoryContext,
+        context: ChatHistoryContext,
         session_id: str | None = None,
     ) -> ConversationHistoryProvider:
         """Resolve the active conversation-history source for the runtime context."""
@@ -369,9 +369,9 @@ def resolve_conversation_history_provider(
     prefer_message_history: bool = False,
 ) -> ConversationHistoryProvider:
     """Compatibility wrapper for older direct provider resolution imports."""
-    service = MemoryService(chat_store=chat_store)
+    service = ChatHistoryService(chat_store=chat_store)
     return service.resolve_conversation_history_provider(
-        context=MemoryContext(
+        context=ChatHistoryContext(
             message_history=tuple(message_history or ()),
             session_id=(session_id or "").strip() or None,
             vault_name=(vault_name or "").strip() or None,

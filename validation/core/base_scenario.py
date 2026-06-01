@@ -5,6 +5,7 @@ This module provides the foundation for V2 validation scenarios that focus on
 real user workflows with readable, high-level operations.
 """
 
+import asyncio
 import sys
 import inspect
 from pathlib import Path
@@ -16,6 +17,8 @@ from abc import ABC, abstractmethod
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import ExecutionTaskSource
+from core.runtime.state import get_runtime_context
 import yaml
 from .vault_manager import VaultManager
 from .system_controller import SystemController
@@ -199,15 +202,15 @@ class BaseScenario(ABC):
             )
 
         files_before = self._collect_vault_files(vault)
-        payload = {"global_id": f"{vault.name}/{workflow_name}"}
-        if step_name:
-            payload["step_name"] = step_name
-        if expect_failure:
-            payload["expect_failure"] = True
-
-        response = self.call_api("/api/workflows/execute", method="POST", data=payload)
-        if response.status_code != 200:
-            error_message = response.text or str(response.data) or "Workflow execution failed"
+        try:
+            execution_result = await get_runtime_context().workflow_governor.execute_workflow(
+                global_id=f"{vault.name}/{workflow_name}",
+                source=ExecutionTaskSource.API,
+                step_name=step_name,
+                expect_failure=expect_failure,
+            )
+        except Exception as exc:
+            error_message = str(exc) or "Workflow execution failed"
             if expect_failure:
                 self._log_timeline(f"✅ Workflow failed as expected: {error_message}")
                 self.logger.info(
@@ -223,6 +226,12 @@ class BaseScenario(ABC):
                 self._log_timeline(f"❌ Workflow failed: {error_message}")
             return WorkflowResult(status="failed", error_message=error_message)
 
+        if execution_result.status not in {"completed", "skipped"}:
+            return WorkflowResult(
+                status=execution_result.status or "failed",
+                error_message=execution_result.reason or "Workflow execution failed",
+            )
+
         files_after = self._collect_vault_files(vault)
         created_files = sorted(files_after - files_before)
         self._log_timeline(
@@ -232,6 +241,27 @@ class BaseScenario(ABC):
             self._log_timeline(f"   📄 Created: {file_path}")
 
         return WorkflowResult(status="completed", created_files=created_files)
+
+    async def _wait_for_execution_task(
+        self,
+        task_id: str,
+        *,
+        timeout_seconds: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Poll the public task endpoint until a workflow task reaches a terminal state."""
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        terminal_statuses = {"completed", "failed", "cancelled", "timed_out", "skipped"}
+        while True:
+            snapshot = await get_runtime_context().task_coordinator.get_task(task_id)
+            if snapshot is None:
+                raise AssertionError(f"Execution task lookup failed for {task_id}")
+            task = snapshot.__dict__.copy()
+            task["metadata"] = dict(snapshot.metadata or {})
+            if task.get("status") in terminal_statuses:
+                return task
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError(f"Execution task did not finish within {timeout_seconds:g}s: {task_id}")
+            await asyncio.sleep(0.25)
 
     async def trigger_job(self, vault: VaultPath, assistant_name: str) -> bool:
         """Trigger a scheduled job and wait for completion."""

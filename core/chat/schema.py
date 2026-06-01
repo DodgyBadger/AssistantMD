@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 from core.database import connect_sqlite_from_system_db
+from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
 
 DB_NAME = "chat_sessions"
+MIGRATION_NAMESPACE = "chat_sessions"
+
+CHAT_SESSION_MIGRATIONS = (
+    SQLiteMigration(
+        version=1,
+        name="add_compaction_checkpoints",
+        apply=lambda conn: _migrate_compaction_checkpoints(conn),
+    ),
+)
 
 
-def ensure_chat_sessions_schema(system_root: str | None = None) -> None:
+def ensure_chat_sessions_schema(
+    system_root: str | None = None,
+    *,
+    apply_migrations: bool = False,
+) -> None:
     """Create chat-session tables when they do not already exist."""
     conn = connect_sqlite_from_system_db(DB_NAME, system_root)
     try:
@@ -96,9 +110,50 @@ def ensure_chat_sessions_schema(system_root: str | None = None) -> None:
             ON chat_sessions(session_id)
             """
         )
+        _migrate_compaction_checkpoints(conn)
         conn.commit()
+        if apply_migrations:
+            apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS)
+            conn.commit()
     finally:
         conn.close()
+
+
+def _migrate_compaction_checkpoints(conn) -> None:
+    """Add append-only chat compaction checkpoint storage."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_compaction_checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checkpoint_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            vault_name TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source TEXT NOT NULL,
+            message_count_before INTEGER NOT NULL,
+            last_message_sequence_index INTEGER NOT NULL,
+            summary_message_json TEXT NOT NULL,
+            replacement_history_json TEXT NOT NULL,
+            metadata_json TEXT,
+            UNIQUE (checkpoint_id),
+            FOREIGN KEY (session_id, vault_name)
+                REFERENCES chat_sessions(session_id, vault_name)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_compaction_checkpoints_session_id
+        ON chat_compaction_checkpoints(session_id, vault_name, id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_compaction_checkpoints_session_sequence
+        ON chat_compaction_checkpoints(session_id, vault_name, last_message_sequence_index)
+        """
+    )
 
 
 def _deduplicate_session_ids(conn) -> None:
