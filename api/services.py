@@ -73,6 +73,7 @@ from core.runtime.execution_tasks import (
 )
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
+from core.vault_state.file_mutations import replace_vault_file_content
 from core.vault_state.models import VaultFile, VaultFileEvent
 from .models import (
     VaultInfo,
@@ -1408,20 +1409,43 @@ async def update_workflow_file(
     expected_sha256: str | None = None,
 ) -> WorkflowFileResponse:
     """Replace workflow source content and reload workflow definitions."""
+    normalized_id = str(global_id or "").strip()
     workflow_path, source = _resolve_workflow_file_path(global_id)
     current_content = workflow_path.read_text(encoding="utf-8")
     current_sha256 = _sha256_text(current_content)
     if expected_sha256 and expected_sha256 != current_sha256:
         raise ValueError("Workflow file changed since it was opened. Refresh and retry.")
 
-    temp_path = workflow_path.with_suffix(workflow_path.suffix + ".tmp")
-    temp_path.write_text(content, encoding="utf-8")
-    temp_path.replace(workflow_path)
+    if source == "vault":
+        runtime = get_runtime_context()
+        vault_name, _workflow_name = normalized_id.split("/", 1)
+        vault_root = (Path(runtime.config.data_root) / vault_name).resolve()
+        relative_path = workflow_path.relative_to(vault_root).as_posix()
+        async with runtime.task_coordinator.track_current_task(
+            kind=ExecutionTaskKind.WORKFLOW,
+            scope=workflow_vault_scope(vault_name),
+            source=ExecutionTaskSource.API,
+            label=f"edit_workflow:{normalized_id}",
+            metadata={
+                "workflow_id": normalized_id,
+                "vault": vault_name,
+                "path": relative_path,
+            },
+        ):
+            replace_vault_file_content(
+                vault_path=vault_root,
+                path=relative_path,
+                content=content,
+                operation="update_workflow_file",
+                markdown_only=True,
+            )
+    else:
+        _write_system_workflow_file_content(workflow_path, content)
 
     logger.info(
         "Workflow file updated",
         data={
-            "global_id": str(global_id or "").strip(),
+            "global_id": normalized_id,
             "source": source,
             "path": str(workflow_path),
         },
@@ -1434,12 +1458,12 @@ async def update_workflow_file(
         pass
 
     return WorkflowFileResponse(
-        global_id=str(global_id or "").strip(),
+        global_id=normalized_id,
         path=str(workflow_path),
         source=source,
         content=content,
         sha256=_sha256_text(content),
-        message=f"Saved workflow '{str(global_id or '').strip()}'.",
+        message=f"Saved workflow '{normalized_id}'.",
     )
 
 
@@ -1469,6 +1493,13 @@ def _resolve_workflow_file_path(global_id: str) -> tuple[Path, str]:
     if not workflow_path.is_file():
         raise ValueError(f"Workflow file not found: {normalized_id}")
     return workflow_path, "vault"
+
+
+def _write_system_workflow_file_content(path: Path, content: str) -> None:
+    """Atomically replace a system workflow template file."""
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(content, encoding="utf-8")
+    temp_path.replace(path)
 
 
 def _resolve_system_workflow_file_path(global_id: str) -> Path:
@@ -1554,9 +1585,7 @@ async def _set_system_workflow_enabled_state(global_id: str, enabled: bool) -> W
         key="enabled",
         value="true" if enabled else "false",
     )
-    temp_path = template_path.with_suffix(template_path.suffix + ".tmp")
-    temp_path.write_text(updated_content, encoding="utf-8")
-    temp_path.replace(template_path)
+    _write_system_workflow_file_content(template_path, updated_content)
 
     logger.info(
         "System workflow template enabled state changed",
