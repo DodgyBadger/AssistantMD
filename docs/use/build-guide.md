@@ -147,7 +147,7 @@ setup uses two complementary patterns as examples:
 - User-approved markdown notes for durable facts and preferences.
 - Derived session summaries for recall and search across prior chats.
 
-To customize explicit "remember this" behavior, edit the shipped context-note
+To customize explicit "remember this" behavior, edit the shipped save-user-note
 skill in `AssistantMD/Skills/`. That skill should define when a note is worth
 saving, where the note is stored, how it is structured, and what should be
 rejected or merged instead of appended. The default context script can stay
