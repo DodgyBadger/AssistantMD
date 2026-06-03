@@ -11,6 +11,13 @@ Chat sessions can now be associated with a workspace folder inside the active va
 - Add `playbook.md` to a workspace folder for local working policy. It is merged after `AssistantMD/playbook.md`, so project-specific guidance can refine the vault-wide defaults without duplicating them.
 - Refresh the system scripts manually from System / Misc to get the updated default context script.
 
+### Activity log diagnostics
+
+The System activity log is easier to inspect when diagnosing imports and runtime issues.
+
+- Filter activity entries by search text, level, and tag.
+- Ingestion now records per-file activity with the source filename, selected strategy, warnings, outputs, and OCR fallback details.
+
 ## 2026-05-31 - v0.6.3
 
 ### Composable session summaries

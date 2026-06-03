@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import List
+from typing import Any, List
 from pathlib import Path
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
@@ -80,7 +80,16 @@ class IngestionService:
             raise ValueError(f"Ingestion job {job_id} not found")
 
         self.mark_processing(job_id)
+        log_context = self._job_log_context(job)
+        self.logger.info(
+            "ingestion_job_started",
+            data={
+                **log_context,
+                "event": "ingestion_job_started",
+            },
+        )
 
+        ingestion_settings = {}
         try:
             vault = job.vault
             if not vault:
@@ -151,14 +160,50 @@ class IngestionService:
                 update_job_outputs(job_id, outputs)
                 self._cleanup_source_file(source_path=source_path, vault=vault)
                 self.mark_completed(job_id)
+                self.logger.info(
+                    "ingestion_job_completed",
+                    data={
+                        **log_context,
+                        "event": "ingestion_job_completed",
+                        "pdf_mode": "page_images",
+                        "outputs": outputs,
+                        "outputs_count": len(outputs),
+                    },
+                )
                 return
 
             strategies = self._get_strategies(job, suffix, ingestion_settings)
             extractor_opts = options.get("extractor_options", {}) if isinstance(options, dict) else {}
-            extracted, warnings = self._run_strategies(raw_doc, strategies, ingestion_settings, extractor_opts)
+            self.logger.info(
+                "ingestion_strategies_resolved",
+                data={
+                    **log_context,
+                    "event": "ingestion_strategies_resolved",
+                    "strategies": strategies,
+                    "pdf_mode": pdf_mode,
+                    "extractor_option_keys": sorted(extractor_opts.keys()),
+                },
+            )
+            extracted, warnings = self._run_strategies(
+                raw_doc,
+                strategies,
+                ingestion_settings,
+                extractor_opts,
+                log_context=log_context,
+            )
             if extracted is None:
                 msg = f"No extractor succeeded for {raw_doc.mime or 'unknown mime'}"
-                self.logger.warning(msg, metadata={"job_id": job_id, "strategies": strategies})
+                self.logger.warning(
+                    "ingestion_job_failed",
+                    data={
+                        **log_context,
+                        "event": "ingestion_job_failed",
+                        "issue": f"ingestion_job_failed:{job_id}",
+                        "reason": msg,
+                        "strategies": strategies,
+                        "warnings": warnings or [],
+                    },
+                )
                 self.mark_failed(job_id, msg)
                 return
 
@@ -178,7 +223,28 @@ class IngestionService:
 
             update_job_outputs(job_id, outputs)
             self.mark_completed(job_id)
+            self.logger.info(
+                "ingestion_job_completed",
+                data={
+                    **log_context,
+                    "event": "ingestion_job_completed",
+                    "selected_strategy": extracted.strategy_id,
+                    "strategies": strategies,
+                    "warnings": warnings or [],
+                    "outputs": outputs,
+                    "outputs_count": len(outputs),
+                },
+            )
         except Exception as exc:
+            self.logger.error(
+                "ingestion_job_failed",
+                data={
+                    **log_context,
+                    "event": "ingestion_job_failed",
+                    "error_type": type(exc).__name__,
+                    "error": self._truncate_log_value(str(exc)),
+                },
+            )
             if job.source_type == SourceKind.URL.value:
                 try:
                     url_cfg = ingestion_settings.get("url", {}) if isinstance(ingestion_settings, dict) else {}
@@ -473,36 +539,106 @@ class IngestionService:
         strategies: list[str],
         ingestion_settings: dict,
         options: dict | None = None,
+        *,
+        log_context: dict[str, Any] | None = None,
     ):
         """
         Try extractors in order; return first non-empty result.
         """
         warnings: list[str] = []
         extractor_options = options or {}
+        base_log_context = log_context or {}
         for strat in strategies:
             secret_name = self._STRATEGY_SECRET_REQUIREMENTS.get(strat)
             if secret_name and not secret_has_value(secret_name):
-                warnings.append(f"{strat}:missing_secret:{secret_name}")
+                warning = f"{strat}:missing_secret:{secret_name}"
+                warnings.append(warning)
+                self.logger.info(
+                    "ingestion_strategy_skipped",
+                    data={
+                        **base_log_context,
+                        "event": "ingestion_strategy_skipped",
+                        "strategy": strat,
+                        "reason": "missing_secret",
+                        "secret_name": secret_name,
+                    },
+                )
                 continue
 
             extractor_fn = self._resolve_extractor_by_strategy(strat)
             if extractor_fn is None:
-                warnings.append(f"{strat}:missing")
+                warning = f"{strat}:missing"
+                warnings.append(warning)
+                self.logger.info(
+                    "ingestion_strategy_skipped",
+                    data={
+                        **base_log_context,
+                        "event": "ingestion_strategy_skipped",
+                        "strategy": strat,
+                        "reason": "missing_extractor",
+                    },
+                )
                 continue
             try:
                 result = extractor_fn(raw_doc, extractor_options) if extractor_fn.__code__.co_argcount > 1 else extractor_fn(raw_doc)
             except Exception as exc:
-                warnings.append(f"{strat}:error:{exc}")
+                warning = f"{strat}:error:{exc}"
+                warnings.append(warning)
+                self.logger.info(
+                    "ingestion_strategy_failed",
+                    data={
+                        **base_log_context,
+                        "event": "ingestion_strategy_failed",
+                        "strategy": strat,
+                        "error_type": type(exc).__name__,
+                        "error": self._truncate_log_value(str(exc)),
+                    },
+                )
                 continue
 
             text = (result.plain_text or "").strip()
             if text:
                 if strat != result.strategy_id:
                     result.strategy_id = strat
+                self.logger.info(
+                    "ingestion_strategy_selected",
+                    data={
+                        **base_log_context,
+                        "event": "ingestion_strategy_selected",
+                        "strategy": strat,
+                        "warnings": warnings,
+                    },
+                )
                 return result, warnings if warnings else None
-            warnings.append(f"{strat}:empty")
+            warning = f"{strat}:empty"
+            warnings.append(warning)
+            self.logger.info(
+                "ingestion_strategy_empty",
+                data={
+                    **base_log_context,
+                    "event": "ingestion_strategy_empty",
+                    "strategy": strat,
+                },
+            )
 
         return None, warnings if warnings else None
+
+    def _job_log_context(self, job: IngestionJob) -> dict[str, Any]:
+        options = job.options if isinstance(job.options, dict) else {}
+        return {
+            "job_id": job.id,
+            "vault": job.vault,
+            "source_uri": job.source_uri,
+            "source_type": job.source_type,
+            "mime_hint": job.mime_hint,
+            "options": options,
+        }
+
+    @staticmethod
+    def _truncate_log_value(value: str, limit: int = 500) -> str:
+        if len(value) <= limit:
+            return value
+        return f"{value[:limit]}..."
 
     def _load_builtin_handlers(self) -> None:
         """
