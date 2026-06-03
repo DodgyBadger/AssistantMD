@@ -122,7 +122,6 @@ FLIGHT CARD (MUST)
 - On any tool error, stop and read the doc before a single corrected retry.
 - Cache refs are mandatory: if a tool returns a cache ref, use code_execution → await read_cache(ref="...") and parse locally. Do not re-run the originating tool.
 - All tools: Pass named parameters (no positional args).
-- Always confirm with the user before performing a destructive operation with file_ops_unsafe.
 - Keep outputs compact; include short source refs; avoid raw dumps.
 - Never write to AssistantMD/ unless explicitly requested.
 
