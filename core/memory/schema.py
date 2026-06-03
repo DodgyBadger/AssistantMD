@@ -20,6 +20,11 @@ SESSION_SUMMARY_MIGRATIONS = (
         name="remove_source_summary_from_session_summary_fts",
         apply=lambda conn: _migrate_source_summary_out_of_retrieval(conn),
     ),
+    SQLiteMigration(
+        version=3,
+        name="add_session_summary_workspace_path",
+        apply=lambda conn: _migrate_workspace_path(conn),
+    ),
 )
 
 
@@ -45,6 +50,7 @@ def ensure_session_summary_schema(
                 user_intent TEXT,
                 named_entities TEXT,
                 source_summary TEXT,
+                workspace_path TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 metadata_json TEXT,
@@ -62,6 +68,13 @@ def ensure_session_summary_schema(
             """
             CREATE INDEX IF NOT EXISTS idx_session_summaries_vault_domain
             ON session_summaries(vault_name, domain)
+            """
+        )
+        _migrate_workspace_path(conn)
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_summaries_vault_workspace
+            ON session_summaries(vault_name, workspace_path)
             """
         )
         conn.execute(
@@ -134,6 +147,19 @@ def _migrate_source_summary_out_of_retrieval(conn) -> None:
             WHERE metadata_json LIKE '%"field_type": "source_summary"%'
             """
         )
+
+
+def _migrate_workspace_path(conn) -> None:
+    """Add workspace path storage for workspace-filtered retrieval."""
+    columns = _table_columns(conn, "session_summaries")
+    if "workspace_path" not in columns:
+        conn.execute("ALTER TABLE session_summaries ADD COLUMN workspace_path TEXT")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_session_summaries_vault_workspace
+        ON session_summaries(vault_name, workspace_path)
+        """
+    )
 
 
 def _create_session_summaries_fts(conn) -> None:

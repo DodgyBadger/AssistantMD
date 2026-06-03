@@ -251,6 +251,124 @@
             gap: 0.75rem;
             align-items: start;
         }
+        .chat-settings-primary-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.75rem;
+            align-items: start;
+        }
+        .workspace-field {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: 0.5rem;
+            align-items: stretch;
+        }
+        .workspace-icon-button {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.375rem;
+            border: 1px solid rgb(var(--border-secondary));
+            background: rgb(var(--bg-card));
+            color: rgb(var(--text-primary));
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+        }
+        .workspace-icon-button svg {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
+        .workspace-icon-button:hover,
+        .workspace-icon-button:focus-visible {
+            border-color: rgb(var(--accent-primary));
+            background: rgb(var(--bg-elevated));
+            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
+        }
+        .workspace-icon-button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .workspace-tree {
+            display: flex;
+            flex-direction: column;
+            gap: 0.05rem;
+        }
+        .workspace-tree-row {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            min-height: 1.8rem;
+            border-radius: 0.4rem;
+        }
+        .workspace-tree-row:hover {
+            background: rgb(var(--bg-elevated));
+        }
+        .workspace-tree-toggle,
+        .workspace-tree-spacer {
+            width: 1.35rem;
+            height: 1.35rem;
+            flex: 0 0 1.35rem;
+        }
+        .workspace-tree-toggle {
+            border-radius: 0.35rem;
+            border: 1px solid transparent;
+            background: transparent;
+            color: rgb(var(--text-primary));
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .workspace-tree-toggle:hover,
+        .workspace-tree-toggle:focus-visible {
+            background: rgb(var(--accent-primary) / 0.10);
+            border-color: transparent;
+            box-shadow: none;
+            outline: none;
+        }
+        .workspace-tree-toggle svg {
+            width: 0.85rem;
+            height: 0.85rem;
+            transition: transform 0.15s ease;
+        }
+        .workspace-tree-toggle[aria-expanded="true"] svg {
+            transform: rotate(90deg);
+        }
+        .workspace-tree-select {
+            min-width: 0;
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.2rem 0.3rem;
+            border-radius: 0.35rem;
+            text-align: left;
+            color: rgb(var(--text-primary));
+        }
+        .workspace-tree-select:hover,
+        .workspace-tree-select:focus-visible {
+            background: rgb(var(--accent-primary) / 0.10);
+            outline: none;
+        }
+        .workspace-tree-folder-icon {
+            width: 1rem;
+            height: 1rem;
+            flex: 0 0 1rem;
+            color: rgb(var(--text-secondary));
+        }
+        .workspace-tree-name,
+        .workspace-tree-label {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .workspace-tree-name {
+            font-size: 0.88rem;
+            font-weight: 500;
+        }
         .tool-dropdown {
             position: relative;
         }
@@ -373,6 +491,9 @@
             background: transparent;
         }
         @media (min-width: 768px) {
+            .chat-settings-primary-row {
+                grid-template-columns: minmax(0, 1fr) minmax(18rem, 1.35fr);
+            }
             .chat-settings-secondary-row {
                 grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem) minmax(0, 1fr);
             }
@@ -382,6 +503,17 @@
             grid-template-columns: minmax(0, 1fr) auto;
             gap: 0.75rem;
             align-items: center;
+        }
+        .chat-session-context-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.75rem;
+            align-items: center;
+        }
+        @media (min-width: 768px) {
+            .chat-session-context-row {
+                grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
+            }
         }
         .session-summary-trigger {
             width: 2.5rem;
@@ -1232,14 +1364,28 @@
                     </svg>
                 </summary>
                 <div class="p-4 pt-2 space-y-3">
-                    <!-- Row 1: Vault | Context template -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <!-- Row 1: Vault | Workspace -->
+                    <div class="chat-settings-primary-row">
                         <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select vault...</option>
                         </select>
-                        <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">Select template...</option>
-                        </select>
+                        <div class="workspace-field">
+                            <input id="workspace-path-input" type="text"
+                                placeholder="Workspace path..."
+                                aria-label="Workspace path"
+                                class="min-w-0 w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
+                            <button id="workspace-picker-btn" type="button" class="workspace-icon-button" aria-label="Choose workspace folder" title="Choose workspace folder">
+                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                    <path d="M2.75 5.75A1.75 1.75 0 0 1 4.5 4h3.1c.46 0 .9.18 1.22.5l1.05 1.05c.23.23.54.35.86.35h5.77A1.75 1.75 0 0 1 18.25 7.65v6.6A1.75 1.75 0 0 1 16.5 16H4.5a1.75 1.75 0 0 1-1.75-1.75v-8.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" />
+                                </svg>
+                            </button>
+                            <button id="workspace-unlock-btn" type="button" class="workspace-icon-button hidden" aria-label="Unlock workspace path" title="Unlock workspace path">
+                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                    <path d="M6.25 8.5V6.75a3.75 3.75 0 0 1 7.08-1.72" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" />
+                                    <rect x="4.25" y="8.5" width="11.5" height="7.5" rx="1.75" stroke="currentColor" stroke-width="1.45" />
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <!-- Row 2: Model | Thinking | Tools -->
                     <div class="chat-settings-secondary-row">
@@ -1280,14 +1426,19 @@
                             </div>
                         </div>
                     </div>
-                    <!-- Row 3: Session -->
-                    <div class="session-selector-row">
-                        <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">New session</option>
+                    <!-- Row 3: Session | Context template -->
+                    <div class="chat-session-context-row">
+                        <div class="session-selector-row">
+                            <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                                <option value="">New session</option>
+                            </select>
+                            <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Show session summary">
+                                🧠
+                            </button>
+                        </div>
+                        <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                            <option value="">Select template...</option>
                         </select>
-                        <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Show session summary">
-                            🧠
-                        </button>
                     </div>
                     <div id="session-title-row" class="session-title-row hidden">
                         <input id="session-title-input" type="text" maxlength="120"

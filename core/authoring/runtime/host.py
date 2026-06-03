@@ -112,6 +112,23 @@ class MontyDateTokens:
         return None
 
 
+@dataclass(frozen=True)
+class Workspace:
+    """Read-only workspace selected for the current chat session."""
+
+    path: str = ""
+    exists: bool = False
+
+    def __post_init__(self) -> None:
+        normalized = (self.path or "").strip()
+        if normalized != self.path:
+            object.__setattr__(self, "path", normalized)
+        if normalized and not self.exists:
+            object.__setattr__(self, "exists", True)
+        if not normalized and self.exists:
+            object.__setattr__(self, "exists", False)
+
+
 @dataclass
 class WorkflowAuthoringHost(AuthoringHost):
     """Workflow-scoped runtime state shared by helper executors."""
@@ -129,6 +146,7 @@ class WorkflowAuthoringHost(AuthoringHost):
     # Context assembly sets this when message_history is already curated prior history.
     prefer_message_history: bool = False
     latest_message: LatestMessage = field(default_factory=LatestMessage)
+    workspace: Workspace = field(default_factory=Workspace)
 
     def __post_init__(self) -> None:
         if self.vault_path is None:
@@ -154,12 +172,14 @@ class WorkflowAuthoringHost(AuthoringHost):
                 week_start_day=self.week_start_day,
             ),
             "latest_message": self.latest_message,
+            "workspace": self.workspace,
         }
 
     def get_monty_dataclasses(self) -> tuple[type, ...]:
         """Return dataclass types Monty should expose for reserved globals."""
         return (
             MontyDateTokens,
+            Workspace,
             RetrievedItem,
             RetrieveResult,
             ScriptToolResult,

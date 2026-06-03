@@ -137,6 +137,10 @@ class SessionOps(BaseTool):
                         user_intent=_summary_data_value(summary_data, "user_intent"),
                         named_entities=_summary_data_value(summary_data, "named_entities"),
                         source_summary=_summary_data_value(summary_data, "source_summary"),
+                        workspace_path=ChatStore().get_session_workspace_path(
+                            active_session_id,
+                            active_vault_name,
+                        ) or None,
                         metadata=summary_metadata,
                     )
                     _maybe_add_artifacts(
@@ -178,6 +182,10 @@ class SessionOps(BaseTool):
                         user_intent=extraction["user_intent"],
                         named_entities=extraction["named_entities"],
                         source_summary=extraction["source_summary"],
+                        workspace_path=ChatStore().get_session_workspace_path(
+                            active_session_id,
+                            active_vault_name,
+                        ) or None,
                         metadata={
                             "source": "chat_session_extraction",
                             "extraction_policy": "summary_intent_classification_source_summary",

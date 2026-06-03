@@ -71,6 +71,9 @@ from .models import (
     ChatSessionsPurgeRequest,
     ChatSessionsPurgeResponse,
     ChatSessionTitleRequest,
+    ChatSessionWorkspaceRequest,
+    ChatWorkspaceInfo,
+    VaultDirectoryListResponse,
 )
 from .exceptions import (
     APIException,
@@ -100,6 +103,8 @@ from .services import (
     get_chat_history_compaction_status,
     purge_chat_sessions,
     set_chat_session_title,
+    set_chat_session_workspace,
+    list_vault_directories,
     delete_chat_session,
     get_system_activity_log,
     get_system_settings,
@@ -205,6 +210,7 @@ async def _parse_chat_execute_payload(
                 "model": str(form.get("model") or "").strip(),
                 "thinking": str(form.get("thinking") or "").strip() or None,
                 "context_template": str(form.get("context_template") or "").strip() or None,
+                "workspace_path": str(form.get("workspace_path") or "").strip() or None,
                 "stream": _parse_form_bool(form.get("stream"), default=False),
             }
         )
@@ -246,6 +252,12 @@ async def _execute_chat_request(
             requested_session_id=chat_request.session_id,
             vault_name=chat_request.vault_name,
         )
+        if chat_request.workspace_path is not None:
+            set_chat_session_workspace(
+                chat_request.vault_name,
+                session_id,
+                chat_request.workspace_path,
+            )
     except ChatSessionVaultMismatch as exc:
         raise ChatSessionVaultMismatchError(
             session_id=exc.session_id,
@@ -267,6 +279,7 @@ async def _execute_chat_request(
             "image_path_count": len(chat_request.image_paths),
             "image_upload_count": len(image_uploads),
             "context_template": chat_request.context_template,
+            "workspace_path": chat_request.workspace_path,
         },
     )
 
@@ -942,6 +955,15 @@ async def context_templates(vault_name: str):
         return create_error_response(e)
 
 
+@router.get("/vaults/{vault_name}/directories", response_model=VaultDirectoryListResponse)
+async def vault_directories(vault_name: str, path: str | None = None):
+    """Return child directories for workspace selection."""
+    try:
+        return list_vault_directories(vault_name, path)
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.get("/chat/sessions", response_model=List[ChatSessionInfo])
 async def chat_sessions(vault_name: str):
     """
@@ -1036,6 +1058,15 @@ async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
         title = (request.title or "").strip() or None
         set_chat_session_title(request.vault_name, session_id, title)
         return {"session_id": session_id, "title": title}
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.patch("/chat/sessions/{session_id}/workspace", response_model=ChatWorkspaceInfo | None)
+async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRequest):
+    """Set or clear the workspace path for a chat session."""
+    try:
+        return set_chat_session_workspace(request.vault_name, session_id, request.path)
     except Exception as e:
         return create_error_response(e)
 

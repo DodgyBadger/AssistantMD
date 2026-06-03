@@ -557,6 +557,7 @@ async def _prepare_chat_execution(
         model_alias=model,
         context_template=context_template,
         now=_resolve_context_manager_now(),
+        workspace_path=_CHAT_STORE.get_session_workspace_path(session_id, vault_name),
         event_sink=_CHAT_STORE,
         tools=tool_functions,
         tool_instructions="",

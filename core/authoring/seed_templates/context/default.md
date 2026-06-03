@@ -104,6 +104,20 @@ if context_notes_result.metadata.get("status") == "completed":
             + bounded_text(context_notes_text, context_notes_char_limit)
         )
 
+workspace_instructions = ""
+if workspace.exists:
+    workspace_overview_path = f"{workspace.path}/project_overview.md"
+    workspace_overview_result = await file_ops_safe(operation="read", path=workspace_overview_path)
+    if workspace_overview_result.metadata.get("status") == "completed":
+        workspace_overview_text = workspace_overview_result.return_value
+        if workspace_overview_text.strip():
+            workspace_instructions = (
+                "## Workspace\n"
+                f"The current chat workspace is `{workspace.path}`. "
+                f"The following workspace overview was loaded from `{workspace_overview_path}`.\n\n"
+                + bounded_text(workspace_overview_text, 6000)
+            )
+
 def skill_name_from_path(path):
     parts = path.split("/")
     filename = parts[-1] if parts else path
@@ -142,6 +156,8 @@ instructions = soul_instructions
 instructions += "\n\n" + playbook_instructions
 if context_notes_instructions:
     instructions += "\n\n" + context_notes_instructions
+if workspace_instructions:
+    instructions += "\n\n" + workspace_instructions
 if skills_lines:
     instructions += (
         "\n\n## Skills\n"

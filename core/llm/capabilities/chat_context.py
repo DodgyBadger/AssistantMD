@@ -25,6 +25,7 @@ def build_chat_context_capability(
     session_id: str,
     model_alias: str,
     context_template: str | None,
+    workspace_path: str = "",
     history_processor_factory: Callable[..., Any] = build_context_manager_history_processor,
 ) -> HistoryProcessor[Any] | None:
     """Build a context-template history processor capability when available."""
@@ -40,6 +41,7 @@ def build_chat_context_capability(
                 vault_path=vault_path,
                 model_alias=model_alias,
                 template_name=candidate,
+                workspace_path=workspace_path,
             )
             return HistoryProcessor(_normalize_history_processor(processor))
         except ContextTemplateExecutionError as exc:
