@@ -905,6 +905,7 @@ function sessionSummaryEditableFields() {
         { key: 'user_intent', label: 'User Intent', rows: 3 },
         { key: 'domain', label: 'Domain', rows: 2 },
         { key: 'work_product', label: 'Work Product', rows: 2 },
+        { key: 'workspace_path', label: 'Workspace', rows: 2 },
         { key: 'named_entities', label: 'Named Entities', rows: 2 },
         { key: 'source_summary', label: 'Source Summary', rows: 6 },
     ];

@@ -74,6 +74,7 @@ class SessionOpsChatToolScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Write a summary for this chat session.",
                     "session_id": session_id,
+                    "workspace_path": "Projects/WorkspaceA",
                     "tools": ["session_ops"],
                     "model": "test",
                 },
@@ -83,6 +84,59 @@ class SessionOpsChatToolScenario(BaseScenario):
             self.soft_assert(
                 current is not None and current.summary == "Chat summary testing",
                 "session_ops should write a session summary for the active chat session",
+            )
+            self.soft_assert_equal(
+                current.workspace_path if current else None,
+                "Projects/WorkspaceA",
+                "session_ops should copy the active session workspace path onto the summary",
+            )
+
+            updated = self.call_api(
+                f"/api/chat/sessions/{session_id}/summary",
+                method="PUT",
+                params={"vault_name": vault.name},
+                data={
+                    "summary": "Chat summary testing",
+                    "domain": "validation",
+                    "work_product": "test artifact",
+                    "user_intent": "Validate that chat can write a session summary.",
+                    "workspace_path": "Projects/ManualWorkspace",
+                    "named_entities": "",
+                    "source_summary": "",
+                    "metadata": current.metadata if current else {},
+                },
+            )
+            self.soft_assert_equal(updated.status_code, 200, "Manual summary update should succeed")
+            updated_payload = updated.json()
+            self.soft_assert_equal(
+                updated_payload.get("workspace_path"),
+                "Projects/ManualWorkspace",
+                "Manual summary updates should persist workspace_path",
+            )
+
+            from core.tools.session_ops import _list_sessions
+
+            listed = _list_sessions(
+                vault_name=vault.name,
+                limit=10,
+                cursor="",
+                summary_status="any",
+            )
+            listed_session = next(
+                (
+                    row for row in listed.get("sessions", [])
+                    if row.get("session_id") == session_id
+                ),
+                None,
+            )
+            self.soft_assert(
+                listed_session is not None,
+                "session_ops list_sessions should include the active session",
+            )
+            self.soft_assert(
+                listed_session is not None
+                and listed_session.get("workspace_path") == "Projects/ManualWorkspace",
+                "session_ops list_sessions should expose workspace_path in compact rows",
             )
 
             current_case["name"] = "get"

@@ -824,6 +824,7 @@ async def update_chat_session_summary(
         domain=data.get("domain"),
         work_product=data.get("work_product"),
         user_intent=data.get("user_intent"),
+        workspace_path=data.get("workspace_path"),
         named_entities=data.get("named_entities"),
         source_summary=data.get("source_summary"),
         metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},

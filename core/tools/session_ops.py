@@ -442,6 +442,7 @@ def _list_sessions(
                 "history_revision_delta": status["history_revision_delta"],
                 "domain": session_summary.domain if session_summary else None,
                 "user_intent": session_summary.user_intent if session_summary else None,
+                "workspace_path": session_summary.workspace_path if session_summary else None,
             }
         )
 

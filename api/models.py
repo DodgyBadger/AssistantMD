@@ -418,6 +418,7 @@ class ChatSessionSummaryUpdateRequest(BaseModel):
     domain: Optional[str] = Field(None, description="Replacement domain")
     work_product: Optional[str] = Field(None, description="Replacement work product")
     user_intent: Optional[str] = Field(None, description="Replacement user intent")
+    workspace_path: Optional[str] = Field(None, description="Replacement workspace path")
     named_entities: Optional[str] = Field(None, description="Replacement named entities")
     source_summary: Optional[str] = Field(None, description="Replacement source summary")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Replacement summary metadata")
