@@ -32,15 +32,42 @@ soul_instructions = (
     )
 )
 
-playbook_result = await file_ops_safe(operation="read", path="AssistantMD/playbook.md")
-playbook_instructions = (
-    playbook_result.return_value.strip()
-    if playbook_result.metadata.get("status") == "completed"
-    else DEFAULT_PLAYBOOK
-)
-
 DEFAULT_USER_NOTES_FILE = "AssistantMD/user.md"
 DEFAULT_USER_NOTES_CHAR_LIMIT = 6000
+
+
+def split_parent_filename(path):
+    parts = path.rsplit("/", 1)
+    if len(parts) == 1:
+        return ".", parts[0]
+    return parts[0] or ".", parts[1]
+
+
+async def read_convention_file(path):
+    exact_result = await file_ops_safe(operation="read", path=path)
+    if exact_result.metadata.get("status") == "completed":
+        return path, exact_result
+
+    parent, filename = split_parent_filename(path)
+    listing = await file_ops_safe(operation="list", path=parent, include_all=True)
+    if listing.metadata.get("status") != "completed":
+        return path, exact_result
+
+    filename_lower = filename.lower()
+    matches = []
+    for candidate in listing.metadata.get("files", []):
+        candidate_name = candidate.rsplit("/", 1)[-1]
+        if candidate_name.lower() == filename_lower:
+            matches.append(candidate)
+
+    if len(matches) != 1:
+        return path, exact_result
+
+    matched_path = matches[0]
+    matched_result = await file_ops_safe(operation="read", path=matched_path)
+    if matched_result.metadata.get("status") == "completed":
+        return matched_path, matched_result
+    return path, exact_result
 
 
 def bounded_text(value, max_chars):
@@ -69,10 +96,17 @@ def parse_positive_int(value, default_value):
     return parsed if parsed > 0 else default_value
 
 
+playbook_path, playbook_result = await read_convention_file("AssistantMD/playbook.md")
+playbook_instructions = (
+    playbook_result.return_value.strip()
+    if playbook_result.metadata.get("status") == "completed"
+    else DEFAULT_PLAYBOOK
+)
+
 workspace_playbook_instructions = ""
 if workspace.exists:
     workspace_playbook_path = f"{workspace.path}/playbook.md"
-    workspace_playbook_result = await file_ops_safe(operation="read", path=workspace_playbook_path)
+    workspace_playbook_path, workspace_playbook_result = await read_convention_file(workspace_playbook_path)
     if workspace_playbook_result.metadata.get("status") == "completed":
         workspace_playbook_text = workspace_playbook_result.return_value
         if workspace_playbook_text.strip():
@@ -110,7 +144,7 @@ if USER_NOTES_result.metadata.get("status") == "completed":
 workspace_instructions = ""
 if workspace.exists:
     workspace_overview_path = f"{workspace.path}/README.md"
-    workspace_overview_result = await file_ops_safe(operation="read", path=workspace_overview_path)
+    workspace_overview_path, workspace_overview_result = await read_convention_file(workspace_overview_path)
     if workspace_overview_result.metadata.get("status") == "completed":
         workspace_overview_text = workspace_overview_result.return_value
         if workspace_overview_text.strip():

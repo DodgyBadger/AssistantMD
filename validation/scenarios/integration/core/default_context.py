@@ -32,7 +32,7 @@ Use the validation soul instruction.
         )
         self.create_file(
             vault,
-            "AssistantMD/playbook.md",
+            "AssistantMD/PlayBook.md",
             """# Vault Playbook
 
 Use the validation vault playbook.
@@ -64,7 +64,7 @@ Use the validation vault playbook.
         )
         self.create_file(
             vault,
-            "Projects/WorkspaceA/README.md",
+            "Projects/WorkspaceA/readme.md",
             """# Workspace A
 
 This workspace is for validating workspace README loading.
@@ -72,7 +72,7 @@ This workspace is for validating workspace README loading.
         )
         self.create_file(
             vault,
-            "Projects/WorkspaceA/playbook.md",
+            "Projects/WorkspaceA/PLAYBOOK.md",
             """# Workspace Playbook
 
 Use the workspace-specific validation playbook.
