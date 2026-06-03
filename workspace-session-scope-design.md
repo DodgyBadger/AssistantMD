@@ -4,7 +4,7 @@
 
 Add a lightweight chat-session workspace setting that lets a user associate a
 chat session with a vault-relative folder. Context scripts can then load
-workspace-local files such as `project_overview.md` without requiring a custom
+workspace-local files such as `README.md` without requiring a custom
 context script per project folder.
 
 This is intended as a convenience layer over existing vault files and context
@@ -169,11 +169,11 @@ Default context script can optionally load:
 if workspace.exists:
     overview = await file_ops_safe(
         operation="read",
-        path=f"{workspace.path}/project_overview.md",
+        path=f"{workspace.path}/README.md",
     )
 ```
 
-The default context script should treat a missing overview as normal and
+The default context script should treat a missing workspace README as normal and
 continue without error.
 
 Do not make the filename configurable in the first pass unless a concrete need
@@ -207,7 +207,7 @@ be an explicit workflow contract, not an implicit change to all workflows.
 - `core/authoring/context_manager.py`: pass workspace into the chat context
   host.
 - `core/authoring/seed_templates/context/default.md`: optional
-  `project_overview.md` loading.
+  workspace `README.md` loading.
 - `static/index.html` and `static/app.js`: text field, folder button, unlock
   behavior, sidebar modal folder picker, request payload wiring.
 ## Validation Target
@@ -219,8 +219,8 @@ Add or extend an integration scenario that verifies:
 - Session list/detail responses include the workspace.
 - Invalid workspace paths are rejected with a stable API error.
 - A context template can read `workspace.path` and load
-  `workspace/project_overview.md`.
-- Missing `project_overview.md` does not fail context assembly.
+  `workspace/README.md`.
+- Missing `README.md` does not fail context assembly.
 - Updating workspace after unlock affects a later turn's context assembly.
 
 Maintainers own the full validation suite. Agents should run focused local

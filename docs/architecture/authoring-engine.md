@@ -58,6 +58,12 @@ The active/latest message is not part of the retrieved history. Scripts may insp
 
 `retrieve_history(...)` returns safe units: user messages, assistant messages, and atomic tool call + tool return exchanges. This preserves provider protocol requirements while still allowing scripts to add, remove, reorder, summarize, or flatten history intentionally.
 
+Context scripts also receive a read-only `workspace` input for the active chat
+session. `workspace.path` is the saved vault-relative workspace path, or an
+empty string when unset. `workspace.exists` is `True` when a path is set. The
+chat agent sees workspace information only when the context script includes it
+in assembled messages or instructions.
+
 ## Discovery and precedence
 
 - `template_discovery.py` scans `AssistantMD/Authoring/` (one level deep) per vault.

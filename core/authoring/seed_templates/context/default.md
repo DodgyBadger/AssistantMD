@@ -1,29 +1,17 @@
 ---
 run_type: context
-description: Default template for regular chat. Passes full history. Loads soul.md, user.md, and skill catalog if present.
+description: Default template for regular chat. Passes full history. Loads soul.md, playbooks, user.md, and skill catalog if present.
 ---
 ```python
-"""Default chat context: pass history, inject soul.md instructions, user context, and skills catalog if present."""
+"""Default chat context: pass history, inject soul.md, playbooks, user context, and skills catalog if present."""
 
 DEFAULT_PLAYBOOK = (
-    "## Vault-First Work Policy\n"
-    "Treat the active vault as the user's first source of truth. Do not raise "
-    "prior-session search or vault search during greetings, setup, casual conversation, or "
-    "before the user's work intent is clear. Once the user has described a "
-    "concrete goal, and before using external research tools or starting "
-    "substantial new research or synthesis, ask once whether they want you to "
-    "first check prior work in the vault and prior chat sessions. Keep the question "
-    "brief and concrete, for example: `Before I start fresh, do you want me to "
-    "do a quick vault and prior-session search so we do not duplicate earlier "
-    "work?`\n\n"
-    "If the user agrees, call `session_ops` with `operation=\"search_sessions\"`, "
-    "`mode=\"search\"`, a short natural-language `query` based on the current "
-    "goal, and a small numeric `limit` such as 5. If useful, also use `file_ops_safe` to search "
-    "vault files directly. Treat prior-session and file-search results as "
-    "leads, not authority. Explain what you found, why it may matter, and let "
-    "the user confirm or redirect before relying on it.\n\n"
-    "Do not ask repeatedly. If the user declines, ignores the question, or the "
-    "request is clearly small and self-contained, continue normally."
+    "## Vault Work Policy\n"
+    "Treat the active vault as the user's source of truth for their files, "
+    "notes, drafts, and project context.\n\n"
+    "When a workspace playbook is loaded, merge it with this vault-level "
+    "guidance. Treat workspace guidance as more specific when the two directly "
+    "conflict."
 )
 
 history_result = await retrieve_history(scope="session", limit="all")
@@ -51,8 +39,8 @@ playbook_instructions = (
     else DEFAULT_PLAYBOOK
 )
 
-DEFAULT_CONTEXT_NOTES_FILE = "AssistantMD/user.md"
-DEFAULT_CONTEXT_NOTES_CHAR_LIMIT = 6000
+DEFAULT_USER_NOTES_FILE = "AssistantMD/user.md"
+DEFAULT_USER_NOTES_CHAR_LIMIT = 6000
 
 
 def bounded_text(value, max_chars):
@@ -81,32 +69,47 @@ def parse_positive_int(value, default_value):
     return parsed if parsed > 0 else default_value
 
 
-context_notes_skill_result = await file_ops_safe(
+workspace_playbook_instructions = ""
+if workspace.exists:
+    workspace_playbook_path = f"{workspace.path}/playbook.md"
+    workspace_playbook_result = await file_ops_safe(operation="read", path=workspace_playbook_path)
+    if workspace_playbook_result.metadata.get("status") == "completed":
+        workspace_playbook_text = workspace_playbook_result.return_value
+        if workspace_playbook_text.strip():
+            workspace_playbook_instructions = (
+                "## Workspace Playbook\n"
+                f"The following workspace-specific playbook was loaded from `{workspace_playbook_path}`. "
+                "Treat it as more specific than the vault-level playbook when the two directly conflict.\n\n"
+                + bounded_text(workspace_playbook_text, 6000)
+            )
+
+
+USER_NOTES_skill_result = await file_ops_safe(
     operation="frontmatter",
     path="AssistantMD/Skills/save_user_note.md",
-    keys="context_notes_file,context_notes_char_limit",
+    keys="USER_NOTES_file,USER_NOTES_char_limit",
 )
-context_notes_file = frontmatter_value(context_notes_skill_result, "context_notes_file", DEFAULT_CONTEXT_NOTES_FILE)
-context_notes_char_limit = parse_positive_int(
-    frontmatter_value(context_notes_skill_result, "context_notes_char_limit", DEFAULT_CONTEXT_NOTES_CHAR_LIMIT),
-    DEFAULT_CONTEXT_NOTES_CHAR_LIMIT,
+USER_NOTES_file = frontmatter_value(USER_NOTES_skill_result, "USER_NOTES_file", DEFAULT_USER_NOTES_FILE)
+USER_NOTES_char_limit = parse_positive_int(
+    frontmatter_value(USER_NOTES_skill_result, "USER_NOTES_char_limit", DEFAULT_USER_NOTES_CHAR_LIMIT),
+    DEFAULT_USER_NOTES_CHAR_LIMIT,
 )
 
-context_notes_result = await file_ops_safe(operation="read", path=context_notes_file)
-context_notes_instructions = ""
-if context_notes_result.metadata.get("status") == "completed":
-    context_notes_text = context_notes_result.return_value
-    if context_notes_text.strip():
-        context_notes_instructions = (
+USER_NOTES_result = await file_ops_safe(operation="read", path=USER_NOTES_file)
+USER_NOTES_instructions = ""
+if USER_NOTES_result.metadata.get("status") == "completed":
+    USER_NOTES_text = USER_NOTES_result.return_value
+    if USER_NOTES_text.strip():
+        USER_NOTES_instructions = (
             "## User Notes\n"
-            f"The following user-maintained notes were loaded from `{context_notes_file}`. "
+            f"The following user-maintained notes were loaded from `{USER_NOTES_file}`. "
             "Treat them as editable context, not hidden authority.\n\n"
-            + bounded_text(context_notes_text, context_notes_char_limit)
+            + bounded_text(USER_NOTES_text, USER_NOTES_char_limit)
         )
 
 workspace_instructions = ""
 if workspace.exists:
-    workspace_overview_path = f"{workspace.path}/project_overview.md"
+    workspace_overview_path = f"{workspace.path}/README.md"
     workspace_overview_result = await file_ops_safe(operation="read", path=workspace_overview_path)
     if workspace_overview_result.metadata.get("status") == "completed":
         workspace_overview_text = workspace_overview_result.return_value
@@ -114,7 +117,7 @@ if workspace.exists:
             workspace_instructions = (
                 "## Workspace\n"
                 f"The current chat workspace is `{workspace.path}`. "
-                f"The following workspace overview was loaded from `{workspace_overview_path}`.\n\n"
+                f"The following workspace README was loaded from `{workspace_overview_path}`.\n\n"
                 + bounded_text(workspace_overview_text, 6000)
             )
 
@@ -154,8 +157,10 @@ for path, item in skill_items_by_path.items():
 
 instructions = soul_instructions
 instructions += "\n\n" + playbook_instructions
-if context_notes_instructions:
-    instructions += "\n\n" + context_notes_instructions
+if workspace_playbook_instructions:
+    instructions += "\n\n" + workspace_playbook_instructions
+if USER_NOTES_instructions:
+    instructions += "\n\n" + USER_NOTES_instructions
 if workspace_instructions:
     instructions += "\n\n" + workspace_instructions
 if skills_lines:
@@ -163,8 +168,7 @@ if skills_lines:
         "\n\n## Skills\n"
         "The following skills are available. When a skill seems relevant to the user's request, "
         "read the full skill file before responding. For explicit requests to remember, save, "
-        "or persist facts for future chats, use the Save User Note skill rather than `session_ops`; "
-        "`session_ops` is for searching prior chat sessions.\n"
+        "or persist facts for future chats, use the Save User Note skill.\n"
         + "\n".join(skills_lines)
     )
 

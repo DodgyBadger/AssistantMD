@@ -1,5 +1,16 @@
 # Release Notes
 
+## 2026-06-03 - v0.6.4
+
+### Workspace-aware chat sessions
+
+Chat sessions can now be associated with a workspace folder inside the active vault.
+
+- Set a workspace when you start or continue a chat so the default context setup can automatically load local orientation files.
+- Add `README.md` to a workspace folder to warm the session with what the folder is about, current state, important files, goals, or constraints.
+- Add `playbook.md` to a workspace folder for local working policy. It is merged after `AssistantMD/playbook.md`, so project-specific guidance can refine the vault-wide defaults without duplicating them.
+- Refresh the system scripts manually from System / Misc to get the updated default context script.
+
 ## 2026-05-31 - v0.6.3
 
 ### Composable session summaries

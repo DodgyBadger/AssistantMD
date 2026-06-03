@@ -15,7 +15,7 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 
 `system/chat_sessions.db` is the canonical record. A `session_id` is globally unique and is permanently bound to the `vault_name` recorded on the session row. Chat execution resolves this binding before running the model; reusing an existing `session_id` with another vault returns `ChatSessionVaultMismatch`.
 
-It has three tables:
+The main tables are:
 
 - **`chat_sessions`** — one row per session: `session_id`, `vault_name`, `created_at`, `last_activity_at`, `title`
 - **`chat_messages`** — full provider-native message objects stored as JSON, plus extracted `content_text`, `role`, `direction`, and `sequence_index` for querying
@@ -23,6 +23,18 @@ It has three tables:
 - **`chat_compaction_checkpoints`** — compaction replay checkpoints with a
   system-maintained replacement history and the raw-message sequence boundary
   covered by that checkpoint
+
+## Workspace metadata
+
+Chat sessions may store a vault-relative workspace path in session metadata.
+The workspace is a convenience hint for context assembly; it does not change
+the session's vault binding, restrict file access, or change the vault root
+used by tools. Saved workspace paths are allowed to become stale if a vault is
+reorganized.
+
+Session summaries denormalize the current workspace path into
+`session_summaries.workspace_path` so future retrieval can filter prior work by
+workspace without reparsing chat-session metadata.
 
 ## Markdown transcripts
 

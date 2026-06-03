@@ -1,8 +1,9 @@
 """
-Integration scenario for default context loading of vault-native user notes.
+Integration scenario for packaged default context loading behavior.
 
-Validates that the packaged default context template reads AssistantMD/user.md
-as bounded context without depending on the file's internal structure.
+Validates that the default context template loads vault-level instructions,
+workspace-local orientation files, and bounded user notes without depending on
+the internal structure of those markdown files.
 """
 
 import sys
@@ -16,11 +17,27 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 from validation.core.base_scenario import BaseScenario
 
 
-class DefaultUserNotesScenario(BaseScenario):
-    """Ensure default.md loads user.md and bounds oversized content."""
+class DefaultContextScenario(BaseScenario):
+    """Ensure default.md composes vault, workspace, and user context."""
 
     async def test_scenario(self):
-        vault = self.create_vault("DefaultUserNotesVault")
+        vault = self.create_vault("DefaultContextVault")
+        self.create_file(
+            vault,
+            "AssistantMD/soul.md",
+            """# Soul
+
+Use the validation soul instruction.
+""",
+        )
+        self.create_file(
+            vault,
+            "AssistantMD/playbook.md",
+            """# Vault Playbook
+
+Use the validation vault playbook.
+""",
+        )
         self.create_file(
             vault,
             "AssistantMD/user.md",
@@ -45,18 +62,35 @@ class DefaultUserNotesScenario(BaseScenario):
             + """
 """,
         )
+        self.create_file(
+            vault,
+            "Projects/WorkspaceA/README.md",
+            """# Workspace A
+
+This workspace is for validating workspace README loading.
+""",
+        )
+        self.create_file(
+            vault,
+            "Projects/WorkspaceA/playbook.md",
+            """# Workspace Playbook
+
+Use the workspace-specific validation playbook.
+""",
+        )
 
         await self.start_system()
 
         from core.authoring.context_manager import build_context_manager_history_processor
 
-        session_id = "default_user_notes_session"
+        session_id = "default_context_session"
         processor = build_context_manager_history_processor(
             session_id=session_id,
             vault_name=vault.name,
             vault_path=str(vault),
             model_alias="gpt",
             template_name="default.md",
+            workspace_path="Projects/WorkspaceA",
         )
 
         processed = await processor(
@@ -76,6 +110,28 @@ class DefaultUserNotesScenario(BaseScenario):
             if getattr(part, "part_kind", None) == "system-prompt"
         )
 
+        self.soft_assert(
+            "Use the validation soul instruction." in system_text,
+            "Expected default context to load AssistantMD/soul.md",
+        )
+        self.soft_assert(
+            "Use the validation vault playbook." in system_text,
+            "Expected default context to load AssistantMD/playbook.md",
+        )
+        self.soft_assert(
+            "This workspace is for validating workspace README loading." in system_text,
+            "Expected default context to load workspace README.md",
+        )
+        self.soft_assert(
+            "Use the workspace-specific validation playbook." in system_text,
+            "Expected default context to load workspace playbook.md",
+        )
+        vault_playbook_index = system_text.find("Use the validation vault playbook.")
+        workspace_playbook_index = system_text.find("Use the workspace-specific validation playbook.")
+        self.soft_assert(
+            0 <= vault_playbook_index < workspace_playbook_index,
+            "Expected workspace playbook to appear after the vault playbook",
+        )
         self.soft_assert(
             "## User Notes" in system_text,
             "Expected default context instructions to include user notes section",

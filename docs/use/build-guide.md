@@ -24,6 +24,25 @@ Open the app, pick a model, and start talking. The chat agent can read, search, 
 - Organize, tag, or restructure files
 - Research topics with web search and save findings to your vault
 
+### Workspace folders
+
+When starting or continuing a chat, you can set a workspace to a vault-relative
+folder. Workspace does not restrict what the agent can access and does not
+change the vault root; it is a session-level hint that context assembly scripts
+can use to load local orientation files.
+
+The default context assembly script uses two workspace conventions:
+
+- `{workspace}/README.md` introduces the folder: what it is, current state,
+  important files, active goals, or constraints.
+- `{workspace}/playbook.md` adds workspace-specific working policy. It is
+  loaded after `AssistantMD/playbook.md`, so it is treated as more specific
+  when the two directly conflict.
+
+Leave either file out when you do not need it. If you want only workspace-local
+working policy, omit `AssistantMD/playbook.md` and keep the local playbook in
+the workspace folder.
+
 ---
 
 ## Skills
@@ -111,6 +130,8 @@ be harder than replacing it.
 
 The default context assembly script (found in `system/Authoring/default.md`):
 - Loads `AssistantMD/soul.md` and `AssistantMD/playbook.md` as additional system instructions.
+- Loads workspace-local `README.md` and `playbook.md` when a chat session has a
+  workspace.
 - Discovers skills from `AssistantMD/Skills/`.
 - Packaged skills include authoring instructions and a skill for maintaining a
   lightweight user-owned markdown note file.
