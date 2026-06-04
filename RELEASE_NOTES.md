@@ -19,6 +19,10 @@ The System activity log is easier to inspect when diagnosing imports and runtime
 - Ingestion now records per-file activity with the source filename, selected strategy, warnings, outputs, and OCR fallback details.
 - Workflow scheduling and run activity now includes searchable workflow names, scheduler sync decisions, and terminal run details.
 
+### Provider reliability
+
+- OpenRouter requests now use provider routing defaults that require requested parameters to be supported and skip Azure-backed routes by default, reducing provider mismatch issues for tool-using chat turns. The ignored provider list is editable in System settings.
+
 ## 2026-05-31 - v0.6.3
 
 ### Composable session summaries

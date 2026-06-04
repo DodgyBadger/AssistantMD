@@ -1983,6 +1983,17 @@ def repair_settings_from_template() -> SystemSettingsResponse:
                 active_section[key] = value
         merged[section] = active_section
 
+    # Existing core provider entries may need newly introduced non-secret fields
+    # from the template. Preserve all active values and only fill absent keys.
+    active_providers = merged.get("providers", {})
+    template_providers = template_sections.get("providers", {})
+    if isinstance(active_providers, dict) and isinstance(template_providers, dict):
+        for key, template_provider in template_providers.items():
+            active_provider = active_providers.get(key)
+            if isinstance(active_provider, dict) and isinstance(template_provider, dict):
+                for provider_key, provider_value in template_provider.items():
+                    active_provider.setdefault(provider_key, provider_value)
+
     # Prune removed settings (settings are not user-extensible)
     settings_template_keys = set(template_sections["settings"].keys())
     merged["settings"] = {
