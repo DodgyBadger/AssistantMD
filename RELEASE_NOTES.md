@@ -17,6 +17,7 @@ The System activity log is easier to inspect when diagnosing imports and runtime
 
 - Filter activity entries by search text, level, and tag.
 - Ingestion now records per-file activity with the source filename, selected strategy, warnings, outputs, and OCR fallback details.
+- Workflow scheduling and run activity now includes searchable workflow names, scheduler sync decisions, and terminal run details.
 
 ## 2026-05-31 - v0.6.3
 
