@@ -118,6 +118,8 @@ class PreparedChatExecution:
     attached_image_count: int
     model: str
     tools: List[str]
+    context_template: Optional[str] = None
+    workspace_path: str = ""
 
 
 def _accepted_user_request(prepared: PreparedChatExecution) -> ModelRequest:
@@ -179,6 +181,48 @@ def _build_tool_call_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitEr
     )
 
 
+def _chat_event_for_message(message: str) -> str | None:
+    """Map existing chat lifecycle messages to stable activity event names."""
+    if message in {"Chat execution started", "Streaming chat execution started"}:
+        return "chat_turn_started"
+    if message in {"Chat execution completed", "Streaming chat execution completed"}:
+        return "chat_turn_completed"
+    if message in {"Chat execution cancelled", "Streaming chat execution cancelled"}:
+        return "chat_turn_cancelled"
+    if "failed" in message.lower() or "limit exceeded" in message.lower():
+        return "chat_turn_failed"
+    return None
+
+
+def _chat_status_for_event(event: str | None) -> str | None:
+    """Return a normalized status label for chat activity events."""
+    if event == "chat_turn_started":
+        return "started"
+    if event == "chat_turn_completed":
+        return "completed"
+    if event == "chat_turn_cancelled":
+        return "cancelled"
+    if event == "chat_turn_failed":
+        return "failed"
+    return None
+
+
+def _summarize_tool_activity(tool_activity: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Build compact tool-call counts for activity logs."""
+    by_tool: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    for item in tool_activity.values():
+        tool_name = str(item.get("tool_name") or "tool")
+        status = str(item.get("status") or "unknown")
+        by_tool[tool_name] = by_tool.get(tool_name, 0) + 1
+        by_status[status] = by_status.get(status, 0) + 1
+    return {
+        "tool_call_count": len(tool_activity),
+        "tool_call_status_counts": by_status,
+        "tool_call_tool_counts": by_tool,
+    }
+
+
 def _log_chat_lifecycle(
     message: str,
     *,
@@ -190,20 +234,30 @@ def _log_chat_lifecycle(
     phase: str,
     prompt_length: int | None = None,
     attached_image_count: int | None = None,
+    context_template: str | None = None,
+    workspace_path: str | None = None,
     extra: Optional[dict[str, Any]] = None,
 ) -> None:
     """Emit structured lifecycle logs for chat session execution."""
+    event = _chat_event_for_message(message)
     payload: dict[str, Any] = {
         "vault_name": vault_name,
         "session_id": session_id,
         "streaming": streaming,
         "phase": phase,
     }
+    if event:
+        payload["event"] = event
+        payload["status"] = _chat_status_for_event(event)
     if model is not None:
         payload["model"] = model
     if tools is not None:
         payload["tools"] = list(tools)
         payload["tools_count"] = len(tools)
+    if context_template is not None:
+        payload["context_template"] = context_template
+    if workspace_path is not None:
+        payload["workspace_path"] = workspace_path
     if prompt_length is not None:
         payload["prompt_length"] = prompt_length
     if attached_image_count is not None:
@@ -227,6 +281,8 @@ def _log_chat_failure(
     phase: str,
     prompt_length: int | None = None,
     attached_image_count: int | None = None,
+    context_template: str | None = None,
+    workspace_path: str | None = None,
     extra: Optional[dict[str, Any]] = None,
     exc: Exception,
 ) -> None:
@@ -237,9 +293,12 @@ def _log_chat_failure(
     rss_bytes = _get_process_rss_bytes()
     if rss_bytes is not None:
         payload["memory_rss_bytes"] = rss_bytes
+    event = _chat_event_for_message(message) or "chat_turn_failed"
     logger.error(
         message,
         data={
+            "event": event,
+            "status": _chat_status_for_event(event),
             "vault_name": vault_name,
             "session_id": session_id,
             "streaming": streaming,
@@ -247,6 +306,8 @@ def _log_chat_failure(
             "model": model,
             "tools": list(tools or []),
             "tools_count": len(tools or []),
+            "context_template": context_template,
+            "workspace_path": workspace_path,
             "prompt_length": prompt_length,
             "attached_image_count": attached_image_count,
             **payload,
@@ -546,6 +607,7 @@ async def _prepare_chat_execution(
 ) -> PreparedChatExecution:
     """Perform chat preflight before either sync or streaming execution begins."""
     _validate_image_capability(model, image_paths, image_uploads)
+    workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
         vault_name, vault_path, tools, model, thinking
     )
@@ -557,7 +619,7 @@ async def _prepare_chat_execution(
         model_alias=model,
         context_template=context_template,
         now=_resolve_context_manager_now(),
-        workspace_path=_CHAT_STORE.get_session_workspace_path(session_id, vault_name),
+        workspace_path=workspace_path,
         event_sink=_CHAT_STORE,
         tools=tool_functions,
         tool_instructions="",
@@ -587,6 +649,8 @@ async def _prepare_chat_execution(
         attached_image_count=attached_image_count,
         model=model,
         tools=list(tools),
+        context_template=context_template,
+        workspace_path=workspace_path,
     )
 
 
@@ -654,11 +718,14 @@ async def execute_chat_prompt(
     phase = "preflight"
     attached_image_count = 0
     prepared = None
+    initial_workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
     _log_chat_lifecycle(
         "Chat execution started",
         vault_name=vault_name,
         session_id=session_id,
         model=model,
+        context_template=context_template,
+        workspace_path=initial_workspace_path,
         extra={"thinking": thinking_value_to_label(thinking)},
         tools=tools,
         streaming=False,
@@ -689,6 +756,8 @@ async def execute_chat_prompt(
             phase=phase,
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
+            context_template=prepared.context_template,
+            workspace_path=prepared.workspace_path,
             extra={
                 "history_message_count": len(prepared.message_history or []),
                 "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
@@ -751,6 +820,8 @@ async def execute_chat_prompt(
             phase=phase,
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
+            context_template=prepared.context_template,
+            workspace_path=prepared.workspace_path,
             extra={
                 "message_count": len(result.all_messages()),
                 "response_length": len(result.output or ""),
@@ -764,6 +835,7 @@ async def execute_chat_prompt(
             history_file=None,
         )
     except asyncio.CancelledError as exc:
+        failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
         _log_chat_failure(
             "Chat execution cancelled",
             vault_name=vault_name,
@@ -774,11 +846,14 @@ async def execute_chat_prompt(
             phase=phase,
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
+            context_template=prepared.context_template if prepared else context_template,
+            workspace_path=failure_workspace_path,
             exc=exc,
         )
         raise
     except UsageLimitExceeded as exc:
         limit_error = _build_tool_call_limit_error(exc)
+        failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
         _log_chat_failure(
             "Chat tool-call limit exceeded",
             vault_name=vault_name,
@@ -789,11 +864,14 @@ async def execute_chat_prompt(
             phase=phase,
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
+            context_template=prepared.context_template if prepared else context_template,
+            workspace_path=failure_workspace_path,
             extra=limit_error.details,
             exc=exc,
         )
         raise limit_error from exc
     except Exception as exc:
+        failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
         _log_chat_failure(
             "Chat execution failed",
             vault_name=vault_name,
@@ -804,6 +882,8 @@ async def execute_chat_prompt(
             phase=phase,
             prompt_length=len(prompt),
             attached_image_count=attached_image_count,
+            context_template=prepared.context_template if prepared else context_template,
+            workspace_path=failure_workspace_path,
             exc=exc,
         )
         if isinstance(exc, ContextTemplateExecutionError):
@@ -871,6 +951,8 @@ async def _stream_prepared_chat_prompt(
             phase="agent_stream",
             prompt_length=len(prepared.prompt_for_history),
             attached_image_count=prepared.attached_image_count,
+            context_template=prepared.context_template,
+            workspace_path=prepared.workspace_path,
             extra={
                 "history_message_count": len(prepared.message_history or []),
                 "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
@@ -934,9 +1016,10 @@ async def _stream_prepared_chat_prompt(
                         "tool_name": tool_name,
                         "arguments": _normalize_tool_args(tool_args),
                     }
-                    logger.info(
+                    logger.set_sinks(["validation"]).info(
                         "Streaming tool call started",
                         data={
+                            "event": "chat_tool_call_started",
                             "vault_name": vault_name,
                             "session_id": session_id,
                             "tool_call_id": tool_id,
@@ -969,9 +1052,10 @@ async def _stream_prepared_chat_prompt(
                         "result": _normalize_tool_result(result_content),
                     }
                     result_text = tool_result_as_text(result_content)
-                    logger.info(
+                    logger.set_sinks(["validation"]).info(
                         "Streaming tool call finished",
                         data={
+                            "event": "chat_tool_call_finished",
                             "vault_name": vault_name,
                             "session_id": session_id,
                             "tool_call_id": tool_id,
@@ -1009,7 +1093,9 @@ async def _stream_prepared_chat_prompt(
                 phase="agent_stream",
                 prompt_length=len(prepared.prompt_for_history),
                 attached_image_count=prepared.attached_image_count,
-                extra={"tool_activity": tool_activity},
+                context_template=prepared.context_template,
+                workspace_path=prepared.workspace_path,
+                extra=_summarize_tool_activity(tool_activity),
                 exc=exc,
             )
             cancel_chunk = {
@@ -1080,7 +1166,9 @@ async def _stream_prepared_chat_prompt(
                 phase="agent_stream",
                 prompt_length=len(prepared.prompt_for_history),
                 attached_image_count=prepared.attached_image_count,
-                extra={"tool_activity": tool_activity, **limit_error.details},
+                context_template=prepared.context_template,
+                workspace_path=prepared.workspace_path,
+                extra={**_summarize_tool_activity(tool_activity), **limit_error.details},
                 exc=exc,
             )
             error_chunk = {
@@ -1105,7 +1193,9 @@ async def _stream_prepared_chat_prompt(
                 phase="agent_stream",
                 prompt_length=len(prepared.prompt_for_history),
                 attached_image_count=prepared.attached_image_count,
-                extra={"tool_activity": tool_activity},
+                context_template=prepared.context_template,
+                workspace_path=prepared.workspace_path,
+                extra=_summarize_tool_activity(tool_activity),
                 exc=e,
             )
             error_chunk = {
@@ -1136,8 +1226,10 @@ async def _stream_prepared_chat_prompt(
                 phase="session_persist",
                 prompt_length=len(prepared.prompt_for_history),
                 attached_image_count=prepared.attached_image_count,
+                context_template=prepared.context_template,
+                workspace_path=prepared.workspace_path,
                 extra={
-                    "tool_activity": tool_activity,
+                    **_summarize_tool_activity(tool_activity),
                     "response_length": len(full_response),
                 },
             )
@@ -1186,6 +1278,8 @@ async def execute_chat_prompt_stream(
             streaming=True,
             phase="preflight",
             prompt_length=len(prompt),
+            context_template=context_template,
+            workspace_path=_CHAT_STORE.get_session_workspace_path(session_id, vault_name),
             exc=exc,
         )
         if isinstance(exc, ChatContextTemplateError):

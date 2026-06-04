@@ -317,3 +317,15 @@ Validation target:
 
 Move to Feature Development for the first implementation slice. Recommended first slice: chat/context activity summaries, because they are highly user-visible and currently rely on scattered phase logs plus validation-only context events.
 
+## Implementation Progress
+
+### 2026-06-04 — Chat and Context Activity Slice
+
+Implemented the first slice:
+
+- Added stable `chat_turn_started`, `chat_turn_completed`, `chat_turn_failed`, and `chat_turn_cancelled` event fields to chat lifecycle activity.
+- Added normalized chat `status`, `context_template`, `workspace_path`, and compact tool-call count summaries to chat terminal activity.
+- Moved streaming per-tool start/finish logs to validation-only while preserving browser SSE metadata and persisted chat tool events.
+- Added `context_template_run_started`, `context_template_run_completed`, and `context_template_run_failed` activity events around context-template execution.
+- Moved successful context helper details (`retrieve_history`, `assemble_context`, direct tool start/completion) to validation-only, while keeping direct tool failures activity-visible.
+- Added focused scenario coverage in chat failure, streaming chat failure, and default context scenarios.

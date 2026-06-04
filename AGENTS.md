@@ -37,4 +37,5 @@ Start with the phase that matches the current request. Open only that guide firs
 ## Reference Docs
 - [Project Structure](docs/agent-guides/project-structure.md)
 - [Coding Standards](docs/agent-guides/coding-standards.md)
+- [Activity Logging](docs/agent-guides/activity-logging.md)
 - [Git and Review Workflow](docs/agent-guides/git-and-review.md)

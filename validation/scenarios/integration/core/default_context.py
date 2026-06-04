@@ -157,6 +157,26 @@ Use the workspace-specific validation playbook.
             "Expected default context to truncate oversized user notes content",
         )
 
+        activity_log = self.call_api("/api/system/activity-log")
+        self.soft_assert_equal(activity_log.status_code, 200, "Activity log fetch should succeed")
+        activity_content = activity_log.json()["content"]
+        self.soft_assert(
+            '"event": "context_template_run_completed"' in activity_content,
+            "Expected activity log to include context-template completion event",
+        )
+        self.soft_assert(
+            '"template_name": "default.md"' in activity_content,
+            "Expected context-template activity to include template name",
+        )
+        self.soft_assert(
+            '"workspace_path": "Projects/WorkspaceA"' in activity_content,
+            "Expected context-template activity to include workspace path",
+        )
+        self.soft_assert(
+            '"summary_section_count": 1' in activity_content,
+            "Expected context-template activity to include summary section count",
+        )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()

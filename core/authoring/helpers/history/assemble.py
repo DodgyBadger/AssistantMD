@@ -51,7 +51,7 @@ async def execute(
     for item in history:
         assembled_messages.append(_normalize_history_context_item(item))
 
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_assemble_context_completed",
         data={
             "workflow_id": context.workflow_id,

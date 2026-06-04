@@ -54,6 +54,12 @@ class ChatFailureLoggingScenario(BaseScenario):
             assert '"message": "Chat execution failed"' in content, (
                 "Activity log should include structured chat execution failure"
             )
+            assert '"event": "chat_turn_failed"' in content, (
+                "Activity log should include stable chat failure event"
+            )
+            assert '"status": "failed"' in content, (
+                "Activity log should include normalized chat failure status"
+            )
             assert '"message": "Chat request failed before response"' in content, (
                 "Activity log should include API-layer failure context"
             )
