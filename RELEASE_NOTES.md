@@ -9,6 +9,7 @@ Chat sessions can now be associated with a workspace folder inside the active va
 - Set a workspace when you start or continue a chat so the default context setup can automatically load local orientation files.
 - Add `README.md` to a workspace folder to warm the session with what the folder is about, current state, important files, goals, or constraints.
 - Add `playbook.md` to a workspace folder for local working policy. It is merged after `AssistantMD/playbook.md`, so project-specific guidance can refine the vault-wide defaults without duplicating them.
+- `session_ops` search boosts results if in same workspace as current session, and can filter search and list results by workspace.
 - Refresh the system scripts manually from System / Misc to get the updated default context script.
 
 ### Activity log diagnostics

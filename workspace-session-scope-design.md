@@ -136,6 +136,41 @@ ON session_summaries(vault_name, workspace_path);
 The first implementation does not need to add workspace filtering to summary
 search, but it should preserve the data needed for that future query shape.
 
+## Session Retrieval Contract
+
+Workspace participates in `session_ops` retrieval as structured metadata, not
+as searchable content.
+
+Add one optional `filter` object to `session_ops`. The same filter applies to
+`list_sessions` and `search_sessions`:
+
+```json
+{
+  "workspace": "current"
+}
+```
+
+Supported workspace filter values:
+
+- `"current"`: use the active chat session workspace.
+- `"Path/To/Workspace"`: exact workspace match.
+- `"Path/To/Workspace/*"`: prefix match for descendants under that path.
+
+Do not support general glob patterns such as `"*/wetland_grant"` in the first
+implementation. Workspace filtering is path-oriented and deterministic.
+
+`list_sessions` applies the filter to the browsed session set.
+`search_sessions` applies the filter as an eligibility boundary before ranking.
+Without an explicit workspace filter, `search_sessions` may modestly boost
+same-workspace matches when the active session has a workspace. The distinction
+is:
+
+- Filter changes which sessions are eligible.
+- Boost changes only result ordering.
+
+Filters should remain metadata-only. Fuzzy concepts such as topic, domain,
+intent, named entities, and content belong in the `query` for `search_sessions`.
+
 ## Validation Rules
 
 Server-side validation is authoritative:

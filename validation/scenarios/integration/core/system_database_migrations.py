@@ -26,7 +26,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            3,
+            4,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -55,7 +55,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         with sqlite3.connect(system_root / "session_summaries.db") as conn:
             self.soft_assert_equal(
                 self._migration_versions(conn, "session_summaries"),
-                [1, 2],
+                [1, 2, 3],
                 "Session summary migration versions should be recorded",
             )
 

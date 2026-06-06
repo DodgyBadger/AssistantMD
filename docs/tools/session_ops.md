@@ -28,6 +28,8 @@ parameter.
 - `summary_status`: optional `list_sessions` filter. Defaults to `summarized`,
   which includes only sessions with stored summaries. Supported values are
   `summarized`, `any`, `current`, `pending`, and `stale`.
+- `filter`: optional metadata filter object for `list_sessions` and
+  `search_sessions`. Currently supports `workspace` only.
 - `data`: optional object for `upsert_session_summary`. Supported keys are
   `summary`, `domain`, `work_product`, `user_intent`, `named_entities`,
   `source_summary`, `artifacts`, and `metadata`.
@@ -81,6 +83,36 @@ Returns pretty-printed JSON text. Successful operations include a stable
 `status` and `operation` value, plus operation-specific data such as
 `session_summary` or ranked `matches`.
 
+## Filtering
+
+Use `filter` only for deterministic metadata constraints. Filtering changes
+which sessions are eligible before listing or search ranking happens.
+
+Supported filters:
+
+- `workspace`: restrict results by workspace path.
+  - `"current"`: use the current chat session's workspace.
+  - `"Path/To/Workspace"`: exact workspace match.
+  - `"Path/To/Workspace/*"`: prefix match for descendants under that path.
+
+Examples:
+
+```json
+{"filter": {"workspace": "current"}}
+```
+
+```json
+{"filter": {"workspace": "Projects/ClientA"}}
+```
+
+```json
+{"filter": {"workspace": "Library/Stewardship/*"}}
+```
+
+Do not use general glob patterns such as `"*/wetland_grant"`. Do not use
+`filter` for fuzzy concepts like topic, intent, domain, named entities, or
+content. Put those concepts in `query` for `search_sessions`.
+
 ## Notes
 
 - `list_sessions` returns a compact page of summarized chat-session rows ordered
@@ -104,6 +136,13 @@ Returns pretty-printed JSON text. Successful operations include a stable
   - `mode: "search"` is the default. It searches the supplied `query` across session-summary fields using
     lexical FTS/BM25 evidence plus semantic vector evidence.
   - `mode: "deep"` searches session-summary fields plus raw chat transcripts.
+- Without `filter`, `search_sessions` searches broadly across the vault. If the
+  current chat session has a workspace, exact same-workspace matches may be
+  boosted, but other workspaces remain eligible.
+- With `filter.workspace`, `search_sessions` searches only matching workspace
+  sessions, then ranks by relevance. Use workspace filtering when the workspace
+  is a hard boundary; rely on workspace boost when the workspace is only a
+  preference.
 - Use `search` for normal live-chat lookup when the current session does not
   yet have a stored summary, or when the user names a specific word, phrase, topic,
   or concept.
@@ -124,6 +163,12 @@ List sessions with missing summaries:
 
 ```json
 {"operation": "list_sessions", "summary_status": "pending", "limit": 50}
+```
+
+List recent sessions in the current workspace:
+
+```json
+{"operation": "list_sessions", "filter": {"workspace": "current"}, "limit": 50}
 ```
 
 Fetch the stored summary for the current session:
@@ -162,6 +207,12 @@ Search session-summary fields for a user-named concept:
 
 ```json
 {"operation": "search_sessions", "query": "greenhouse gas accounting", "limit": 5}
+```
+
+Search only sessions in the current workspace:
+
+```json
+{"operation": "search_sessions", "query": "greenhouse gas accounting", "filter": {"workspace": "current"}, "limit": 5}
 ```
 
 Search session-summary fields and raw transcripts:

@@ -26,10 +26,12 @@ class SessionOpsChatToolScenario(BaseScenario):
 
         import core.chat.executor as chat_executor
         from core.authoring.shared.tool_binding import resolve_tool_binding
+        from core.chat.chat_store import ChatStore
         from core.memory.session_summary import SessionSummaryStore
         from pydantic_ai.models.test import TestModel
 
         store = SessionSummaryStore(system_root=str(self._get_system_controller()._system_root))
+        chat_store = ChatStore(system_root=str(self._get_system_controller()._system_root))
 
         current_case = {"name": "upsert"}
 
@@ -96,7 +98,7 @@ class SessionOpsChatToolScenario(BaseScenario):
                 method="PUT",
                 params={"vault_name": vault.name},
                 data={
-                    "summary": "Chat summary testing",
+                    "summary": "Wetland grant planning notes from manual workspace.",
                     "domain": "validation",
                     "work_product": "test artifact",
                     "user_intent": "Validate that chat can write a session summary.",
@@ -113,8 +115,49 @@ class SessionOpsChatToolScenario(BaseScenario):
                 "Projects/ManualWorkspace",
                 "Manual summary updates should persist workspace_path",
             )
+            store.upsert_session_summary(
+                vault_name=vault.name,
+                session_id=session_id,
+                title="Manual workspace test",
+                summary="Wetland grant planning notes from manual workspace.",
+                domain="validation",
+                work_product="test artifact",
+                user_intent="Validate that chat can write a session summary.",
+                workspace_path="Projects/ManualWorkspace",
+                metadata=current.metadata if current else {},
+            )
 
-            from core.tools.session_ops import _list_sessions
+            sibling_session_id = "session_ops_chat_tool_sibling"
+            child_session_id = "session_ops_chat_tool_child"
+            chat_store.ensure_session(sibling_session_id, vault.name)
+            chat_store.ensure_session(child_session_id, vault.name)
+            store.upsert_session_summary(
+                vault_name=vault.name,
+                session_id=sibling_session_id,
+                title="Sibling workspace test",
+                summary="Wetland grant planning notes from another workspace.",
+                domain="validation",
+                work_product="test artifact",
+                user_intent="Validate workspace-filtered session search.",
+                workspace_path="Projects/OtherWorkspace",
+            )
+            store.upsert_session_summary(
+                vault_name=vault.name,
+                session_id=child_session_id,
+                title="Child workspace test",
+                summary="Wetland grant planning notes from a child workspace.",
+                domain="validation",
+                work_product="test artifact",
+                user_intent="Validate workspace subtree filtering.",
+                workspace_path="Projects/ManualWorkspace/Child",
+            )
+
+            from core.tools.session_ops import (
+                _list_sessions,
+                _parse_session_filter,
+                _search_session_summary_fields,
+                _search_sessions,
+            )
 
             listed = _list_sessions(
                 vault_name=vault.name,
@@ -138,6 +181,88 @@ class SessionOpsChatToolScenario(BaseScenario):
                 and listed_session.get("workspace_path") == "Projects/ManualWorkspace",
                 "session_ops list_sessions should expose workspace_path in compact rows",
             )
+            exact_filter = _parse_session_filter(
+                {"workspace": "Projects/ManualWorkspace"},
+                vault_name=vault.name,
+                active_session_id=session_id,
+            )
+            exact_listed = _list_sessions(
+                vault_name=vault.name,
+                limit=10,
+                cursor="",
+                summary_status="any",
+                workspace_filter=exact_filter,
+            )
+            self.soft_assert_equal(
+                [row.get("session_id") for row in exact_listed.get("sessions", [])],
+                [session_id],
+                "session_ops list_sessions should support exact workspace filtering",
+            )
+            subtree_filter = _parse_session_filter(
+                {"workspace": "Projects/ManualWorkspace/*"},
+                vault_name=vault.name,
+                active_session_id=session_id,
+            )
+            subtree_listed = _list_sessions(
+                vault_name=vault.name,
+                limit=10,
+                cursor="",
+                summary_status="any",
+                workspace_filter=subtree_filter,
+            )
+            self.soft_assert_equal(
+                [row.get("session_id") for row in subtree_listed.get("sessions", [])],
+                [child_session_id],
+                "session_ops list_sessions should support workspace subtree filtering",
+            )
+
+            original_search_by_field = SessionSummaryStore.search_session_summaries_by_field
+
+            async def _no_vector_matches(self, **kwargs):
+                del self, kwargs
+                return ()
+
+            SessionSummaryStore.search_session_summaries_by_field = _no_vector_matches
+            try:
+                filtered_candidates = await _search_session_summary_fields(
+                    store=store,
+                    vault_name=vault.name,
+                    query="wetland grant planning",
+                    limit=10,
+                    workspace_filter=exact_filter,
+                )
+                self.soft_assert_equal(
+                    sorted(filtered_candidates),
+                    [session_id],
+                    "session_ops search should apply workspace filter before ranking candidates",
+                )
+                boosted_search = await _search_sessions(
+                    store=store,
+                    vault_name=vault.name,
+                    mode="search",
+                    query="wetland grant planning",
+                    limit=10,
+                    active_workspace_path="Projects/ManualWorkspace",
+                )
+                first_match = (
+                    boosted_search.get("matches", [{}])[0]
+                    if boosted_search.get("matches")
+                    else {}
+                )
+                self.soft_assert_equal(
+                    first_match.get("session_id"),
+                    session_id,
+                    "session_ops search_sessions should boost exact current-workspace matches",
+                )
+                self.soft_assert(
+                    any(
+                        evidence.get("source") == "workspace"
+                        for evidence in first_match.get("evidence", [])
+                    ),
+                    "workspace boost should be visible as search evidence",
+                )
+            finally:
+                SessionSummaryStore.search_session_summaries_by_field = original_search_by_field
 
             current_case["name"] = "get"
             fetched = self.call_api(

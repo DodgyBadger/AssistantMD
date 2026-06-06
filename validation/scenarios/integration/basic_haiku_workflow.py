@@ -38,7 +38,7 @@ class BasicHaikuWorkflowScenario(BaseScenario):
         )
         job_event = self.assert_event_contains(
             events,
-            name="job_synced",
+            name="workflow_job_created",
             expected={"job_id": "HaikuVault__haiku_writer", "action": "created"},
         )
         trigger = str(job_event.get("data", {}).get("trigger", "")).lower()
