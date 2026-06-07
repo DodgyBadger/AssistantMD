@@ -114,13 +114,15 @@ const configElements = {
     configTab: document.getElementById('configuration-tab')
 };
 
+let sessionControls;
+
 const sessionSummary = window.SessionSummary.create({
     state,
     elements: chatElements,
     icons: window.AssistantMDIcons,
     utils: window.AssistantMDUtils,
     callbacks: {
-        renderSessionSelector,
+        renderSessionSelector: () => sessionControls.renderSelector(),
         fetchSessions,
     },
 });
@@ -132,6 +134,22 @@ const workspacePicker = window.WorkspacePicker.create({
     callbacks: {
         fetchSessions,
         addChatErrorMessage,
+    },
+});
+
+sessionControls = window.SessionControls.create({
+    state,
+    elements: chatElements,
+    composeState: chatComposeState,
+    utils: window.AssistantMDUtils,
+    sessionSummary,
+    callbacks: {
+        loadSession,
+        clearSession,
+        clearPendingAttachments,
+        renderChatEmptyState,
+        syncChatControlLocks,
+        updateStatus,
     },
 });
 
@@ -559,182 +577,11 @@ function setToolMenuOpen(open) {
     }
 }
 
-function setSessionMenuOpen(open) {
-    chatComposeState.sessionMenuOpen = Boolean(open);
-    if (!chatComposeState.sessionMenuOpen) {
-        sessionSummary.closePreview();
-    }
-    if (chatElements.sessionDropdown) {
-        chatElements.sessionDropdown.classList.toggle('open', chatComposeState.sessionMenuOpen);
-    }
-    if (chatElements.sessionDropdownMenu) {
-        chatElements.sessionDropdownMenu.classList.toggle('hidden', !chatComposeState.sessionMenuOpen);
-    }
-    if (chatElements.sessionDropdownTrigger) {
-        chatElements.sessionDropdownTrigger.setAttribute('aria-expanded', chatComposeState.sessionMenuOpen ? 'true' : 'false');
-    }
-}
-
-function sessionTitle(session) {
-    if (!session || !session.session_id) {
-        return 'New session';
-    }
-    const title = String(session.title || '').trim();
-    return title || session.session_id;
-}
-
-function sessionActivityLabel(session) {
-    if (!session || !session.session_id) {
-        return '';
-    }
-    const rawDate = session.last_activity_at || session.created_at || '';
-    const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
-    const activity = parsed && !Number.isNaN(parsed.getTime())
-        ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-        : rawDate;
-    return activity ? `Updated ${activity}` : 'No activity yet';
-}
-
-function formatSessionOptionLabel(session) {
-    if (!session || !session.session_id) {
-        return 'New session';
-    }
-    const meta = sessionActivityLabel(session);
-    return meta ? `${sessionTitle(session)} (${meta})` : sessionTitle(session);
-}
-
-function renderSessionSelector() {
-    if (!chatElements.sessionDropdownMenu || !chatElements.sessionDropdownLabel) return;
-
-    const activeSession = state.sessions.find((session) => session.session_id === state.sessionId) || null;
-    const activeMeta = sessionActivityLabel(activeSession);
-    chatElements.sessionDropdownLabel.innerHTML = `
-        <span class="session-dropdown-title">${escapeHtml(sessionTitle(activeSession))}</span>
-        ${activeMeta ? `<span class="session-dropdown-meta">${escapeHtml(activeMeta)}</span>` : ''}
-    `;
-
-    const rows = [
-        renderSessionDropdownRow(null, !activeSession),
-        ...state.sessions.map((session) => renderSessionDropdownRow(session, session.session_id === state.sessionId)),
-    ];
-    chatElements.sessionDropdownMenu.innerHTML = rows.join('');
-    updateSessionSummaryTrigger();
-}
-
-function renderSessionDropdownRow(session, isActive) {
-    const sessionId = session?.session_id || '';
-    const hasSummary = Boolean(session?.has_summary);
-    const meta = sessionActivityLabel(session);
-    const previewAttribute = hasSummary ? ` data-session-summary-preview-id="${escapeHtml(sessionId)}"` : '';
-    const previewFocusAttribute = hasSummary ? ` data-session-summary-preview-focus-id="${escapeHtml(sessionId)}"` : '';
-    const marker = hasSummary ? '<span class="session-summary-marker" aria-hidden="true">✦</span>' : '';
-    return `
-        <div
-            class="session-dropdown-option${isActive ? ' is-active' : ''}"
-            role="option"
-            aria-selected="${isActive ? 'true' : 'false'}"
-        >
-            <button type="button" class="session-dropdown-select-button" data-session-id="${escapeHtml(sessionId)}"${previewFocusAttribute}>
-                <span class="session-dropdown-label">
-                    <span class="session-dropdown-title-wrap"${previewAttribute}>
-                        <span class="session-dropdown-title">${escapeHtml(sessionTitle(session))}</span>
-                        ${marker}
-                    </span>
-                    ${meta ? `<span class="session-dropdown-meta">${escapeHtml(meta)}</span>` : ''}
-                </span>
-            </button>
-        </div>
-    `;
-}
-
-function updateSessionSummaryTrigger() {
-    if (!chatElements.sessionSummaryTrigger) return;
-    const session = sessionSummary.selectedSessionWithSummary();
-    if (!session) {
-        chatElements.sessionSummaryTrigger.classList.remove('is-visible');
-        chatElements.sessionSummaryTrigger.setAttribute('aria-hidden', 'true');
-        return;
-    }
-    chatElements.sessionSummaryTrigger.classList.add('is-visible');
-    chatElements.sessionSummaryTrigger.removeAttribute('aria-hidden');
-}
-
-async function selectSessionFromDropdown(sessionId) {
-    setSessionMenuOpen(false);
-    if (!sessionId) {
-        await clearSession(false);
-    } else {
-        await loadSession(sessionId);
-    }
-}
-
-function renderCompactionProgress(status) {
-    const fill = chatElements.compactionFill;
-    const track = chatElements.compactionTrack;
-    if (!fill || !track) return;
-
-    fill.classList.remove('compaction-warm', 'compaction-hot');
-    if (!status || !status.compaction_token_threshold || status.compaction_type === 'none') {
-        fill.style.width = '0%';
-        track.title = status && status.compaction_type === 'none'
-            ? 'Chat history compaction is disabled'
-            : 'Chat history compaction status unavailable';
-        return;
-    }
-
-    const threshold = Math.max(Number(status.compaction_token_threshold) || 0, 1);
-    const tokens = Math.max(Number(status.estimated_tokens_before) || 0, 0);
-    const percent = Math.round((tokens / threshold) * 100);
-    const boundedPercent = tokens > 0 ? Math.max(2, Math.min(percent, 100)) : 0;
-    fill.style.width = `${boundedPercent}%`;
-    if (percent >= 100) {
-        fill.classList.add('compaction-hot');
-    } else if (percent >= 70) {
-        fill.classList.add('compaction-warm');
-    }
-    const actionText = status.compaction_type === 'auto'
-        ? 'Chat will be automatically compacted at 100%.'
-        : 'Ask chat to compact when ready.';
-    track.title = `${percent}% (${tokens.toLocaleString()} / ${threshold.toLocaleString()} threshold). ${actionText}`;
-}
-
-function clearCompactionProgress() {
-    state.compactionStatusRequestId += 1;
-    renderCompactionProgress(null);
-}
-
-async function refreshCompactionProgress() {
-    const vault = chatElements.vaultSelector?.value || '';
-    const sessionId = state.sessionId || '';
-    if (!vault || !sessionId) {
-        clearCompactionProgress();
-        return;
-    }
-
-    const requestId = state.compactionStatusRequestId + 1;
-    state.compactionStatusRequestId = requestId;
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}/compaction-status?vault_name=${encodeURIComponent(vault)}`
-        );
-        if (requestId !== state.compactionStatusRequestId) return;
-        if (!response.ok) {
-            throw new Error('Failed to fetch chat compaction status');
-        }
-        renderCompactionProgress(await response.json());
-    } catch (error) {
-        if (requestId === state.compactionStatusRequestId) {
-            console.error('Error fetching chat compaction status:', error);
-            renderCompactionProgress(null);
-        }
-    }
-}
-
 async function fetchSessions(vault, preferredSessionId = '') {
     state.sessions = [];
-    renderSessionSelector();
+    sessionControls.renderSelector();
     if (!vault) {
-        clearCompactionProgress();
+        sessionControls.clearCompactionProgress();
         return;
     }
     try {
@@ -743,12 +590,12 @@ async function fetchSessions(vault, preferredSessionId = '') {
             throw new Error('Failed to fetch chat sessions');
         }
         state.sessions = await response.json();
-        renderSessionSelector();
+        sessionControls.renderSelector();
         if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
             state.sessionId = preferredSessionId;
-            renderSessionSelector();
+            sessionControls.renderSelector();
         }
-        await refreshCompactionProgress();
+        await sessionControls.refreshCompactionProgress();
     } catch (error) {
         console.error('Error fetching chat sessions:', error);
     }
@@ -761,8 +608,8 @@ async function loadSession(sessionId) {
     }
     try {
         state.sessionId = sessionId;
-        renderSessionSelector();
-        refreshCompactionProgress();
+        sessionControls.renderSelector();
+        sessionControls.refreshCompactionProgress();
         state.isLoading = true;
         syncChatControlLocks();
         const response = await fetch(
@@ -778,10 +625,10 @@ async function loadSession(sessionId) {
             chatElements.workspacePathInput.value = payload.workspace?.path || '';
         }
         renderPersistedSession(payload);
-        renderSessionSelector();
-        updateSessionTitleRow();
+        sessionControls.renderSelector();
+        sessionControls.updateTitleRow();
         updateStatus();
-        await refreshCompactionProgress();
+        await sessionControls.refreshCompactionProgress();
     } catch (error) {
         console.error('Error loading chat session:', error);
         addChatErrorMessage(error.message);
@@ -1203,7 +1050,7 @@ function populateSelectors() {
     });
 
     updateToolDropdownSummary();
-    renderSessionSelector();
+    sessionControls.renderSelector();
     syncChatControlLocks();
 }
 
@@ -1868,7 +1715,7 @@ function formatActivityChatSessionLabel(session) {
     if (title) {
         return title;
     }
-    return formatSessionOptionLabel(session);
+    return sessionControls.formatOptionLabel(session);
 }
 
 function renderActivityKindLabel(group) {
@@ -2128,87 +1975,7 @@ function setupEventListeners() {
         setChatComposerHeight(current, { persist: false });
     });
 
-    if (chatElements.sessionDropdownTrigger) {
-        chatElements.sessionDropdownTrigger.addEventListener('click', (event) => {
-            event.stopPropagation();
-            if (chatElements.sessionDropdownTrigger.disabled) {
-                return;
-            }
-            setSessionMenuOpen(!chatComposeState.sessionMenuOpen);
-        });
-    }
-
-    if (chatElements.sessionDropdownMenu) {
-        chatElements.sessionDropdownMenu.addEventListener('click', async (event) => {
-            const target = event.target;
-            if (!(target instanceof Element)) return;
-            const option = target.closest('[data-session-id]');
-            if (option instanceof HTMLElement) {
-                event.preventDefault();
-                await selectSessionFromDropdown(option.dataset.sessionId || '');
-            }
-        });
-        chatElements.sessionDropdownMenu.addEventListener('mouseover', (event) => {
-            const target = event.target;
-            if (!(target instanceof Element)) return;
-            const previewTarget = target.closest('[data-session-summary-preview-id]');
-            if (!(previewTarget instanceof HTMLElement)) return;
-            const related = event.relatedTarget;
-            if (related instanceof Element && previewTarget.contains(related)) return;
-            const sessionId = previewTarget.dataset.sessionSummaryPreviewId || '';
-            const session = state.sessions.find((item) => item.session_id === sessionId);
-            sessionSummary.openPreview(previewTarget, session);
-        });
-        chatElements.sessionDropdownMenu.addEventListener('mouseout', (event) => {
-            const target = event.target;
-            if (!(target instanceof Element)) return;
-            const previewTarget = target.closest('[data-session-summary-preview-id]');
-            if (!(previewTarget instanceof HTMLElement)) return;
-            const related = event.relatedTarget;
-            if (related instanceof Element && previewTarget.contains(related)) return;
-            sessionSummary.closePreview();
-        });
-        chatElements.sessionDropdownMenu.addEventListener('focusin', (event) => {
-            const target = event.target;
-            if (!(target instanceof Element)) return;
-            const previewTarget = target.closest('[data-session-summary-preview-focus-id]');
-            if (!(previewTarget instanceof HTMLElement)) return;
-            const sessionId = previewTarget.dataset.sessionSummaryPreviewFocusId || '';
-            const session = state.sessions.find((item) => item.session_id === sessionId);
-            sessionSummary.openPreview(previewTarget, session);
-        });
-        chatElements.sessionDropdownMenu.addEventListener('focusout', (event) => {
-            const target = event.target;
-            if (!(target instanceof Element)) return;
-            if (target.closest('[data-session-summary-preview-focus-id]')) {
-                sessionSummary.closePreview();
-            }
-        });
-    }
-
-    if (chatElements.sessionSummaryTrigger) {
-        chatElements.sessionSummaryTrigger.addEventListener('mouseenter', () => sessionSummary.warmPreview(sessionSummary.selectedSessionWithSummary()));
-        chatElements.sessionSummaryTrigger.addEventListener('focus', () => sessionSummary.warmPreview(sessionSummary.selectedSessionWithSummary()));
-        chatElements.sessionSummaryTrigger.addEventListener('click', () => sessionSummary.openModalForSession(sessionSummary.selectedSessionWithSummary()));
-    }
-
-    if (chatElements.sessionTitleSave) {
-        chatElements.sessionTitleSave.addEventListener('click', saveSessionTitle);
-    }
-
-    if (chatElements.sessionTitleInput) {
-        chatElements.sessionTitleInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') saveSessionTitle();
-        });
-    }
-
-    if (chatElements.sessionDeleteBtn) {
-        chatElements.sessionDeleteBtn.addEventListener('click', deleteCurrentSession);
-    }
-
-    if (chatElements.sessionExportBtn) {
-        chatElements.sessionExportBtn.addEventListener('click', exportCurrentSession);
-    }
+    sessionControls.attachEventListeners();
 
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.addEventListener('input', () => {
@@ -2327,7 +2094,7 @@ function setupEventListeners() {
         if (chatComposeState.sessionMenuOpen) {
             const clickedSessionDropdown = chatElements.sessionDropdown && chatElements.sessionDropdown.contains(target);
             if (!clickedSessionDropdown) {
-                setSessionMenuOpen(false);
+                sessionControls.setMenuOpen(false);
                 sessionSummary.closePreview();
             }
         }
@@ -2451,9 +2218,9 @@ function handleVaultChange() {
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';
     }
-    clearCompactionProgress();
-    renderSessionSelector();
-    updateSessionTitleRow();
+    sessionControls.clearCompactionProgress();
+    sessionControls.renderSelector();
+    sessionControls.updateTitleRow();
     renderChatEmptyState();
     updateStatus();
     populateTemplates([]); // reset while loading
@@ -2547,9 +2314,9 @@ async function sendMessage() {
     const requestSessionId = state.sessionId || createClientSessionId(vault);
     state.sessionId = requestSessionId;
     state.isWorkspaceUnlocked = false;
-    renderSessionSelector();
-    updateSessionTitleRow();
-    refreshCompactionProgress();
+    sessionControls.renderSelector();
+    sessionControls.updateTitleRow();
+    sessionControls.refreshCompactionProgress();
     syncChatControlLocks();
     state.activeChatSessionId = requestSessionId;
     const abortController = new AbortController();
@@ -2615,9 +2382,9 @@ async function sendMessage() {
         if (sessionId) {
             state.sessionId = sessionId;
             syncChatControlLocks();
-            renderSessionSelector();
-            updateSessionTitleRow();
-            refreshCompactionProgress();
+            sessionControls.renderSelector();
+            sessionControls.updateTitleRow();
+            sessionControls.refreshCompactionProgress();
         }
 
         // Fallback for environments that do not support streaming
@@ -2740,7 +2507,7 @@ async function sendMessage() {
         chatElements.sendBtn.disabled = false;
         syncChatControlLocks();
         chatElements.chatInput.focus();
-        refreshCompactionProgress();
+        sessionControls.refreshCompactionProgress();
     }
 }
 
@@ -3433,111 +3200,6 @@ async function forkCurrentSession(sequenceIndex, button) {
 }
 
 // Clear session
-function updateSessionTitleRow() {
-    const row = chatElements.sessionTitleRow;
-    const input = chatElements.sessionTitleInput;
-    if (!row || !input) return;
-
-    const sessionId = state.sessionId;
-    if (!sessionId) {
-        row.classList.add('hidden');
-        input.value = '';
-        return;
-    }
-
-    const session = state.sessions.find((s) => s.session_id === sessionId);
-    input.value = session?.title || '';
-    row.classList.remove('hidden');
-}
-
-async function saveSessionTitle() {
-    const sessionId = state.sessionId;
-    const vault = chatElements.vaultSelector?.value || '';
-    const input = chatElements.sessionTitleInput;
-    const btn = chatElements.sessionTitleSave;
-    if (!sessionId || !vault || !input || !btn) return;
-
-    const title = input.value.trim() || null;
-    btn.disabled = true;
-    try {
-        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/title`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault_name: vault, title }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        // Update local state so the picker label refreshes immediately
-        const session = state.sessions.find((s) => s.session_id === sessionId);
-        if (session) session.title = title;
-        renderSessionSelector();
-    } catch (error) {
-        console.error('Failed to save session title:', error);
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-async function exportCurrentSession() {
-    const sessionId = state.sessionId;
-    const vault = chatElements.vaultSelector?.value || '';
-    const btn = chatElements.sessionExportBtn;
-    if (!sessionId || !vault || !btn) return;
-
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Exporting...';
-    try {
-        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/export`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault_name: vault }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const payload = await response.json();
-        alert(`Transcript exported to ${payload.filename}`);
-    } catch (error) {
-        console.error('Failed to export session transcript:', error);
-        alert('Failed to export transcript');
-    } finally {
-        btn.textContent = originalText;
-        syncChatControlLocks();
-    }
-}
-
-async function deleteCurrentSession() {
-    const sessionId = state.sessionId;
-    const vault = chatElements.vaultSelector?.value || '';
-    const btn = chatElements.sessionDeleteBtn;
-    if (!sessionId || !vault || !btn) return;
-
-    if (!confirm(
-        `Delete session "${sessionId}"? This removes it from the chat session list and database only. Exported transcripts are not deleted.`
-    )) return;
-
-    btn.disabled = true;
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`,
-            { method: 'DELETE' }
-        );
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        state.sessions = state.sessions.filter((s) => s.session_id !== sessionId);
-        state.sessionId = null;
-        clearPendingAttachments();
-        renderChatEmptyState();
-        renderSessionSelector();
-        updateSessionTitleRow();
-        syncChatControlLocks();
-        updateStatus();
-    } catch (error) {
-        console.error('Failed to delete session:', error);
-    } finally {
-        btn.disabled = false;
-    }
-}
 
 async function clearSession(confirmReset = true) {
     const confirmed = confirmReset
@@ -3550,11 +3212,11 @@ async function clearSession(confirmReset = true) {
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';
     }
-    clearCompactionProgress();
+    sessionControls.clearCompactionProgress();
     clearPendingAttachments();
     renderChatEmptyState();
-    renderSessionSelector();
-    updateSessionTitleRow();
+    sessionControls.renderSelector();
+    sessionControls.updateTitleRow();
     syncChatControlLocks();
     updateStatus();
 }

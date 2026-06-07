@@ -174,7 +174,7 @@ Validation target:
 
 ### Phase 3: Extract Session Controls
 
-Status: next.
+Status: complete in the current refactor branch.
 
 Why:
 
@@ -202,8 +202,11 @@ Dependencies:
 Validation target:
 
 - Manual smoke: select existing session, new session, summary peek, summary modal, title save, export/delete buttons.
+- Static checks: `node --check` for all scripts and `git diff --check`. Done.
 
 ### Phase 4: Extract Dashboard View
+
+Status: next.
 
 Why:
 
