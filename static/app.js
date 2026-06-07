@@ -953,11 +953,14 @@ function renderSessionSummaryPreview(summary) {
     if (!summary?.has_summary) {
         return '<p class="session-summary-preview-text text-txt-secondary">No summary record found.</p>';
     }
-    const summaryText = String(summary.summary || summary.user_intent || '').trim();
+    const rawSummaryText = String(summary.summary || summary.user_intent || '').trim();
+    const summaryText = rawSummaryText
+        ? truncateText(rawSummaryText, 520)
+        : 'No summary text captured.';
     const workspacePath = String(summary.workspace_path || '').trim();
     return `
         <div class="session-summary-preview-title">Session Summary</div>
-        <div class="session-summary-preview-text">${escapeHtml(summaryText || 'No summary text captured.')}</div>
+        <div class="session-summary-preview-text">${escapeHtml(summaryText)}</div>
         <div class="session-summary-preview-workspace">
             <span class="font-semibold text-txt-primary">Workspace:</span>
             ${escapeHtml(workspacePath || 'Not set')}
