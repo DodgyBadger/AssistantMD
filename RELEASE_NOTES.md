@@ -10,7 +10,7 @@
 - The authoring skill now guides chat agents to interview users one question at a time when helping shape customization or workflow goals.
 - Updated Pydantic AI and Monty dependencies, including the recent Monty sandbox security fix.
 - CI now catches stray root-level markdown planning files before merge, while allowing approved root docs such as release notes and third-party notices.
-- UI improvements
+- Improvements to the chat UI.
 - Refactored monolithic app.js into smaller modules.
 
 
