@@ -273,35 +273,45 @@ Validation target:
 - Manual smoke or targeted scenario if available: run workflow, stop workflow, edit workflow file.
 - Static checks: `node --check` for all scripts and `git diff --check`. Done.
 
-### Phase 7: Extract Chat Streaming
+### Phase 7: Extract Chat Rendering
 
-Status: next.
+Status: complete in the current refactor branch.
 
-Why last:
+Why:
 
-- Highest risk and most central behavior.
-- Touches active API calls, SSE parsing, message rendering, markdown, tool calls, copy/fork, and scroll behavior.
+- Removes the DOM-heavy chat rendering code while leaving the higher-risk request/stream/cancel lifecycle stable.
+- Gives message rendering, persisted transcript rendering, markdown/math post-processing, tool-call UI, copy controls, and fork controls a clear owner.
 
 Move:
 
-- `sendMessage`
-- SSE event parsing
 - assistant streaming message creation
+- persisted session rendering
 - tool call rendering
 - assistant finalization
-- markdown/math post-processing if needed
-- copy/fork button helpers if not already in shared utilities
+- markdown/math post-processing
+- copy/fork button helpers
 
 Keep in `app.js`:
 
 - state object initially
-- high-level send button wiring initially
+- `sendMessage`
+- `stopChatResponse`
+- SSE event parsing
 - vault/session/workspace selection inputs
 
 Validation target:
 
 - Manual smoke: send basic message, send message with tool calls, stop response, copy response, fork from assistant message.
-- If validation coverage exists for chat streaming, extend that scenario rather than adding a separate noisy one.
+- Static checks: `node --check` for all scripts and `git diff --check`. Done.
+
+### Later: Extract Chat Streaming Lifecycle
+
+Status: deferred.
+
+Why:
+
+- The request lifecycle touches selected vault/model/tools, workspace path, attachments, session creation, cancellation, session refresh, and error handling.
+- It should be extracted only after the rendering boundary has settled.
 
 ## Framework Decision Point
 
