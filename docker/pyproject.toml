@@ -11,7 +11,7 @@ dependencies = [
     "uvicorn[standard]>=0.22.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
-    "pydantic-ai==1.85.1",
+    "pydantic-ai==1.106.0",
     "pydantic-ai-harness[code-mode]==0.1.2",
     "fastapi>=0.100.0",
     "python-multipart",
@@ -27,7 +27,7 @@ dependencies = [
     "markdown-it-py>=4.0.0",
     "playwright>=1.57.0",
     "pymupdf>=1.24.10",
-    "pydantic-monty",
+    "pydantic-monty==0.0.18",
 ]
 
 [project.optional-dependencies]
