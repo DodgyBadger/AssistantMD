@@ -1,35 +1,18 @@
-// Shared SVG icon for copy buttons
-const COPY_ICON_SVG = `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="8" y="8" width="14" height="14" rx="2" ry="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
-        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-    </svg>
-`.trim();
+const {
+    COPY_ICON_SVG,
+    FORK_ICON_SVG,
+    SESSION_SUMMARY_ICON_SVG,
+    TYPING_DOTS_HTML,
+} = window.AssistantMDIcons;
 
-const FORK_ICON_SVG = `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M16 3h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M8 3H3v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="m21 3-7.828 7.828A4 4 0 0 0 12 13.657V22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-    </svg>
-`.trim();
-
-const SESSION_SUMMARY_ICON_SVG = `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M20 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M22 5h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M4 17v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M5 18H3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-    </svg>
-`.trim();
-
-const TYPING_DOTS_HTML = `
-    <span class="typing-dot"></span>
-    <span class="typing-dot"></span>
-    <span class="typing-dot"></span>
-`.trim();
+const {
+    escapeHtml,
+    truncateText,
+    formatShortDate,
+    getCopyableText,
+    handleCopy,
+    flashCopyFeedback,
+} = window.AssistantMDUtils;
 
 const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
 
@@ -130,6 +113,27 @@ const configElements = {
     statusMessages: document.getElementById('config-status-messages'),
     configTab: document.getElementById('configuration-tab')
 };
+
+const sessionSummary = window.SessionSummary.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        renderSessionSelector,
+        fetchSessions,
+    },
+});
+
+const workspacePicker = window.WorkspacePicker.create({
+    state,
+    elements: chatElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        fetchSessions,
+        addChatErrorMessage,
+    },
+});
 
 function isChatNearBottom(element, threshold = 64) {
     if (!element) return true;
@@ -513,236 +517,8 @@ function syncChatControlLocks() {
     if (chatElements.sessionDeleteBtn) {
         chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
     }
-    syncWorkspaceControlState();
+    workspacePicker.syncControls();
     syncSendButtonState();
-}
-
-function syncWorkspaceControlState() {
-    const input = chatElements.workspacePathInput;
-    if (!input) return;
-
-    const hasSession = Boolean(state.sessionId);
-    const hasWorkspace = Boolean(input.value.trim());
-    const locked = state.isLoading || (hasSession && hasWorkspace && !state.isWorkspaceUnlocked);
-
-    input.disabled = locked;
-    input.title = locked
-        ? 'Workspace is locked for this session. Unlock to edit.'
-        : '';
-
-    if (chatElements.workspacePickerBtn) {
-        chatElements.workspacePickerBtn.disabled = state.isLoading || (locked && !state.isWorkspaceUnlocked);
-    }
-    if (chatElements.workspaceUnlockBtn) {
-        chatElements.workspaceUnlockBtn.classList.toggle('hidden', !(hasSession && hasWorkspace && locked));
-        chatElements.workspaceUnlockBtn.disabled = state.isLoading;
-    }
-}
-
-function currentWorkspacePath() {
-    return (chatElements.workspacePathInput?.value || '').trim();
-}
-
-async function saveWorkspacePath() {
-    const input = chatElements.workspacePathInput;
-    const vault = chatElements.vaultSelector?.value || '';
-    const sessionId = state.sessionId || '';
-    if (!input || !vault || !sessionId || state.isLoading) return;
-
-    const path = currentWorkspacePath();
-    try {
-        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/workspace`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault_name: vault, path }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const payload = await response.json().catch(() => null);
-        input.value = payload?.path || '';
-        state.isWorkspaceUnlocked = false;
-        await fetchSessions(vault, sessionId);
-    } catch (error) {
-        console.error('Failed to save workspace path:', error);
-        addChatErrorMessage(`Workspace not saved: ${error.message}`);
-    } finally {
-        syncWorkspaceControlState();
-    }
-}
-
-function unlockWorkspacePath() {
-    if (!chatElements.workspacePathInput || state.isLoading) return;
-    const confirmed = window.confirm(
-        'Unlock workspace editing for this session? Future turns will use the updated workspace path.'
-    );
-    if (!confirmed) return;
-    state.isWorkspaceUnlocked = true;
-    syncWorkspaceControlState();
-    chatElements.workspacePathInput.focus();
-}
-
-function openWorkspacePickerModal() {
-    if (!chatElements.workspacePathInput) return;
-    const vault = chatElements.vaultSelector?.value || '';
-    if (!vault) {
-        alert('Select a vault before choosing a workspace.');
-        return;
-    }
-    closeWorkspacePickerModal();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'workspace-picker-modal';
-    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    overlay.innerHTML = `
-        <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="workspace-picker-modal-title">
-            <div class="app-modal-header flex-none">
-                <div class="app-modal-title-block">
-                    <h2 id="workspace-picker-modal-title" class="text-lg font-semibold text-txt-primary">Workspace</h2>
-                    <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(chatElements.vaultSelector?.value || 'No vault selected')}</p>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workspace-picker-close>Close</button>
-                </div>
-            </div>
-            <div id="workspace-picker-body" class="p-4 flex-1 overflow-y-auto">
-                <div class="text-sm text-txt-secondary">Loading folders...</div>
-            </div>
-        </section>
-    `;
-
-    overlay.addEventListener('click', async (event) => {
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        if (event.target === overlay || event.target.closest('[data-workspace-picker-close]')) {
-            closeWorkspacePickerModal();
-            return;
-        }
-        const toggle = target.closest('[data-workspace-toggle]');
-        if (toggle instanceof HTMLElement) {
-            await toggleWorkspaceTreeNode(toggle);
-            return;
-        }
-        const selectPath = target.closest('[data-workspace-select]')?.getAttribute('data-workspace-select');
-        if (selectPath !== null && selectPath !== undefined) {
-            chatElements.workspacePathInput.value = selectPath;
-            state.isWorkspaceUnlocked = true;
-            syncWorkspaceControlState();
-            await saveWorkspacePath();
-            closeWorkspacePickerModal();
-        }
-    });
-
-    document.body.appendChild(overlay);
-    loadWorkspaceDirectory(overlay).catch((error) => {
-        const body = overlay.querySelector('#workspace-picker-body');
-        if (body) {
-            body.innerHTML = `<p class="state-error">Unable to load folders: ${escapeHtml(error.message)}</p>`;
-        }
-    });
-}
-
-function closeWorkspacePickerModal() {
-    document.getElementById('workspace-picker-modal')?.remove();
-}
-
-async function loadWorkspaceDirectory(modal, path) {
-    const body = modal.querySelector('#workspace-picker-body');
-    const vault = chatElements.vaultSelector?.value || '';
-    if (!body || !vault) return;
-
-    body.innerHTML = '<div class="text-sm text-txt-secondary">Loading folders...</div>';
-    const payload = await fetchWorkspaceDirectories(path || '');
-    const directories = Array.isArray(payload.directories) ? payload.directories : [];
-    const selectedPath = currentWorkspacePath();
-
-    body.innerHTML = `
-        <div class="space-y-3">
-            <div class="p-3 rounded border border-border-primary bg-app-elevated">
-                <div class="text-xs uppercase text-txt-secondary">Selected workspace</div>
-                <div class="mt-1 text-sm cell-mono text-txt-primary">${escapeHtml(selectedPath || 'No workspace')}</div>
-            </div>
-            <div class="workspace-tree" role="tree">
-                ${directories.length ? directories.map((directory) => renderWorkspaceDirectoryRow(directory, 0)).join('') : '<p class="text-sm text-txt-secondary">No folders available.</p>'}
-            </div>
-        </div>
-    `;
-}
-
-async function fetchWorkspaceDirectories(path) {
-    const vault = chatElements.vaultSelector?.value || '';
-    const params = new URLSearchParams();
-    if (path) params.set('path', path);
-    const suffix = params.toString() ? `?${params.toString()}` : '';
-    const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/directories${suffix}`);
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${response.status}`);
-    }
-    return response.json();
-}
-
-async function toggleWorkspaceTreeNode(toggle) {
-    const row = toggle.closest('[data-workspace-row]');
-    if (!(row instanceof HTMLElement)) return;
-
-    const path = row.getAttribute('data-workspace-row') || '';
-    const children = row.querySelector(':scope > [data-workspace-children]');
-    if (!(children instanceof HTMLElement)) return;
-
-    const expanded = toggle.getAttribute('aria-expanded') === 'true';
-    if (expanded) {
-        toggle.setAttribute('aria-expanded', 'false');
-        children.classList.add('hidden');
-        return;
-    }
-
-    toggle.setAttribute('aria-expanded', 'true');
-    children.classList.remove('hidden');
-    if (children.dataset.loaded === 'true') return;
-
-    children.innerHTML = '<div class="py-1 text-xs text-txt-secondary">Loading...</div>';
-    try {
-        const payload = await fetchWorkspaceDirectories(path);
-        const directories = Array.isArray(payload.directories) ? payload.directories : [];
-        const depth = Number.parseInt(row.getAttribute('data-workspace-depth') || '0', 10) + 1;
-        children.innerHTML = directories.length
-            ? directories.map((directory) => renderWorkspaceDirectoryRow(directory, depth)).join('')
-            : '<div class="py-1 text-xs text-txt-secondary">No child folders.</div>';
-        children.dataset.loaded = 'true';
-    } catch (error) {
-        children.innerHTML = `<div class="py-1 text-xs state-error">Unable to load folders: ${escapeHtml(error.message)}</div>`;
-    }
-}
-
-function renderWorkspaceDirectoryRow(directory, depth) {
-    const path = String(directory.path || '');
-    const name = String(directory.name || path || 'Folder');
-    const indent = Math.min(Math.max(depth, 0) * 1.25, 5);
-    return `
-        <div data-workspace-row="${escapeHtml(path)}" data-workspace-depth="${depth}">
-            <div class="workspace-tree-row" role="treeitem" style="padding-left: ${indent}rem;">
-                ${directory.has_children
-                    ? `<button type="button" class="workspace-tree-toggle" data-workspace-toggle aria-expanded="false" aria-label="Expand ${escapeHtml(name)}">
-                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <path d="M7.25 4.75 12.75 10l-5.5 5.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                    </button>`
-                    : '<span class="workspace-tree-spacer" aria-hidden="true"></span>'}
-                <button type="button" class="workspace-tree-select" data-workspace-select="${escapeHtml(path)}">
-                    <svg class="workspace-tree-folder-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                    <span class="workspace-tree-label min-w-0">
-                        <span class="workspace-tree-name">${escapeHtml(name)}</span>
-                    </span>
-                </button>
-            </div>
-            <div class="workspace-tree-children hidden" data-workspace-children></div>
-        </div>
-    `;
 }
 
 function populateThinkingSelector() {
@@ -786,7 +562,7 @@ function setToolMenuOpen(open) {
 function setSessionMenuOpen(open) {
     chatComposeState.sessionMenuOpen = Boolean(open);
     if (!chatComposeState.sessionMenuOpen) {
-        closeSessionSummaryPreview();
+        sessionSummary.closePreview();
     }
     if (chatElements.sessionDropdown) {
         chatElements.sessionDropdown.classList.toggle('open', chatComposeState.sessionMenuOpen);
@@ -825,16 +601,6 @@ function formatSessionOptionLabel(session) {
     }
     const meta = sessionActivityLabel(session);
     return meta ? `${sessionTitle(session)} (${meta})` : sessionTitle(session);
-}
-
-function sessionSummaryCacheKey(vault, sessionId) {
-    return `${vault || ''}::${sessionId || ''}`;
-}
-
-function selectedSessionWithSummary() {
-    if (!state.sessionId) return null;
-    const session = state.sessions.find((item) => item.session_id === state.sessionId);
-    return session?.has_summary ? session : null;
 }
 
 function renderSessionSelector() {
@@ -883,7 +649,7 @@ function renderSessionDropdownRow(session, isActive) {
 
 function updateSessionSummaryTrigger() {
     if (!chatElements.sessionSummaryTrigger) return;
-    const session = selectedSessionWithSummary();
+    const session = sessionSummary.selectedSessionWithSummary();
     if (!session) {
         chatElements.sessionSummaryTrigger.classList.remove('is-visible');
         chatElements.sessionSummaryTrigger.setAttribute('aria-hidden', 'true');
@@ -899,407 +665,6 @@ async function selectSessionFromDropdown(sessionId) {
         await clearSession(false);
     } else {
         await loadSession(sessionId);
-    }
-}
-
-async function fetchSessionSummaryPreview(session) {
-    if (!session) return null;
-
-    const vault = chatElements.vaultSelector?.value || '';
-    const cacheKey = sessionSummaryCacheKey(vault, session.session_id);
-    const cached = state.sessionSummaryPreviewCache[cacheKey];
-    if (cached) {
-        return cached;
-    }
-    if (state.sessionSummaryPreviewInFlight[cacheKey]) {
-        return state.sessionSummaryPreviewInFlight[cacheKey];
-    }
-
-    state.sessionSummaryPreviewInFlight[cacheKey] = (async () => {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(session.session_id)}/summary?vault_name=${encodeURIComponent(vault)}`
-        );
-        if (!response.ok) {
-            throw new Error('Failed to fetch session summary');
-        }
-        const data = await response.json();
-        state.sessionSummaryPreviewCache[cacheKey] = data;
-        return data;
-    })();
-
-    try {
-        return await state.sessionSummaryPreviewInFlight[cacheKey];
-    } finally {
-        delete state.sessionSummaryPreviewInFlight[cacheKey];
-    }
-}
-
-async function warmSessionSummaryPreview(session) {
-    try {
-        await fetchSessionSummaryPreview(session);
-    } catch (error) {
-        console.error('Error fetching session summary preview:', error);
-    }
-}
-
-function renderSessionSummaryPreview(summary) {
-    if (!summary?.has_summary) {
-        return '<p class="session-summary-preview-text text-txt-secondary">No summary record found.</p>';
-    }
-    const rawSummaryText = String(summary.summary || summary.user_intent || '').trim();
-    const summaryText = rawSummaryText
-        ? truncateText(rawSummaryText, 520)
-        : 'No summary text captured.';
-    const workspacePath = String(summary.workspace_path || '').trim();
-    return `
-        <div class="session-summary-preview-title">Session Summary</div>
-        <div class="session-summary-preview-text">${escapeHtml(summaryText)}</div>
-        <div class="session-summary-preview-workspace">
-            <span class="font-semibold text-txt-primary">Workspace:</span>
-            ${escapeHtml(workspacePath || 'Not set')}
-        </div>
-    `;
-}
-
-function positionSessionSummaryPreview(popover, anchor) {
-    const anchorRect = anchor.getBoundingClientRect();
-    const margin = 8;
-    const popoverRect = popover.getBoundingClientRect();
-    let left = anchorRect.right + margin;
-    let top = anchorRect.top;
-    if (left + popoverRect.width > window.innerWidth - margin) {
-        left = anchorRect.left - popoverRect.width - margin;
-    }
-    if (left < margin) {
-        left = margin;
-    }
-    if (top + popoverRect.height > window.innerHeight - margin) {
-        top = window.innerHeight - popoverRect.height - margin;
-    }
-    if (top < margin) {
-        top = margin;
-    }
-    popover.style.left = `${left}px`;
-    popover.style.top = `${top}px`;
-}
-
-function closeSessionSummaryPreview() {
-    document.getElementById('session-summary-preview-popover')?.remove();
-}
-
-async function openSessionSummaryPreview(anchor, session) {
-    if (!anchor || !session) return;
-    closeSessionSummaryPreview();
-    const popover = document.createElement('div');
-    popover.id = 'session-summary-preview-popover';
-    popover.className = 'session-summary-preview-popover';
-    popover.innerHTML = '<p class="session-summary-preview-text text-txt-secondary">Loading summary...</p>';
-    document.body.appendChild(popover);
-    positionSessionSummaryPreview(popover, anchor);
-    try {
-        const summary = await fetchSessionSummaryPreview(session);
-        if (!document.body.contains(popover)) return;
-        popover.innerHTML = renderSessionSummaryPreview(summary);
-        positionSessionSummaryPreview(popover, anchor);
-    } catch (error) {
-        console.error('Error fetching session summary preview:', error);
-        if (document.body.contains(popover)) {
-            popover.innerHTML = '<p class="session-summary-preview-text state-error">Unable to load summary preview.</p>';
-            positionSessionSummaryPreview(popover, anchor);
-        }
-    }
-}
-
-function renderSessionSummaryDetails(summary) {
-    const fields = sessionSummaryEditableFields();
-    const artifacts = Array.isArray(summary.artifacts) ? summary.artifacts : [];
-    const metadata = summary.metadata && typeof summary.metadata === 'object' ? summary.metadata : {};
-    return `
-        <div class="space-y-4">
-            <div class="state-surface-warning p-3 rounded border text-sm">
-                Manual edits update this derived session summary only. If this chat session is continued later, session summarization may replace these edits.
-            </div>
-            ${fields.map(field => renderSessionSummaryReadonlyField(summary, field)).join('')}
-            <div>
-                <p class="font-semibold text-txt-primary">Artifacts</p>
-                ${artifacts.length
-                    ? `<ul class="mt-1 list-disc list-inside text-sm text-txt-primary">${artifacts.map(artifact => `<li><span class="cell-mono">${escapeHtml(artifact.path || '')}</span>${artifact.artifact_role ? ` <span class="text-txt-secondary">(${escapeHtml(artifact.artifact_role)})</span>` : ''}</li>`).join('')}</ul>`
-                    : '<p class="text-sm text-txt-secondary">No artifacts linked.</p>'}
-            </div>
-            <div>
-                <p class="font-semibold text-txt-primary">Metadata</p>
-                ${renderSessionSummaryVectorIndex(summary.vector_index)}
-                <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(metadata, null, 2))}</pre>
-            </div>
-            <div class="text-xs text-txt-secondary">
-                Created ${escapeHtml(formatShortDate(summary.created_at || ''))} · Updated ${escapeHtml(formatShortDate(summary.updated_at || ''))}
-            </div>
-        </div>
-    `;
-}
-
-function renderSessionSummaryVectorIndex(vectorIndex) {
-    const status = vectorIndex && typeof vectorIndex === 'object' ? vectorIndex : {};
-    const indexedFields = Number(status.indexed_fields || 0);
-    const expectedFields = Number(status.expected_fields || 0);
-    const indexedTypes = Array.isArray(status.indexed_field_types) ? status.indexed_field_types : [];
-    const missingTypes = Array.isArray(status.missing_field_types) ? status.missing_field_types : [];
-    const detail = [
-        indexedTypes.length ? `indexed: ${indexedTypes.join(', ')}` : '',
-        missingTypes.length ? `missing: ${missingTypes.join(', ')}` : '',
-    ].filter(Boolean).join(' · ');
-    return `
-        <div class="mt-1 mb-2 rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">
-            <span class="font-semibold text-txt-primary">Vector index:</span>
-            ${escapeHtml(String(indexedFields))}/${escapeHtml(String(expectedFields))} fields
-            ${detail ? `<span class="block mt-1">${escapeHtml(detail)}</span>` : ''}
-        </div>
-    `;
-}
-
-function sessionSummaryEditableFields() {
-    return [
-        { key: 'summary', label: 'Summary', rows: 6 },
-        { key: 'user_intent', label: 'User Intent', rows: 3 },
-        { key: 'domain', label: 'Domain', rows: 2 },
-        { key: 'work_product', label: 'Work Product', rows: 2 },
-        { key: 'workspace_path', label: 'Workspace', rows: 2 },
-        { key: 'named_entities', label: 'Named Entities', rows: 2 },
-        { key: 'source_summary', label: 'Source Summary', rows: 6 },
-    ];
-}
-
-function renderSessionSummaryReadonlyField(summary, field) {
-    const value = String(summary?.[field.key] || '').trim();
-    return `
-        <div>
-            <p class="font-semibold text-txt-primary">${escapeHtml(field.label)}</p>
-            ${value
-                ? `<p class="text-sm text-txt-primary whitespace-pre-wrap">${escapeHtml(value)}</p>`
-                : '<p class="text-sm text-txt-secondary">Not captured.</p>'}
-        </div>
-    `;
-}
-
-function renderSessionSummaryEditForm(summary) {
-    return `
-        <div class="space-y-4">
-            <div class="state-surface-warning p-3 rounded border text-sm">
-                Manual edits update this derived session summary only. If this chat session is continued later, session summarization may replace these edits.
-            </div>
-            ${sessionSummaryEditableFields().map(field => `
-                <label class="block">
-                    <span class="font-semibold text-txt-primary">${escapeHtml(field.label)}</span>
-                    <textarea
-                        data-session-summary-field="${escapeHtml(field.key)}"
-                        rows="${field.rows}"
-                        class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    >${escapeHtml(summary?.[field.key] || '')}</textarea>
-                </label>
-            `).join('')}
-            <div>
-                <p class="font-semibold text-txt-primary">Metadata</p>
-                <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(summary?.metadata || {}, null, 2))}</pre>
-            </div>
-        </div>
-    `;
-}
-
-async function openSessionSummaryModalForSession(session) {
-    if (!session) return;
-
-    closeSessionSummaryModal();
-    const popover = document.createElement('div');
-    popover.id = 'session-summary-modal';
-    popover.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    popover.innerHTML = `
-        <div class="absolute inset-0" data-session-summary-close="true"></div>
-        <section class="app-modal-panel relative overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="session-summary-modal-title">
-            <div class="app-modal-header sticky top-0">
-                <div class="app-modal-title-block">
-                    <h2 id="session-summary-modal-title" class="text-lg font-semibold text-txt-primary inline-flex items-center gap-2">
-                        <span class="session-summary-title-icon" aria-hidden="true">${SESSION_SUMMARY_ICON_SVG}</span>
-                        <span>Session Summary</span>
-                    </h2>
-                    <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(session.session_id)}</p>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error" data-session-summary-delete="true">
-                        Delete Summary
-                    </button>
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-edit="true">
-                        Edit
-                    </button>
-                    <button type="button" class="hidden px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-session-summary-save="true">
-                        Save
-                    </button>
-                    <button type="button" class="hidden px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-cancel-edit="true">
-                        Cancel
-                    </button>
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-close="true">
-                        Close
-                    </button>
-                </div>
-            </div>
-            <div id="session-summary-modal-body" class="p-4 text-sm text-txt-primary">
-                <p class="text-txt-secondary">Loading summary details...</p>
-            </div>
-        </section>
-    `;
-    popover.addEventListener('click', (event) => {
-        const target = event.target;
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryClose === 'true') {
-            closeSessionSummaryModal();
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryEdit === 'true') {
-            const summary = currentSessionSummaryFromModal();
-            setSessionSummaryModalEditing(popover, summary);
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummarySave === 'true') {
-            saveSessionSummaryModal(popover, target);
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryCancelEdit === 'true') {
-            cancelSessionSummaryEdit(popover);
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryDelete === 'true') {
-            deleteSessionSummaryFromModal(popover, target);
-        }
-    });
-    document.body.appendChild(popover);
-
-    const body = popover.querySelector('#session-summary-modal-body');
-    try {
-        const summary = await fetchSessionSummaryPreview(session);
-        if (!body) return;
-        popover._sessionSummary = summary;
-        body.innerHTML = summary?.has_summary
-            ? renderSessionSummaryDetails(summary)
-            : '<p class="text-sm text-txt-secondary">No summary record found for this session.</p>';
-    } catch (error) {
-        console.error('Error opening session summary modal:', error);
-        if (body) {
-            body.innerHTML = '<p class="text-sm state-error">Unable to load summary details.</p>';
-        }
-    }
-}
-
-function closeSessionSummaryModal() {
-    document.getElementById('session-summary-modal')?.remove();
-}
-
-function currentSessionSummaryFromModal() {
-    return document.getElementById('session-summary-modal')?._sessionSummary || null;
-}
-
-function setSessionSummaryModalEditing(modal, summary) {
-    const body = modal.querySelector('#session-summary-modal-body');
-    const editButton = modal.querySelector('[data-session-summary-edit]');
-    const saveButton = modal.querySelector('[data-session-summary-save]');
-    const cancelButton = modal.querySelector('[data-session-summary-cancel-edit]');
-    if (body) {
-        body.innerHTML = renderSessionSummaryEditForm(summary);
-    }
-    editButton?.classList.add('hidden');
-    saveButton?.classList.remove('hidden');
-    cancelButton?.classList.remove('hidden');
-}
-
-function setSessionSummaryModalReadonly(modal, summary) {
-    const body = modal.querySelector('#session-summary-modal-body');
-    const editButton = modal.querySelector('[data-session-summary-edit]');
-    const saveButton = modal.querySelector('[data-session-summary-save]');
-    const cancelButton = modal.querySelector('[data-session-summary-cancel-edit]');
-    if (body) {
-        body.innerHTML = summary?.has_summary
-            ? renderSessionSummaryDetails(summary)
-            : '<p class="text-sm text-txt-secondary">No summary record found for this session.</p>';
-    }
-    editButton?.classList.remove('hidden');
-    saveButton?.classList.add('hidden');
-    cancelButton?.classList.add('hidden');
-}
-
-function cancelSessionSummaryEdit(modal) {
-    setSessionSummaryModalReadonly(modal, currentSessionSummaryFromModal());
-}
-
-async function saveSessionSummaryModal(modal, triggerButton) {
-    const vault = chatElements.vaultSelector?.value || '';
-    const existing = currentSessionSummaryFromModal();
-    const sessionId = existing?.session_id || '';
-    if (!sessionId || !vault) return;
-    triggerButton.disabled = true;
-    triggerButton.textContent = 'Saving...';
-    const payload = {};
-    sessionSummaryEditableFields().forEach(field => {
-        const input = modal.querySelector(`[data-session-summary-field="${field.key}"]`);
-        payload[field.key] = input ? input.value : '';
-    });
-    payload.metadata = existing?.metadata || {};
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}/summary?vault_name=${encodeURIComponent(vault)}`,
-            {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            }
-        );
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const summary = await response.json();
-        const cacheKey = sessionSummaryCacheKey(vault, sessionId);
-        state.sessionSummaryPreviewCache[cacheKey] = summary;
-        modal._sessionSummary = summary;
-        renderSessionSelector();
-        setSessionSummaryModalReadonly(modal, summary);
-    } catch (error) {
-        console.error('Error saving session summary:', error);
-        const body = modal.querySelector('#session-summary-modal-body');
-        if (body) {
-            body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to save summary: ${escapeHtml(error.message)}</p>`);
-        }
-    } finally {
-        triggerButton.disabled = false;
-        triggerButton.textContent = 'Save';
-    }
-}
-
-async function deleteSessionSummaryFromModal(modal, triggerButton) {
-    const vault = chatElements.vaultSelector?.value || '';
-    const summary = currentSessionSummaryFromModal();
-    const sessionId = summary?.session_id || '';
-    if (!sessionId || !vault) return;
-    const confirmed = window.confirm('Delete this derived summary record? The chat session will not be deleted.');
-    if (!confirmed) return;
-    triggerButton.disabled = true;
-    triggerButton.textContent = 'Deleting...';
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}/summary?vault_name=${encodeURIComponent(vault)}`,
-            { method: 'DELETE' }
-        );
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        delete state.sessionSummaryPreviewCache[sessionSummaryCacheKey(vault, sessionId)];
-        closeSessionSummaryModal();
-        await fetchSessions(vault, state.sessionId || sessionId);
-    } catch (error) {
-        console.error('Error deleting session summary:', error);
-        const body = modal.querySelector('#session-summary-modal-body');
-        if (body) {
-            body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to delete summary: ${escapeHtml(error.message)}</p>`);
-        }
-        triggerButton.disabled = false;
-        triggerButton.textContent = 'Delete Summary';
     }
 }
 
@@ -2697,17 +2062,10 @@ document.addEventListener('keydown', (event) => {
             setChatFocusMode(false);
             return;
         }
-        closeWorkspacePickerModal();
+        workspacePicker.closeModal();
         closeVaultActivityDetails();
     }
 });
-
-function formatShortDate(value) {
-    if (!value) return '—';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '—';
-    return parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
 
 async function loadVaultActivity(vaultName) {
     if (!vaultName) return;
@@ -2799,7 +2157,7 @@ function setupEventListeners() {
             if (related instanceof Element && previewTarget.contains(related)) return;
             const sessionId = previewTarget.dataset.sessionSummaryPreviewId || '';
             const session = state.sessions.find((item) => item.session_id === sessionId);
-            openSessionSummaryPreview(previewTarget, session);
+            sessionSummary.openPreview(previewTarget, session);
         });
         chatElements.sessionDropdownMenu.addEventListener('mouseout', (event) => {
             const target = event.target;
@@ -2808,7 +2166,7 @@ function setupEventListeners() {
             if (!(previewTarget instanceof HTMLElement)) return;
             const related = event.relatedTarget;
             if (related instanceof Element && previewTarget.contains(related)) return;
-            closeSessionSummaryPreview();
+            sessionSummary.closePreview();
         });
         chatElements.sessionDropdownMenu.addEventListener('focusin', (event) => {
             const target = event.target;
@@ -2817,21 +2175,21 @@ function setupEventListeners() {
             if (!(previewTarget instanceof HTMLElement)) return;
             const sessionId = previewTarget.dataset.sessionSummaryPreviewFocusId || '';
             const session = state.sessions.find((item) => item.session_id === sessionId);
-            openSessionSummaryPreview(previewTarget, session);
+            sessionSummary.openPreview(previewTarget, session);
         });
         chatElements.sessionDropdownMenu.addEventListener('focusout', (event) => {
             const target = event.target;
             if (!(target instanceof Element)) return;
             if (target.closest('[data-session-summary-preview-focus-id]')) {
-                closeSessionSummaryPreview();
+                sessionSummary.closePreview();
             }
         });
     }
 
     if (chatElements.sessionSummaryTrigger) {
-        chatElements.sessionSummaryTrigger.addEventListener('mouseenter', () => warmSessionSummaryPreview(selectedSessionWithSummary()));
-        chatElements.sessionSummaryTrigger.addEventListener('focus', () => warmSessionSummaryPreview(selectedSessionWithSummary()));
-        chatElements.sessionSummaryTrigger.addEventListener('click', () => openSessionSummaryModalForSession(selectedSessionWithSummary()));
+        chatElements.sessionSummaryTrigger.addEventListener('mouseenter', () => sessionSummary.warmPreview(sessionSummary.selectedSessionWithSummary()));
+        chatElements.sessionSummaryTrigger.addEventListener('focus', () => sessionSummary.warmPreview(sessionSummary.selectedSessionWithSummary()));
+        chatElements.sessionSummaryTrigger.addEventListener('click', () => sessionSummary.openModalForSession(sessionSummary.selectedSessionWithSummary()));
     }
 
     if (chatElements.sessionTitleSave) {
@@ -2854,23 +2212,23 @@ function setupEventListeners() {
 
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.addEventListener('input', () => {
-            syncWorkspaceControlState();
+            workspacePicker.syncControls();
         });
-        chatElements.workspacePathInput.addEventListener('blur', saveWorkspacePath);
+        chatElements.workspacePathInput.addEventListener('blur', workspacePicker.savePath);
         chatElements.workspacePathInput.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                saveWorkspacePath();
+                workspacePicker.savePath();
             }
         });
     }
 
     if (chatElements.workspacePickerBtn) {
-        chatElements.workspacePickerBtn.addEventListener('click', openWorkspacePickerModal);
+        chatElements.workspacePickerBtn.addEventListener('click', workspacePicker.openModal);
     }
 
     if (chatElements.workspaceUnlockBtn) {
-        chatElements.workspaceUnlockBtn.addEventListener('click', unlockWorkspacePath);
+        chatElements.workspaceUnlockBtn.addEventListener('click', workspacePicker.unlockPath);
     }
 
     if (chatElements.toolDropdownTrigger) {
@@ -2970,7 +2328,7 @@ function setupEventListeners() {
             const clickedSessionDropdown = chatElements.sessionDropdown && chatElements.sessionDropdown.contains(target);
             if (!clickedSessionDropdown) {
                 setSessionMenuOpen(false);
-                closeSessionSummaryPreview();
+                sessionSummary.closePreview();
             }
         }
     });
@@ -3185,7 +2543,7 @@ async function sendMessage() {
         .map(cb => cb.value);
 
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
-    const workspacePathValue = currentWorkspacePath() || null;
+    const workspacePathValue = workspacePicker.currentPath() || null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
     state.sessionId = requestSessionId;
     state.isWorkspaceUnlocked = false;
@@ -3502,22 +2860,6 @@ function restoreLatexPlaceholders(html, segments) {
         const placeholder = `@@MATH_SEGMENT_${index}@@`;
         return acc.split(placeholder).join(escapeHtml(rawMath));
     }, html);
-}
-
-function escapeHtml(value) {
-    if (!value) return '';
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function truncateText(value, maxLength) {
-    const text = String(value || '').trim();
-    if (!text || text.length <= maxLength) return text;
-    return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
 function getMathJax() {
@@ -4088,56 +3430,6 @@ async function forkCurrentSession(sequenceIndex, button) {
         addChatErrorMessage(`Fork failed: ${error.message}`);
         button.disabled = previousDisabled;
     }
-}
-
-function getCopyableText(element) {
-    const clone = element.cloneNode(true);
-    clone.querySelectorAll('.copy-button').forEach(btn => btn.remove());
-    return clone.innerText.trim();
-}
-
-async function handleCopy(text) {
-    try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-        }
-    } catch (err) {
-        console.warn('navigator.clipboard.writeText failed', err);
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.top = '-1000px';
-    textarea.style.left = '-1000px';
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-
-    let didCopy = false;
-    try {
-        didCopy = document.execCommand('copy');
-    } catch (err) {
-        console.warn('document.execCommand copy failed', err);
-    }
-
-    document.body.removeChild(textarea);
-    return didCopy;
-}
-
-function flashCopyFeedback(button, didCopy) {
-    const originalLabel = button.innerHTML;
-    const originalTitle = button.title;
-    button.innerHTML = didCopy ? '✅' : '⚠️';
-    button.title = didCopy ? 'Copied!' : 'Copy failed';
-    button.disabled = true;
-
-    setTimeout(() => {
-        button.innerHTML = originalLabel;
-        button.title = originalTitle;
-        button.disabled = false;
-    }, 1200);
 }
 
 // Clear session
