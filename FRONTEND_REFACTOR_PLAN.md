@@ -252,7 +252,7 @@ Validation target:
 
 ### Phase 6: Extract Workflow Actions
 
-Status: next.
+Status: complete in the current refactor branch.
 
 Why:
 
@@ -271,8 +271,11 @@ Move:
 Validation target:
 
 - Manual smoke or targeted scenario if available: run workflow, stop workflow, edit workflow file.
+- Static checks: `node --check` for all scripts and `git diff --check`. Done.
 
 ### Phase 7: Extract Chat Streaming
+
+Status: next.
 
 Why last:
 

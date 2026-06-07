@@ -162,7 +162,25 @@ const vaultActivity = window.VaultActivity.create({
     },
 });
 
-const dashboardView = window.DashboardView.create({
+let dashboardView;
+
+const workflowActions = window.WorkflowActions.create({
+    state,
+    elements: dashElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        fetchMetadata,
+        populateSelectors,
+        fetchSystemStatus,
+        fetchWorkflowTasks,
+        displaySystemStatus,
+        isTerminalTaskStatus,
+        activeWorkflowTasks: () => dashboardView.activeWorkflowTasks(),
+        selectedVault: () => chatElements.vaultSelector?.value || '',
+    },
+});
+
+dashboardView = window.DashboardView.create({
     state,
     elements: dashElements,
     utils: window.AssistantMDUtils,
@@ -171,11 +189,11 @@ const dashboardView = window.DashboardView.create({
         loadVaultActivity: vaultActivity.loadActivity,
         fetchWorkflowTasks,
         isTerminalTaskStatus,
-        openWorkflowFileEditor,
-        toggleWorkflowEnabled,
-        executeWorkflow,
-        stopWorkflow,
-        stopAllWorkflows,
+        openWorkflowFileEditor: workflowActions.openFileEditor,
+        toggleWorkflowEnabled: workflowActions.toggleWorkflowEnabled,
+        executeWorkflow: workflowActions.executeWorkflow,
+        stopWorkflow: workflowActions.stopWorkflow,
+        stopAllWorkflows: workflowActions.stopAllWorkflows,
     },
 });
 
@@ -1324,7 +1342,7 @@ function setupEventListeners() {
     });
 
     if (dashElements.rescanBtn) {
-        dashElements.rescanBtn.addEventListener('click', rescanVaults);
+        dashElements.rescanBtn.addEventListener('click', workflowActions.rescanVaults);
     }
 
     dashboardView.attachEventListeners();
@@ -2349,430 +2367,6 @@ async function clearSession(confirmReset = true) {
     sessionControls.updateTitleRow();
     syncChatControlLocks();
     updateStatus();
-}
-
-// Rescan vaults
-async function rescanVaults() {
-    if (!dashElements.rescanResult) return;
-
-    dashElements.rescanResult.innerHTML = '<p class="text-txt-secondary">Rescanning...</p>';
-    dashElements.rescanBtn.disabled = true;
-
-    try {
-        const response = await fetch('api/vaults/rescan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const data = await response.json();
-
-        if (data.metadata) {
-            state.metadata = data.metadata;
-            window.App = window.App || {};
-            window.App.metadata = data.metadata;
-            populateSelectors();
-        } else {
-            await fetchMetadata();
-        }
-
-        await fetchSystemStatus();
-        renderRescanResult(data);
-
-    } catch (error) {
-        console.error('Error rescanning:', error);
-        dashElements.rescanResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-    } finally {
-        dashElements.rescanBtn.disabled = false;
-    }
-}
-
-function renderRescanResult(data) {
-    if (!dashElements.rescanResult) return;
-
-    const configurationErrors = state.systemStatus?.configuration_errors || [];
-    const workflowErrors = configurationErrors.filter((error) => {
-        const filePath = String(error.file_path || '');
-        return filePath.includes('/AssistantMD/Workflows/');
-    });
-
-    dashElements.rescanResult.innerHTML = `
-        <div class="state-surface-success p-3 rounded border">
-            <p class="font-medium">✅ Rescan Completed</p>
-            <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
-            <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
-            <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
-            <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
-            <p class="mt-2 text-sm">${data.message || ''}</p>
-        </div>
-        ${workflowErrors.length ? `
-            <div class="state-surface-error p-3 rounded border mt-3">
-                <p class="font-medium">⚠️ Workflows Failed To Load</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    ${workflowErrors.map((error) => `
-                        <li>
-                            <span class="font-medium">${escapeHtml(error.workflow_name || error.file_path || 'workflow')}</span>:
-                            ${escapeHtml(error.error_message || 'Unknown load error')}
-                        </li>
-                    `).join('')}
-                </ul>
-            </div>
-        ` : ''}
-    `;
-}
-
-// Execute workflow manually
-async function toggleWorkflowEnabled(globalId, enabled, triggerButton = null) {
-    if (!globalId) {
-        return;
-    }
-
-    if (triggerButton) {
-        triggerButton.disabled = true;
-    }
-
-    try {
-        const response = await fetch('api/workflows/enabled', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ global_id: globalId, enabled })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-success p-3 rounded border">
-                <p class="font-medium">${escapeHtml(data.message || 'Workflow updated.')}</p>
-            </div>
-        `;
-        await fetchSystemStatus();
-    } catch (error) {
-        console.error('Error updating workflow enabled state:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-    } finally {
-        if (triggerButton) {
-            triggerButton.disabled = false;
-        }
-    }
-}
-
-async function openWorkflowFileEditor(globalId) {
-    if (!globalId) {
-        return;
-    }
-
-    closeWorkflowFileEditor();
-    const overlay = document.createElement('div');
-    overlay.id = 'workflow-file-modal';
-    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    overlay.innerHTML = `
-        <div class="absolute inset-0" data-workflow-file-close="true"></div>
-        <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="workflow-file-modal-title">
-            <div class="app-modal-header flex-none">
-                <div class="app-modal-title-block">
-                    <h2 id="workflow-file-modal-title" class="text-lg font-semibold text-txt-primary">Workflow: ${escapeHtml(globalId)}</h2>
-                    <p id="workflow-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">Loading...</p>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-workflow-file-save="true" disabled>
-                        Save
-                    </button>
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workflow-file-close="true">
-                        Close
-                    </button>
-                </div>
-            </div>
-            <div class="p-4 space-y-3 flex-1 min-h-0 flex flex-col">
-                <div id="workflow-file-modal-status" class="text-sm text-txt-secondary">Loading workflow file...</div>
-                <textarea
-                    id="workflow-file-modal-editor"
-                    class="w-full flex-1 min-h-0 px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    spellcheck="false"
-                    disabled
-                ></textarea>
-            </div>
-        </section>
-    `;
-    document.body.appendChild(overlay);
-
-    const editor = overlay.querySelector('#workflow-file-modal-editor');
-    const pathLabel = overlay.querySelector('#workflow-file-modal-path');
-    const statusLabel = overlay.querySelector('#workflow-file-modal-status');
-    const saveButton = overlay.querySelector('[data-workflow-file-save]');
-    let sha256 = '';
-
-    overlay.addEventListener('click', async (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) {
-            return;
-        }
-        if (target.dataset.workflowFileClose === 'true') {
-            closeWorkflowFileEditor();
-            return;
-        }
-        if (target.dataset.workflowFileSave === 'true' && editor instanceof HTMLTextAreaElement) {
-            saveButton.disabled = true;
-            statusLabel.textContent = 'Saving...';
-            try {
-                const response = await fetch(`api/workflows/file?global_id=${encodeURIComponent(globalId)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        content: editor.value,
-                        expected_sha256: sha256
-                    })
-                });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || `HTTP ${response.status}`);
-                }
-                const data = await response.json();
-                sha256 = data.sha256 || '';
-                statusLabel.textContent = data.message || 'Saved.';
-                await fetchSystemStatus();
-                saveButton.disabled = false;
-            } catch (error) {
-                console.error('Error saving workflow file:', error);
-                statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
-                saveButton.disabled = false;
-            }
-        }
-    });
-
-    try {
-        const response = await fetch(`api/workflows/file?global_id=${encodeURIComponent(globalId)}`);
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const data = await response.json();
-        sha256 = data.sha256 || '';
-        if (pathLabel) {
-            pathLabel.textContent = data.path || '';
-        }
-        if (editor instanceof HTMLTextAreaElement) {
-            editor.value = data.content || '';
-            editor.disabled = false;
-        }
-        if (statusLabel) {
-            statusLabel.textContent = `Editing ${data.source || 'workflow'} workflow file.`;
-        }
-        if (saveButton instanceof HTMLButtonElement) {
-            saveButton.disabled = false;
-        }
-    } catch (error) {
-        console.error('Error loading workflow file:', error);
-        if (statusLabel) {
-            statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
-        }
-    }
-}
-
-function closeWorkflowFileEditor() {
-    document.getElementById('workflow-file-modal')?.remove();
-}
-
-async function executeWorkflow(globalId, triggerButton = null, isSystemTemplate = false) {
-    if (!globalId) {
-        return;
-    }
-
-    const selectedVault = chatElements.vaultSelector?.value || '';
-    const scopeLabel = isSystemTemplate
-        ? ` for vault "${selectedVault || '(none selected)'}"`
-        : '';
-    const confirmed = window.confirm(`Run workflow "${globalId}"${scopeLabel}?`);
-    if (!confirmed) {
-        return;
-    }
-    if (isSystemTemplate && !selectedVault) {
-        dashElements.executeWorkflowResult.innerHTML = '<p class="state-error">Select a vault before running a system workflow.</p>';
-        return;
-    }
-
-    dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Starting workflow...</p>';
-    if (triggerButton) {
-        triggerButton.disabled = true;
-    }
-
-    try {
-        const payload = { global_id: globalId };
-        if (isSystemTemplate) {
-            payload.vault_name = selectedVault;
-        }
-
-        const response = await fetch('api/workflows/execute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        const task = data.task || {};
-        if (!task.task_id) {
-            throw new Error('Workflow did not return an execution task.');
-        }
-        await fetchWorkflowTasks({ render: true });
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-info p-3 rounded border">
-                <p class="font-medium">Workflow started</p>
-                <p>Workflow: ${escapeHtml(globalId)}</p>
-                <p class="text-sm">Task: ${escapeHtml(task.task_id)}</p>
-                <p class="text-sm">Use the Running Workflows list to monitor or stop this task.</p>
-            </div>
-        `;
-        monitorWorkflowTask(task.task_id);
-    } catch (error) {
-        console.error('Error executing workflow:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-        displaySystemStatus();
-    } finally {
-        if (triggerButton) {
-            triggerButton.disabled = false;
-        }
-    }
-}
-
-async function monitorWorkflowTask(taskId) {
-    if (!taskId) return;
-    try {
-        while (true) {
-            await new Promise(resolve => window.setTimeout(resolve, 1000));
-            const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}`);
-            if (!response.ok) {
-                return;
-            }
-            const task = await response.json();
-            if (!isTerminalTaskStatus(task.status)) {
-                continue;
-            }
-            await fetchWorkflowTasks({ render: true });
-            renderWorkflowTaskResult(task);
-            return;
-        }
-    } catch (error) {
-        console.error('Error monitoring workflow task:', error);
-    }
-}
-
-async function stopWorkflow(taskId, triggerButton = null) {
-    if (!taskId) return;
-    if (triggerButton) {
-        triggerButton.disabled = true;
-        triggerButton.textContent = 'Stopping...';
-    }
-    try {
-        const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}/cancel`, {
-            method: 'POST'
-        });
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-info p-3 rounded border">
-                <p class="font-medium">Stop requested</p>
-                <p class="text-sm">Task: ${escapeHtml(taskId)}</p>
-                <p class="text-sm">Files mutated by this workflow will be rolled back when cancellation completes.</p>
-            </div>
-        `;
-        await fetchWorkflowTasks({ render: true });
-    } catch (error) {
-        console.error('Error stopping workflow:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-        if (triggerButton) {
-            triggerButton.disabled = false;
-            triggerButton.textContent = 'Stop';
-        }
-    }
-}
-
-async function stopAllWorkflows(triggerButton = null) {
-    const tasks = dashboardView.activeWorkflowTasks();
-    if (!tasks.length) {
-        dashElements.executeWorkflowResult.innerHTML = '<p class="text-sm text-txt-secondary">No running workflows to stop.</p>';
-        return;
-    }
-    const confirmed = window.confirm(`Stop ${tasks.length} running workflow task${tasks.length === 1 ? '' : 's'}?`);
-    if (!confirmed) {
-        return;
-    }
-    if (triggerButton) {
-        triggerButton.disabled = true;
-        triggerButton.textContent = 'Stopping...';
-    }
-    try {
-        const results = await Promise.allSettled(
-            tasks.map(task => fetch(`api/tasks/${encodeURIComponent(task.task_id)}/cancel`, { method: 'POST' }))
-        );
-        const failures = [];
-        for (const result of results) {
-            if (result.status === 'rejected') {
-                failures.push(result.reason?.message || 'request failed');
-                continue;
-            }
-            if (!result.value.ok) {
-                failures.push(`HTTP ${result.value.status}`);
-            }
-        }
-        await fetchWorkflowTasks({ render: true });
-        if (failures.length) {
-            dashElements.executeWorkflowResult.innerHTML = `
-                <p class="state-error">Stop requested for ${tasks.length - failures.length} workflow task${tasks.length - failures.length === 1 ? '' : 's'}, but ${failures.length} failed.</p>
-            `;
-            return;
-        }
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-info p-3 rounded border">
-                <p class="font-medium">Stop requested for all running workflows</p>
-                <p class="text-sm">${tasks.length} workflow task${tasks.length === 1 ? '' : 's'} will stop and roll back mutated files where applicable.</p>
-            </div>
-        `;
-    } catch (error) {
-        console.error('Error stopping all workflows:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-    } finally {
-        if (triggerButton) {
-            triggerButton.disabled = false;
-            triggerButton.textContent = 'Stop All';
-        }
-    }
-}
-
-function renderWorkflowTaskResult(task) {
-    const result = task?.metadata?.workflow_result || null;
-    const status = String(task?.status || '').toLowerCase();
-    const success = status === 'completed' && (!result || result.success !== false);
-    const surfaceClass = success ? 'state-surface-success' : 'state-surface-error';
-    const heading = success ? '✅ Execution Completed' : `Workflow ${status || 'finished'}`;
-    const outputFiles = result?.output_files || [];
-    dashElements.executeWorkflowResult.innerHTML = `
-        <div class="${surfaceClass} p-3 rounded border">
-            <p class="font-medium">${escapeHtml(heading)}</p>
-            <p>Workflow: ${escapeHtml(result?.global_id || task?.metadata?.workflow_id || task?.label || '')}</p>
-            ${typeof result?.execution_time_seconds === 'number'
-                ? `<p>Execution time: ${result.execution_time_seconds.toFixed(2)}s</p>`
-                : ''}
-            ${outputFiles.length ? `
-                <p class="mt-2">Output files created:</p>
-                <ul class="list-disc list-inside ml-4">
-                    ${outputFiles.map(f => `<li class="text-sm">${escapeHtml(f)}</li>`).join('')}
-                </ul>
-            ` : ''}
-            <p class="mt-2 text-sm">${escapeHtml(result?.message || task?.terminal_reason || '')}</p>
-        </div>
-    `;
 }
 
 function isTerminalTaskStatus(status) {
