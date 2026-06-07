@@ -1,17 +1,28 @@
 // Shared SVG icon for copy buttons
 const COPY_ICON_SVG = `
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <rect x="6.5" y="6.5" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.4"></rect>
-        <rect x="4.5" y="4.5" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.85"></rect>
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="8" y="8" width="14" height="14" rx="2" ry="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
+        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
     </svg>
 `.trim();
 
 const FORK_ICON_SVG = `
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M16 3h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M8 3h-5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M21 3l-7.536 7.536a5 5 0 0 0-1.464 3.534v6.93" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M3 3l7.536 7.536a5 5 0 0 1 1.464 3.534v.93" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <circle cx="12" cy="18" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></circle>
+        <circle cx="6" cy="6" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></circle>
+        <circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></circle>
+        <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M12 12v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg>
+`.trim();
+
+const SESSION_SUMMARY_ICON_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M20 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M22 5h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M4 17v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M5 18H3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
     </svg>
 `.trim();
 
@@ -65,7 +76,8 @@ const state = {
 const chatComposeState = {
     pendingAttachments: [],
     popoverOpen: false,
-    toolMenuOpen: false
+    toolMenuOpen: false,
+    sessionMenuOpen: false
 };
 
 let mathTypesetQueue = Promise.resolve();
@@ -79,7 +91,10 @@ const chatElements = {
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
     thinkingSelector: document.getElementById('thinking-selector'),
-    sessionSelector: document.getElementById('session-selector'),
+    sessionDropdown: document.getElementById('session-dropdown'),
+    sessionDropdownTrigger: document.getElementById('session-dropdown-trigger'),
+    sessionDropdownLabel: document.getElementById('session-dropdown-label'),
+    sessionDropdownMenu: document.getElementById('session-dropdown-menu'),
     sessionSummaryTrigger: document.getElementById('session-summary-trigger'),
     toolDropdown: document.getElementById('tool-dropdown'),
     toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
@@ -487,8 +502,11 @@ function syncChatControlLocks() {
     if (chatElements.thinkingSelector) {
         chatElements.thinkingSelector.disabled = state.isLoading;
     }
-    if (chatElements.sessionSelector) {
-        chatElements.sessionSelector.disabled = state.isLoading;
+    if (chatElements.sessionDropdownTrigger) {
+        chatElements.sessionDropdownTrigger.disabled = state.isLoading;
+    }
+    if (chatElements.sessionSummaryTrigger) {
+        chatElements.sessionSummaryTrigger.disabled = state.isLoading;
     }
     if (chatElements.sessionTitleInput) {
         chatElements.sessionTitleInput.disabled = state.isLoading;
@@ -720,8 +738,9 @@ function renderWorkspaceDirectoryRow(directory, depth) {
                     </button>`
                     : '<span class="workspace-tree-spacer" aria-hidden="true"></span>'}
                 <button type="button" class="workspace-tree-select" data-workspace-select="${escapeHtml(path)}">
-                    <svg class="workspace-tree-folder-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path d="M2.75 5.75A1.75 1.75 0 0 1 4.5 4h3.1c.46 0 .9.18 1.22.5l1.05 1.05c.23.23.54.35.86.35h5.77A1.75 1.75 0 0 1 18.25 7.65v6.6A1.75 1.75 0 0 1 16.5 16H4.5a1.75 1.75 0 0 1-1.75-1.75v-8.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" />
+                    <svg class="workspace-tree-folder-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                     </svg>
                     <span class="workspace-tree-label min-w-0">
                         <span class="workspace-tree-name">${escapeHtml(name)}</span>
@@ -771,19 +790,48 @@ function setToolMenuOpen(open) {
     }
 }
 
-function formatSessionOptionLabel(session) {
+function setSessionMenuOpen(open) {
+    chatComposeState.sessionMenuOpen = Boolean(open);
+    if (!chatComposeState.sessionMenuOpen) {
+        closeSessionSummaryPreview();
+    }
+    if (chatElements.sessionDropdown) {
+        chatElements.sessionDropdown.classList.toggle('open', chatComposeState.sessionMenuOpen);
+    }
+    if (chatElements.sessionDropdownMenu) {
+        chatElements.sessionDropdownMenu.classList.toggle('hidden', !chatComposeState.sessionMenuOpen);
+    }
+    if (chatElements.sessionDropdownTrigger) {
+        chatElements.sessionDropdownTrigger.setAttribute('aria-expanded', chatComposeState.sessionMenuOpen ? 'true' : 'false');
+    }
+}
+
+function sessionTitle(session) {
     if (!session || !session.session_id) {
         return 'New session';
     }
     const title = String(session.title || '').trim();
+    return title || session.session_id;
+}
+
+function sessionActivityLabel(session) {
+    if (!session || !session.session_id) {
+        return '';
+    }
     const rawDate = session.last_activity_at || session.created_at || '';
     const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
-    const timeStr = parsed && !Number.isNaN(parsed.getTime())
+    const activity = parsed && !Number.isNaN(parsed.getTime())
         ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
         : rawDate;
-    const base = title || session.session_id;
-    const summaryMarker = session.has_summary ? ' 🧠' : '';
-    return timeStr ? `${base}${summaryMarker} (last activity: ${timeStr})` : `${base}${summaryMarker}`;
+    return activity ? `Updated ${activity}` : 'No activity yet';
+}
+
+function formatSessionOptionLabel(session) {
+    if (!session || !session.session_id) {
+        return 'New session';
+    }
+    const meta = sessionActivityLabel(session);
+    return meta ? `${sessionTitle(session)} (${meta})` : sessionTitle(session);
 }
 
 function sessionSummaryCacheKey(vault, sessionId) {
@@ -791,32 +839,53 @@ function sessionSummaryCacheKey(vault, sessionId) {
 }
 
 function selectedSessionWithSummary() {
-    const sessionId = chatElements.sessionSelector?.value || '';
-    if (!sessionId) return null;
-    const session = state.sessions.find((item) => item.session_id === sessionId);
+    if (!state.sessionId) return null;
+    const session = state.sessions.find((item) => item.session_id === state.sessionId);
     return session?.has_summary ? session : null;
 }
 
 function renderSessionSelector() {
-    if (!chatElements.sessionSelector) return;
+    if (!chatElements.sessionDropdownMenu || !chatElements.sessionDropdownLabel) return;
 
-    const previousValue = chatElements.sessionSelector.value;
-    chatElements.sessionSelector.innerHTML = '<option value="">New session</option>';
+    const activeSession = state.sessions.find((session) => session.session_id === state.sessionId) || null;
+    const activeMeta = sessionActivityLabel(activeSession);
+    chatElements.sessionDropdownLabel.innerHTML = `
+        <span class="session-dropdown-title">${escapeHtml(sessionTitle(activeSession))}</span>
+        ${activeMeta ? `<span class="session-dropdown-meta">${escapeHtml(activeMeta)}</span>` : ''}
+    `;
 
-    state.sessions.forEach((session) => {
-        const option = document.createElement('option');
-        option.value = session.session_id;
-        option.textContent = formatSessionOptionLabel(session);
-        chatElements.sessionSelector.appendChild(option);
-    });
-
-    const activeValue = state.sessionId || previousValue || '';
-    if (activeValue && state.sessions.some((session) => session.session_id === activeValue)) {
-        chatElements.sessionSelector.value = activeValue;
-    } else {
-        chatElements.sessionSelector.value = '';
-    }
+    const rows = [
+        renderSessionDropdownRow(null, !activeSession),
+        ...state.sessions.map((session) => renderSessionDropdownRow(session, session.session_id === state.sessionId)),
+    ];
+    chatElements.sessionDropdownMenu.innerHTML = rows.join('');
     updateSessionSummaryTrigger();
+}
+
+function renderSessionDropdownRow(session, isActive) {
+    const sessionId = session?.session_id || '';
+    const hasSummary = Boolean(session?.has_summary);
+    const meta = sessionActivityLabel(session);
+    const previewAttribute = hasSummary ? ` data-session-summary-preview-id="${escapeHtml(sessionId)}"` : '';
+    const previewFocusAttribute = hasSummary ? ` data-session-summary-preview-focus-id="${escapeHtml(sessionId)}"` : '';
+    const marker = hasSummary ? '<span class="session-summary-marker" aria-hidden="true">✦</span>' : '';
+    return `
+        <div
+            class="session-dropdown-option${isActive ? ' is-active' : ''}"
+            role="option"
+            aria-selected="${isActive ? 'true' : 'false'}"
+        >
+            <button type="button" class="session-dropdown-select-button" data-session-id="${escapeHtml(sessionId)}"${previewFocusAttribute}>
+                <span class="session-dropdown-label">
+                    <span class="session-dropdown-title-wrap"${previewAttribute}>
+                        <span class="session-dropdown-title">${escapeHtml(sessionTitle(session))}</span>
+                        ${marker}
+                    </span>
+                    ${meta ? `<span class="session-dropdown-meta">${escapeHtml(meta)}</span>` : ''}
+                </span>
+            </button>
+        </div>
+    `;
 }
 
 function updateSessionSummaryTrigger() {
@@ -827,20 +896,20 @@ function updateSessionSummaryTrigger() {
         chatElements.sessionSummaryTrigger.setAttribute('aria-hidden', 'true');
         return;
     }
-    const vault = chatElements.vaultSelector?.value || '';
-    const cached = state.sessionSummaryPreviewCache[sessionSummaryCacheKey(vault, session.session_id)];
     chatElements.sessionSummaryTrigger.classList.add('is-visible');
     chatElements.sessionSummaryTrigger.removeAttribute('aria-hidden');
-    chatElements.sessionSummaryTrigger.title = cached?.summary
-        ? truncateText(cached.summary, 700)
-        : 'Show session summary';
-    if (!cached) {
-        warmSelectedSessionSummaryPreview();
+}
+
+async function selectSessionFromDropdown(sessionId) {
+    setSessionMenuOpen(false);
+    if (!sessionId) {
+        await clearSession(false);
+    } else {
+        await loadSession(sessionId);
     }
 }
 
-async function fetchSelectedSessionSummaryPreview() {
-    const session = selectedSessionWithSummary();
+async function fetchSessionSummaryPreview(session) {
     if (!session) return null;
 
     const vault = chatElements.vaultSelector?.value || '';
@@ -862,7 +931,6 @@ async function fetchSelectedSessionSummaryPreview() {
         }
         const data = await response.json();
         state.sessionSummaryPreviewCache[cacheKey] = data;
-        updateSessionSummaryTrigger();
         return data;
     })();
 
@@ -873,11 +941,76 @@ async function fetchSelectedSessionSummaryPreview() {
     }
 }
 
-async function warmSelectedSessionSummaryPreview() {
+async function warmSessionSummaryPreview(session) {
     try {
-        await fetchSelectedSessionSummaryPreview();
+        await fetchSessionSummaryPreview(session);
     } catch (error) {
         console.error('Error fetching session summary preview:', error);
+    }
+}
+
+function renderSessionSummaryPreview(summary) {
+    if (!summary?.has_summary) {
+        return '<p class="session-summary-preview-text text-txt-secondary">No summary record found.</p>';
+    }
+    const summaryText = String(summary.summary || summary.user_intent || '').trim();
+    const workspacePath = String(summary.workspace_path || '').trim();
+    return `
+        <div class="session-summary-preview-title">Session Summary</div>
+        <div class="session-summary-preview-text">${escapeHtml(summaryText || 'No summary text captured.')}</div>
+        <div class="session-summary-preview-workspace">
+            <span class="font-semibold text-txt-primary">Workspace:</span>
+            ${escapeHtml(workspacePath || 'Not set')}
+        </div>
+    `;
+}
+
+function positionSessionSummaryPreview(popover, anchor) {
+    const anchorRect = anchor.getBoundingClientRect();
+    const margin = 8;
+    const popoverRect = popover.getBoundingClientRect();
+    let left = anchorRect.right + margin;
+    let top = anchorRect.top;
+    if (left + popoverRect.width > window.innerWidth - margin) {
+        left = anchorRect.left - popoverRect.width - margin;
+    }
+    if (left < margin) {
+        left = margin;
+    }
+    if (top + popoverRect.height > window.innerHeight - margin) {
+        top = window.innerHeight - popoverRect.height - margin;
+    }
+    if (top < margin) {
+        top = margin;
+    }
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+}
+
+function closeSessionSummaryPreview() {
+    document.getElementById('session-summary-preview-popover')?.remove();
+}
+
+async function openSessionSummaryPreview(anchor, session) {
+    if (!anchor || !session) return;
+    closeSessionSummaryPreview();
+    const popover = document.createElement('div');
+    popover.id = 'session-summary-preview-popover';
+    popover.className = 'session-summary-preview-popover';
+    popover.innerHTML = '<p class="session-summary-preview-text text-txt-secondary">Loading summary...</p>';
+    document.body.appendChild(popover);
+    positionSessionSummaryPreview(popover, anchor);
+    try {
+        const summary = await fetchSessionSummaryPreview(session);
+        if (!document.body.contains(popover)) return;
+        popover.innerHTML = renderSessionSummaryPreview(summary);
+        positionSessionSummaryPreview(popover, anchor);
+    } catch (error) {
+        console.error('Error fetching session summary preview:', error);
+        if (document.body.contains(popover)) {
+            popover.innerHTML = '<p class="session-summary-preview-text state-error">Unable to load summary preview.</p>';
+            positionSessionSummaryPreview(popover, anchor);
+        }
     }
 }
 
@@ -976,8 +1109,7 @@ function renderSessionSummaryEditForm(summary) {
     `;
 }
 
-async function openSelectedSessionSummaryModal() {
-    const session = selectedSessionWithSummary();
+async function openSessionSummaryModalForSession(session) {
     if (!session) return;
 
     closeSessionSummaryModal();
@@ -989,7 +1121,10 @@ async function openSelectedSessionSummaryModal() {
         <section class="app-modal-panel relative overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="session-summary-modal-title">
             <div class="app-modal-header sticky top-0">
                 <div class="app-modal-title-block">
-                    <h2 id="session-summary-modal-title" class="text-lg font-semibold text-txt-primary">🧠 Session Summary</h2>
+                    <h2 id="session-summary-modal-title" class="text-lg font-semibold text-txt-primary inline-flex items-center gap-2">
+                        <span class="session-summary-title-icon" aria-hidden="true">${SESSION_SUMMARY_ICON_SVG}</span>
+                        <span>Session Summary</span>
+                    </h2>
                     <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(session.session_id)}</p>
                 </div>
                 <div class="app-modal-actions">
@@ -1042,7 +1177,7 @@ async function openSelectedSessionSummaryModal() {
 
     const body = popover.querySelector('#session-summary-modal-body');
     try {
-        const summary = await fetchSelectedSessionSummaryPreview();
+        const summary = await fetchSessionSummaryPreview(session);
         if (!body) return;
         popover._sessionSummary = summary;
         body.innerHTML = summary?.has_summary
@@ -1097,9 +1232,10 @@ function cancelSessionSummaryEdit(modal) {
 }
 
 async function saveSessionSummaryModal(modal, triggerButton) {
-    const session = selectedSessionWithSummary();
     const vault = chatElements.vaultSelector?.value || '';
-    if (!session || !vault) return;
+    const existing = currentSessionSummaryFromModal();
+    const sessionId = existing?.session_id || '';
+    if (!sessionId || !vault) return;
     triggerButton.disabled = true;
     triggerButton.textContent = 'Saving...';
     const payload = {};
@@ -1107,11 +1243,10 @@ async function saveSessionSummaryModal(modal, triggerButton) {
         const input = modal.querySelector(`[data-session-summary-field="${field.key}"]`);
         payload[field.key] = input ? input.value : '';
     });
-    const existing = currentSessionSummaryFromModal();
     payload.metadata = existing?.metadata || {};
     try {
         const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(session.session_id)}/summary?vault_name=${encodeURIComponent(vault)}`,
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/summary?vault_name=${encodeURIComponent(vault)}`,
             {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -1123,10 +1258,10 @@ async function saveSessionSummaryModal(modal, triggerButton) {
             throw new Error(errorData.message || `HTTP ${response.status}`);
         }
         const summary = await response.json();
-        const cacheKey = sessionSummaryCacheKey(vault, session.session_id);
+        const cacheKey = sessionSummaryCacheKey(vault, sessionId);
         state.sessionSummaryPreviewCache[cacheKey] = summary;
         modal._sessionSummary = summary;
-        updateSessionSummaryTrigger();
+        renderSessionSelector();
         setSessionSummaryModalReadonly(modal, summary);
     } catch (error) {
         console.error('Error saving session summary:', error);
@@ -1141,25 +1276,26 @@ async function saveSessionSummaryModal(modal, triggerButton) {
 }
 
 async function deleteSessionSummaryFromModal(modal, triggerButton) {
-    const session = selectedSessionWithSummary();
     const vault = chatElements.vaultSelector?.value || '';
-    if (!session || !vault) return;
+    const summary = currentSessionSummaryFromModal();
+    const sessionId = summary?.session_id || '';
+    if (!sessionId || !vault) return;
     const confirmed = window.confirm('Delete this derived summary record? The chat session will not be deleted.');
     if (!confirmed) return;
     triggerButton.disabled = true;
     triggerButton.textContent = 'Deleting...';
     try {
         const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(session.session_id)}/summary?vault_name=${encodeURIComponent(vault)}`,
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/summary?vault_name=${encodeURIComponent(vault)}`,
             { method: 'DELETE' }
         );
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.message || `HTTP ${response.status}`);
         }
-        delete state.sessionSummaryPreviewCache[sessionSummaryCacheKey(vault, session.session_id)];
+        delete state.sessionSummaryPreviewCache[sessionSummaryCacheKey(vault, sessionId)];
         closeSessionSummaryModal();
-        await fetchSessions(vault, session.session_id);
+        await fetchSessions(vault, state.sessionId || sessionId);
     } catch (error) {
         console.error('Error deleting session summary:', error);
         const body = modal.querySelector('#session-summary-modal-body');
@@ -1248,7 +1384,8 @@ async function fetchSessions(vault, preferredSessionId = '') {
         state.sessions = await response.json();
         renderSessionSelector();
         if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
-            chatElements.sessionSelector.value = preferredSessionId;
+            state.sessionId = preferredSessionId;
+            renderSessionSelector();
         }
         await refreshCompactionProgress();
     } catch (error) {
@@ -2637,22 +2774,68 @@ function setupEventListeners() {
         setChatComposerHeight(current, { persist: false });
     });
 
-    if (chatElements.sessionSelector) {
-        chatElements.sessionSelector.addEventListener('change', async (event) => {
-            const selectedSessionId = event.target.value || '';
-            updateSessionSummaryTrigger();
-            if (!selectedSessionId) {
-                await clearSession(false);
+    if (chatElements.sessionDropdownTrigger) {
+        chatElements.sessionDropdownTrigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (chatElements.sessionDropdownTrigger.disabled) {
                 return;
             }
-            await loadSession(selectedSessionId);
+            setSessionMenuOpen(!chatComposeState.sessionMenuOpen);
+        });
+    }
+
+    if (chatElements.sessionDropdownMenu) {
+        chatElements.sessionDropdownMenu.addEventListener('click', async (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const option = target.closest('[data-session-id]');
+            if (option instanceof HTMLElement) {
+                event.preventDefault();
+                await selectSessionFromDropdown(option.dataset.sessionId || '');
+            }
+        });
+        chatElements.sessionDropdownMenu.addEventListener('mouseover', (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const previewTarget = target.closest('[data-session-summary-preview-id]');
+            if (!(previewTarget instanceof HTMLElement)) return;
+            const related = event.relatedTarget;
+            if (related instanceof Element && previewTarget.contains(related)) return;
+            const sessionId = previewTarget.dataset.sessionSummaryPreviewId || '';
+            const session = state.sessions.find((item) => item.session_id === sessionId);
+            openSessionSummaryPreview(previewTarget, session);
+        });
+        chatElements.sessionDropdownMenu.addEventListener('mouseout', (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const previewTarget = target.closest('[data-session-summary-preview-id]');
+            if (!(previewTarget instanceof HTMLElement)) return;
+            const related = event.relatedTarget;
+            if (related instanceof Element && previewTarget.contains(related)) return;
+            closeSessionSummaryPreview();
+        });
+        chatElements.sessionDropdownMenu.addEventListener('focusin', (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const previewTarget = target.closest('[data-session-summary-preview-focus-id]');
+            if (!(previewTarget instanceof HTMLElement)) return;
+            const sessionId = previewTarget.dataset.sessionSummaryPreviewFocusId || '';
+            const session = state.sessions.find((item) => item.session_id === sessionId);
+            openSessionSummaryPreview(previewTarget, session);
+        });
+        chatElements.sessionDropdownMenu.addEventListener('focusout', (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest('[data-session-summary-preview-focus-id]')) {
+                closeSessionSummaryPreview();
+            }
         });
     }
 
     if (chatElements.sessionSummaryTrigger) {
-        chatElements.sessionSummaryTrigger.addEventListener('mouseenter', warmSelectedSessionSummaryPreview);
-        chatElements.sessionSummaryTrigger.addEventListener('focus', warmSelectedSessionSummaryPreview);
-        chatElements.sessionSummaryTrigger.addEventListener('click', openSelectedSessionSummaryModal);
+        chatElements.sessionSummaryTrigger.addEventListener('mouseenter', () => warmSessionSummaryPreview(selectedSessionWithSummary()));
+        chatElements.sessionSummaryTrigger.addEventListener('focus', () => warmSessionSummaryPreview(selectedSessionWithSummary()));
+        chatElements.sessionSummaryTrigger.addEventListener('click', () => openSessionSummaryModalForSession(selectedSessionWithSummary()));
     }
 
     if (chatElements.sessionTitleSave) {
@@ -2784,6 +2967,14 @@ function setupEventListeners() {
             const clickedToolDropdown = chatElements.toolDropdown && chatElements.toolDropdown.contains(target);
             if (!clickedToolDropdown) {
                 setToolMenuOpen(false);
+            }
+        }
+
+        if (chatComposeState.sessionMenuOpen) {
+            const clickedSessionDropdown = chatElements.sessionDropdown && chatElements.sessionDropdown.contains(target);
+            if (!clickedSessionDropdown) {
+                setSessionMenuOpen(false);
+                closeSessionSummaryPreview();
             }
         }
     });

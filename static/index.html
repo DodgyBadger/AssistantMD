@@ -291,6 +291,27 @@
             cursor: not-allowed;
             box-shadow: none;
         }
+        .theme-icon-button {
+            width: 2rem;
+            height: 2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: rgb(var(--text-secondary));
+            background: transparent;
+            border: 0;
+            cursor: pointer;
+            transition: color 0.15s ease, opacity 0.15s ease;
+        }
+        .theme-icon-button:hover,
+        .theme-icon-button:focus-visible {
+            color: rgb(var(--accent-primary));
+            outline: none;
+        }
+        .theme-icon-button svg {
+            width: 1.2rem;
+            height: 1.2rem;
+        }
         .workspace-tree {
             display: flex;
             flex-direction: column;
@@ -501,8 +522,186 @@
         .session-selector-row {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
-            gap: 0.75rem;
+            gap: 0.5rem;
             align-items: center;
+            min-width: 0;
+        }
+        .session-dropdown {
+            position: relative;
+            min-width: 0;
+        }
+        .session-dropdown-trigger {
+            width: 100%;
+            min-height: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.45rem 0.75rem;
+            border: 1px solid rgb(var(--border-secondary));
+            border-radius: 0.375rem;
+            background: rgb(var(--bg-card));
+            color: rgb(var(--text-primary));
+            text-align: left;
+        }
+        .session-dropdown-trigger:focus-visible {
+            outline: 2px solid rgb(var(--accent-primary));
+            outline-offset: 2px;
+        }
+        .session-dropdown-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            line-height: 1.2;
+        }
+        .session-dropdown-title {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .session-dropdown-meta {
+            flex: 0 0 auto;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 0.66rem;
+            color: rgb(var(--text-secondary));
+        }
+        .session-dropdown-chevron {
+            width: 1rem;
+            height: 1rem;
+            flex: 0 0 auto;
+            color: rgb(var(--text-secondary));
+            transition: transform 0.15s ease;
+        }
+        .session-dropdown.open .session-dropdown-chevron {
+            transform: rotate(180deg);
+        }
+        .session-dropdown-menu {
+            position: absolute;
+            z-index: 40;
+            top: calc(100% + 0.35rem);
+            left: 0;
+            right: 0;
+            max-height: 20rem;
+            overflow-y: auto;
+            border: 1px solid rgb(var(--border-primary));
+            border-radius: 0.375rem;
+            background: rgb(var(--bg-card));
+            box-shadow: 0 12px 24px rgb(0 0 0 / 0.16);
+            padding: 0.35rem;
+        }
+        .session-dropdown-option {
+            width: 100%;
+            border-radius: 0.25rem;
+            color: rgb(var(--text-primary));
+            text-align: left;
+        }
+        .session-dropdown-option:hover,
+        .session-dropdown-option:focus-visible,
+        .session-dropdown-option.is-active {
+            background: rgb(var(--bg-elevated));
+        }
+        .session-dropdown-select-button {
+            width: 100%;
+            min-width: 0;
+            padding: 0.45rem 0.5rem;
+            color: inherit;
+            text-align: left;
+        }
+        .session-dropdown-select-button .session-dropdown-label {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) max-content;
+            column-gap: 1rem;
+        }
+        .session-dropdown-title-wrap {
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .session-summary-marker {
+            flex: 0 0 auto;
+            font-size: 0.62rem;
+            line-height: 1;
+            color: rgb(var(--accent-primary));
+        }
+        .session-summary-trigger {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.375rem;
+            border: 1px solid rgb(var(--border-secondary));
+            background: rgb(var(--bg-card));
+            color: rgb(var(--text-secondary));
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .session-summary-trigger.is-visible {
+            display: inline-flex;
+        }
+        .session-summary-trigger:hover,
+        .session-summary-trigger:focus-visible {
+            color: rgb(var(--accent-primary));
+            border-color: rgb(var(--accent-primary));
+            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
+            outline: none;
+        }
+        .session-summary-trigger svg {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
+        .session-summary-preview-popover {
+            position: fixed;
+            z-index: 70;
+            width: min(22rem, calc(100vw - 2rem));
+            max-height: min(20rem, calc(100vh - 2rem));
+            overflow-y: auto;
+            border: 1px solid rgb(var(--border-primary));
+            border-radius: 0.375rem;
+            background: rgb(var(--bg-card));
+            box-shadow: 0 12px 28px rgb(0 0 0 / 0.18);
+            padding: 0.75rem;
+            color: rgb(var(--text-primary));
+        }
+        .session-summary-preview-title {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: rgb(var(--text-secondary));
+        }
+        .session-summary-preview-text {
+            margin-top: 0.25rem;
+            font-size: 0.8rem;
+            line-height: 1.35;
+            color: rgb(var(--text-primary));
+            white-space: pre-wrap;
+        }
+        .session-summary-preview-workspace {
+            margin-top: 0.75rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid rgb(var(--border-secondary));
+            font-size: 0.72rem;
+            color: rgb(var(--text-secondary));
+            word-break: break-word;
+        }
+        .session-summary-title-icon {
+            width: 1.5rem;
+            height: 1.5rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: rgb(var(--text-secondary));
+        }
+        .session-summary-title-icon svg {
+            width: 1.1rem;
+            height: 1.1rem;
         }
         .chat-session-context-row {
             display: grid;
@@ -514,26 +713,6 @@
             .chat-session-context-row {
                 grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
             }
-        }
-        .session-summary-trigger {
-            width: 2.5rem;
-            height: 2.5rem;
-            border-radius: 0.375rem;
-            border: 1px solid rgb(var(--border-secondary));
-            background: rgb(var(--bg-card));
-            color: rgb(var(--text-primary));
-            display: none;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-        .session-summary-trigger.is-visible {
-            display: inline-flex;
-        }
-        .session-summary-trigger:hover,
-        .session-summary-trigger:focus-visible {
-            border-color: rgb(var(--accent-primary));
-            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
         }
         .session-title-row {
             display: flex;
@@ -1268,6 +1447,11 @@
             border-color: transparent;
             background: transparent;
         }
+        .chat-attach-btn svg,
+        .chat-focus-inline-btn svg {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
         .chat-focus-inline-btn {
             position: absolute;
             right: 1rem;
@@ -1389,8 +1573,14 @@
                         </button>
                     </nav>
                     <div class="flex items-center gap-3 flex-shrink-0 relative z-10">
-                        <button id="theme-toggle" type="button" class="text-2xl hover:opacity-75 transition-opacity focus:outline-none cursor-pointer" style="touch-action: manipulation;" title="Change theme">
-                            🎨
+                        <button id="theme-toggle" type="button" class="theme-icon-button" style="touch-action: manipulation;" title="Change theme" aria-label="Change theme">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                                <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2c5.523 0 10 4.477 10 10 0 1.657-1.343 3-3 3h-1.8a2 2 0 0 0-1.4 3.429l.2.196A2 2 0 0 1 14.6 22z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -1421,14 +1611,16 @@
                                 aria-label="Workspace path"
                                 class="min-w-0 w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
                             <button id="workspace-picker-btn" type="button" class="workspace-icon-button" aria-label="Choose workspace folder" title="Choose workspace folder">
-                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path d="M2.75 5.75A1.75 1.75 0 0 1 4.5 4h3.1c.46 0 .9.18 1.22.5l1.05 1.05c.23.23.54.35.86.35h5.77A1.75 1.75 0 0 1 18.25 7.65v6.6A1.75 1.75 0 0 1 16.5 16H4.5a1.75 1.75 0 0 1-1.75-1.75v-8.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" />
+                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                                 </svg>
                             </button>
                             <button id="workspace-unlock-btn" type="button" class="workspace-icon-button hidden" aria-label="Unlock workspace path" title="Unlock workspace path">
-                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path d="M6.25 8.5V6.75a3.75 3.75 0 0 1 7.08-1.72" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" />
-                                    <rect x="4.25" y="8.5" width="11.5" height="7.5" rx="1.75" stroke="currentColor" stroke-width="1.45" />
+                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <circle cx="12" cy="16" r="1" fill="currentColor"></circle>
+                                    <rect x="3" y="10" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
+                                    <path d="M7 10V7a5 5 0 0 1 9.33-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                                 </svg>
                             </button>
                         </div>
@@ -1475,11 +1667,31 @@
                     <!-- Row 3: Session | Context template -->
                     <div class="chat-session-context-row">
                         <div class="session-selector-row">
-                            <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                                <option value="">New session</option>
-                            </select>
-                            <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Show session summary">
-                                🧠
+                            <div id="session-dropdown" class="session-dropdown">
+                                <button
+                                    id="session-dropdown-trigger"
+                                    type="button"
+                                    class="session-dropdown-trigger"
+                                    aria-expanded="false"
+                                    aria-controls="session-dropdown-menu"
+                                >
+                                    <span id="session-dropdown-label" class="session-dropdown-label">
+                                        <span class="session-dropdown-title">New session</span>
+                                    </span>
+                                    <svg class="session-dropdown-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                    </svg>
+                                </button>
+                                <div id="session-dropdown-menu" class="session-dropdown-menu hidden" role="listbox"></div>
+                            </div>
+                            <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Open session summary" title="Open session summary">
+                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    <path d="M20 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    <path d="M22 5h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    <path d="M4 17v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    <path d="M5 18H3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                </svg>
                             </button>
                         </div>
                         <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
@@ -1527,11 +1739,18 @@
                                     class="block w-full px-3 py-2 pr-12 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
                                 ></textarea>
                                 <button id="attach-btn" type="button" class="chat-attach-btn" title="Attach image(s)" aria-label="Attach image(s)" aria-expanded="false" aria-controls="chat-attachment-popover">
-                                    📎
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657L4.757 11.757a6 6 0 1 0 8.486 8.486L21.657 11.657" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    </svg>
                                     <span id="attach-count-badge" class="chat-attach-badge" style="display:none"></span>
                                 </button>
                                 <button id="chat-focus-toggle-inline" type="button" class="chat-focus-inline-btn" title="Focus chat workspace" aria-label="Focus chat workspace" aria-pressed="false">
-                                    ⛶
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M8 3H5a2 2 0 0 0-2 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M21 8V5a2 2 0 0 0-2-2h-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M3 16v3a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M16 21h3a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    </svg>
                                 </button>
                                 <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
                                 <div id="chat-attachment-popover" class="chat-attachment-popover hidden" role="menu" aria-label="Pending attachments"></div>
