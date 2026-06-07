@@ -8,11 +8,10 @@ const COPY_ICON_SVG = `
 
 const FORK_ICON_SVG = `
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="18" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></circle>
-        <circle cx="6" cy="6" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></circle>
-        <circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></circle>
-        <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M12 12v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M16 3h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M8 3H3v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="m21 3-7.828 7.828A4 4 0 0 0 12 13.657V22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
     </svg>
 `.trim();
 
@@ -32,12 +31,6 @@ const TYPING_DOTS_HTML = `
     <span class="typing-dot"></span>
 `.trim();
 
-const STATUS_EMOJIS = {
-    thinking: '💬',
-    tools: '🛠️',
-    done: '✅',
-    error: '⚠️'
-};
 const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
 
 // State management
@@ -1056,7 +1049,7 @@ function renderSessionSummaryVectorIndex(vectorIndex) {
         missingTypes.length ? `missing: ${missingTypes.join(', ')}` : '',
     ].filter(Boolean).join(' · ');
     return `
-        <div class="mt-1 mb-2 rounded-md border border-border-primary bg-app-bg p-2 text-xs text-txt-secondary">
+        <div class="mt-1 mb-2 rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">
             <span class="font-semibold text-txt-primary">Vector index:</span>
             ${escapeHtml(String(indexedFields))}/${escapeHtml(String(expectedFields))} fields
             ${detail ? `<span class="block mt-1">${escapeHtml(detail)}</span>` : ''}
@@ -3681,7 +3674,7 @@ function createAssistantStreamingMessage() {
 
     const statusText = document.createElement('span');
     statusText.className = 'stream-status-text';
-    statusText.textContent = 'Assistant is responding 💬';
+    statusText.textContent = 'Assistant is responding';
 
     progressDiv.appendChild(indicator);
     progressDiv.appendChild(statusText);
@@ -3773,26 +3766,15 @@ function renderAssistantMarkdown(context, options = {}) {
 }
 
 function setAssistantStatus(context, label, state = 'thinking') {
-    const emoji = STATUS_EMOJIS[state] || STATUS_EMOJIS.thinking;
-    context.statusText.textContent = `${label} ${emoji}`;
+    context.statusText.textContent = label;
     context.indicator.className = 'stream-status-indicator';
     if (state === 'thinking') {
         context.indicator.classList.add('typing');
         context.indicator.innerHTML = TYPING_DOTS_HTML;
         return;
     }
-
-    const stateClass = state === 'tools'
-        ? 'tool'
-        : state === 'done'
-        ? 'success'
-        : state === 'error'
-        ? 'error'
-        : '';
-    if (stateClass) {
-        context.indicator.classList.add(stateClass);
-    }
-    context.indicator.textContent = emoji;
+    context.indicator.classList.add('hidden');
+    context.indicator.innerHTML = '';
 }
 
 function handleToolEvent(context, payload) {
