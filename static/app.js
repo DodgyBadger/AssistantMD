@@ -79,11 +79,6 @@ const chatElements = {
     composer: document.getElementById('chat-composer'),
     compactionTrack: document.getElementById('chat-compaction-track'),
     compactionFill: document.getElementById('chat-compaction-fill'),
-    sessionTitleRow: document.getElementById('session-title-row'),
-    sessionTitleInput: document.getElementById('session-title-input'),
-    sessionTitleSave: document.getElementById('session-title-save'),
-    sessionExportBtn: document.getElementById('session-export-btn'),
-    sessionDeleteBtn: document.getElementById('session-delete-btn'),
 };
 
 // DOM elements - Dashboard
@@ -131,6 +126,7 @@ sessionControls = window.SessionControls.create({
     state,
     elements: chatElements,
     composeState: chatComposeState,
+    icons: window.AssistantMDIcons,
     utils: window.AssistantMDUtils,
     sessionSummary,
     callbacks: {
@@ -539,18 +535,6 @@ function syncChatControlLocks() {
     }
     if (chatElements.sessionSummaryTrigger) {
         chatElements.sessionSummaryTrigger.disabled = state.isLoading;
-    }
-    if (chatElements.sessionTitleInput) {
-        chatElements.sessionTitleInput.disabled = state.isLoading;
-    }
-    if (chatElements.sessionTitleSave) {
-        chatElements.sessionTitleSave.disabled = state.isLoading;
-    }
-    if (chatElements.sessionExportBtn) {
-        chatElements.sessionExportBtn.disabled = state.isLoading || !state.sessionId;
-    }
-    if (chatElements.sessionDeleteBtn) {
-        chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
     }
     workspacePicker.syncControls();
     syncSendButtonState();

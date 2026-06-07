@@ -573,6 +573,10 @@ details summary::-webkit-details-marker {
     border-radius: 0.25rem;
     color: rgb(var(--text-primary));
     text-align: left;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.25rem;
 }
 .session-dropdown-option:hover,
 .session-dropdown-option:focus-visible,
@@ -602,6 +606,58 @@ details summary::-webkit-details-marker {
     font-size: 0.62rem;
     line-height: 1;
     color: rgb(var(--accent-primary));
+}
+.session-dropdown-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding-right: 0.25rem;
+}
+.session-dropdown-action {
+    width: 1.8rem;
+    height: 1.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    color: rgb(var(--text-secondary));
+}
+.session-dropdown-action:hover,
+.session-dropdown-action:focus-visible {
+    color: rgb(var(--text-primary));
+    background: rgb(var(--bg-card));
+    outline: none;
+}
+.session-dropdown-action:focus-visible {
+    box-shadow: 0 0 0 2px rgb(var(--accent-primary));
+}
+.session-dropdown-action.is-danger {
+    color: rgb(var(--state-error));
+}
+.session-dropdown-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.session-dropdown-action svg {
+    width: 1rem;
+    height: 1rem;
+}
+.session-dropdown-option-editing {
+    padding: 0.35rem 0.35rem 0.35rem 0.5rem;
+}
+.session-dropdown-title-input {
+    min-width: 0;
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.25rem;
+    background: rgb(var(--bg-card));
+    color: rgb(var(--text-primary));
+    font-size: 0.875rem;
+}
+.session-dropdown-title-input:focus {
+    outline: 2px solid rgb(var(--accent-primary));
+    outline-offset: 1px;
 }
 .session-summary-trigger {
     width: 2.5rem;
@@ -683,36 +739,6 @@ details summary::-webkit-details-marker {
 @media (min-width: 768px) {
     .chat-session-context-row {
         grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
-    }
-}
-.session-title-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-.session-title-row.hidden {
-    display: none;
-}
-.session-title-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-.session-title-row input {
-    min-width: 0;
-}
-.session-title-actions > button {
-    flex: 1 1 5.5rem;
-}
-@media (min-width: 640px) {
-    .session-title-row {
-        flex-direction: row;
-    }
-    .session-title-actions {
-        flex-wrap: nowrap;
-    }
-    .session-title-actions > button {
-        flex: 0 0 auto;
     }
 }
 .app-modal-overlay {

@@ -1,10 +1,13 @@
 (function sessionControlsModule(window) {
-    function createSessionControlsController({ state, elements, composeState, utils, sessionSummary, callbacks }) {
+    function createSessionControlsController({ state, elements, composeState, icons, utils, sessionSummary, callbacks }) {
         const { escapeHtml } = utils;
+        let editingSessionId = '';
 
         function setMenuOpen(open) {
             composeState.sessionMenuOpen = Boolean(open);
+            const hadEditingSession = Boolean(editingSessionId);
             if (!composeState.sessionMenuOpen) {
+                editingSessionId = '';
                 sessionSummary.closePreview();
             }
             if (elements.sessionDropdown) {
@@ -15,6 +18,9 @@
             }
             if (elements.sessionDropdownTrigger) {
                 elements.sessionDropdownTrigger.setAttribute('aria-expanded', composeState.sessionMenuOpen ? 'true' : 'false');
+            }
+            if (!composeState.sessionMenuOpen && hadEditingSession) {
+                renderSelector();
             }
         }
 
@@ -62,15 +68,20 @@
             ];
             elements.sessionDropdownMenu.innerHTML = rows.join('');
             updateSummaryTrigger();
+            focusEditingInput();
         }
 
         function renderDropdownRow(session, isActive) {
             const sessionId = session?.session_id || '';
             const hasSummary = Boolean(session?.has_summary);
             const meta = activityLabel(session);
+            const isEditing = Boolean(sessionId && editingSessionId === sessionId);
             const previewAttribute = hasSummary ? ` data-session-summary-preview-id="${escapeHtml(sessionId)}"` : '';
             const previewFocusAttribute = hasSummary ? ` data-session-summary-preview-focus-id="${escapeHtml(sessionId)}"` : '';
             const marker = hasSummary ? '<span class="session-summary-marker" aria-hidden="true">✦</span>' : '';
+            if (isEditing) {
+                return renderEditingDropdownRow(session, isActive);
+            }
             return `
                 <div
                     class="session-dropdown-option${isActive ? ' is-active' : ''}"
@@ -86,8 +97,73 @@
                             ${meta ? `<span class="session-dropdown-meta">${escapeHtml(meta)}</span>` : ''}
                         </span>
                     </button>
+                    ${isActive && sessionId ? renderActiveSessionActions(sessionId) : ''}
                 </div>
             `;
+        }
+
+        function renderEditingDropdownRow(session, isActive) {
+            const sessionId = session?.session_id || '';
+            return `
+                <div
+                    class="session-dropdown-option session-dropdown-option-editing${isActive ? ' is-active' : ''}"
+                    role="option"
+                    aria-selected="${isActive ? 'true' : 'false'}"
+                    data-session-editing-id="${escapeHtml(sessionId)}"
+                >
+                    <input
+                        type="text"
+                        class="session-dropdown-title-input"
+                        value="${escapeHtml(session?.title || '')}"
+                        placeholder="Add a title..."
+                        maxlength="120"
+                        data-session-title-input="${escapeHtml(sessionId)}"
+                        aria-label="Session title"
+                    />
+                    <div class="session-dropdown-row-actions">
+                        ${renderRowActionButton('save-title', sessionId, 'Save title', icons.CHECK_ICON_SVG)}
+                        ${renderRowActionButton('cancel-title', sessionId, 'Cancel title edit', icons.X_ICON_SVG)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderActiveSessionActions(sessionId) {
+            return `
+                <div class="session-dropdown-row-actions" aria-label="Session actions">
+                    ${renderRowActionButton('edit-title', sessionId, 'Edit title', icons.EDIT_ICON_SVG)}
+                    ${renderRowActionButton('export', sessionId, 'Export transcript', icons.DOWNLOAD_ICON_SVG)}
+                    ${renderRowActionButton('delete', sessionId, 'Delete session', icons.TRASH_ICON_SVG, 'is-danger')}
+                </div>
+            `;
+        }
+
+        function renderRowActionButton(action, sessionId, label, icon, extraClass = '') {
+            const classes = ['session-dropdown-action', extraClass].filter(Boolean).join(' ');
+            return `
+                <button
+                    type="button"
+                    class="${classes}"
+                    data-session-action="${action}"
+                    data-session-action-id="${escapeHtml(sessionId)}"
+                    title="${escapeHtml(label)}"
+                    aria-label="${escapeHtml(label)}"
+                    ${state.isLoading ? 'disabled' : ''}
+                >${icon}</button>
+            `;
+        }
+
+        function focusEditingInput() {
+            if (!editingSessionId || !elements.sessionDropdownMenu) return;
+            window.requestAnimationFrame(() => {
+                const input = elements.sessionDropdownMenu.querySelector(
+                    `[data-session-title-input="${cssEscape(editingSessionId)}"]`
+                );
+                if (input instanceof HTMLInputElement) {
+                    input.focus();
+                    input.select();
+                }
+            });
         }
 
         function updateSummaryTrigger() {
@@ -104,6 +180,7 @@
 
         async function selectFromDropdown(sessionId) {
             setMenuOpen(false);
+            editingSessionId = '';
             if (!sessionId) {
                 await callbacks.clearSession(false);
             } else {
@@ -174,31 +251,15 @@
         }
 
         function updateTitleRow() {
-            const row = elements.sessionTitleRow;
-            const input = elements.sessionTitleInput;
-            if (!row || !input) return;
-
-            const sessionId = state.sessionId;
-            if (!sessionId) {
-                row.classList.add('hidden');
-                input.value = '';
-                return;
-            }
-
-            const session = state.sessions.find((s) => s.session_id === sessionId);
-            input.value = session?.title || '';
-            row.classList.remove('hidden');
+            renderSelector();
         }
 
-        async function saveTitle() {
-            const sessionId = state.sessionId;
+        async function saveTitle(sessionId = state.sessionId, titleValue = '', btn = null) {
             const vault = elements.vaultSelector?.value || '';
-            const input = elements.sessionTitleInput;
-            const btn = elements.sessionTitleSave;
-            if (!sessionId || !vault || !input || !btn) return;
+            if (!sessionId || !vault) return;
 
-            const nextTitle = input.value.trim() || null;
-            btn.disabled = true;
+            const nextTitle = String(titleValue || '').trim() || null;
+            if (btn) btn.disabled = true;
             try {
                 const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/title`, {
                     method: 'PATCH',
@@ -209,23 +270,20 @@
 
                 const session = state.sessions.find((s) => s.session_id === sessionId);
                 if (session) session.title = nextTitle;
+                editingSessionId = '';
                 renderSelector();
             } catch (error) {
                 console.error('Failed to save session title:', error);
             } finally {
-                btn.disabled = false;
+                if (btn) btn.disabled = false;
             }
         }
 
-        async function exportCurrent() {
-            const sessionId = state.sessionId;
+        async function exportCurrent(sessionId = state.sessionId, btn = null) {
             const vault = elements.vaultSelector?.value || '';
-            const btn = elements.sessionExportBtn;
-            if (!sessionId || !vault || !btn) return;
+            if (!sessionId || !vault) return;
 
-            const originalText = btn.textContent;
-            btn.disabled = true;
-            btn.textContent = 'Exporting...';
+            if (btn) btn.disabled = true;
             try {
                 const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/export`, {
                     method: 'POST',
@@ -240,22 +298,20 @@
                 console.error('Failed to export session transcript:', error);
                 alert('Failed to export transcript');
             } finally {
-                btn.textContent = originalText;
+                if (btn) btn.disabled = false;
                 callbacks.syncChatControlLocks();
             }
         }
 
-        async function deleteCurrent() {
-            const sessionId = state.sessionId;
+        async function deleteCurrent(sessionId = state.sessionId, btn = null) {
             const vault = elements.vaultSelector?.value || '';
-            const btn = elements.sessionDeleteBtn;
-            if (!sessionId || !vault || !btn) return;
+            if (!sessionId || !vault) return;
 
             if (!confirm(
                 `Delete session "${sessionId}"? This removes it from the chat session list and database only. Exported transcripts are not deleted.`
             )) return;
 
-            btn.disabled = true;
+            if (btn) btn.disabled = true;
             try {
                 const response = await fetch(
                     `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`,
@@ -265,17 +321,56 @@
 
                 state.sessions = state.sessions.filter((s) => s.session_id !== sessionId);
                 state.sessionId = null;
+                editingSessionId = '';
                 callbacks.clearPendingAttachments();
                 callbacks.renderChatEmptyState();
                 renderSelector();
-                updateTitleRow();
                 callbacks.syncChatControlLocks();
                 callbacks.updateStatus();
             } catch (error) {
                 console.error('Failed to delete session:', error);
             } finally {
-                btn.disabled = false;
+                if (btn) btn.disabled = false;
             }
+        }
+
+        async function handleSessionAction(button) {
+            const action = button.dataset.sessionAction || '';
+            const sessionId = button.dataset.sessionActionId || '';
+            if (!sessionId || state.isLoading) return;
+
+            if (action === 'edit-title') {
+                editingSessionId = sessionId;
+                renderSelector();
+                return;
+            }
+            if (action === 'cancel-title') {
+                editingSessionId = '';
+                renderSelector();
+                return;
+            }
+            if (action === 'save-title') {
+                const input = elements.sessionDropdownMenu?.querySelector(
+                    `[data-session-title-input="${cssEscape(sessionId)}"]`
+                );
+                const titleValue = input instanceof HTMLInputElement ? input.value : '';
+                await saveTitle(sessionId, titleValue, button);
+                return;
+            }
+            if (action === 'export') {
+                await exportCurrent(sessionId, button);
+                return;
+            }
+            if (action === 'delete') {
+                await deleteCurrent(sessionId, button);
+            }
+        }
+
+        function cssEscape(value) {
+            if (window.CSS && typeof window.CSS.escape === 'function') {
+                return window.CSS.escape(value);
+            }
+            return String(value).replace(/"/g, '\\"');
         }
 
         function attachEventListeners() {
@@ -293,10 +388,31 @@
                 elements.sessionDropdownMenu.addEventListener('click', async (event) => {
                     const target = event.target;
                     if (!(target instanceof Element)) return;
+                    const actionButton = target.closest('[data-session-action]');
+                    if (actionButton instanceof HTMLButtonElement) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        await handleSessionAction(actionButton);
+                        return;
+                    }
                     const option = target.closest('[data-session-id]');
                     if (option instanceof HTMLElement) {
                         event.preventDefault();
                         await selectFromDropdown(option.dataset.sessionId || '');
+                    }
+                });
+                elements.sessionDropdownMenu.addEventListener('keydown', async (event) => {
+                    const target = event.target;
+                    if (!(target instanceof HTMLInputElement)) return;
+                    const sessionId = target.dataset.sessionTitleInput || '';
+                    if (!sessionId) return;
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        await saveTitle(sessionId, target.value);
+                    } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        editingSessionId = '';
+                        renderSelector();
                     }
                 });
                 elements.sessionDropdownMenu.addEventListener('mouseover', (event) => {
@@ -343,23 +459,6 @@
                 elements.sessionSummaryTrigger.addEventListener('click', () => sessionSummary.openModalForSession(sessionSummary.selectedSessionWithSummary()));
             }
 
-            if (elements.sessionTitleSave) {
-                elements.sessionTitleSave.addEventListener('click', saveTitle);
-            }
-
-            if (elements.sessionTitleInput) {
-                elements.sessionTitleInput.addEventListener('keydown', (event) => {
-                    if (event.key === 'Enter') saveTitle();
-                });
-            }
-
-            if (elements.sessionDeleteBtn) {
-                elements.sessionDeleteBtn.addEventListener('click', deleteCurrent);
-            }
-
-            if (elements.sessionExportBtn) {
-                elements.sessionExportBtn.addEventListener('click', exportCurrent);
-            }
         }
 
         return Object.freeze({
