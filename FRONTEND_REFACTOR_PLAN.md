@@ -206,7 +206,7 @@ Validation target:
 
 ### Phase 4: Extract Dashboard View
 
-Status: next.
+Status: complete in the current refactor branch.
 
 Why:
 
@@ -228,8 +228,11 @@ Keep in `app.js` initially:
 Validation target:
 
 - Manual smoke: dashboard loads, sort headers work, workflow run buttons still dispatch, running tasks display.
+- Static checks: `node --check` for all scripts and `git diff --check`. Done.
 
 ### Phase 5: Extract Vault Activity
+
+Status: next.
 
 Why:
 
