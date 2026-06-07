@@ -918,6 +918,12 @@ def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
             "source_summary": None,
             "metadata": {},
             "artifacts": [],
+            "vector_index": {
+                "indexed_fields": 0,
+                "expected_fields": 0,
+                "indexed_field_types": [],
+                "missing_field_types": [],
+            },
         }
     return _session_summary_response(session_summary)
 
@@ -938,6 +944,7 @@ async def update_chat_session_summary(
             message=f"Session summary not found: {session_id}",
             details={"session_id": session_id, "vault_name": vault_name},
         )
+    previous = existing
     session_summary = store.update_session_summary_fields(
         vault_name=vault_name,
         session_id=session_id,
@@ -950,11 +957,20 @@ async def update_chat_session_summary(
         source_summary=data.get("source_summary"),
         metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
     )
-    indexed_fields = await _maybe_index_session_summary_for_api(
-        store,
-        vault_name=vault_name,
-        session_id=session_id,
-    )
+    try:
+        indexed_fields = await _index_session_summary_for_api(
+            store,
+            vault_name=vault_name,
+            session_id=session_id,
+        )
+    except Exception:
+        _restore_session_summary_for_api(
+            store,
+            vault_name=vault_name,
+            session_id=session_id,
+            previous_summary=previous,
+        )
+        raise
     response = _session_summary_response(session_summary)
     response["indexed_fields"] = indexed_fields
     return response
@@ -973,21 +989,31 @@ def delete_chat_session_summary(vault_name: str, session_id: str) -> dict:
     }
 
 
-async def _maybe_index_session_summary_for_api(
+async def _index_session_summary_for_api(
     store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
 ) -> int:
     try:
-        return await store.index_session_summary_fields(
+        indexed_fields = await store.index_session_summary_fields(
             vault_name=vault_name,
             session_id=session_id,
             vector_service=VectorService(),
         )
+        logger.info(
+            "session_summary_field_indexing_completed",
+            data={
+                "source": "api",
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "indexed_fields": indexed_fields,
+            },
+        )
+        return indexed_fields
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "session_summary_field_indexing_skipped",
+        logger.error(
+            "session_summary_field_indexing_failed",
             data={
                 "source": "api",
                 "vault_name": vault_name,
@@ -996,7 +1022,45 @@ async def _maybe_index_session_summary_for_api(
                 "error": str(exc),
             },
         )
-        return 0
+        raise APIException(
+            status_code=500,
+            error_type="SessionSummaryIndexingFailed",
+            message=f"Failed to refresh session summary vector index for {session_id}",
+            details={
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        ) from exc
+
+
+def _restore_session_summary_for_api(
+    store: SessionSummaryStore,
+    *,
+    vault_name: str,
+    session_id: str,
+    previous_summary,
+) -> None:
+    store.upsert_session_summary(
+        vault_name=vault_name,
+        session_id=session_id,
+        title=previous_summary.title,
+        summary=previous_summary.summary,
+        domain=previous_summary.domain,
+        work_product=previous_summary.work_product,
+        user_intent=previous_summary.user_intent,
+        named_entities=previous_summary.named_entities,
+        source_summary=previous_summary.source_summary,
+        workspace_path=previous_summary.workspace_path,
+        metadata=previous_summary.metadata,
+    )
+    if previous_summary.artifacts:
+        store.add_session_artifacts(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifacts=tuple(previous_summary.artifacts),
+        )
 
 
 def _session_summary_response(session_summary) -> dict:
@@ -1015,6 +1079,10 @@ def _session_summary_response(session_summary) -> dict:
         "source_summary": session_summary.source_summary,
         "metadata": session_summary.metadata,
         "artifacts": [artifact.to_dict() for artifact in session_summary.artifacts],
+        "vector_index": SessionSummaryStore().get_session_summary_vector_index_status(
+            vault_name=session_summary.vault_name,
+            session_id=session_summary.session_id,
+        ),
     }
 
 

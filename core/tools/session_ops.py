@@ -57,6 +57,10 @@ SESSION_SEARCH_FETCH_MULTIPLIER = 20
 SESSION_SEARCH_MIN_FETCH_LIMIT = 100
 
 
+class SessionSummaryIndexingError(RuntimeError):
+    """Raised when a durable session summary write cannot refresh vector indexes."""
+
+
 class SessionOps(BaseTool):
     """Search and summarize chat sessions."""
 
@@ -139,6 +143,10 @@ class SessionOps(BaseTool):
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
+                    previous_summary = store.get_session_summary(
+                        vault_name=active_vault_name,
+                        session_id=active_session_id,
+                    )
                     session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
@@ -158,16 +166,25 @@ class SessionOps(BaseTool):
                         ) or None,
                         metadata=summary_metadata,
                     )
+                    try:
+                        indexed_fields = await _index_session_summary_fields(
+                            store,
+                            vault_name=active_vault_name,
+                            session_id=active_session_id,
+                        )
+                    except Exception:
+                        _restore_session_summary_after_failed_refresh(
+                            store,
+                            vault_name=active_vault_name,
+                            session_id=active_session_id,
+                            previous_summary=previous_summary,
+                        )
+                        raise
                     _maybe_add_artifacts(
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                         artifacts=summary_data.get("artifacts"),
-                    )
-                    indexed_fields = await _maybe_index_session_summary_fields(
-                        store,
-                        vault_name=active_vault_name,
-                        session_id=active_session_id,
                     )
                     refreshed = store.get_session_summary(
                         vault_name=session_summary.vault_name,
@@ -186,6 +203,10 @@ class SessionOps(BaseTool):
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                         summarization_model=summarization_model,
+                    )
+                    previous_summary = store.get_session_summary(
+                        vault_name=active_vault_name,
+                        session_id=active_session_id,
                     )
                     session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
@@ -210,12 +231,21 @@ class SessionOps(BaseTool):
                             "tool_event_count": extraction["tool_event_count"],
                         },
                     )
+                    try:
+                        indexed_fields = await _index_session_summary_fields(
+                            store,
+                            vault_name=active_vault_name,
+                            session_id=active_session_id,
+                        )
+                    except Exception:
+                        _restore_session_summary_after_failed_refresh(
+                            store,
+                            vault_name=active_vault_name,
+                            session_id=active_session_id,
+                            previous_summary=previous_summary,
+                        )
+                        raise
                     artifact_count = _add_chat_mutation_artifacts(
-                        store,
-                        vault_name=active_vault_name,
-                        session_id=active_session_id,
-                    )
-                    indexed_fields = await _maybe_index_session_summary_fields(
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
@@ -279,6 +309,8 @@ class SessionOps(BaseTool):
                     result = result.to_dict()
                 return json.dumps(result, ensure_ascii=False, indent=2)
             except ModelRetry:
+                raise
+            except SessionSummaryIndexingError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.error(
@@ -1211,21 +1243,30 @@ def _extract_arg_paths(value: Any) -> list[str]:
     return paths
 
 
-async def _maybe_index_session_summary_fields(
+async def _index_session_summary_fields(
     store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
 ) -> int:
     try:
-        return await store.index_session_summary_fields(
+        indexed_fields = await store.index_session_summary_fields(
             vault_name=vault_name,
             session_id=session_id,
             vector_service=VectorService(),
         )
+        logger.info(
+            "session_summary_field_indexing_completed",
+            data={
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "indexed_fields": indexed_fields,
+            },
+        )
+        return indexed_fields
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "session_summary_field_indexing_skipped",
+        logger.error(
+            "session_summary_field_indexing_failed",
             data={
                 "vault_name": vault_name,
                 "session_id": session_id,
@@ -1233,7 +1274,40 @@ async def _maybe_index_session_summary_fields(
                 "error": str(exc),
             },
         )
-        return 0
+        raise SessionSummaryIndexingError(
+            f"Failed to index session summary fields for {session_id}: {exc}"
+        ) from exc
+
+
+def _restore_session_summary_after_failed_refresh(
+    store: SessionSummaryStore,
+    *,
+    vault_name: str,
+    session_id: str,
+    previous_summary: Any,
+) -> None:
+    if previous_summary is None:
+        store.delete_session_summary(vault_name=vault_name, session_id=session_id)
+        return
+    store.upsert_session_summary(
+        vault_name=vault_name,
+        session_id=session_id,
+        title=previous_summary.title,
+        summary=previous_summary.summary,
+        domain=previous_summary.domain,
+        work_product=previous_summary.work_product,
+        user_intent=previous_summary.user_intent,
+        named_entities=previous_summary.named_entities,
+        source_summary=previous_summary.source_summary,
+        workspace_path=previous_summary.workspace_path,
+        metadata=previous_summary.metadata,
+    )
+    if previous_summary.artifacts:
+        store.add_session_artifacts(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifacts=tuple(previous_summary.artifacts),
+        )
 
 
 def _maybe_add_artifacts(

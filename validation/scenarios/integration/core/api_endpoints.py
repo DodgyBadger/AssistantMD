@@ -305,6 +305,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert memory_preview.json().get("summary") == "Original session summary.", (
             "Session summary preview returns summary"
         )
+        assert memory_preview.json().get("vector_index", {}).get("expected_fields") == 4, (
+            "Session summary preview exposes expected vector index coverage"
+        )
 
         memory_update = self.call_api(
             f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}",
@@ -322,6 +325,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert memory_update.status_code == 200, "Session summary update endpoint succeeds"
         assert memory_update.json().get("summary") == "Edited session summary.", (
             "Session summary update replaces summary"
+        )
+        assert memory_update.json().get("vector_index", {}).get("indexed_fields") == 4, (
+            "Session summary update returns refreshed vector index coverage"
         )
 
         title_update = self.call_api(

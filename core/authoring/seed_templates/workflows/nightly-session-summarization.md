@@ -25,7 +25,6 @@ if not sessions:
     await finish(status="skipped", reason="no sessions pending or stale summarization")
 
 summarized = []
-failed = []
 
 for item in sessions:
     metadata = item.metadata or {}
@@ -36,44 +35,29 @@ for item in sessions:
     summary_status = metadata.get("summary_status", "")
 
     if not session_id:
-        failed.append({"session_id": "", "title": title, "error": "missing session_id"})
-        continue
+        raise ValueError("Cannot summarize a session item without session_id")
 
-    try:
-        result = await session_ops(
-            operation="summarize_session",
-            session_id=session_id,
-            summarization_model=SUMMARIZATION_MODEL,
-        )
-        summarized.append(
-            {
-                "session_id": session_id,
-                "title": title,
-                "message_count": message_count,
-                "history_revision": history_revision,
-                "summary_status": summary_status,
-                "result": result.return_value,
-            }
-        )
-    except Exception as exc:
-        failed.append(
-            {
-                "session_id": session_id,
-                "title": title,
-                "message_count": message_count,
-                "history_revision": history_revision,
-                "summary_status": summary_status,
-                "error": str(exc),
-            }
-        )
+    result = await session_ops(
+        operation="summarize_session",
+        session_id=session_id,
+        summarization_model=SUMMARIZATION_MODEL,
+    )
+    summarized.append(
+        {
+            "session_id": session_id,
+            "title": title,
+            "message_count": message_count,
+            "history_revision": history_revision,
+            "summary_status": summary_status,
+            "result": result.return_value,
+        }
+    )
 
 {
-    "status": "completed" if not failed else "completed_with_errors",
+    "status": "completed",
     "selected": len(sessions),
     "summarized": len(summarized),
-    "failed": len(failed),
     "batch_size": BATCH_SIZE,
     "summarization_model": SUMMARIZATION_MODEL,
-    "failures": failed,
 }
 ```

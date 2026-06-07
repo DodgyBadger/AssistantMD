@@ -429,6 +429,7 @@ class ChatSessionSummaryResponse(BaseModel):
     source_summary: Optional[str] = Field(None, description="Extracted source summary")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Summary metadata")
     artifacts: List[Dict[str, Any]] = Field(default_factory=list, description="Linked summary artifacts")
+    vector_index: Dict[str, Any] = Field(default_factory=dict, description="Vector index coverage")
 
 
 class ChatSessionSummaryUpdateRequest(BaseModel):

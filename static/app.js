@@ -899,11 +899,31 @@ function renderSessionSummaryDetails(summary) {
             </div>
             <div>
                 <p class="font-semibold text-txt-primary">Metadata</p>
+                ${renderSessionSummaryVectorIndex(summary.vector_index)}
                 <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(metadata, null, 2))}</pre>
             </div>
             <div class="text-xs text-txt-secondary">
                 Created ${escapeHtml(formatShortDate(summary.created_at || ''))} · Updated ${escapeHtml(formatShortDate(summary.updated_at || ''))}
             </div>
+        </div>
+    `;
+}
+
+function renderSessionSummaryVectorIndex(vectorIndex) {
+    const status = vectorIndex && typeof vectorIndex === 'object' ? vectorIndex : {};
+    const indexedFields = Number(status.indexed_fields || 0);
+    const expectedFields = Number(status.expected_fields || 0);
+    const indexedTypes = Array.isArray(status.indexed_field_types) ? status.indexed_field_types : [];
+    const missingTypes = Array.isArray(status.missing_field_types) ? status.missing_field_types : [];
+    const detail = [
+        indexedTypes.length ? `indexed: ${indexedTypes.join(', ')}` : '',
+        missingTypes.length ? `missing: ${missingTypes.join(', ')}` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+        <div class="mt-1 mb-2 rounded-md border border-border-primary bg-app-bg p-2 text-xs text-txt-secondary">
+            <span class="font-semibold text-txt-primary">Vector index:</span>
+            ${escapeHtml(String(indexedFields))}/${escapeHtml(String(expectedFields))} fields
+            ${detail ? `<span class="block mt-1">${escapeHtml(detail)}</span>` : ''}
         </div>
     `;
 }
