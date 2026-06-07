@@ -6,6 +6,15 @@ const COPY_ICON_SVG = `
     </svg>
 `.trim();
 
+const FORK_ICON_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M16 3h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M8 3h-5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M21 3l-7.536 7.536a5 5 0 0 0-1.464 3.534v6.93" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M3 3l7.536 7.536a5 5 0 0 1 1.464 3.534v.93" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg>
+`.trim();
+
 const TYPING_DOTS_HTML = `
     <span class="typing-dot"></span>
     <span class="typing-dot"></span>
@@ -1287,11 +1296,15 @@ function renderPersistedSession(payload) {
 
         if (message.role === 'assistant') {
             const assistantToolEvents = pendingToolEvents.splice(0, pendingToolEvents.length);
-            renderPersistedAssistantMessage(message.content || '', assistantToolEvents);
+            renderPersistedAssistantMessage(message.content || '', assistantToolEvents, {
+                sequenceIndex: message.sequence_index
+            });
             return;
         }
 
-        addMessage('user', message.content || '');
+        addMessage('user', message.content || '', {
+            sequenceIndex: message.sequence_index
+        });
     });
 
     if (pendingToolEvents.length > 0) {
@@ -1299,9 +1312,10 @@ function renderPersistedSession(payload) {
     }
 }
 
-function renderPersistedAssistantMessage(content, toolEvents) {
+function renderPersistedAssistantMessage(content, toolEvents, options = {}) {
     const context = createAssistantStreamingMessage();
     context.fullText = content || '';
+    context.sequenceIndex = Number.isInteger(options.sequenceIndex) ? options.sequenceIndex : null;
     renderAssistantMarkdown(context, { finalize: true });
     hydratePersistedToolEvents(context, toolEvents);
     finalizeAssistantMessage(context, {
@@ -3053,6 +3067,10 @@ async function sendMessage() {
                 toolCount: 0,
                 status: 'done'
             });
+            if (vault && state.sessionId) {
+                await fetchSessions(vault, state.sessionId);
+                await loadSession(state.sessionId);
+            }
             return;
         }
 
@@ -3136,6 +3154,9 @@ async function sendMessage() {
         });
         if (vault) {
             await fetchSessions(vault, state.sessionId || '');
+            if (state.sessionId) {
+                await loadSession(state.sessionId);
+            }
         }
 
     } catch (error) {
@@ -3411,6 +3432,10 @@ function addMessage(role, content, options = {}) {
 
     const copyButton = createCopyButton(() => getCopyableText(bodyDiv), 'message-copy-button');
     actionsDiv.appendChild(copyButton);
+    const forkButton = role === 'assistant' ? createForkButton(options.sequenceIndex) : null;
+    if (forkButton) {
+        actionsDiv.appendChild(forkButton);
+    }
 
     if (footerContent.innerHTML.trim()) {
         footerDiv.appendChild(footerContent);
@@ -3681,6 +3706,10 @@ function finalizeAssistantMessage(context, metadata) {
 
     const copyButton = createCopyButton(() => getCopyableText(context.bodyDiv), 'message-copy-button');
     actionsDiv.appendChild(copyButton);
+    const forkButton = createForkButton(context.sequenceIndex);
+    if (forkButton) {
+        actionsDiv.appendChild(forkButton);
+    }
 
     if (footerContent.childElementCount > 0) {
         footerDiv.appendChild(footerContent);
@@ -3806,6 +3835,63 @@ function createCopyButton(getText, extraClass = '') {
     });
 
     return button;
+}
+
+function createForkButton(sequenceIndex) {
+    if (!Number.isInteger(sequenceIndex) || sequenceIndex < 0) {
+        return null;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'copy-button message-fork-button';
+    button.setAttribute('aria-label', 'Fork session from this message');
+    button.title = 'Fork session from this message';
+    button.innerHTML = FORK_ICON_SVG;
+
+    button.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        await forkCurrentSession(sequenceIndex, button);
+    });
+
+    return button;
+}
+
+async function forkCurrentSession(sequenceIndex, button) {
+    const vault = chatElements.vaultSelector.value;
+    const sessionId = state.sessionId;
+    if (state.isLoading || !vault || !sessionId || !Number.isInteger(sequenceIndex)) {
+        return;
+    }
+
+    const previousDisabled = button.disabled;
+    button.disabled = true;
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/fork`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                vault_name: vault,
+                through_sequence_index: sequenceIndex
+            })
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        const payload = await response.json();
+        const forkSessionId = payload?.session?.session_id;
+        if (!forkSessionId) {
+            throw new Error('Fork response did not include a new session id.');
+        }
+        state.sessionId = forkSessionId;
+        state.isWorkspaceUnlocked = false;
+        await fetchSessions(vault, forkSessionId);
+        await loadSession(forkSessionId);
+    } catch (error) {
+        console.error('Failed to fork chat session:', error);
+        addChatErrorMessage(`Fork failed: ${error.message}`);
+        button.disabled = previousDisabled;
+    }
 }
 
 function getCopyableText(element) {

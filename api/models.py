@@ -392,6 +392,26 @@ class ChatSessionWorkspaceRequest(BaseModel):
     path: Optional[str] = Field(None, description="Vault-relative workspace directory path")
 
 
+class ChatSessionForkRequest(BaseModel):
+    """Request to fork one persisted chat session."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    through_sequence_index: int = Field(
+        ...,
+        ge=0,
+        description="Persisted message sequence index to fork through, inclusive",
+    )
+
+
+class ChatSessionForkResponse(BaseModel):
+    """Response returned after creating a forked chat session."""
+
+    session: ChatSessionInfo = Field(..., description="New forked session summary")
+    source_session_id: str = Field(..., description="Source session identifier")
+    through_sequence_index: int = Field(..., description="Inclusive source message sequence fork point")
+    copied_message_count: int = Field(..., description="Number of messages copied into the fork")
+
+
 class ChatSessionSummaryResponse(BaseModel):
     """Lightweight session summary payload for UI previews."""
 

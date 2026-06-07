@@ -57,6 +57,7 @@ from core.settings.secrets_store import (
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
+from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.memory.session_summary import SessionSummaryStore
 from core.system_migrations import (
@@ -107,6 +108,7 @@ from .models import (
     SystemSettingsResponse,
     TemplateInfo,
     ChatSessionInfo,
+    ChatSessionForkResponse,
     ChatWorkspaceInfo,
     ChatSessionDetailResponse,
     ChatSessionMessageInfo,
@@ -773,6 +775,125 @@ def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
         )
         for session in sessions
     ]
+
+
+def fork_chat_session(
+    *,
+    vault_name: str,
+    source_session_id: str,
+    through_sequence_index: int,
+) -> ChatSessionForkResponse:
+    """Create a new chat session from a source session prefix."""
+    source_session = _chat_store.get_session_by_id(source_session_id)
+    if source_session is None:
+        raise APIException(
+            status_code=404,
+            error_type="ChatSessionNotFound",
+            message=f"Chat session not found: {source_session_id}",
+            details={"session_id": source_session_id, "vault_name": vault_name},
+        )
+    if source_session.vault_name != vault_name:
+        raise APIException(
+            status_code=409,
+            error_type="ChatSessionVaultMismatch",
+            message=(
+                f"Chat session '{source_session_id}' belongs to vault "
+                f"'{source_session.vault_name}' and cannot be used with vault '{vault_name}'."
+            ),
+            details={
+                "session_id": source_session_id,
+                "requested_vault": vault_name,
+                "bound_vault": source_session.vault_name,
+            },
+        )
+
+    highest_sequence = _chat_store.get_highest_message_sequence_index(source_session_id, vault_name)
+    if highest_sequence < 0:
+        raise APIException(
+            status_code=400,
+            error_type="ChatSessionForkEmpty",
+            message=f"Chat session has no messages to fork: {source_session_id}",
+            details={"session_id": source_session_id, "vault_name": vault_name},
+        )
+    if through_sequence_index > highest_sequence:
+        raise APIException(
+            status_code=400,
+            error_type="ChatSessionForkPointInvalid",
+            message=(
+                f"Fork point {through_sequence_index} is beyond the latest "
+                f"message sequence {highest_sequence}."
+            ),
+            details={
+                "session_id": source_session_id,
+                "vault_name": vault_name,
+                "through_sequence_index": through_sequence_index,
+                "highest_sequence_index": highest_sequence,
+            },
+        )
+
+    new_session_id = _generate_unique_chat_session_id(vault_name)
+    new_title = _forked_session_title(source_session)
+    copied_message_count = _chat_store.fork_session(
+        source_session_id=source_session_id,
+        new_session_id=new_session_id,
+        vault_name=vault_name,
+        through_sequence_index=through_sequence_index,
+        title=new_title,
+        metadata_update={
+            "fork": {
+                "source_session_id": source_session_id,
+                "through_sequence_index": through_sequence_index,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        },
+    )
+    new_session = _chat_store.get_session(session_id=new_session_id, vault_name=vault_name)
+    if new_session is None:  # pragma: no cover - defensive consistency check
+        raise RuntimeError(f"Forked session was not persisted: {new_session_id}")
+
+    logger.info(
+        "Chat session forked",
+        data={
+            "vault_name": vault_name,
+            "source_session_id": source_session_id,
+            "new_session_id": new_session_id,
+            "through_sequence_index": through_sequence_index,
+            "copied_message_count": copied_message_count,
+            "workspace_path": _chat_store.get_session_workspace_path(new_session_id, vault_name) or None,
+        },
+    )
+    return ChatSessionForkResponse(
+        session=ChatSessionInfo(
+            session_id=new_session.session_id,
+            created_at=new_session.created_at,
+            last_activity_at=new_session.last_activity_at,
+            title=new_session.title or None,
+            workspace=_chat_workspace_info(
+                _chat_store.get_session_workspace_path(new_session.session_id, vault_name)
+            ),
+            has_summary=False,
+        ),
+        source_session_id=source_session_id,
+        through_sequence_index=through_sequence_index,
+        copied_message_count=copied_message_count,
+    )
+
+
+def _generate_unique_chat_session_id(vault_name: str) -> str:
+    base_session_id = generate_session_id(vault_name)
+    generated_session_id = base_session_id
+    suffix = 1
+    while _chat_store.get_session_by_id(generated_session_id) is not None:
+        suffix += 1
+        generated_session_id = f"{base_session_id}_{suffix}"
+    return generated_session_id
+
+
+def _forked_session_title(source_session: StoredChatSession) -> str:
+    title = (source_session.title or "").strip()
+    if title:
+        return f"{title} (fork)"
+    return f"Fork of {source_session.session_id}"
 
 
 def get_chat_session_summary(vault_name: str, session_id: str) -> dict:

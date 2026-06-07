@@ -204,6 +204,13 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             )
             assert title_response.status_code == 200, "Setting the session title should succeed"
 
+            workspace_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/workspace",
+                method="PATCH",
+                data={"vault_name": vault.name, "path": "Projects/ForkProbe"},
+            )
+            assert workspace_response.status_code == 200, "Setting the session workspace should succeed"
+
             export_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/export",
                 method="POST",
@@ -267,7 +274,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             with sqlite3.connect(chat_sessions_db) as conn:
                 message_rows_after_follow_up = conn.execute(
                     """
-                    SELECT role, content_text, message_json
+                    SELECT sequence_index, role, content_text, message_json
                     FROM chat_messages
                     WHERE session_id = ? AND vault_name = ?
                     ORDER BY sequence_index ASC
@@ -276,7 +283,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 ).fetchall()
             self.soft_assert_equal(
                 _count_user_prompt_rows(
-                    message_rows_after_follow_up,
+                    _strip_sequence_column(message_rows_after_follow_up),
                     "Use the session_probe tool and then answer briefly.",
                 ),
                 1,
@@ -284,7 +291,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 _count_user_prompt_rows(
-                    message_rows_after_follow_up,
+                    _strip_sequence_column(message_rows_after_follow_up),
                     "Call the session_probe tool again and answer with the result only.",
                 ),
                 1,
@@ -294,6 +301,81 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 len(list(transcript_dir.glob(f"{session_id}*.md"))),
                 1,
                 "Export should keep a single transcript variant for the session",
+            )
+
+            first_assistant_sequence = _first_visible_assistant_sequence_index(
+                message_rows_after_follow_up,
+            )
+            assert first_assistant_sequence is not None, "First visible assistant sequence should be persisted"
+            fork_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/fork",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "through_sequence_index": first_assistant_sequence,
+                },
+            )
+            assert fork_response.status_code == 200, "Session fork endpoint should succeed"
+            fork_payload = fork_response.json()
+            fork_session_id = fork_payload["session"]["session_id"]
+            self.soft_assert(
+                fork_session_id != session_id,
+                "Fork should create a distinct chat session id",
+            )
+            self.soft_assert_equal(
+                fork_payload["session"]["title"],
+                "Session Probe Title (fork)",
+                "Fork title should derive from the source title",
+            )
+            self.soft_assert_equal(
+                fork_payload["session"]["workspace"]["path"],
+                "Projects/ForkProbe",
+                "Fork should carry over the source workspace",
+            )
+
+            fork_detail = self.call_api(
+                f"/api/chat/sessions/{fork_session_id}?vault_name={vault.name}",
+            )
+            assert fork_detail.status_code == 200, "Forked session detail endpoint should succeed"
+            fork_messages = fork_detail.json()["messages"]
+            fork_message_text = "\n".join(message["content"] for message in fork_messages)
+            self.soft_assert(
+                "Use the session_probe tool and then answer briefly." in fork_message_text,
+                "Fork should retain messages before the selected fork point",
+            )
+            self.soft_assert(
+                "Call the session_probe tool again and answer with the result only."
+                not in fork_message_text,
+                "Fork should exclude messages after the selected fork point",
+            )
+            self.soft_assert_equal(
+                fork_detail.json()["workspace"]["path"],
+                "Projects/ForkProbe",
+                "Fork detail should expose copied workspace metadata",
+            )
+
+            fork_follow_up = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Continue only in the forked session.",
+                    "session_id": fork_session_id,
+                    "tools": ["session_probe"],
+                    "model": "test",
+                },
+            )
+            assert fork_follow_up.status_code == 200, "Continuing the fork should succeed"
+            source_detail_after_fork = self.call_api(
+                f"/api/chat/sessions/{session_id}?vault_name={vault.name}",
+            )
+            assert source_detail_after_fork.status_code == 200, "Source session detail should still load"
+            source_message_text = "\n".join(
+                message["content"] for message in source_detail_after_fork.json()["messages"]
+            )
+            self.soft_assert(
+                "Continue only in the forked session." not in source_message_text,
+                "Continuing a fork should not append messages to the source session",
             )
 
             await self.restart_system()
@@ -367,6 +449,24 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
 def _count_user_prompt_rows(rows, prompt: str) -> int:
     return sum(1 for role, content, _message_json in rows if role == "user" and content == prompt)
+
+
+def _strip_sequence_column(rows):
+    return [(role, content, message_json) for _sequence, role, content, message_json in rows]
+
+
+def _prompt_sequence_index(rows, prompt: str) -> int | None:
+    for sequence_index, role, content, _message_json in rows:
+        if role == "user" and content == prompt:
+            return int(sequence_index)
+    return None
+
+
+def _first_visible_assistant_sequence_index(rows) -> int | None:
+    for sequence_index, role, content, _message_json in rows:
+        if role == "assistant" and not str(content or "").startswith("["):
+            return int(sequence_index)
+    return None
 
 
 CHAT_SESSION_PERSISTENCE_CONTRACT_CODE = """
