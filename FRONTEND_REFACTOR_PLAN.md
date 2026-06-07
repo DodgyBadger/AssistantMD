@@ -232,7 +232,7 @@ Validation target:
 
 ### Phase 5: Extract Vault Activity
 
-Status: next.
+Status: complete in the current refactor branch.
 
 Why:
 
@@ -248,8 +248,11 @@ Move:
 Validation target:
 
 - Manual smoke: vault activity loads, sorting works, details modal opens/closes.
+- Static checks: `node --check` for all scripts and `git diff --check`. Done.
 
 ### Phase 6: Extract Workflow Actions
+
+Status: next.
 
 Why:
 
