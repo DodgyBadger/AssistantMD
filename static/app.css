@@ -502,6 +502,9 @@ details summary::-webkit-details-marker {
     position: relative;
     min-width: 0;
 }
+.session-dropdown.open {
+    z-index: 45;
+}
 .session-dropdown-trigger {
     width: 100%;
     min-height: 2.5rem;
@@ -516,6 +519,8 @@ details summary::-webkit-details-marker {
     color: rgb(var(--text-primary));
     text-align: left;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .session-dropdown-trigger-button {
     flex: 0 1 auto;
@@ -526,6 +531,8 @@ details summary::-webkit-details-marker {
     color: inherit;
     text-align: left;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .session-dropdown-trigger-button:focus-visible,
 .session-dropdown-chevron-button:focus-visible {
@@ -595,10 +602,12 @@ details summary::-webkit-details-marker {
     justify-content: center;
     color: rgb(var(--text-secondary));
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .session-dropdown-menu {
     position: absolute;
-    z-index: 40;
+    z-index: 50;
     top: calc(100% + 0.35rem);
     left: 0;
     right: 0;
@@ -620,6 +629,8 @@ details summary::-webkit-details-marker {
     align-items: center;
     column-gap: 0.75rem;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .session-dropdown-option:hover,
 .session-dropdown-option:focus-visible,
@@ -669,6 +680,8 @@ details summary::-webkit-details-marker {
     border-radius: 0.25rem;
     color: rgb(var(--text-secondary));
     opacity: 0.68;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .session-dropdown-action:hover,
 .session-dropdown-action:focus-visible {

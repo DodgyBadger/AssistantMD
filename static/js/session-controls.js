@@ -402,30 +402,23 @@
                 setMenuOpen(!composeState.sessionMenuOpen);
             };
 
-            const handleClosedSelectorClick = (event) => {
+            const handleSessionDropdownClick = async (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
-                if (!target.closest('.session-dropdown-trigger')) return;
-                if (target.closest('[data-session-action]')) return;
+                const trigger = target.closest('.session-dropdown-trigger');
+                if (!trigger) return;
                 event.stopPropagation();
+                const actionButton = target.closest('[data-session-action]');
+                if (actionButton instanceof HTMLButtonElement) {
+                    event.preventDefault();
+                    await handleSessionAction(actionButton);
+                    return;
+                }
                 toggleSessionMenu();
             };
 
             if (elements.sessionDropdown) {
-                elements.sessionDropdown.addEventListener('click', handleClosedSelectorClick);
-            }
-
-            if (elements.sessionDropdownTrigger) {
-                elements.sessionDropdownTrigger.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    toggleSessionMenu();
-                });
-            }
-            if (elements.sessionDropdownChevronTrigger) {
-                elements.sessionDropdownChevronTrigger.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    toggleSessionMenu();
-                });
+                elements.sessionDropdown.addEventListener('click', handleSessionDropdownClick);
             }
 
             if (elements.sessionDropdownMenu) {
@@ -493,19 +486,6 @@
                     if (!(target instanceof Element)) return;
                     if (target.closest('[data-session-summary-preview-focus-id]')) {
                         sessionSummary.closePreview();
-                    }
-                });
-            }
-
-            if (elements.sessionDropdownActiveActions) {
-                elements.sessionDropdownActiveActions.addEventListener('click', async (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    const actionButton = target.closest('[data-session-action]');
-                    if (actionButton instanceof HTMLButtonElement) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        await handleSessionAction(actionButton);
                     }
                 });
             }
