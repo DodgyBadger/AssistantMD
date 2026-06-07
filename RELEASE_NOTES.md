@@ -1,6 +1,6 @@
 # Release Notes
 
-## 2026-06-03 - v0.6.4
+## 2026-06-06 - v0.6.4
 
 ### Workspace-aware chat sessions
 
