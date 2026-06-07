@@ -1,31 +1,8 @@
 (function sessionControlsModule(window) {
-    function createSessionControlsController({ state, elements, composeState, icons, utils, sessionSummary, callbacks }) {
+    function createSessionControlsController({ state, elements, icons, utils, sessionSummary, callbacks }) {
         const { escapeHtml } = utils;
         let editingSessionId = '';
-
-        function setMenuOpen(open) {
-            composeState.sessionMenuOpen = Boolean(open);
-            const hadEditingSession = Boolean(editingSessionId);
-            if (!composeState.sessionMenuOpen) {
-                editingSessionId = '';
-                sessionSummary.closePreview();
-            }
-            if (elements.sessionDropdown) {
-                elements.sessionDropdown.classList.toggle('open', composeState.sessionMenuOpen);
-            }
-            if (elements.sessionDropdownMenu) {
-                elements.sessionDropdownMenu.classList.toggle('hidden', !composeState.sessionMenuOpen);
-            }
-            if (elements.sessionDropdownTrigger) {
-                elements.sessionDropdownTrigger.setAttribute('aria-expanded', composeState.sessionMenuOpen ? 'true' : 'false');
-            }
-            if (elements.sessionDropdownChevronTrigger) {
-                elements.sessionDropdownChevronTrigger.setAttribute('aria-expanded', composeState.sessionMenuOpen ? 'true' : 'false');
-            }
-            if (!composeState.sessionMenuOpen && hadEditingSession) {
-                renderSelector();
-            }
-        }
+        let sessionBrowserFilter = '';
 
         function title(session) {
             if (!session || !session.session_id) {
@@ -56,91 +33,8 @@
         }
 
         function renderSelector() {
-            if (!elements.sessionDropdownMenu || !elements.sessionDropdownLabel) return;
-
-            const activeSession = state.sessions.find((session) => session.session_id === state.sessionId) || null;
-            const activeMeta = activityLabel(activeSession);
-            const activeHasSummary = Boolean(activeSession?.has_summary);
-            elements.sessionDropdownLabel.innerHTML = `
-                <span class="session-dropdown-title-wrap">
-                    <span class="session-dropdown-title">${escapeHtml(title(activeSession))}</span>
-                    ${activeHasSummary ? '<span class="session-summary-marker" aria-hidden="true">✦</span>' : ''}
-                </span>
-            `;
-            if (elements.sessionDropdownActiveActions) {
-                elements.sessionDropdownActiveActions.innerHTML = activeSession
-                    ? renderSessionActions(activeSession.session_id)
-                    : '';
-            }
-            if (elements.sessionDropdownActiveMeta) {
-                elements.sessionDropdownActiveMeta.textContent = activeMeta || '';
-            }
-
-            const rows = [
-                renderDropdownRow(null, !activeSession),
-                ...state.sessions.map((session) => renderDropdownRow(session, session.session_id === state.sessionId)),
-            ];
-            elements.sessionDropdownMenu.innerHTML = rows.join('');
-            updateSummaryTrigger();
+            renderSessionBrowserList();
             focusEditingInput();
-        }
-
-        function renderDropdownRow(session, isActive) {
-            const sessionId = session?.session_id || '';
-            const hasSummary = Boolean(session?.has_summary);
-            const meta = activityLabel(session);
-            const isEditing = Boolean(sessionId && editingSessionId === sessionId);
-            const previewAttribute = hasSummary ? ` data-session-summary-preview-id="${escapeHtml(sessionId)}"` : '';
-            const previewFocusAttribute = hasSummary ? ` data-session-summary-preview-focus-id="${escapeHtml(sessionId)}"` : '';
-            const marker = hasSummary ? '<span class="session-summary-marker" aria-hidden="true">✦</span>' : '';
-            if (isEditing) {
-                return renderEditingDropdownRow(session, isActive);
-            }
-            return `
-                <div
-                    class="session-dropdown-option${isActive ? ' is-active' : ''}"
-                    role="option"
-                    aria-selected="${isActive ? 'true' : 'false'}"
-                    data-session-row-id="${escapeHtml(sessionId)}"
-                >
-                    <span class="session-dropdown-main">
-                        <button type="button" class="session-dropdown-select-button" data-session-id="${escapeHtml(sessionId)}"${previewFocusAttribute}>
-                            <span class="session-dropdown-title-wrap"${previewAttribute}>
-                                <span class="session-dropdown-title">${escapeHtml(title(session))}</span>
-                                ${marker}
-                            </span>
-                        </button>
-                        ${sessionId ? renderSessionActions(sessionId) : ''}
-                    </span>
-                    ${meta ? `<span class="session-dropdown-meta">${escapeHtml(meta)}</span>` : ''}
-                </div>
-            `;
-        }
-
-        function renderEditingDropdownRow(session, isActive) {
-            const sessionId = session?.session_id || '';
-            return `
-                <div
-                    class="session-dropdown-option session-dropdown-option-editing${isActive ? ' is-active' : ''}"
-                    role="option"
-                    aria-selected="${isActive ? 'true' : 'false'}"
-                    data-session-editing-id="${escapeHtml(sessionId)}"
-                >
-                    <input
-                        type="text"
-                        class="session-dropdown-title-input"
-                        value="${escapeHtml(session?.title || '')}"
-                        placeholder="Add a title..."
-                        maxlength="120"
-                        data-session-title-input="${escapeHtml(sessionId)}"
-                        aria-label="Session title"
-                    />
-                    <div class="session-dropdown-row-actions">
-                        ${renderRowActionButton('save-title', sessionId, 'Save title', icons.CHECK_ICON_SVG)}
-                        ${renderRowActionButton('cancel-title', sessionId, 'Cancel title edit', icons.X_ICON_SVG)}
-                    </div>
-                </div>
-            `;
         }
 
         function renderSessionActions(sessionId) {
@@ -168,11 +62,9 @@
         }
 
         function focusEditingInput() {
-            if (!editingSessionId || !elements.sessionDropdownMenu) return;
+            if (!editingSessionId) return;
             window.requestAnimationFrame(() => {
-                const input = elements.sessionDropdownMenu.querySelector(
-                    `[data-session-title-input="${cssEscape(editingSessionId)}"]`
-                );
+                const input = document.querySelector(`[data-session-title-input="${cssEscape(editingSessionId)}"]`);
                 if (input instanceof HTMLInputElement) {
                     input.focus();
                     input.select();
@@ -180,20 +72,7 @@
             });
         }
 
-        function updateSummaryTrigger() {
-            if (!elements.sessionSummaryTrigger) return;
-            const session = sessionSummary.selectedSessionWithSummary();
-            if (!session) {
-                elements.sessionSummaryTrigger.classList.remove('is-visible');
-                elements.sessionSummaryTrigger.setAttribute('aria-hidden', 'true');
-                return;
-            }
-            elements.sessionSummaryTrigger.classList.add('is-visible');
-            elements.sessionSummaryTrigger.removeAttribute('aria-hidden');
-        }
-
-        async function selectFromDropdown(sessionId) {
-            setMenuOpen(false);
+        async function selectSession(sessionId) {
             editingSessionId = '';
             if (!sessionId) {
                 await callbacks.clearSession(false);
@@ -268,6 +147,186 @@
             renderSelector();
         }
 
+        function sessionBrowserModal() {
+            return document.getElementById('session-browser-modal');
+        }
+
+        function modalControlsSource() {
+            return document.getElementById('chat-settings-modal-controls-source');
+        }
+
+        function moveSettingsControlsIntoModal(modal) {
+            const source = modalControlsSource();
+            const target = modal.querySelector('#chat-settings-modal-controls');
+            if (!source || !target) return;
+            while (source.firstChild) {
+                target.appendChild(source.firstChild);
+            }
+        }
+
+        function restoreSettingsControlsFromModal(modal) {
+            const source = modalControlsSource();
+            const target = modal?.querySelector('#chat-settings-modal-controls');
+            if (!source || !target) return;
+            while (target.firstChild) {
+                source.appendChild(target.firstChild);
+            }
+        }
+
+        function closeSessionBrowserModal() {
+            const modal = sessionBrowserModal();
+            restoreSettingsControlsFromModal(modal);
+            modal?.remove();
+            sessionSummary.closePreview();
+        }
+
+        function filteredBrowserSessions() {
+            const filter = sessionBrowserFilter.trim().toLowerCase();
+            if (!filter) return state.sessions;
+            return state.sessions.filter((session) => {
+                const haystack = [
+                    title(session),
+                    session.session_id,
+                    session.workspace_path || '',
+                    activityLabel(session),
+                ].join(' ').toLowerCase();
+                return haystack.includes(filter);
+            });
+        }
+
+        function renderSessionBrowserList() {
+            const modal = sessionBrowserModal();
+            const list = modal?.querySelector('#session-browser-list');
+            const count = modal?.querySelector('#session-browser-count');
+            if (!list) return;
+
+            const sessions = filteredBrowserSessions();
+            if (count) {
+                count.textContent = `${sessions.length} of ${state.sessions.length} sessions`;
+            }
+            if (sessions.length === 0) {
+                list.innerHTML = '<p class="session-browser-empty">No sessions match this filter.</p>';
+                return;
+            }
+            list.innerHTML = sessions
+                .map((session) => renderSessionBrowserRow(session, session.session_id === state.sessionId))
+                .join('');
+            focusEditingInput();
+        }
+
+        function renderSessionBrowserRow(session, isActive) {
+            const sessionId = session?.session_id || '';
+            if (sessionId && editingSessionId === sessionId) {
+                return renderSessionBrowserEditingRow(session, isActive);
+            }
+            const hasSummary = Boolean(session?.has_summary);
+            const previewAttribute = hasSummary ? ` data-session-summary-preview-id="${escapeHtml(sessionId)}"` : '';
+            const previewFocusAttribute = hasSummary ? ` data-session-summary-preview-focus-id="${escapeHtml(sessionId)}"` : '';
+            const meta = activityLabel(session);
+            return `
+                <div
+                    class="session-browser-row${isActive ? ' is-active' : ''}"
+                    data-session-browser-row-id="${escapeHtml(sessionId)}"
+                    ${previewFocusAttribute}
+                >
+                    <div class="session-browser-row-main"${previewAttribute}>
+                        <span class="session-dropdown-title-wrap">
+                            <span class="session-dropdown-title">${escapeHtml(title(session))}</span>
+                            ${renderSessionBrowserSummaryAction(session)}
+                        </span>
+                        ${meta ? `<span class="session-browser-row-meta">${escapeHtml(meta)}</span>` : ''}
+                    </div>
+                    ${renderSessionActions(sessionId)}
+                </div>
+            `;
+        }
+
+        function renderSessionBrowserSummaryAction(session) {
+            const sessionId = session?.session_id || '';
+            if (!session?.has_summary || !sessionId) return '';
+            return renderRowActionButton('summary', sessionId, 'Open summary', icons.SESSION_SUMMARY_ICON_SVG, 'is-summary');
+        }
+
+        function renderSessionBrowserEditingRow(session, isActive) {
+            const sessionId = session?.session_id || '';
+            return `
+                <div class="session-browser-row session-browser-row-editing${isActive ? ' is-active' : ''}">
+                    <input
+                        type="text"
+                        class="session-dropdown-title-input"
+                        value="${escapeHtml(session?.title || '')}"
+                        placeholder="Add a title..."
+                        maxlength="120"
+                        data-session-title-input="${escapeHtml(sessionId)}"
+                        aria-label="Session title"
+                    />
+                    <div class="session-dropdown-row-actions">
+                        ${renderRowActionButton('save-title', sessionId, 'Save title', icons.CHECK_ICON_SVG)}
+                        ${renderRowActionButton('cancel-title', sessionId, 'Cancel title edit', icons.X_ICON_SVG)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function openSessionBrowserModal() {
+            closeSessionBrowserModal();
+            const overlay = document.createElement('div');
+            overlay.id = 'session-browser-modal';
+            overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
+            overlay.innerHTML = `
+                <div class="absolute inset-0" data-session-browser-close="true"></div>
+                <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="session-browser-modal-title">
+                    <div class="app-modal-header flex-none">
+                        <div class="app-modal-title-block">
+                            <h2 id="session-browser-modal-title" class="text-lg font-semibold text-txt-primary inline-flex items-center gap-2">
+                                <span class="session-summary-title-icon" aria-hidden="true">${icons.SETTINGS_ICON_SVG}</span>
+                                <span>Chat Settings</span>
+                            </h2>
+                            <p id="session-browser-count" class="mt-1 text-xs text-txt-secondary"></p>
+                        </div>
+                        <div class="app-modal-actions">
+                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-browser-close="true">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                    <div class="session-browser-body flex-1">
+                        <div id="chat-settings-modal-controls" class="chat-settings-modal-controls"></div>
+                        <div class="session-browser-section-header">
+                            <div>
+                                <h3 class="session-browser-section-title">Sessions</h3>
+                                <p class="session-browser-section-subtitle">Filter, open, summarize, export, or delete chat sessions.</p>
+                            </div>
+                        </div>
+                        <input
+                            id="session-browser-filter"
+                            type="text"
+                            class="session-browser-filter"
+                            placeholder="Filter sessions..."
+                            value="${escapeHtml(sessionBrowserFilter)}"
+                            autocomplete="off"
+                        />
+                        <div id="session-browser-list" class="session-browser-list"></div>
+                    </div>
+                </section>
+            `;
+            overlay.addEventListener('click', handleSessionBrowserClick);
+            overlay.addEventListener('input', handleSessionBrowserInput);
+            overlay.addEventListener('keydown', handleSessionBrowserKeydown);
+            overlay.addEventListener('mouseover', handleSummaryPreviewMouseover);
+            overlay.addEventListener('mouseout', handleSummaryPreviewMouseout);
+            overlay.addEventListener('focusin', handleSummaryPreviewFocusin);
+            overlay.addEventListener('focusout', handleSummaryPreviewFocusout);
+            document.body.appendChild(overlay);
+            moveSettingsControlsIntoModal(overlay);
+            renderSessionBrowserList();
+            const filterInput = overlay.querySelector('#session-browser-filter');
+            if (filterInput instanceof HTMLInputElement) {
+                filterInput.focus();
+                filterInput.select();
+            }
+        }
+
         async function saveTitle(sessionId = state.sessionId, titleValue = '', btn = null) {
             const vault = elements.vaultSelector?.value || '';
             if (!sessionId || !vault) return;
@@ -286,6 +345,7 @@
                 if (session) session.title = nextTitle;
                 editingSessionId = '';
                 renderSelector();
+                renderSessionBrowserList();
             } catch (error) {
                 console.error('Failed to save session title:', error);
             } finally {
@@ -344,6 +404,7 @@
                     callbacks.renderChatEmptyState();
                 }
                 renderSelector();
+                renderSessionBrowserList();
                 callbacks.syncChatControlLocks();
                 callbacks.updateStatus();
             } catch (error) {
@@ -361,21 +422,30 @@
 
             if (action === 'edit-title') {
                 editingSessionId = sessionId;
-                setMenuOpen(true);
                 renderSelector();
+                renderSessionBrowserList();
                 return;
             }
             if (action === 'cancel-title') {
                 editingSessionId = '';
                 renderSelector();
+                renderSessionBrowserList();
                 return;
             }
             if (action === 'save-title') {
-                const input = elements.sessionDropdownMenu?.querySelector(
-                    `[data-session-title-input="${cssEscape(sessionId)}"]`
-                );
+                const input = document.querySelector(`[data-session-title-input="${cssEscape(sessionId)}"]`);
                 const titleValue = input instanceof HTMLInputElement ? input.value : '';
                 await saveTitle(sessionId, titleValue, button);
+                return;
+            }
+            if (action === 'summary') {
+                const session = state.sessions.find((item) => item.session_id === sessionId);
+                if (!session) return;
+                closeSessionBrowserModal();
+                sessionSummary.openModalForSession(session, {
+                    backLabel: 'Sessions',
+                    onBack: openSessionBrowserModal,
+                });
                 return;
             }
             if (action === 'export') {
@@ -387,6 +457,101 @@
             }
         }
 
+        async function handleSessionBrowserClick(event) {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+
+            const closeTarget = target.closest('[data-session-browser-close]');
+            if (closeTarget) {
+                closeSessionBrowserModal();
+                return;
+            }
+
+            const actionButton = target.closest('[data-session-action]');
+            if (actionButton instanceof HTMLButtonElement) {
+                event.preventDefault();
+                event.stopPropagation();
+                await handleSessionAction(actionButton);
+                return;
+            }
+
+            const row = target.closest('[data-session-browser-row-id]');
+            if (row instanceof HTMLElement) {
+                event.preventDefault();
+                const sessionId = row.dataset.sessionBrowserRowId || '';
+                closeSessionBrowserModal();
+                await selectSession(sessionId);
+            }
+        }
+
+        function handleSessionBrowserInput(event) {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement)) return;
+            if (target.id !== 'session-browser-filter') return;
+            sessionBrowserFilter = target.value;
+            renderSessionBrowserList();
+        }
+
+        async function handleSessionBrowserKeydown(event) {
+            const target = event.target;
+            if (target instanceof HTMLInputElement && target.dataset.sessionTitleInput) {
+                const sessionId = target.dataset.sessionTitleInput || '';
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    await saveTitle(sessionId, target.value);
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    editingSessionId = '';
+                    renderSelector();
+                    renderSessionBrowserList();
+                }
+                return;
+            }
+            if (event.key === 'Escape') {
+                closeSessionBrowserModal();
+            }
+        }
+
+        function handleSummaryPreviewMouseover(event) {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const previewTarget = target.closest('[data-session-summary-preview-id]');
+            if (!(previewTarget instanceof HTMLElement)) return;
+            const related = event.relatedTarget;
+            if (related instanceof Element && previewTarget.contains(related)) return;
+            const sessionId = previewTarget.dataset.sessionSummaryPreviewId || '';
+            const session = state.sessions.find((item) => item.session_id === sessionId);
+            sessionSummary.openPreview(previewTarget, session);
+        }
+
+        function handleSummaryPreviewMouseout(event) {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const previewTarget = target.closest('[data-session-summary-preview-id]');
+            if (!(previewTarget instanceof HTMLElement)) return;
+            const related = event.relatedTarget;
+            if (related instanceof Element && previewTarget.contains(related)) return;
+            sessionSummary.closePreview();
+        }
+
+        function handleSummaryPreviewFocusin(event) {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const previewTarget = target.closest('[data-session-summary-preview-focus-id]');
+            if (!(previewTarget instanceof HTMLElement)) return;
+            const sessionId = previewTarget.dataset.sessionSummaryPreviewFocusId || '';
+            const session = state.sessions.find((item) => item.session_id === sessionId);
+            sessionSummary.openPreview(previewTarget, session);
+        }
+
+        function handleSummaryPreviewFocusout(event) {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest('[data-session-summary-preview-focus-id]')) {
+                sessionSummary.closePreview();
+            }
+        }
+
         function cssEscape(value) {
             if (window.CSS && typeof window.CSS.escape === 'function') {
                 return window.CSS.escape(value);
@@ -395,111 +560,13 @@
         }
 
         function attachEventListeners() {
-            const toggleSessionMenu = () => {
-                if (elements.sessionDropdownTrigger?.disabled) {
-                    return;
-                }
-                setMenuOpen(!composeState.sessionMenuOpen);
-            };
-
-            const handleSessionDropdownClick = async (event) => {
-                const target = event.target;
-                if (!(target instanceof Element)) return;
-                const trigger = target.closest('.session-dropdown-trigger');
-                if (!trigger) return;
-                event.stopPropagation();
-                const actionButton = target.closest('[data-session-action]');
-                if (actionButton instanceof HTMLButtonElement) {
-                    event.preventDefault();
-                    await handleSessionAction(actionButton);
-                    return;
-                }
-                toggleSessionMenu();
-            };
-
-            if (elements.sessionDropdown) {
-                elements.sessionDropdown.addEventListener('click', handleSessionDropdownClick);
-            }
-
-            if (elements.sessionDropdownMenu) {
-                elements.sessionDropdownMenu.addEventListener('click', async (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    const actionButton = target.closest('[data-session-action]');
-                    if (actionButton instanceof HTMLButtonElement) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        await handleSessionAction(actionButton);
-                        return;
-                    }
-                    const option = target.closest('[data-session-row-id]');
-                    if (option instanceof HTMLElement) {
-                        event.preventDefault();
-                        await selectFromDropdown(option.dataset.sessionRowId || '');
-                    }
-                });
-                elements.sessionDropdownMenu.addEventListener('keydown', async (event) => {
-                    const target = event.target;
-                    if (!(target instanceof HTMLInputElement)) return;
-                    const sessionId = target.dataset.sessionTitleInput || '';
-                    if (!sessionId) return;
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        await saveTitle(sessionId, target.value);
-                    } else if (event.key === 'Escape') {
-                        event.preventDefault();
-                        editingSessionId = '';
-                        renderSelector();
-                    }
-                });
-                elements.sessionDropdownMenu.addEventListener('mouseover', (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    const previewTarget = target.closest('[data-session-summary-preview-id]');
-                    if (!(previewTarget instanceof HTMLElement)) return;
-                    const related = event.relatedTarget;
-                    if (related instanceof Element && previewTarget.contains(related)) return;
-                    const sessionId = previewTarget.dataset.sessionSummaryPreviewId || '';
-                    const session = state.sessions.find((item) => item.session_id === sessionId);
-                    sessionSummary.openPreview(previewTarget, session);
-                });
-                elements.sessionDropdownMenu.addEventListener('mouseout', (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    const previewTarget = target.closest('[data-session-summary-preview-id]');
-                    if (!(previewTarget instanceof HTMLElement)) return;
-                    const related = event.relatedTarget;
-                    if (related instanceof Element && previewTarget.contains(related)) return;
-                    sessionSummary.closePreview();
-                });
-                elements.sessionDropdownMenu.addEventListener('focusin', (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    const previewTarget = target.closest('[data-session-summary-preview-focus-id]');
-                    if (!(previewTarget instanceof HTMLElement)) return;
-                    const sessionId = previewTarget.dataset.sessionSummaryPreviewFocusId || '';
-                    const session = state.sessions.find((item) => item.session_id === sessionId);
-                    sessionSummary.openPreview(previewTarget, session);
-                });
-                elements.sessionDropdownMenu.addEventListener('focusout', (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    if (target.closest('[data-session-summary-preview-focus-id]')) {
-                        sessionSummary.closePreview();
-                    }
-                });
-            }
-
-            if (elements.sessionSummaryTrigger) {
-                elements.sessionSummaryTrigger.addEventListener('mouseenter', () => sessionSummary.warmPreview(sessionSummary.selectedSessionWithSummary()));
-                elements.sessionSummaryTrigger.addEventListener('focus', () => sessionSummary.warmPreview(sessionSummary.selectedSessionWithSummary()));
-                elements.sessionSummaryTrigger.addEventListener('click', () => sessionSummary.openModalForSession(sessionSummary.selectedSessionWithSummary()));
+            if (elements.sessionBrowserTrigger) {
+                elements.sessionBrowserTrigger.addEventListener('click', openSessionBrowserModal);
             }
 
         }
 
         return Object.freeze({
-            setMenuOpen,
             formatOptionLabel,
             renderSelector,
             clearCompactionProgress,
@@ -509,6 +576,7 @@
             saveTitle,
             exportCurrent,
             deleteCurrent,
+            openSessionBrowserModal,
         });
     }
 

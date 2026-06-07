@@ -61,44 +61,39 @@
 
         <!-- Chat Tab Content -->
         <div id="chat-content" class="tab-content flex flex-col">
-            <!-- Chat Settings Section -->
-            <details id="chat-settings-panel" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm flex-shrink-0">
-                <summary class="collapsible-summary">
-                    <div class="summary-text">
-                        <span class="summary-title">Chat Settings</span>
+            <div id="chat-settings-bar" class="chat-settings-bar">
+                <div class="chat-settings-vault-row">
+                    <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                        <option value="">Select vault...</option>
+                    </select>
+                    <button id="session-browser-trigger" type="button" class="session-browser-trigger" aria-label="Open chat settings" title="Open chat settings">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.32-1.915" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"></circle>
+                        </svg>
+                    </button>
+                </div>
+                <div id="chat-settings-modal-controls-source" class="hidden">
+                    <div class="workspace-field">
+                        <input id="workspace-path-input" type="text"
+                            placeholder="Workspace path..."
+                            aria-label="Workspace path"
+                            class="min-w-0 w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
+                        <button id="workspace-picker-btn" type="button" class="workspace-icon-button" aria-label="Choose workspace folder" title="Choose workspace folder">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
+                        <button id="workspace-unlock-btn" type="button" class="workspace-icon-button hidden" aria-label="Unlock workspace path" title="Unlock workspace path">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <circle cx="12" cy="16" r="1" fill="currentColor"></circle>
+                                <rect x="3" y="10" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
+                                <path d="M7 10V7a5 5 0 0 1 9.33-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
                     </div>
-                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                </summary>
-                <div class="p-4 pt-2 space-y-3">
-                    <!-- Row 1: Vault | Workspace -->
-                    <div class="chat-settings-primary-row">
-                        <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">Select vault...</option>
-                        </select>
-                        <div class="workspace-field">
-                            <input id="workspace-path-input" type="text"
-                                placeholder="Workspace path..."
-                                aria-label="Workspace path"
-                                class="min-w-0 w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
-                            <button id="workspace-picker-btn" type="button" class="workspace-icon-button" aria-label="Choose workspace folder" title="Choose workspace folder">
-                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                    <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                </svg>
-                            </button>
-                            <button id="workspace-unlock-btn" type="button" class="workspace-icon-button hidden" aria-label="Unlock workspace path" title="Unlock workspace path">
-                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <circle cx="12" cy="16" r="1" fill="currentColor"></circle>
-                                    <rect x="3" y="10" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
-                                    <path d="M7 10V7a5 5 0 0 1 9.33-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Row 2: Model | Thinking | Tools -->
-                    <div class="chat-settings-secondary-row">
+                    <div class="chat-settings-model-row">
                         <select id="model-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select model...</option>
                         </select>
@@ -112,6 +107,8 @@
                             <option value="high">Thinking: High</option>
                             <option value="xhigh">Thinking: XHigh</option>
                         </select>
+                    </div>
+                    <div class="chat-settings-tools-row">
                         <div id="tool-dropdown" class="tool-dropdown">
                             <button
                                 id="tool-dropdown-trigger"
@@ -135,57 +132,12 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Row 3: Session | Context template -->
-                    <div class="chat-session-context-row">
-                        <div class="session-selector-row">
-                            <div id="session-dropdown" class="session-dropdown">
-                                <div class="session-dropdown-trigger">
-                                    <span class="session-dropdown-active-main">
-                                        <button
-                                            id="session-dropdown-trigger"
-                                            type="button"
-                                            class="session-dropdown-trigger-button"
-                                            aria-expanded="false"
-                                            aria-controls="session-dropdown-menu"
-                                        >
-                                            <span id="session-dropdown-label" class="session-dropdown-label">
-                                                <span class="session-dropdown-title">New session</span>
-                                            </span>
-                                        </button>
-                                        <span id="session-dropdown-active-actions" class="session-dropdown-active-actions"></span>
-                                    </span>
-                                    <span id="session-dropdown-active-meta" class="session-dropdown-active-meta"></span>
-                                    <button
-                                        id="session-dropdown-chevron-trigger"
-                                        type="button"
-                                        class="session-dropdown-chevron-button"
-                                        aria-label="Open session selector"
-                                        aria-controls="session-dropdown-menu"
-                                    >
-                                        <svg class="session-dropdown-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                                        </svg>
-                                    </button>
-                                </div>
-                                <div id="session-dropdown-menu" class="session-dropdown-menu hidden" role="listbox"></div>
-                            </div>
-                            <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Open session summary" title="Open session summary">
-                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                    <path d="M20 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                    <path d="M22 5h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                    <path d="M4 17v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                    <path d="M5 18H3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                </svg>
-                            </button>
-                        </div>
                         <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select template...</option>
                         </select>
                     </div>
                 </div>
-            </details>
+            </div>
 
             <!-- Chat Container -->
             <div id="chat-workspace" class="bg-app-card border border-border-primary rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">

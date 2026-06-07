@@ -142,7 +142,7 @@ body.chat-focus-mode #chat-content {
     padding: 0;
     background: rgb(var(--bg-app));
 }
-body.chat-focus-mode #chat-settings-panel {
+body.chat-focus-mode #chat-settings-bar {
     display: none;
 }
 body.chat-focus-mode #chat-workspace {
@@ -217,11 +217,23 @@ details summary {
 details summary::-webkit-details-marker {
     display: none;
 }
-.chat-settings-secondary-row {
+.chat-settings-model-row,
+.chat-settings-tools-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 0.75rem;
     align-items: start;
+}
+.chat-settings-bar {
+    margin-bottom: 0.75rem;
+    flex-shrink: 0;
+}
+.chat-settings-vault-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: center;
+    min-width: 0;
 }
 .chat-settings-primary-row {
     display: grid;
@@ -487,65 +499,10 @@ details summary::-webkit-details-marker {
     .chat-settings-primary-row {
         grid-template-columns: minmax(0, 1fr) minmax(18rem, 1.35fr);
     }
-    .chat-settings-secondary-row {
-        grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem) minmax(0, 1fr);
+    .chat-settings-model-row,
+    .chat-settings-tools-row {
+        grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
     }
-}
-.session-selector-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.5rem;
-    align-items: center;
-    min-width: 0;
-}
-.session-dropdown {
-    position: relative;
-    min-width: 0;
-}
-.session-dropdown.open {
-    z-index: 45;
-}
-.session-dropdown-trigger {
-    width: 100%;
-    min-height: 2.5rem;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    column-gap: 0.75rem;
-    padding: 0.45rem 0.45rem 0.45rem 0.75rem;
-    border: 1px solid rgb(var(--border-secondary));
-    border-radius: 0.375rem;
-    background: rgb(var(--bg-card));
-    color: rgb(var(--text-primary));
-    text-align: left;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-}
-.session-dropdown-trigger-button {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    display: inline-flex;
-    align-items: center;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-}
-.session-dropdown-trigger-button:focus-visible,
-.session-dropdown-chevron-button:focus-visible {
-    outline: 2px solid rgb(var(--accent-primary));
-    outline-offset: 2px;
-}
-.session-dropdown-label {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    display: inline-flex;
-    align-items: center;
-    line-height: 1.2;
 }
 .session-dropdown-title {
     display: block;
@@ -556,114 +513,12 @@ details summary::-webkit-details-marker {
     font-size: 0.875rem;
     font-weight: 500;
 }
-.session-dropdown-meta {
-    flex: 0 0 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.66rem;
-    color: rgb(var(--text-secondary));
-}
-.session-dropdown-chevron {
-    width: 1rem;
-    height: 1rem;
-    color: rgb(var(--text-secondary));
-    transition: transform 0.15s ease;
-}
-.session-dropdown.open .session-dropdown-chevron {
-    transform: rotate(180deg);
-}
-.session-dropdown-active-main {
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-}
-.session-dropdown-active-actions {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-}
-.session-dropdown-active-actions:empty {
-    display: none;
-}
-.session-dropdown-active-meta {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.66rem;
-    color: rgb(var(--text-secondary));
-}
-.session-dropdown-chevron-button {
-    width: 1.45rem;
-    height: 1.45rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: rgb(var(--text-secondary));
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-}
-.session-dropdown-menu {
-    position: absolute;
-    z-index: 50;
-    top: calc(100% + 0.35rem);
-    left: 0;
-    right: 0;
-    max-height: 20rem;
-    overflow-y: auto;
-    border: 1px solid rgb(var(--border-primary));
-    border-radius: 0.375rem;
-    background: rgb(var(--bg-card));
-    box-shadow: 0 12px 24px rgb(0 0 0 / 0.16);
-    padding: 0.35rem;
-}
-.session-dropdown-option {
-    width: 100%;
-    border-radius: 0.25rem;
-    color: rgb(var(--text-primary));
-    text-align: left;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    column-gap: 0.75rem;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-}
-.session-dropdown-option:hover,
-.session-dropdown-option:focus-visible,
-.session-dropdown-option.is-active {
-    background: rgb(var(--bg-elevated));
-}
-.session-dropdown-select-button {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    padding: 0.45rem 0 0.45rem 0.5rem;
-    color: inherit;
-    text-align: left;
-}
-.session-dropdown-main {
-    width: 100%;
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-}
 .session-dropdown-title-wrap {
     min-width: 0;
     max-width: 100%;
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-}
-.session-summary-marker {
-    flex: 0 0 auto;
-    font-size: 0.62rem;
-    line-height: 1;
-    color: rgb(var(--accent-primary));
 }
 .session-dropdown-row-actions {
     display: inline-flex;
@@ -693,6 +548,10 @@ details summary::-webkit-details-marker {
 .session-dropdown-action:focus-visible {
     box-shadow: 0 0 0 2px rgb(var(--accent-primary));
 }
+.session-dropdown-action.is-summary {
+    color: rgb(var(--accent-primary));
+    opacity: 0.82;
+}
 .session-dropdown-action:disabled {
     opacity: 0.45;
     cursor: not-allowed;
@@ -700,10 +559,6 @@ details summary::-webkit-details-marker {
 .session-dropdown-action svg {
     width: 0.86rem;
     height: 0.86rem;
-}
-.session-dropdown-option-editing {
-    padding: 0.35rem 0.35rem 0.35rem 0.5rem;
-    cursor: default;
 }
 .session-dropdown-title-input {
     min-width: 0;
@@ -719,7 +574,8 @@ details summary::-webkit-details-marker {
     outline: 2px solid rgb(var(--accent-primary));
     outline-offset: 1px;
 }
-.session-summary-trigger {
+.session-summary-trigger,
+.session-browser-trigger {
     width: 2.5rem;
     height: 2.5rem;
     border-radius: 0.375rem;
@@ -730,18 +586,31 @@ details summary::-webkit-details-marker {
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .session-summary-trigger.is-visible {
     display: inline-flex;
 }
+.session-browser-trigger {
+    display: inline-flex;
+}
+.session-summary-trigger:disabled,
+.session-browser-trigger:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
 .session-summary-trigger:hover,
-.session-summary-trigger:focus-visible {
+.session-summary-trigger:focus-visible,
+.session-browser-trigger:hover,
+.session-browser-trigger:focus-visible {
     color: rgb(var(--accent-primary));
     border-color: rgb(var(--accent-primary));
     box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
     outline: none;
 }
-.session-summary-trigger svg {
+.session-summary-trigger svg,
+.session-browser-trigger svg {
     width: 1.1rem;
     height: 1.1rem;
 }
@@ -790,16 +659,112 @@ details summary::-webkit-details-marker {
     width: 1.1rem;
     height: 1.1rem;
 }
-.chat-session-context-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
+.session-summary-back-button {
+    width: 2rem;
+    height: 2rem;
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    border: 1px solid rgb(var(--border-primary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--text-primary));
 }
-@media (min-width: 768px) {
-    .chat-session-context-row {
-        grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
-    }
+.session-summary-back-button:hover,
+.session-summary-back-button:focus-visible {
+    background: rgb(var(--bg-card));
+    outline: 2px solid rgb(var(--accent-primary));
+    outline-offset: 1px;
+}
+.session-summary-back-button svg {
+    width: 1rem;
+    height: 1rem;
+}
+.session-browser-body {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+}
+.chat-settings-modal-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgb(var(--border-primary));
+}
+.session-browser-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+.session-browser-section-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: rgb(var(--text-primary));
+}
+.session-browser-section-subtitle {
+    margin-top: 0.1rem;
+    font-size: 0.74rem;
+    color: rgb(var(--text-secondary));
+}
+.session-browser-filter {
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-card));
+    color: rgb(var(--text-primary));
+    font-size: 0.9rem;
+}
+.session-browser-filter:focus {
+    outline: 2px solid rgb(var(--accent-primary));
+    outline-offset: 1px;
+}
+.session-browser-list {
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.session-browser-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 0.75rem;
+    padding: 0.55rem 0.55rem 0.55rem 0.7rem;
+    border-radius: 0.375rem;
+    color: rgb(var(--text-primary));
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+.session-browser-row:hover,
+.session-browser-row:focus-visible,
+.session-browser-row.is-active {
+    background: rgb(var(--bg-elevated));
+}
+.session-browser-row-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.session-browser-row-meta {
+    font-size: 0.68rem;
+    color: rgb(var(--text-secondary));
+}
+.session-browser-row-editing {
+    cursor: default;
+}
+.session-browser-empty {
+    padding: 1rem;
+    color: rgb(var(--text-secondary));
+    font-size: 0.9rem;
 }
 .app-modal-overlay {
     align-items: stretch;

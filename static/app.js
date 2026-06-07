@@ -44,8 +44,7 @@ const state = {
 const chatComposeState = {
     pendingAttachments: [],
     popoverOpen: false,
-    toolMenuOpen: false,
-    sessionMenuOpen: false
+    toolMenuOpen: false
 };
 
 // DOM elements - Chat
@@ -57,14 +56,7 @@ const chatElements = {
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
     thinkingSelector: document.getElementById('thinking-selector'),
-    sessionDropdown: document.getElementById('session-dropdown'),
-    sessionDropdownTrigger: document.getElementById('session-dropdown-trigger'),
-    sessionDropdownChevronTrigger: document.getElementById('session-dropdown-chevron-trigger'),
-    sessionDropdownLabel: document.getElementById('session-dropdown-label'),
-    sessionDropdownActiveActions: document.getElementById('session-dropdown-active-actions'),
-    sessionDropdownActiveMeta: document.getElementById('session-dropdown-active-meta'),
-    sessionDropdownMenu: document.getElementById('session-dropdown-menu'),
-    sessionSummaryTrigger: document.getElementById('session-summary-trigger'),
+    sessionBrowserTrigger: document.getElementById('session-browser-trigger'),
     toolDropdown: document.getElementById('tool-dropdown'),
     toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
     toolDropdownMenu: document.getElementById('tool-dropdown-menu'),
@@ -128,7 +120,6 @@ const workspacePicker = window.WorkspacePicker.create({
 sessionControls = window.SessionControls.create({
     state,
     elements: chatElements,
-    composeState: chatComposeState,
     icons: window.AssistantMDIcons,
     utils: window.AssistantMDUtils,
     sessionSummary,
@@ -533,14 +524,8 @@ function syncChatControlLocks() {
     if (chatElements.thinkingSelector) {
         chatElements.thinkingSelector.disabled = state.isLoading;
     }
-    if (chatElements.sessionDropdownTrigger) {
-        chatElements.sessionDropdownTrigger.disabled = state.isLoading;
-    }
-    if (chatElements.sessionDropdownChevronTrigger) {
-        chatElements.sessionDropdownChevronTrigger.disabled = state.isLoading;
-    }
-    if (chatElements.sessionSummaryTrigger) {
-        chatElements.sessionSummaryTrigger.disabled = state.isLoading;
+    if (chatElements.sessionBrowserTrigger) {
+        chatElements.sessionBrowserTrigger.disabled = state.isLoading;
     }
     workspacePicker.syncControls();
     syncSendButtonState();
@@ -1200,13 +1185,6 @@ function setupEventListeners() {
             }
         }
 
-        if (chatComposeState.sessionMenuOpen) {
-            const clickedSessionDropdown = chatElements.sessionDropdown && chatElements.sessionDropdown.contains(target);
-            if (!clickedSessionDropdown) {
-                sessionControls.setMenuOpen(false);
-                sessionSummary.closePreview();
-            }
-        }
     });
 
     if (dashElements.rescanBtn) {

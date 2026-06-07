@@ -1,6 +1,6 @@
 (function sessionSummaryModule(window, document) {
     function createSessionSummaryController({ state, elements, icons, utils, callbacks }) {
-        const { SESSION_SUMMARY_ICON_SVG } = icons;
+        const { ARROW_LEFT_ICON_SVG, SESSION_SUMMARY_ICON_SVG } = icons;
         const { escapeHtml, truncateText, formatShortDate } = utils;
 
         function cacheKey(vault, sessionId) {
@@ -331,10 +331,12 @@
             }
         }
 
-        async function openModalForSession(session) {
+        async function openModalForSession(session, options = {}) {
             if (!session) return;
 
             closeModal();
+            const backLabel = String(options.backLabel || 'Sessions');
+            const hasBackAction = typeof options.onBack === 'function';
             const popover = document.createElement('div');
             popover.id = 'session-summary-modal';
             popover.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
@@ -350,6 +352,11 @@
                             <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(session.session_id)}</p>
                         </div>
                         <div class="app-modal-actions">
+                            ${hasBackAction ? `
+                                <button type="button" class="session-summary-back-button" data-session-summary-back="true" aria-label="Back to ${escapeHtml(backLabel)}" title="Back to ${escapeHtml(backLabel)}">
+                                    ${ARROW_LEFT_ICON_SVG}
+                                </button>
+                            ` : ''}
                             <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error" data-session-summary-delete="true">
                                 Delete Summary
                             </button>
@@ -374,6 +381,11 @@
             `;
             popover.addEventListener('click', (event) => {
                 const target = event.target;
+                if (target instanceof HTMLElement && target.dataset.sessionSummaryBack === 'true') {
+                    closeModal();
+                    options.onBack();
+                    return;
+                }
                 if (target instanceof HTMLElement && target.dataset.sessionSummaryClose === 'true') {
                     closeModal();
                     return;
