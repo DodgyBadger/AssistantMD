@@ -423,6 +423,20 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "summarize_session should persist extracted summary",
         )
         self.soft_assert_equal(
+            extracted["session_summary"]["title"],
+            "conservation fundraising",
+            "summarize_session should use extracted domain as title when session has no custom title",
+        )
+        extracted_session = chat_store.get_session(
+            session_id="extract-session",
+            vault_name=vault_name,
+        )
+        self.soft_assert_equal(
+            extracted_session.title if extracted_session else None,
+            "conservation fundraising",
+            "summarize_session should save generated domain title to the chat session",
+        )
+        self.soft_assert_equal(
             extracted["indexed_fields"],
             4,
             "summarize_session should index extracted vector-searchable fields",

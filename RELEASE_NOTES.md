@@ -1,5 +1,19 @@
 # Release Notes
 
+
+## 2026-06-07 - v0.6.5
+
+- Fork a chat session from any assistant message to branch an existing conversation while preserving the original session.
+- Newly summarized sessions without a custom title now use the extracted domain as their chat title, so session lists are easier to scan.
+- Session summaries now fail visibly if vector indexing cannot complete, so incomplete summaries do not quietly look healthy while missing searchable context.
+- The default customization guidance now better explains the recommended path: start with playbooks, skills, and workspace-local `README.md` / `playbook.md` files before reaching for custom scripts.
+- The authoring skill now guides chat agents to interview users one question at a time when helping shape customization or workflow goals.
+- Updated Pydantic AI and Monty dependencies, including the recent Monty sandbox security fix.
+- CI now catches stray root-level markdown planning files before merge, while allowing approved root docs such as release notes and third-party notices.
+- UI improvements
+- Refactored monolithic app.js into smaller modules.
+
+
 ## 2026-06-06 - v0.6.4
 
 ### Workspace-aware chat sessions

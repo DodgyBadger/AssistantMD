@@ -204,6 +204,11 @@ class SessionOps(BaseTool):
                         session_id=active_session_id,
                         summarization_model=summarization_model,
                     )
+                    generated_title = _summary_title_or_domain(
+                        title=extraction["title"],
+                        domain=extraction["domain"],
+                    )
+                    extraction["title"] = generated_title
                     previous_summary = store.get_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
@@ -211,7 +216,7 @@ class SessionOps(BaseTool):
                     session_summary = store.upsert_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
-                        title=extraction["title"],
+                        title=generated_title,
                         summary=extraction["summary"],
                         domain=extraction["domain"],
                         work_product=extraction["work_product"],
@@ -249,6 +254,11 @@ class SessionOps(BaseTool):
                         store,
                         vault_name=active_vault_name,
                         session_id=active_session_id,
+                    )
+                    _maybe_set_generated_session_title(
+                        vault_name=active_vault_name,
+                        session_id=active_session_id,
+                        title=generated_title,
                     )
                     refreshed = store.get_session_summary(
                         vault_name=session_summary.vault_name,
@@ -445,6 +455,34 @@ def _require(value: object, message: str) -> None:
 def _session_title(*, vault_name: str, session_id: str) -> str | None:
     session = ChatStore().get_session(session_id=session_id, vault_name=vault_name)
     return session.title if session is not None else None
+
+
+def _summary_title_or_domain(*, title: str | None, domain: str | None) -> str | None:
+    cleaned_title = _clean_generated_title(title)
+    if cleaned_title:
+        return cleaned_title
+    return _clean_generated_title(domain)
+
+
+def _maybe_set_generated_session_title(
+    *,
+    vault_name: str,
+    session_id: str,
+    title: str | None,
+) -> None:
+    generated_title = _clean_generated_title(title)
+    if not generated_title:
+        return
+    chat_store = ChatStore()
+    session = chat_store.get_session(session_id=session_id, vault_name=vault_name)
+    if session is None or (session.title or "").strip():
+        return
+    chat_store.set_session_title(session_id, vault_name, generated_title)
+
+
+def _clean_generated_title(value: str | None) -> str | None:
+    cleaned = " ".join(str(value or "").split()).strip()
+    return cleaned or None
 
 
 class _WorkspaceFilter(BaseModel):
