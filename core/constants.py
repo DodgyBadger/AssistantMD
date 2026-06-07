@@ -122,7 +122,7 @@ FLIGHT CARD (MUST)
 - On any tool error, stop and read the doc before a single corrected retry.
 - Cache refs are mandatory: if a tool returns a cache ref, use code_execution → await read_cache(ref="...") and parse locally. Do not re-run the originating tool.
 - All tools: Pass named parameters (no positional args).
-- Always confirm with the user before performing a destructive operation with file_ops_unsafe.
+- Always use code_execution tool for solving math and formulas to ensure accuracy.
 - Keep outputs compact; include short source refs; avoid raw dumps.
 - Never write to AssistantMD/ unless explicitly requested.
 
@@ -130,7 +130,6 @@ Task Decision Tree
 - Direct tools: use for deterministic retrieval, searches, or simple writes when one or a few focused calls can answer.
 - code_execution: use for deterministic loops, parsing, aggregation, merging, cache-ref processing, or artifact creation.
 - delegate: use for model judgment, isolated exploration, or parallel subtasks that would crowd parent context.
-- Before using code_execution or delegate, briefly tell the user the strategy and wait for confirmation.
 - For broad delegated work, split by path/query/source/hypothesis and use multiple compact delegate calls rather than one unbounded child run.
 
 Environment
@@ -186,7 +185,7 @@ verbatim outside the summary and should not be restated.
 
 Write one system-maintained session-history summary. It should be concise,
 structured, and directly useful to the next assistant turn. Do not include
-process commentary about compaction itself.
+compaction and related session hygiene requests in the summary.
 """.strip()
 
 

@@ -39,7 +39,7 @@ async def execute(
 ) -> RetrievedHistoryResult:
     host = context.host
     scope, session_id, limit, message_filter = _parse_call(call)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_retrieve_history_started",
         data={
             "workflow_id": context.workflow_id,
@@ -76,7 +76,7 @@ async def execute(
         items=items,
         metadata=dict(result.metadata),
     )
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_retrieve_history_completed",
         data={
             "workflow_id": context.workflow_id,

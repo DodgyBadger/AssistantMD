@@ -22,6 +22,7 @@ def build_chat_capabilities(
     context_template: str | None,
     now: datetime | None,
     event_sink: ToolEventSink,
+    workspace_path: str = "",
     tools: list[object] | None = None,
     tool_instructions: str = "",
     history_processor_factory: Callable[..., Any] | None = None,
@@ -35,6 +36,7 @@ def build_chat_capabilities(
         session_id=session_id,
         model_alias=model_alias,
         context_template=context_template,
+        workspace_path=workspace_path,
         **(
             {"history_processor_factory": history_processor_factory}
             if history_processor_factory is not None

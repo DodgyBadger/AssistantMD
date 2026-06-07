@@ -75,7 +75,7 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="job_synced",
+            name="workflow_job_created",
             expected={
                 "workflow_id": "WorkflowLifecycleVault/daily",
                 "action": "created",
@@ -140,9 +140,10 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="job_removed",
+            name="workflow_job_removed",
             expected={
                 "job_id": "WorkflowLifecycleVault__daily",
+                "workflow_id": "WorkflowLifecycleVault/daily",
             },
         )
 

@@ -86,8 +86,17 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             assert '"message": "Streaming chat execution failed"' in content, (
                 "Activity log should include structured streaming failure"
             )
+            assert '"event": "chat_turn_failed"' in content, (
+                "Activity log should include stable streaming failure event"
+            )
+            assert '"status": "failed"' in content, (
+                "Activity log should include normalized streaming failure status"
+            )
             assert '"session_id": "chat_stream_failure_session"' in content, (
                 "Activity log should include the failing streaming session id"
+            )
+            assert '"tool_call_count": 0' in content, (
+                "Activity log should include compact streaming tool summary"
             )
             assert '"error_type": "RuntimeError"' in content, (
                 "Activity log should include the streaming exception type"

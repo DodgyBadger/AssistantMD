@@ -25,7 +25,7 @@ Personal_Vault/
     └── Draft Essays/
 ```
 
-Each folder can be both a place to organize your own knowledge and a shared workbench for collaborating with the agent. Keep notes, sources, drafts, prompts, skills, review items, and outputs together so the context you build for yourself is also the context the agent works from.
+Each folder can be both a place to organize your own knowledge and a shared workbench for collaborating with the agent. Keep notes, sources, drafts, prompts, skills, review items, and outputs together so the context you build for yourself is also the context the agent works from. For chat sessions, you can choose a workspace folder so the default context setup can load local orientation files such as `README.md` and `playbook.md`.
 
 AssistantMD adds its own `AssistantMD/` folder for reusable skills, workflow scripts, exported chat transcripts, imports, and optional context files.
 

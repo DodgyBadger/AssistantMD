@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import (
@@ -23,7 +25,11 @@ from pydantic_ai.settings import ModelSettings
 from core.llm.thinking import ThinkingValue
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
-from core.settings import get_default_api_timeout, get_default_max_output_tokens
+from core.settings import (
+    get_default_api_timeout,
+    get_default_max_output_tokens,
+    get_openrouter_ignored_providers,
+)
 from core.settings.secrets_store import get_secret_value
 from core.utils.value_parser import DirectiveValueParser
 
@@ -47,6 +53,34 @@ def _base_settings_kwargs(thinking: ThinkingValue) -> dict[str, object]:
     if thinking is not None:
         settings_kwargs["thinking"] = thinking
     return settings_kwargs
+
+
+def _apply_openrouter_settings(
+    settings_kwargs: dict[str, object],
+    provider_config: dict[str, Any],
+) -> None:
+    """Map AssistantMD OpenRouter provider config onto Pydantic AI settings."""
+    openrouter_provider = provider_config.get("provider")
+    provider_settings = dict(openrouter_provider) if isinstance(openrouter_provider, dict) else {}
+    ignored_providers = get_openrouter_ignored_providers()
+    if ignored_providers:
+        configured_ignore = provider_settings.get("ignore")
+        if isinstance(configured_ignore, list):
+            merged_ignore = [
+                str(item).strip().lower()
+                for item in configured_ignore
+                if str(item).strip()
+            ]
+        else:
+            merged_ignore = []
+        seen = set(merged_ignore)
+        for provider in ignored_providers:
+            if provider not in seen:
+                merged_ignore.append(provider)
+                seen.add(provider)
+        provider_settings["ignore"] = merged_ignore
+    if provider_settings:
+        settings_kwargs["openrouter_provider"] = provider_settings
 
 
 def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> ModelExecutionSpec | object:
@@ -134,6 +168,7 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
         settings_kwargs = _base_settings_kwargs(thinking)
         provider_config = get_provider_config(provider)
         api_key = _resolve_config_value(provider_config.get("api_key"))
+        _apply_openrouter_settings(settings_kwargs, provider_config)
         return OpenRouterModel(
             model_string,
             provider=OpenRouterProvider(api_key=api_key),

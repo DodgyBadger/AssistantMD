@@ -34,6 +34,17 @@
         importVaults: [],
         importResults: null,
         importUrlResult: null,
+        activityLogEntries: [],
+        activityLogFilters: {
+            query: '',
+            levels: ['error', 'warning', 'info', 'debug'],
+            tags: [],
+            latestFirst: true
+        },
+        activityLogFilterMenus: {
+            level: false,
+            tag: false
+        },
         systemJobs: [],
         systemMigrations: null,
         settingEditKey: null,
@@ -66,6 +77,19 @@
     const elements = {
         activityLogViewer: null,
         refreshActivityLogBtn: null,
+        activityLogSearch: null,
+        activityLogLevelDropdown: null,
+        activityLogLevelTrigger: null,
+        activityLogLevelMenu: null,
+        activityLogLevelSummary: null,
+        activityLogLevelOptions: null,
+        activityLogTagDropdown: null,
+        activityLogTagTrigger: null,
+        activityLogTagMenu: null,
+        activityLogTagSummary: null,
+        activityLogTagOptions: null,
+        activityLogLatestFirst: null,
+        activityLogCount: null,
 
         settingsFeedback: null,
         settingsList: null,
@@ -131,6 +155,19 @@
     function cacheElements() {
         elements.activityLogViewer = document.getElementById('activity-log-viewer');
         elements.refreshActivityLogBtn = document.getElementById('refresh-activity-log');
+        elements.activityLogSearch = document.getElementById('activity-log-search');
+        elements.activityLogLevelDropdown = document.getElementById('activity-log-level-dropdown');
+        elements.activityLogLevelTrigger = document.getElementById('activity-log-level-trigger');
+        elements.activityLogLevelMenu = document.getElementById('activity-log-level-menu');
+        elements.activityLogLevelSummary = document.getElementById('activity-log-level-summary');
+        elements.activityLogLevelOptions = document.getElementById('activity-log-level-options');
+        elements.activityLogTagDropdown = document.getElementById('activity-log-tag-dropdown');
+        elements.activityLogTagTrigger = document.getElementById('activity-log-tag-trigger');
+        elements.activityLogTagMenu = document.getElementById('activity-log-tag-menu');
+        elements.activityLogTagSummary = document.getElementById('activity-log-tag-summary');
+        elements.activityLogTagOptions = document.getElementById('activity-log-tag-options');
+        elements.activityLogLatestFirst = document.getElementById('activity-log-latest-first');
+        elements.activityLogCount = document.getElementById('activity-log-count');
 
         elements.settingsFeedback = document.getElementById('settings-feedback');
         elements.settingsList = document.getElementById('settings-list');
@@ -189,6 +226,13 @@
 
     function bindEvents() {
         elements.refreshActivityLogBtn?.addEventListener('click', () => refreshActivityLog());
+        elements.activityLogSearch?.addEventListener('input', handleActivityLogFilterChange);
+        elements.activityLogLevelTrigger?.addEventListener('click', () => setActivityLogFilterMenuOpen('level', !state.activityLogFilterMenus.level));
+        elements.activityLogLevelOptions?.addEventListener('change', handleActivityLogFilterChange);
+        elements.activityLogTagTrigger?.addEventListener('click', () => setActivityLogFilterMenuOpen('tag', !state.activityLogFilterMenus.tag));
+        elements.activityLogTagOptions?.addEventListener('change', handleActivityLogFilterChange);
+        elements.activityLogLatestFirst?.addEventListener('change', handleActivityLogFilterChange);
+        document.addEventListener('click', handleActivityLogDocumentClick);
 
         elements.settingsList?.addEventListener('click', handleSettingsTableClick);
         elements.settingsList?.addEventListener('input', handleSettingsInputChange);
@@ -262,9 +306,9 @@
             const data = await response.json();
             state.activityLog = data;
 
-            const bodyContent = data.content || '(log is empty)';
-            elements.activityLogViewer.innerHTML = formatLogContent(bodyContent);
-            elements.activityLogViewer.scrollTop = elements.activityLogViewer.scrollHeight;
+            state.activityLogEntries = parseActivityLogEntries(data.content || '');
+            populateActivityLogFilters();
+            renderActivityLog();
         } catch (error) {
             elements.activityLogViewer.textContent = `Failed to load activity log: ${error.message}`;
         } finally {
@@ -646,7 +690,7 @@
     }
 
     function escapeHtml(value) {
-        return (value ?? '').replace(/[&<>'"]/g, (char) => ({
+        return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
             '&': '&amp;',
             '<': '&lt;',
             '>': '&gt;',
@@ -655,24 +699,291 @@
         }[char]));
     }
 
-    function formatLogContent(content) {
-        const lines = (content || '').split(/\r?\n/);
-        const levelClass = (line) => {
-            const match = line.match(/\b(CRITICAL|FATAL|ERROR|WARN|WARNING|INFO|DEBUG)\b/i);
-            if (!match) return '';
-            const level = match[1].toUpperCase();
-            if (level === 'ERROR' || level === 'CRITICAL' || level === 'FATAL') return 'log-level-error';
-            if (level === 'WARN' || level === 'WARNING') return 'log-level-warn';
-            if (level === 'INFO') return 'log-level-info';
-            if (level === 'DEBUG') return 'log-level-debug';
-            return '';
-        };
+    function parseActivityLogEntries(content) {
+        return (content || '')
+            .split(/\r?\n/)
+            .map((line, index) => parseActivityLogLine(line, index))
+            .filter(Boolean);
+    }
 
-        return lines.map((line) => {
-            const cls = levelClass(line);
-            const escaped = escapeHtml(line);
-            return `<span class="log-line ${cls}">${escaped || '&nbsp;'}</span>`;
-        }).join('\n');
+    function parseActivityLogLine(line, index) {
+        const trimmed = (line || '').trim();
+        if (!trimmed) return null;
+
+        try {
+            const record = JSON.parse(trimmed);
+            const data = record && typeof record.data === 'object' && record.data !== null ? record.data : {};
+            const searchText = [
+                record.timestamp,
+                record.level,
+                record.tag,
+                record.message,
+                JSON.stringify(data)
+            ].filter(Boolean).join(' ').toLowerCase();
+
+            return {
+                index,
+                raw: trimmed,
+                parsed: true,
+                timestamp: record.timestamp || '',
+                level: String(record.level || '').toLowerCase(),
+                tag: record.tag || '',
+                message: record.message || '',
+                data,
+                bootId: record.boot_id ?? null,
+                searchText
+            };
+        } catch {
+            return {
+                index,
+                raw: trimmed,
+                parsed: false,
+                timestamp: '',
+                level: '',
+                tag: '',
+                message: trimmed,
+                data: {},
+                bootId: null,
+                searchText: trimmed.toLowerCase()
+            };
+        }
+    }
+
+    function handleActivityLogFilterChange() {
+        state.activityLogFilters = {
+            query: (elements.activityLogSearch?.value || '').trim().toLowerCase(),
+            levels: getCheckedActivityLogFilterValues(elements.activityLogLevelOptions),
+            tags: getCheckedActivityLogFilterValues(elements.activityLogTagOptions),
+            latestFirst: Boolean(elements.activityLogLatestFirst?.checked)
+        };
+        updateActivityLogFilterSummaries();
+        renderActivityLog();
+    }
+
+    function populateActivityLogFilters() {
+        renderActivityLogLevelOptions();
+        renderActivityLogTagOptions();
+        updateActivityLogFilterSummaries();
+    }
+
+    function renderActivityLogLevelOptions() {
+        if (!elements.activityLogLevelOptions) return;
+
+        const levels = ['error', 'warning', 'info', 'debug'];
+        const selected = new Set(Array.isArray(state.activityLogFilters.levels) ? state.activityLogFilters.levels : levels);
+        elements.activityLogLevelOptions.innerHTML = levels
+            .map((level) => renderActivityLogCheckbox('level', level, formatActivityLogLevelLabel(level), selected.has(level)))
+            .join('');
+        state.activityLogFilters.levels = getCheckedActivityLogFilterValues(elements.activityLogLevelOptions);
+    }
+
+    function renderActivityLogTagOptions() {
+        if (!elements.activityLogTagOptions) return;
+
+        const previousOptions = Array.from(elements.activityLogTagOptions.querySelectorAll('input[type="checkbox"]')).map((input) => input.value);
+        const previousSelected = getCheckedActivityLogFilterValues(elements.activityLogTagOptions);
+        const previousWasAll = previousOptions.length === 0 || previousSelected.length === previousOptions.length;
+        const tags = [...new Set(state.activityLogEntries.map((entry) => entry.tag).filter(Boolean))].sort();
+        const selected = previousWasAll ? new Set(tags) : new Set(previousSelected.filter((tag) => tags.includes(tag)));
+
+        elements.activityLogTagOptions.innerHTML = tags.length
+            ? tags.map((tag) => renderActivityLogCheckbox('tag', tag, tag, selected.has(tag))).join('')
+            : '<div class="tool-dropdown-menu-header">No tags loaded.</div>';
+        state.activityLogFilters.tags = getCheckedActivityLogFilterValues(elements.activityLogTagOptions);
+    }
+
+    function renderActivityLogCheckbox(group, value, label, checked) {
+        const id = `activity-log-${group}-${value.replace(/[^a-z0-9_-]/gi, '-')}`;
+        return `
+            <div class="tool-checkbox-wrapper">
+                <label for="${escapeHtml(id)}">
+                    <input id="${escapeHtml(id)}" type="checkbox" value="${escapeHtml(value)}" ${checked ? 'checked' : ''}>
+                    <span class="tool-checkbox-name">${escapeHtml(label)}</span>
+                </label>
+            </div>
+        `;
+    }
+
+    function getCheckedActivityLogFilterValues(container) {
+        return Array.from(container?.querySelectorAll('input[type="checkbox"]:checked') || [])
+            .map((input) => input.value);
+    }
+
+    function updateActivityLogFilterSummaries() {
+        updateActivityLogFilterSummary(
+            elements.activityLogLevelSummary,
+            state.activityLogFilters.levels,
+            ['error', 'warning', 'info', 'debug'],
+            'All levels',
+            'No levels'
+        );
+        const allTags = [...new Set(state.activityLogEntries.map((entry) => entry.tag).filter(Boolean))].sort();
+        updateActivityLogFilterSummary(
+            elements.activityLogTagSummary,
+            state.activityLogFilters.tags,
+            allTags,
+            'All tags',
+            'No tags'
+        );
+    }
+
+    function updateActivityLogFilterSummary(element, selectedValues, allValues, allLabel, noneLabel) {
+        if (!element) return;
+        if (!allValues.length || !selectedValues.length) {
+            element.textContent = noneLabel;
+            return;
+        }
+        if (selectedValues.length === allValues.length) {
+            element.textContent = allLabel;
+            return;
+        }
+        element.textContent = `${selectedValues.length} selected`;
+    }
+
+    function formatActivityLogLevelLabel(level) {
+        return {
+            error: 'Error',
+            warning: 'Warning',
+            info: 'Info',
+            debug: 'Debug'
+        }[level] || level;
+    }
+
+    function setActivityLogFilterMenuOpen(menu, open) {
+        state.activityLogFilterMenus[menu] = Boolean(open);
+        if (open) {
+            const otherMenu = menu === 'level' ? 'tag' : 'level';
+            state.activityLogFilterMenus[otherMenu] = false;
+            const otherDropdown = otherMenu === 'level' ? elements.activityLogLevelDropdown : elements.activityLogTagDropdown;
+            const otherTrigger = otherMenu === 'level' ? elements.activityLogLevelTrigger : elements.activityLogTagTrigger;
+            const otherPanel = otherMenu === 'level' ? elements.activityLogLevelMenu : elements.activityLogTagMenu;
+            otherDropdown?.classList.remove('open');
+            otherPanel?.classList.add('hidden');
+            otherTrigger?.setAttribute('aria-expanded', 'false');
+        }
+        const dropdown = menu === 'level' ? elements.activityLogLevelDropdown : elements.activityLogTagDropdown;
+        const trigger = menu === 'level' ? elements.activityLogLevelTrigger : elements.activityLogTagTrigger;
+        const panel = menu === 'level' ? elements.activityLogLevelMenu : elements.activityLogTagMenu;
+
+        dropdown?.classList.toggle('open', state.activityLogFilterMenus[menu]);
+        panel?.classList.toggle('hidden', !state.activityLogFilterMenus[menu]);
+        trigger?.setAttribute('aria-expanded', state.activityLogFilterMenus[menu] ? 'true' : 'false');
+    }
+
+    function handleActivityLogDocumentClick(event) {
+        const target = event.target;
+        if (!(target instanceof Node)) return;
+
+        if (state.activityLogFilterMenus.level && !elements.activityLogLevelDropdown?.contains(target)) {
+            setActivityLogFilterMenuOpen('level', false);
+        }
+        if (state.activityLogFilterMenus.tag && !elements.activityLogTagDropdown?.contains(target)) {
+            setActivityLogFilterMenuOpen('tag', false);
+        }
+    }
+
+    function renderActivityLog() {
+        if (!elements.activityLogViewer) return;
+
+        const entries = getFilteredActivityLogEntries();
+        if (elements.activityLogCount) {
+            const total = state.activityLogEntries.length;
+            const shown = entries.length;
+            const truncated = state.activityLog?.truncated ? ' Loaded from truncated log window.' : '';
+            elements.activityLogCount.textContent = `${shown} of ${total} entries shown.${truncated}`;
+        }
+
+        if (!state.activityLogEntries.length) {
+            elements.activityLogViewer.innerHTML = '<div class="p-3 text-txt-secondary">No activity log entries loaded.</div>';
+            return;
+        }
+
+        if (!entries.length) {
+            elements.activityLogViewer.innerHTML = '<div class="p-3 text-txt-secondary">No entries match the current filters.</div>';
+            return;
+        }
+
+        elements.activityLogViewer.innerHTML = entries.map(renderActivityLogEntry).join('');
+        elements.activityLogViewer.scrollTop = state.activityLogFilters.latestFirst ? 0 : elements.activityLogViewer.scrollHeight;
+    }
+
+    function getFilteredActivityLogEntries() {
+        const filters = state.activityLogFilters;
+        let entries = state.activityLogEntries.filter((entry) => {
+            if (!filters.levels.includes(entry.level)) return false;
+            if (entry.tag && !filters.tags.includes(entry.tag)) return false;
+            if (filters.query && !entry.searchText.includes(filters.query)) return false;
+            return true;
+        });
+
+        if (filters.latestFirst) {
+            entries = [...entries].reverse();
+        }
+        return entries;
+    }
+
+    function renderActivityLogEntry(entry) {
+        const levelClass = activityLogLevelClass(entry.level);
+        const time = formatActivityLogTimestamp(entry.timestamp);
+        const dataSummary = summarizeActivityLogData(entry.data, entry.bootId);
+
+        return `
+            <div class="activity-log-row ${levelClass}">
+                <div class="text-txt-secondary">${escapeHtml(time || 'unknown time')}</div>
+                <div class="font-semibold uppercase">${escapeHtml(entry.level || 'raw')}</div>
+                <div class="text-txt-primary">${escapeHtml(entry.tag || 'unstructured')}</div>
+                <div>
+                    <div class="text-txt-primary">${escapeHtml(entry.message)}</div>
+                    ${dataSummary ? `<div class="activity-log-meta">${dataSummary}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    function activityLogLevelClass(level) {
+        if (level === 'error' || level === 'critical' || level === 'fatal') return 'log-level-error';
+        if (level === 'warning' || level === 'warn') return 'log-level-warn';
+        if (level === 'info') return 'log-level-info';
+        if (level === 'debug') return 'log-level-debug';
+        return '';
+    }
+
+    function formatActivityLogTimestamp(timestamp) {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return timestamp;
+        return date.toLocaleString(undefined, {
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    }
+
+    function summarizeActivityLogData(data, bootId) {
+        const fields = [];
+        if (data && typeof data === 'object') {
+            Object.entries(data).forEach(([key, value]) => {
+                if (value === undefined || value === null || value === '') return;
+                fields.push([key, value]);
+            });
+        }
+        if (bootId !== null && bootId !== undefined) {
+            fields.push(['boot_id', bootId]);
+        }
+
+        return fields
+            .map(([key, value]) => {
+                const rendered = typeof value === 'string' ? value : JSON.stringify(value);
+                return `<span>${escapeHtml(key)}=${escapeHtml(truncateActivityLogValue(rendered))}</span>`;
+            })
+            .join('');
+    }
+
+    function truncateActivityLogValue(value, limit = 140) {
+        const text = String(value ?? '');
+        return text.length > limit ? `${text.slice(0, limit)}...` : text;
     }
 
     function buildProviderOptions(selected) {

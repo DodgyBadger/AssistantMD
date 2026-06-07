@@ -36,6 +36,11 @@ settings:
     value: 120
     description: "Default timeout in seconds for external API calls."
     restart_required: false
+  openrouter_ignored_providers:
+    value:
+      - azure
+    description: "OpenRouter provider slugs to skip for model calls. Default avoids known Azure routing compatibility issues with tool-using chats; set [] if your OpenRouter account intentionally routes through Azure."
+    restart_required: false
   workflow_task_timeout_seconds:
     value: 0
     description: "Maximum seconds for one workflow execution task. 0 disables the workflow task timeout."
@@ -309,6 +314,8 @@ providers:
   openrouter:
     api_key: OPENROUTER_API_KEY
     base_url: null
+    provider:
+      require_parameters: true
     user_editable: false
   lm_studio:
     api_key: LM_STUDIO_API_KEY

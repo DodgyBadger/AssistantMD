@@ -87,6 +87,10 @@ class LatestMessage:
     text: str
     exists: bool
 
+class Workspace:
+    path: str
+    exists: bool
+
 class AssembleContextResult:
     messages: tuple[Any, ...]
     instructions: tuple[str, ...]
@@ -144,6 +148,7 @@ class MontyDateTokens:
 
 date: MontyDateTokens
 latest_message: LatestMessage
+workspace: Workspace
 
 
 # ---------------------------------------------------------------------------

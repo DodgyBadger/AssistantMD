@@ -48,6 +48,7 @@ class ProviderConfig(BaseModel):
 
     api_key: str | None = None
     base_url: str | None = None
+    provider: dict[str, Any] | None = None
     user_editable: bool = False
 
 

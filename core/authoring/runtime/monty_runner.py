@@ -197,7 +197,7 @@ def _build_direct_tool_functions(
         ) -> Any:
             if args:
                 raise ValueError(f"{_spec.name} only supports keyword arguments")
-            logger.add_sink("validation").info(
+            logger.set_sinks(["validation"]).info(
                 "authoring_direct_tool_started",
                 data={
                     "workflow_id": context.workflow_id,
@@ -205,26 +205,40 @@ def _build_direct_tool_functions(
                     "argument_keys": sorted(kwargs),
                 },
             )
-            result = await invoke_bound_tool(
-                _spec.tool_function,
-                tool_name=_spec.name,
-                arguments=dict(kwargs),
-                run_buffers=host.run_buffers,
-                session_buffers=host.session_buffers,
-                session_id=getattr(host, "session_key", None),
-                chat_session_id=getattr(host, "chat_session_id", None),
-                vault_name=str(context.workflow_id).split("/", 1)[0]
-                if "/" in str(context.workflow_id)
-                else None,
-                message_history=getattr(host, "message_history", None),
-                prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
-            )
+            try:
+                result = await invoke_bound_tool(
+                    _spec.tool_function,
+                    tool_name=_spec.name,
+                    arguments=dict(kwargs),
+                    run_buffers=host.run_buffers,
+                    session_buffers=host.session_buffers,
+                    session_id=getattr(host, "session_key", None),
+                    chat_session_id=getattr(host, "chat_session_id", None),
+                    vault_name=str(context.workflow_id).split("/", 1)[0]
+                    if "/" in str(context.workflow_id)
+                    else None,
+                    message_history=getattr(host, "message_history", None),
+                    prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "authoring_direct_tool_failed",
+                    data={
+                        "event": "authoring_direct_tool_failed",
+                        "workflow_id": context.workflow_id,
+                        "tool": _spec.name,
+                        "argument_keys": sorted(kwargs),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                raise
             tool_result = normalize_tool_result(
                 _spec.name,
                 result,
                 vault_path=host.vault_path or "",
             )
-            logger.add_sink("validation").info(
+            logger.set_sinks(["validation"]).info(
                 "authoring_direct_tool_completed",
                 data={
                     "workflow_id": context.workflow_id,

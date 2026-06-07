@@ -353,6 +353,31 @@ def get_default_api_timeout() -> float:
         return 120.0
 
 
+def get_openrouter_ignored_providers() -> list[str]:
+    """Return normalized OpenRouter provider slugs to skip for model calls."""
+    entry = get_general_settings().get("openrouter_ignored_providers")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        return ["azure"]
+
+    if isinstance(value, str):
+        raw_items = [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return ["azure"]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        provider = str(item).strip().lower()
+        if not provider or provider in seen:
+            continue
+        seen.add(provider)
+        normalized.append(provider)
+    return normalized
+
+
 def get_workflow_task_timeout_seconds() -> float:
     """Return workflow task timeout seconds, where 0 disables the timeout."""
     entry = get_general_settings().get("workflow_task_timeout_seconds")

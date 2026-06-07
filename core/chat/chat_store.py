@@ -611,6 +611,53 @@ class ChatStore:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def set_session_workspace(
+        self,
+        *,
+        session_id: str,
+        vault_name: str,
+        workspace_path: str | None,
+    ) -> None:
+        """Set or clear the workspace path stored in session metadata."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            metadata = self._session_metadata(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+            normalized_path = (workspace_path or "").strip()
+            if normalized_path:
+                metadata["workspace"] = {"path": normalized_path}
+            else:
+                metadata.pop("workspace", None)
+            conn.execute(
+                """
+                UPDATE chat_sessions
+                SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    session_id,
+                    vault_name,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_session_workspace_path(self, session_id: str, vault_name: str) -> str:
+        """Return the stored workspace path for one session, if set."""
+        metadata = self.get_session_metadata(session_id, vault_name)
+        workspace = metadata.get("workspace")
+        if not isinstance(workspace, dict):
+            return ""
+        path = workspace.get("path")
+        return str(path).strip() if path is not None else ""
+
     def get_session_history_revision(self, session_id: str, vault_name: str) -> int:
         """Return the monotonic effective-history revision for one session."""
         return _metadata_history_revision(self.get_session_metadata(session_id, vault_name))

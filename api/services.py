@@ -107,9 +107,12 @@ from .models import (
     SystemSettingsResponse,
     TemplateInfo,
     ChatSessionInfo,
+    ChatWorkspaceInfo,
     ChatSessionDetailResponse,
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
+    VaultDirectoryInfo,
+    VaultDirectoryListResponse,
     ChatSessionExportResponse,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -201,6 +204,146 @@ def resolve_chat_session_for_request(*, requested_session_id: str | None, vault_
         generated_session_id = f"{base_session_id}_{suffix}"
     _chat_store.ensure_session(session_id=generated_session_id, vault_name=vault_name)
     return generated_session_id
+
+
+def _chat_workspace_info(path: str | None) -> ChatWorkspaceInfo | None:
+    normalized = (path or "").strip()
+    if not normalized:
+        return None
+    return ChatWorkspaceInfo(path=normalized, exists=True)
+
+
+def _normalize_workspace_path(path: str | None) -> str:
+    """Normalize a safe vault-relative workspace path string."""
+    raw_path = (path or "").strip().replace("\\", "/")
+    if not raw_path:
+        return ""
+    if raw_path.startswith("/"):
+        raise APIException(
+            status_code=400,
+            error_type="InvalidWorkspacePath",
+            message="Workspace path must be relative to the vault.",
+            details={"path": path},
+        )
+    parts = [part for part in raw_path.split("/") if part and part != "."]
+    if any(part == ".." for part in parts):
+        raise APIException(
+            status_code=400,
+            error_type="InvalidWorkspacePath",
+            message="Workspace path cannot contain '..'.",
+            details={"path": path},
+        )
+    return Path(*parts).as_posix() if parts else ""
+
+
+def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> tuple[str, Path]:
+    """Return a normalized path and existing directory for picker browsing."""
+    normalized_path = _normalize_workspace_path(path)
+    runtime = get_runtime_context()
+    vault_root = (runtime.config.data_root / vault_name).resolve()
+    if not vault_root.is_dir():
+        raise APIException(
+            status_code=404,
+            error_type="VaultNotFound",
+            message=f"Vault not found: {vault_name}",
+            details={"vault_name": vault_name},
+        )
+    resolved = (vault_root / normalized_path).resolve() if normalized_path else vault_root
+    try:
+        resolved.relative_to(vault_root)
+    except ValueError as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidWorkspacePath",
+            message="Workspace path escapes the vault.",
+            details={"path": path, "vault_name": vault_name},
+        ) from exc
+    if not resolved.exists():
+        raise APIException(
+            status_code=404,
+            error_type="WorkspaceNotFound",
+            message=f"Workspace directory not found: {normalized_path}",
+            details={"path": normalized_path, "vault_name": vault_name},
+        )
+    if not resolved.is_dir():
+        raise APIException(
+            status_code=400,
+            error_type="WorkspaceNotDirectory",
+            message=f"Workspace path is not a directory: {normalized_path}",
+            details={"path": normalized_path, "vault_name": vault_name},
+        )
+    return normalized_path, resolved
+
+
+def list_vault_directories(vault_name: str, path: str | None = None) -> VaultDirectoryListResponse:
+    """Return child directories for one vault-relative path."""
+    base_path, base_dir = _resolve_existing_vault_directory(vault_name=vault_name, path=path)
+    runtime = get_runtime_context()
+    vault_root = (runtime.config.data_root / vault_name).resolve()
+    directories: list[VaultDirectoryInfo] = []
+    for child in sorted(base_dir.iterdir(), key=lambda item: item.name.lower()):
+        if not _is_workspace_picker_directory(child):
+            continue
+        try:
+            relative = child.resolve().relative_to(vault_root).as_posix()
+        except ValueError:
+            continue
+        has_children = any(_is_workspace_picker_directory(grandchild) for grandchild in child.iterdir())
+        directories.append(
+            VaultDirectoryInfo(
+                name=child.name,
+                path=relative,
+                has_children=has_children,
+            )
+        )
+    return VaultDirectoryListResponse(path=base_path, directories=directories)
+
+
+def _is_workspace_picker_directory(path: Path) -> bool:
+    """Return whether a directory should appear in the workspace picker."""
+    return path.is_dir() and not path.name.startswith(".") and path.name != ASSISTANTMD_ROOT_DIR
+
+
+def set_chat_session_workspace(vault_name: str, session_id: str, path: str | None) -> ChatWorkspaceInfo | None:
+    """Set or clear the workspace path for one chat session."""
+    normalized_path = _normalize_workspace_path(path)
+    existing_session = _chat_store.get_session_by_id(session_id)
+    if existing_session is None:
+        raise APIException(
+            status_code=404,
+            error_type="ChatSessionNotFound",
+            message=f"Chat session not found: {session_id}",
+            details={"session_id": session_id, "vault_name": vault_name},
+        )
+    if existing_session.vault_name != vault_name:
+        raise APIException(
+            status_code=409,
+            error_type="ChatSessionVaultMismatch",
+            message=(
+                f"Chat session '{session_id}' belongs to vault '{existing_session.vault_name}' "
+                f"and cannot be used with vault '{vault_name}'."
+            ),
+            details={
+                "session_id": session_id,
+                "requested_vault": vault_name,
+                "bound_vault": existing_session.vault_name,
+            },
+        )
+    _chat_store.set_session_workspace(
+        session_id=session_id,
+        vault_name=vault_name,
+        workspace_path=normalized_path or None,
+    )
+    logger.info(
+        "Chat session workspace updated",
+        data={
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "workspace_path": normalized_path,
+            "workspace_set": bool(normalized_path),
+        },
+    )
+    return _chat_workspace_info(normalized_path)
 
 
 def _execution_task_info(snapshot) -> ExecutionTaskInfo:
@@ -619,6 +762,9 @@ def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
             created_at=session.created_at,
             last_activity_at=session.last_activity_at,
             title=session.title or None,
+            workspace=_chat_workspace_info(
+                _chat_store.get_session_workspace_path(session.session_id, vault_name)
+            ),
             has_summary=summary_store.get_session_summary(
                 vault_name=vault_name,
                 session_id=session.session_id,
@@ -646,6 +792,7 @@ def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
             "updated_at": None,
             "domain": None,
             "work_product": None,
+            "workspace_path": _chat_store.get_session_workspace_path(session_id, vault_name) or None,
             "named_entities": None,
             "source_summary": None,
             "metadata": {},
@@ -677,6 +824,7 @@ async def update_chat_session_summary(
         domain=data.get("domain"),
         work_product=data.get("work_product"),
         user_intent=data.get("user_intent"),
+        workspace_path=data.get("workspace_path"),
         named_entities=data.get("named_entities"),
         source_summary=data.get("source_summary"),
         metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
@@ -741,6 +889,7 @@ def _session_summary_response(session_summary) -> dict:
         "updated_at": session_summary.updated_at,
         "domain": session_summary.domain,
         "work_product": session_summary.work_product,
+        "workspace_path": session_summary.workspace_path,
         "named_entities": session_summary.named_entities,
         "source_summary": session_summary.source_summary,
         "metadata": session_summary.metadata,
@@ -755,6 +904,7 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
     return ChatSessionDetailResponse(
         session_id=session_id,
         vault_name=vault_name,
+        workspace=_chat_workspace_info(_chat_store.get_session_workspace_path(session_id, vault_name)),
         messages=[
             ChatSessionMessageInfo(
                 sequence_index=message.sequence_index,
@@ -1832,6 +1982,17 @@ def repair_settings_from_template() -> SystemSettingsResponse:
             if key not in active_section:
                 active_section[key] = value
         merged[section] = active_section
+
+    # Existing core provider entries may need newly introduced non-secret fields
+    # from the template. Preserve all active values and only fill absent keys.
+    active_providers = merged.get("providers", {})
+    template_providers = template_sections.get("providers", {})
+    if isinstance(active_providers, dict) and isinstance(template_providers, dict):
+        for key, template_provider in template_providers.items():
+            active_provider = active_providers.get(key)
+            if isinstance(active_provider, dict) and isinstance(template_provider, dict):
+                for provider_key, provider_value in template_provider.items():
+                    active_provider.setdefault(provider_key, provider_value)
 
     # Prune removed settings (settings are not user-extensible)
     settings_template_keys = set(template_sections["settings"].keys())

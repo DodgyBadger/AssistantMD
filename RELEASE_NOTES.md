@@ -1,5 +1,30 @@
 # Release Notes
 
+## 2026-06-06 - v0.6.4
+
+### Workspace-aware chat sessions
+
+Chat sessions can now be associated with a workspace folder inside the active vault.
+
+- Set a workspace when you start or continue a chat so the default context setup can automatically load local orientation files.
+- Add `README.md` to a workspace folder to warm the session with what the folder is about, current state, important files, goals, or constraints.
+- Add `playbook.md` to a workspace folder for local working policy. It is merged after `AssistantMD/playbook.md`, so project-specific guidance can refine the vault-wide defaults without duplicating them.
+- `session_ops` search boosts results if in same workspace as current session, and can filter search and list results by workspace.
+- Refresh the system scripts manually from System / Misc to get the updated default context script.
+
+### Activity log diagnostics
+
+The System activity log is easier to inspect when diagnosing imports and runtime issues.
+
+- Filter activity entries by search text, level, and tag.
+- Ingestion now records per-file activity with the source filename, selected strategy, warnings, outputs, and OCR fallback details.
+- Workflow scheduling and run activity now includes searchable workflow names, scheduler sync decisions, and terminal run details.
+- Chat and context-template runs now record compact lifecycle summaries with stable event names, session/workspace identity, and terminal status, while noisy helper-level success details stay in validation artifacts.
+
+### Provider reliability
+
+- OpenRouter requests now use provider routing defaults that require requested parameters to be supported and skip Azure-backed routes by default. This is a trial workaround for observed provider-routing issues in long-running, tool-heavy chats rather than a guaranteed fix; the ignored provider list is editable in System settings.
+
 ## 2026-05-31 - v0.6.3
 
 ### Composable session summaries

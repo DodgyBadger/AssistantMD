@@ -90,6 +90,7 @@ class ChatExecuteRequest(BaseModel):
         description="Optional per-request thinking override: default, on, off, minimal, low, medium, high, xhigh",
     )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
+    workspace_path: Optional[str] = Field(None, description="Optional vault-relative workspace directory path")
     stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 
@@ -366,6 +367,13 @@ class TemplateInfo(BaseModel):
     path: Optional[str] = Field(None, description="Full path to template, if available")
 
 
+class ChatWorkspaceInfo(BaseModel):
+    """Vault-relative workspace directory associated with a chat session."""
+
+    path: str = Field("", description="Vault-relative workspace directory path")
+    exists: bool = Field(False, description="Whether a workspace path is set")
+
+
 class ChatSessionInfo(BaseModel):
     """Persisted chat session summary for UI selection."""
 
@@ -373,7 +381,15 @@ class ChatSessionInfo(BaseModel):
     created_at: str = Field(..., description="Session creation timestamp")
     last_activity_at: str = Field(..., description="Most recent activity timestamp")
     title: Optional[str] = Field(None, description="User-defined title, if set")
+    workspace: Optional[ChatWorkspaceInfo] = Field(None, description="Workspace associated with this session")
     has_summary: bool = Field(False, description="Whether a session summary record exists")
+
+
+class ChatSessionWorkspaceRequest(BaseModel):
+    """Request to set or clear a chat session workspace."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    path: Optional[str] = Field(None, description="Vault-relative workspace directory path")
 
 
 class ChatSessionSummaryResponse(BaseModel):
@@ -388,6 +404,7 @@ class ChatSessionSummaryResponse(BaseModel):
     updated_at: Optional[str] = Field(None, description="Session summary update timestamp")
     domain: Optional[str] = Field(None, description="Extracted domain")
     work_product: Optional[str] = Field(None, description="Extracted work product")
+    workspace_path: Optional[str] = Field(None, description="Workspace path stored for this session summary")
     named_entities: Optional[str] = Field(None, description="Extracted named entities")
     source_summary: Optional[str] = Field(None, description="Extracted source summary")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Summary metadata")
@@ -401,6 +418,7 @@ class ChatSessionSummaryUpdateRequest(BaseModel):
     domain: Optional[str] = Field(None, description="Replacement domain")
     work_product: Optional[str] = Field(None, description="Replacement work product")
     user_intent: Optional[str] = Field(None, description="Replacement user intent")
+    workspace_path: Optional[str] = Field(None, description="Replacement workspace path")
     named_entities: Optional[str] = Field(None, description="Replacement named entities")
     source_summary: Optional[str] = Field(None, description="Replacement source summary")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Replacement summary metadata")
@@ -448,8 +466,24 @@ class ChatSessionDetailResponse(BaseModel):
 
     session_id: str = Field(..., description="Session identifier")
     vault_name: str = Field(..., description="Owning vault name")
+    workspace: Optional[ChatWorkspaceInfo] = Field(None, description="Workspace associated with this session")
     messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
     tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")
+
+
+class VaultDirectoryInfo(BaseModel):
+    """One child directory in a vault directory listing."""
+
+    name: str = Field(..., description="Directory basename")
+    path: str = Field(..., description="Vault-relative directory path")
+    has_children: bool = Field(False, description="Whether this directory has child directories")
+
+
+class VaultDirectoryListResponse(BaseModel):
+    """Directory listing response for workspace selection."""
+
+    path: str = Field("", description="Listed vault-relative directory path")
+    directories: List[VaultDirectoryInfo] = Field(default_factory=list, description="Child directories")
 
 
 class ChatSessionsPurgeRequest(BaseModel):

@@ -51,7 +51,7 @@ class WorkflowGovernor:
         task_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute one workflow after waiting for its vault and global lanes."""
-        vault_name = self._split_vault_name(global_id)
+        vault_name, workflow_name = self._split_workflow_identity(global_id)
         source_value = str(source)
         active_task_id = task_id or ""
         task_context = (
@@ -77,6 +77,7 @@ class WorkflowGovernor:
                     "workflow_task_queued_for_vault",
                     global_id=global_id,
                     vault_name=vault_name,
+                    workflow_name=workflow_name,
                     source=source_value,
                     task_id=task.task_id,
                     reason=f"workflow_vault_active:{vault_name}",
@@ -94,6 +95,7 @@ class WorkflowGovernor:
                             "workflow_task_queued_for_global_capacity",
                             global_id=global_id,
                             vault_name=vault_name,
+                            workflow_name=workflow_name,
                             source=source_value,
                             task_id=active_task_id,
                             reason="workflow_global_capacity_active",
@@ -107,8 +109,12 @@ class WorkflowGovernor:
                     "workflow_task_started",
                     global_id=global_id,
                     vault_name=vault_name,
+                    workflow_name=workflow_name,
                     source=source_value,
                     task_id=active_task_id,
+                    step_name=step_name,
+                    expect_failure=expect_failure,
+                    include_load_errors=include_load_errors,
                 )
                 timeout = get_workflow_task_timeout_seconds()
                 try:
@@ -150,10 +156,17 @@ class WorkflowGovernor:
                         "workflow_task_timed_out",
                         global_id=global_id,
                         vault_name=vault_name,
+                        workflow_name=workflow_name,
                         source=source_value,
                         task_id=active_task_id,
                         status="timed_out",
                         reason=reason,
+                        step_name=step_name,
+                        expect_failure=expect_failure,
+                        include_load_errors=include_load_errors,
+                        execution_time_seconds=timeout,
+                        output_files=[],
+                        message=timeout_result.message,
                     )
                     return timeout_result
 
@@ -166,10 +179,17 @@ class WorkflowGovernor:
                     "workflow_task_completed",
                     global_id=global_id,
                     vault_name=vault_name,
+                    workflow_name=workflow_name,
                     source=source_value,
                     task_id=active_task_id,
                     status=result.status,
                     reason=result.reason,
+                    step_name=step_name,
+                    expect_failure=expect_failure,
+                    include_load_errors=include_load_errors,
+                    execution_time_seconds=result.execution_time_seconds,
+                    output_files=result.output_files,
+                    message=result.message,
                 )
                 await self._mark_task_terminal_from_result(active_task_id, result)
                 return result
@@ -178,10 +198,14 @@ class WorkflowGovernor:
                     "workflow_task_cancelled",
                     global_id=global_id,
                     vault_name=vault_name,
+                    workflow_name=workflow_name,
                     source=source_value,
                     task_id=active_task_id,
                     status="cancelled",
                     reason="cancelled",
+                    step_name=step_name,
+                    expect_failure=expect_failure,
+                    include_load_errors=include_load_errors,
                 )
                 raise
             except Exception as exc:
@@ -190,10 +214,14 @@ class WorkflowGovernor:
                     "workflow_task_failed",
                     global_id=global_id,
                     vault_name=vault_name,
+                    workflow_name=workflow_name,
                     source=source_value,
                     task_id=active_task_id,
                     status="failed",
                     reason=reason,
+                    step_name=step_name,
+                    expect_failure=expect_failure,
+                    include_load_errors=include_load_errors,
                 )
                 raise
             finally:
@@ -212,7 +240,7 @@ class WorkflowGovernor:
         background_tasks: set[asyncio.Task] | None = None,
     ) -> ExecutionTaskSnapshot:
         """Start one workflow in the background and return its execution task."""
-        vault_name = self._split_vault_name(global_id)
+        vault_name, _workflow_name = self._split_workflow_identity(global_id)
         task = await self._task_coordinator.create_queued_task(
             kind=ExecutionTaskKind.WORKFLOW,
             scope=workflow_vault_scope(vault_name),
@@ -273,6 +301,7 @@ class WorkflowGovernor:
         *,
         global_id: str,
         vault_name: str,
+        workflow_name: str,
         source: str,
         task_id: str,
         reason: str,
@@ -282,6 +311,7 @@ class WorkflowGovernor:
             data={
                 "event": event,
                 "workflow_id": global_id,
+                "workflow_name": workflow_name,
                 "vault": vault_name,
                 "source": source,
                 "task_id": task_id,
@@ -295,21 +325,35 @@ class WorkflowGovernor:
         *,
         global_id: str,
         vault_name: str,
+        workflow_name: str,
         source: str,
         task_id: str,
         status: str | None = None,
         reason: str | None = None,
+        step_name: str | None = None,
+        expect_failure: bool | None = None,
+        include_load_errors: bool | None = None,
+        execution_time_seconds: float | None = None,
+        output_files: list[str] | None = None,
+        message: str | None = None,
     ) -> None:
         self._logger.add_sink("validation").info(
             event,
             data={
                 "event": event,
                 "workflow_id": global_id,
+                "workflow_name": workflow_name,
                 "vault": vault_name,
                 "source": source,
                 "task_id": task_id,
                 "status": status,
                 "reason": reason,
+                "step_name": step_name,
+                "expect_failure": expect_failure,
+                "include_load_errors": include_load_errors,
+                "execution_time_seconds": execution_time_seconds,
+                "output_files": list(output_files) if output_files is not None else None,
+                "message": message,
             },
         )
 
@@ -336,8 +380,8 @@ class WorkflowGovernor:
         await self._task_coordinator.mark_completed(task_id, reason=reason)
 
     @staticmethod
-    def _split_vault_name(global_id: str) -> str:
+    def _split_workflow_identity(global_id: str) -> tuple[str, str]:
         if "/" not in global_id:
             raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
-        vault_name, _workflow_name = global_id.split("/", 1)
-        return vault_name
+        vault_name, workflow_name = global_id.split("/", 1)
+        return vault_name, workflow_name

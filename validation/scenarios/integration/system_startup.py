@@ -43,7 +43,7 @@ class SystemStartupScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="job_synced",
+            name="workflow_job_created",
             expected={"job_id": "SystemTest__quick_job", "action": "created"},
         )
 
@@ -55,7 +55,7 @@ class SystemStartupScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="job_synced",
+            name="workflow_job_created",
             expected={
                 "job_id": "SystemTest__planning__quick_job_2",
                 "action": "created",
@@ -65,10 +65,10 @@ class SystemStartupScenario(BaseScenario):
         # Capture original job properties
         original_event = self.latest_event(
             events,
-            name="job_synced",
+            name="workflow_job_created",
             workflow_id="SystemTest/quick_job",
         )
-        assert original_event is not None, "Missing job_synced event for quick_job"
+        assert original_event is not None, "Missing workflow_job_created event for quick_job"
         original_data = original_event.get("data", {})
         original_next_run = original_data.get("next_run_time")
         original_trigger = original_data.get("trigger")
@@ -77,10 +77,10 @@ class SystemStartupScenario(BaseScenario):
         # Capture subfolder job properties
         original_subfolder_event = self.latest_event(
             events,
-            name="job_synced",
+            name="workflow_job_created",
             workflow_id="SystemTest/planning/quick_job_2",
         )
-        assert original_subfolder_event is not None, "Missing job_synced event for quick_job_2"
+        assert original_subfolder_event is not None, "Missing workflow_job_created event for quick_job_2"
         original_subfolder_data = original_subfolder_event.get("data", {})
         original_subfolder_next_run = original_subfolder_data.get("next_run_time")
         original_subfolder_trigger = original_subfolder_data.get("trigger")
@@ -91,13 +91,8 @@ class SystemStartupScenario(BaseScenario):
         new_events = self.events_since(checkpoint)
         checkpoint = self.event_checkpoint()
 
-        restored_event = self.latest_event(
-            new_events,
-            name="job_synced",
-            workflow_id="SystemTest/quick_job",
-        )
-        assert restored_event is not None, "Missing job_synced event after restart"
-        restored_data = restored_event.get("data", {})
+        restored_data = self._latest_scheduler_record(new_events, "SystemTest/quick_job")
+        assert restored_data is not None, "Missing scheduler record after restart"
         restored_next_run = restored_data.get("next_run_time")
         restored_trigger = restored_data.get("trigger")
         restored_name = restored_data.get("job_name")
@@ -111,13 +106,11 @@ class SystemStartupScenario(BaseScenario):
         assert original_name == restored_name, "Job name preserved across restart"
 
         # Validate subfolder job also persists
-        restored_subfolder_event = self.latest_event(
+        restored_subfolder_data = self._latest_scheduler_record(
             new_events,
-            name="job_synced",
-            workflow_id="SystemTest/planning/quick_job_2",
+            "SystemTest/planning/quick_job_2",
         )
-        assert restored_subfolder_event is not None, "Missing job_synced event for quick_job_2 after restart"
-        restored_subfolder_data = restored_subfolder_event.get("data", {})
+        assert restored_subfolder_data is not None, "Missing scheduler record for quick_job_2 after restart"
         restored_subfolder_next_run = restored_subfolder_data.get("next_run_time")
         restored_subfolder_trigger = restored_subfolder_data.get("trigger")
 
@@ -138,11 +131,11 @@ class SystemStartupScenario(BaseScenario):
 
         updated_event = self.latest_event(
             new_events,
-            name="job_synced",
+            name="workflow_job_replaced",
             workflow_id="SystemTest/quick_job",
             action="replaced",
         )
-        assert updated_event is not None, "Missing job_synced event after schedule update"
+        assert updated_event is not None, "Missing workflow_job_replaced event after schedule update"
         updated_data = updated_event.get("data", {})
         updated_next_run = updated_data.get("next_run_time")
         updated_trigger = updated_data.get("trigger")
@@ -175,13 +168,9 @@ class SystemStartupScenario(BaseScenario):
         await self.restart_system()
 
         new_events = self.events_since(checkpoint)
-        final_event = self.latest_event(
-            new_events,
-            name="job_synced",
-            workflow_id="SystemTest/quick_job",
-        )
-        assert final_event is not None, "Missing job_synced event after restarts"
-        final_next_run = final_event.get("data", {}).get("next_run_time")
+        final_data = self._latest_scheduler_record(new_events, "SystemTest/quick_job")
+        assert final_data is not None, "Missing scheduler record after restarts"
+        final_next_run = final_data.get("next_run_time")
         assert final_next_run is not None, "Job should survive multiple restarts"
 
         # Test 6: Malformed Workflow Resilience
@@ -203,15 +192,11 @@ class SystemStartupScenario(BaseScenario):
             name="workflow_loaded",
             expected={"workflow_id": "SystemTest/planning/quick_job_2"},
         )
-        self.assert_event_contains(
-            new_events,
-            name="job_synced",
-            expected={"job_id": "SystemTest__quick_job"},
+        assert self._latest_scheduler_record(new_events, "SystemTest/quick_job") is not None, (
+            "Missing scheduler record for quick_job"
         )
-        self.assert_event_contains(
-            new_events,
-            name="job_synced",
-            expected={"job_id": "SystemTest__planning__quick_job_2"},
+        assert self._latest_scheduler_record(new_events, "SystemTest/planning/quick_job_2") is not None, (
+            "Missing scheduler record for quick_job_2"
         )
 
         # Verify the malformed workflow error was captured
@@ -228,6 +213,19 @@ class SystemStartupScenario(BaseScenario):
         # Clean up
         await self.stop_system()
         self.teardown_scenario()
+
+    @staticmethod
+    def _latest_scheduler_record(events, workflow_id: str, action: str | None = None):
+        for event in reversed(events):
+            if event.get("name") != "workflow_scheduler_sync_completed":
+                continue
+            for record in event.get("data", {}).get("scheduled_workflows", []):
+                if record.get("workflow_id") != workflow_id:
+                    continue
+                if action is not None and record.get("action") != action:
+                    continue
+                return record
+        return None
 
 
 

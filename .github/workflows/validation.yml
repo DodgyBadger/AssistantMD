@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
   CI_PYTHON_VERSION: "3.13"
@@ -24,71 +25,34 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # paths-filter requires the base ref to detect docs-only changes correctly
-          fetch-depth: 0
-
-      - name: Detect docs-only changes
-        id: docs-filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            docs:
-              - '**/*.md'
-            code:
-              - '**'
-              - '!**/*.md'
-
-      - name: Determine if security checks can be skipped
-        id: skip-check
-        run: |
-          docs="${{ steps.docs-filter.outputs.docs }}"
-          code="${{ steps.docs-filter.outputs.code }}"
-          if [[ "$docs" == "true" && "$code" != "true" ]]; then
-            echo "only_docs=true" >> "$GITHUB_OUTPUT"
-            echo "Docs-only change detected; skipping security audit. ✅"
-          else
-            echo "only_docs=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Docs-only summary
-        if: ${{ steps.skip-check.outputs.only_docs == 'true' }}
-        run: echo "Documentation-only update; no dependency security audit required."
 
       - name: Set up Node.js
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
 
       - name: Install npm dependencies from lockfile
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: npm ci
 
       - name: Audit npm dependencies (high+)
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: npm audit --audit-level=high
 
       - name: Set up Python
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.CI_PYTHON_VERSION }}
 
       - name: Install uv
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         uses: astral-sh/setup-uv@v2
 
       - name: Sync Python dependencies
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         working-directory: docker
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
         run: uv sync --frozen --all-extras --no-install-project
 
       - name: Audit Python dependencies
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: uv tool run --from pip-audit pip-audit --progress-spinner=off
 
   validation:
@@ -102,39 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # paths-filter requires the base ref to detect docs-only changes correctly
-          fetch-depth: 0
-
-      - name: Detect docs-only changes
-        id: docs-filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            docs:
-              - '**/*.md'
-            code:
-              - '**'
-              - '!**/*.md'
-
-      - name: Determine if validation can be skipped
-        id: skip-check
-        run: |
-          docs="${{ steps.docs-filter.outputs.docs }}"
-          code="${{ steps.docs-filter.outputs.code }}"
-          if [[ "$docs" == "true" && "$code" != "true" ]]; then
-            echo "only_docs=true" >> "$GITHUB_OUTPUT"
-            echo "Docs-only change detected; skipping validation. ✅"
-          else
-            echo "only_docs=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Docs-only summary
-        if: ${{ steps.skip-check.outputs.only_docs == 'true' }}
-        run: echo "Documentation-only update; no validation run required."
 
       - name: Prepare container-style paths
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: |
           if [ -e /app ]; then
             sudo rm -rf /app
@@ -144,13 +77,11 @@ jobs:
           sudo chown -R "$USER":"$USER" /app/system /app/data
 
       - name: Set up Python
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.CI_PYTHON_VERSION }}
 
       - name: Seed validation secrets
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: |
           python scripts/seed_ci_secrets.py --output system/secrets.yaml
         env:
@@ -163,7 +94,6 @@ jobs:
           LIBRECHAT_API_KEY: ${{ secrets.LIBRECHAT_API_KEY }}
 
       - name: Verify seeded secrets file
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: |
           if [ ! -f system/secrets.yaml ]; then
             echo "system/secrets.yaml missing"
@@ -184,26 +114,21 @@ jobs:
           PY
 
       - name: Check vault mutation routing
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: python scripts/check_vault_mutation_routing.py
 
       - name: Install uv
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         uses: astral-sh/setup-uv@v2
 
       - name: Sync dependencies
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         working-directory: docker
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
         run: uv sync --frozen --all-extras --no-install-project
 
       - name: Install Playwright Chromium
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         run: ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -m playwright install --with-deps chromium
 
       - name: Run validation scenarios (integration suite)
-        if: ${{ steps.skip-check.outputs.only_docs != 'true' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

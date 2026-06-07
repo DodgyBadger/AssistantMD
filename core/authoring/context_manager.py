@@ -31,7 +31,7 @@ from core.authoring.contracts import (
 )
 from core.authoring.template_discovery import load_template
 from core.authoring.template_loader import parse_authoring_template_text
-from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, run_authoring_monty
+from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, Workspace, run_authoring_monty
 from core.authoring.cache import add_context_summary, upsert_session
 from core.constants import VALID_WEEK_DAYS
 from core.logger import UnifiedLogger
@@ -425,6 +425,7 @@ async def _build_authoring_context_history(
     session_id: str,
     vault_name: str,
     vault_path: str,
+    workspace_path: str = "",
     template,
     source,
 ) -> List[ModelMessage]:
@@ -471,6 +472,23 @@ async def _build_authoring_context_history(
         message_history=prior_history,
         prefer_message_history=True,
         latest_message=_latest_message_from_model_message(active_prompt_message),
+        workspace=Workspace(path=workspace_path),
+    )
+    logger.info(
+        "Context template run started",
+        data={
+            "event": "context_template_run_started",
+            "status": "started",
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "template_name": template.name,
+            "template_source": template.source,
+            "workspace_path": workspace_path,
+            "workflow_id": workflow_id,
+            "input_message_count": len(messages),
+            "prior_history_count": len(prior_history),
+            "active_prompt_present": active_prompt_message is not None,
+        },
     )
 
     try:
@@ -482,6 +500,22 @@ async def _build_authoring_context_history(
             script_name=template.name,
         )
     except AuthoringMontyExecutionError as exc:
+        logger.warning(
+            "Context template run failed",
+            data={
+                "event": "context_template_run_failed",
+                "status": "failed",
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "template_name": template.name,
+                "template_source": template.source,
+                "workspace_path": workspace_path,
+                "workflow_id": workflow_id,
+                "phase": "authoring_run",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         logger.warning(
             "Context authoring execution failed in history processor",
             data={
@@ -505,6 +539,22 @@ async def _build_authoring_context_history(
     try:
         assembled = _normalize_authoring_context_result(result.value)
     except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Context template run failed",
+            data={
+                "event": "context_template_run_failed",
+                "status": "failed",
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "template_name": template.name,
+                "template_source": template.source,
+                "workspace_path": workspace_path,
+                "workflow_id": workflow_id,
+                "phase": "result_shape",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         logger.warning(
             "Context template returned invalid result shape",
             data={
@@ -586,6 +636,26 @@ async def _build_authoring_context_history(
         curated_history.extend(_history_item_to_model_messages(message))
     if active_prompt_message is not None:
         curated_history.append(active_prompt_message)
+    logger.info(
+        "Context template run completed",
+        data={
+            "event": "context_template_run_completed",
+            "status": "completed",
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "template_name": template.name,
+            "template_source": template.source,
+            "workspace_path": workspace_path,
+            "workflow_id": workflow_id,
+            "input_message_count": len(messages),
+            "prior_history_count": len(prior_history),
+            "assembled_message_count": len(assembled.messages),
+            "curated_history_count": len(curated_history),
+            "summary_section_count": 1 if summary_text else 0,
+            "summary_sections": [section_name] if summary_text else [],
+            "active_prompt_present": active_prompt_message is not None,
+        },
+    )
     logger.set_sinks(["validation"]).info(
         "Context history compiled",
         data={
@@ -613,6 +683,7 @@ def build_context_manager_history_processor(
     vault_path: str,
     model_alias: str,
     template_name: str,
+    workspace_path: str = "",
 ) -> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
     """
     Factory for a history processor that runs a Monty authoring template and
@@ -665,6 +736,7 @@ def build_context_manager_history_processor(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
+            workspace_path=workspace_path,
             template=template,
             source=authoring_source,
         )
