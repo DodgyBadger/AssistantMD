@@ -1,21 +1,49 @@
 ---
 name: Authoring
-description: Guidelines for creating and modifying AssistantMD workflow scripts, context assembly scripts, and skills. Use when the user asks to create, edit, or debug any file in AssistantMD/Authoring/ or AssistantMD/Skills/.
+description: Guidelines for helping users build AssistantMD behavior, skills, workflows, and context customization. Use when the user wants to change how AssistantMD works, support a workflow goal, or create, edit, or debug files in AssistantMD/Authoring/ or AssistantMD/Skills/.
 ---
 
-Use this skill when creating or editing AssistantMD authoring files:
+Use this skill when helping the user build or change AssistantMD behavior:
 
+- global playbook or workspace playbook guidance
+- workspace README orientation
+- skill files
 - workflow scripts
 - context assembly scripts
-- skill files
 
-Before changing files, read the current contract docs:
+First, understand the workflow goal. Ask one short, practical question at a time until you know:
+
+- what the user wants to accomplish;
+- whether it is global to the vault or local to a project/workspace;
+- which vault folders, files, or file types matter;
+- whether the task is one-off, repeated on demand, or scheduled/unattended;
+- what a good result looks like;
+- whether the user wants chat to do the work directly or wants durable support for future sessions.
+
+Prefer the default setup before custom scripts. Recommend the simplest durable customization that fits:
+
+- Use `AssistantMD/playbook.md` for global working policy, source-of-truth rules, review standards, file conventions, or recurring preferences.
+- Use `{workspace}/README.md` for project-local orientation: what the folder is, current state, important files, active goals, and constraints.
+- Use `{workspace}/playbook.md` for project-local working policy that should be more specific than `AssistantMD/playbook.md`.
+- Use a skill in `AssistantMD/Skills/` for a repeatable procedure the chat agent can follow on demand.
+- Use a workflow script when the task must run on a schedule, run unattended, or needs deterministic multi-step file processing.
+- Use a context assembly script when the default context loading behavior cannot express what should be available at the start of a chat.
+
+Before editing files, state the recommended approach and why it fits. Do not start with workflow or context scripts just because the user says "workflow". First decide whether playbooks, workspace files, or skills are enough.
+
+Before changing authoring files, read the current contract docs:
 
 - `__virtual_docs__/use/build-guide.md` for skill behavior and the built-in skill discovery script.
 - `__virtual_docs__/use/authoring.md` for workflow and context script structure.
 - `__virtual_docs__/tools/code_execution.md` for Monty runtime features, helper signatures, direct tool calls, and return shapes.
 
 Do not infer the current API from older vault files. Existing user files may predate the current authoring contract.
+
+When writing skills:
+
+- Write plain markdown instructions the chat agent can follow independently.
+- Include the goal, when to use the skill, relevant paths, required procedure, expected output, and what to avoid changing.
+- Keep the skill focused on one durable procedure or policy area.
 
 When writing authoring scripts:
 
@@ -26,4 +54,4 @@ When writing authoring scripts:
 - Use `delegate(...)` only when the script needs model judgment, and pass explicit instructions and tool access.
 - Make one small change at a time.
 
-Offer to test using `run_workflow` tool. Note that this can only test workflow scripts, not context assemblys scripts. Fix any errors returned by the tool. Even if no errors are returned, inspect the artifacts to ensure they meet requirements.
+Offer to test using the `run_workflow` tool. Note that this can only test workflow scripts, not context assembly scripts. Fix any errors returned by the tool. Even if no errors are returned, inspect the artifacts to ensure they meet requirements.

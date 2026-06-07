@@ -8,9 +8,27 @@ practical example of that composition, and the sections below use it to show
 how the pieces can fit.
 
 Start by customizing the default setup before building your own composition
-from scratch. You can usually get far by editing the shipped markdown
-instructions, skills, and workflows, then replacing pieces only when the
-default shape no longer fits.
+from scratch. If you have a goal in mind, describe it to chat in ordinary
+language: what you want to accomplish, where the relevant files live, how often
+it should happen, and what a good result looks like. The agent can help
+translate that goal into the simplest durable customization that fits.
+
+Most workflow goals can be handled with plain markdown files the default
+context script already knows how to load:
+
+- Put global working policy in `AssistantMD/playbook.md`.
+- Add repeatable procedures as skills in `AssistantMD/Skills/`.
+- When work is project-local, set the chat workspace to that project folder and
+  add `{workspace}/README.md` for orientation.
+- Add `{workspace}/playbook.md` for project-local policy that should be more
+  specific than the global playbook.
+
+The default context assembly script loads this markdown customization without
+requiring application code changes. That keeps the usual path inspectable: the
+user can read the files that shape the agent, and the agent can help revise
+them during normal chat.
+
+The rest of this guide explains the building blocks individually.
 
 ---
 
@@ -98,7 +116,7 @@ runtime details.
 ## Session Summaries
 
 Session summaries are derived records of prior chat sessions. They help the
-agent find related past work without requiring entire transcripts by default.
+agent find related past work without reading entire transcripts.
 AssistantMD defines the summary fields that are extracted and the retrieval
 behavior used by `session_ops`, but it does not require session summaries to
 run at a particular time or be injected into chat context in a particular way.
@@ -123,10 +141,9 @@ notes over time, and session summaries to find related prior work.
 ## Customizing the default setup
 
 AssistantMD ships with a default setup that is meant to be useful as-is and to
-serve as an example of the composable style. Treat it as the recommended
-starting point: inspect the pieces it loads, edit the ones that are close to
-what you want, and build a new composition only when changing the default would
-be harder than replacing it.
+serve as an example of the composable style. The opening section gives the
+recommended customization path; this section lists the pieces the default
+context assembly script loads.
 
 The default context assembly script (found in `system/Authoring/default.md`):
 - Loads `AssistantMD/soul.md` and `AssistantMD/playbook.md` as additional system instructions.
