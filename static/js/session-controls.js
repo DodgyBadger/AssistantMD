@@ -19,6 +19,9 @@
             if (elements.sessionDropdownTrigger) {
                 elements.sessionDropdownTrigger.setAttribute('aria-expanded', composeState.sessionMenuOpen ? 'true' : 'false');
             }
+            if (elements.sessionDropdownChevronTrigger) {
+                elements.sessionDropdownChevronTrigger.setAttribute('aria-expanded', composeState.sessionMenuOpen ? 'true' : 'false');
+            }
             if (!composeState.sessionMenuOpen && hadEditingSession) {
                 renderSelector();
             }
@@ -57,10 +60,21 @@
 
             const activeSession = state.sessions.find((session) => session.session_id === state.sessionId) || null;
             const activeMeta = activityLabel(activeSession);
+            const activeHasSummary = Boolean(activeSession?.has_summary);
             elements.sessionDropdownLabel.innerHTML = `
-                <span class="session-dropdown-title">${escapeHtml(title(activeSession))}</span>
-                ${activeMeta ? `<span class="session-dropdown-meta">${escapeHtml(activeMeta)}</span>` : ''}
+                <span class="session-dropdown-title-wrap">
+                    <span class="session-dropdown-title">${escapeHtml(title(activeSession))}</span>
+                    ${activeHasSummary ? '<span class="session-summary-marker" aria-hidden="true">✦</span>' : ''}
+                </span>
             `;
+            if (elements.sessionDropdownActiveActions) {
+                elements.sessionDropdownActiveActions.innerHTML = activeSession
+                    ? renderSessionActions(activeSession.session_id)
+                    : '';
+            }
+            if (elements.sessionDropdownActiveMeta) {
+                elements.sessionDropdownActiveMeta.textContent = activeMeta || '';
+            }
 
             const rows = [
                 renderDropdownRow(null, !activeSession),
@@ -87,17 +101,18 @@
                     class="session-dropdown-option${isActive ? ' is-active' : ''}"
                     role="option"
                     aria-selected="${isActive ? 'true' : 'false'}"
+                    data-session-row-id="${escapeHtml(sessionId)}"
                 >
-                    <button type="button" class="session-dropdown-select-button" data-session-id="${escapeHtml(sessionId)}"${previewFocusAttribute}>
-                        <span class="session-dropdown-label">
+                    <span class="session-dropdown-main">
+                        <button type="button" class="session-dropdown-select-button" data-session-id="${escapeHtml(sessionId)}"${previewFocusAttribute}>
                             <span class="session-dropdown-title-wrap"${previewAttribute}>
                                 <span class="session-dropdown-title">${escapeHtml(title(session))}</span>
                                 ${marker}
                             </span>
-                            ${meta ? `<span class="session-dropdown-meta">${escapeHtml(meta)}</span>` : ''}
-                        </span>
-                    </button>
-                    ${isActive && sessionId ? renderActiveSessionActions(sessionId) : ''}
+                        </button>
+                        ${sessionId ? renderSessionActions(sessionId) : ''}
+                    </span>
+                    ${meta ? `<span class="session-dropdown-meta">${escapeHtml(meta)}</span>` : ''}
                 </div>
             `;
         }
@@ -128,7 +143,7 @@
             `;
         }
 
-        function renderActiveSessionActions(sessionId) {
+        function renderSessionActions(sessionId) {
             return `
                 <div class="session-dropdown-row-actions" aria-label="Session actions">
                     ${renderRowActionButton('edit-title', sessionId, 'Edit title', icons.EDIT_ICON_SVG)}
@@ -148,7 +163,6 @@
                     data-session-action-id="${escapeHtml(sessionId)}"
                     title="${escapeHtml(label)}"
                     aria-label="${escapeHtml(label)}"
-                    ${state.isLoading ? 'disabled' : ''}
                 >${icon}</button>
             `;
         }
@@ -319,11 +333,16 @@
                 );
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
+                const deletedActiveSession = state.sessionId === sessionId;
                 state.sessions = state.sessions.filter((s) => s.session_id !== sessionId);
-                state.sessionId = null;
+                if (deletedActiveSession) {
+                    state.sessionId = null;
+                }
                 editingSessionId = '';
-                callbacks.clearPendingAttachments();
-                callbacks.renderChatEmptyState();
+                if (deletedActiveSession) {
+                    callbacks.clearPendingAttachments();
+                    callbacks.renderChatEmptyState();
+                }
                 renderSelector();
                 callbacks.syncChatControlLocks();
                 callbacks.updateStatus();
@@ -337,10 +356,12 @@
         async function handleSessionAction(button) {
             const action = button.dataset.sessionAction || '';
             const sessionId = button.dataset.sessionActionId || '';
-            if (!sessionId || state.isLoading) return;
+            if (!sessionId) return;
+            if (action === 'delete' && state.isLoading && sessionId === state.sessionId) return;
 
             if (action === 'edit-title') {
                 editingSessionId = sessionId;
+                setMenuOpen(true);
                 renderSelector();
                 return;
             }
@@ -374,13 +395,36 @@
         }
 
         function attachEventListeners() {
+            const toggleSessionMenu = () => {
+                if (elements.sessionDropdownTrigger?.disabled) {
+                    return;
+                }
+                setMenuOpen(!composeState.sessionMenuOpen);
+            };
+
+            const handleClosedSelectorClick = (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                if (!target.closest('.session-dropdown-trigger')) return;
+                if (target.closest('[data-session-action]')) return;
+                event.stopPropagation();
+                toggleSessionMenu();
+            };
+
+            if (elements.sessionDropdown) {
+                elements.sessionDropdown.addEventListener('click', handleClosedSelectorClick);
+            }
+
             if (elements.sessionDropdownTrigger) {
                 elements.sessionDropdownTrigger.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    if (elements.sessionDropdownTrigger.disabled) {
-                        return;
-                    }
-                    setMenuOpen(!composeState.sessionMenuOpen);
+                    toggleSessionMenu();
+                });
+            }
+            if (elements.sessionDropdownChevronTrigger) {
+                elements.sessionDropdownChevronTrigger.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    toggleSessionMenu();
                 });
             }
 
@@ -395,10 +439,10 @@
                         await handleSessionAction(actionButton);
                         return;
                     }
-                    const option = target.closest('[data-session-id]');
+                    const option = target.closest('[data-session-row-id]');
                     if (option instanceof HTMLElement) {
                         event.preventDefault();
-                        await selectFromDropdown(option.dataset.sessionId || '');
+                        await selectFromDropdown(option.dataset.sessionRowId || '');
                     }
                 });
                 elements.sessionDropdownMenu.addEventListener('keydown', async (event) => {
@@ -449,6 +493,19 @@
                     if (!(target instanceof Element)) return;
                     if (target.closest('[data-session-summary-preview-focus-id]')) {
                         sessionSummary.closePreview();
+                    }
+                });
+            }
+
+            if (elements.sessionDropdownActiveActions) {
+                elements.sessionDropdownActiveActions.addEventListener('click', async (event) => {
+                    const target = event.target;
+                    if (!(target instanceof Element)) return;
+                    const actionButton = target.closest('[data-session-action]');
+                    if (actionButton instanceof HTMLButtonElement) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        await handleSessionAction(actionButton);
                     }
                 });
             }

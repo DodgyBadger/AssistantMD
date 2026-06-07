@@ -140,20 +140,34 @@
                     <div class="chat-session-context-row">
                         <div class="session-selector-row">
                             <div id="session-dropdown" class="session-dropdown">
-                                <button
-                                    id="session-dropdown-trigger"
-                                    type="button"
-                                    class="session-dropdown-trigger"
-                                    aria-expanded="false"
-                                    aria-controls="session-dropdown-menu"
-                                >
-                                    <span id="session-dropdown-label" class="session-dropdown-label">
-                                        <span class="session-dropdown-title">New session</span>
+                                <div class="session-dropdown-trigger">
+                                    <span class="session-dropdown-active-main">
+                                        <button
+                                            id="session-dropdown-trigger"
+                                            type="button"
+                                            class="session-dropdown-trigger-button"
+                                            aria-expanded="false"
+                                            aria-controls="session-dropdown-menu"
+                                        >
+                                            <span id="session-dropdown-label" class="session-dropdown-label">
+                                                <span class="session-dropdown-title">New session</span>
+                                            </span>
+                                        </button>
+                                        <span id="session-dropdown-active-actions" class="session-dropdown-active-actions"></span>
                                     </span>
-                                    <svg class="session-dropdown-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                                    </svg>
-                                </button>
+                                    <span id="session-dropdown-active-meta" class="session-dropdown-active-meta"></span>
+                                    <button
+                                        id="session-dropdown-chevron-trigger"
+                                        type="button"
+                                        class="session-dropdown-chevron-button"
+                                        aria-label="Open session selector"
+                                        aria-controls="session-dropdown-menu"
+                                    >
+                                        <svg class="session-dropdown-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                        </svg>
+                                    </button>
+                                </div>
                                 <div id="session-dropdown-menu" class="session-dropdown-menu hidden" role="listbox"></div>
                             </div>
                             <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Open session summary" title="Open session summary">

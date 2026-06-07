@@ -59,7 +59,10 @@ const chatElements = {
     thinkingSelector: document.getElementById('thinking-selector'),
     sessionDropdown: document.getElementById('session-dropdown'),
     sessionDropdownTrigger: document.getElementById('session-dropdown-trigger'),
+    sessionDropdownChevronTrigger: document.getElementById('session-dropdown-chevron-trigger'),
     sessionDropdownLabel: document.getElementById('session-dropdown-label'),
+    sessionDropdownActiveActions: document.getElementById('session-dropdown-active-actions'),
+    sessionDropdownActiveMeta: document.getElementById('session-dropdown-active-meta'),
     sessionDropdownMenu: document.getElementById('session-dropdown-menu'),
     sessionSummaryTrigger: document.getElementById('session-summary-trigger'),
     toolDropdown: document.getElementById('tool-dropdown'),
@@ -532,6 +535,9 @@ function syncChatControlLocks() {
     }
     if (chatElements.sessionDropdownTrigger) {
         chatElements.sessionDropdownTrigger.disabled = state.isLoading;
+    }
+    if (chatElements.sessionDropdownChevronTrigger) {
+        chatElements.sessionDropdownChevronTrigger.disabled = state.isLoading;
     }
     if (chatElements.sessionSummaryTrigger) {
         chatElements.sessionSummaryTrigger.disabled = state.isLoading;
