@@ -106,6 +106,13 @@
                 <path d="m6 6 12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
             </svg>
         `.trim(),
+        CIRCLE_X_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
+                <path d="m15 9-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="m9 9 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+        `.trim(),
         SEND_ICON_SVG: `
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="m22 2-7 20-4-9-9-4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -197,6 +204,7 @@
     const iconByName = {
         alert: icons.ALERT_ICON_SVG,
         chat: icons.CHAT_ICON_SVG,
+        circleX: icons.CIRCLE_X_ICON_SVG,
         clean: icons.CLEAN_ICON_SVG,
         copy: icons.COPY_ICON_SVG,
         dashboard: icons.DASHBOARD_ICON_SVG,

@@ -393,35 +393,17 @@
                         <p class="text-sm text-txt-secondary">
                             Providers define API keys or base URLs for custom endpoints. Built-in providers are read-only. Enter secret names in the fields below and manage their values from the Secrets section.
                         </p>
-                        <div id="provider-feedback" class="text-sm text-txt-secondary"></div>
-                        <div id="provider-list" class="flex flex-col gap-3">
-                            <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
-                                No custom providers configured.
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div id="provider-feedback" class="flex-1 text-sm text-txt-secondary"></div>
+                                <button id="provider-add-row" type="button" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Provider"></button>
                             </div>
-                        </div>
-                        <form id="provider-form" class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-app-elevated border border-border-primary rounded-md p-4">
-                            <div>
-                                <label for="provider-name" class="block text-sm font-medium text-txt-primary mb-1">Provider Name</label>
-                                <input id="provider-name" name="provider-name" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="e.g. local-ollama" required>
-                            </div>
-                            <div>
-                                <label for="provider-api-key-value" class="block text-sm font-medium text-txt-primary mb-1">API Key Secret (optional)</label>
-                                <input id="provider-api-key" name="provider-api-key" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="SECRET_NAME (optional)">
-                                <p class="text-xs text-txt-secondary mt-1">Enter the secret name; use the Secrets form below to set its value.</p>
-                            </div>
-                            <div>
-                                <label for="provider-base-url" class="block text-sm font-medium text-txt-primary mb-1">Base URL Secret (optional)</label>
-                                <input id="provider-base-url" name="provider-base-url" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="SECRET_NAME (optional)">
-                                <p class="text-xs text-txt-secondary mt-1">Base URLs are stored as secrets; enter the secret name and manage the URL value via the Secrets form.</p>
-                            </div>
-                            <div class="md:col-span-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                <span id="provider-form-status" class="text-sm text-txt-secondary"></span>
-                                <div class="flex items-center gap-2">
-                                    <button type="button" id="provider-reset" class="ui-icon-button" data-icon="x" data-icon-label="Cancel provider edit"></button>
-                                    <button type="submit" id="provider-submit" class="ui-icon-button is-primary" data-icon="save" data-icon-label="Save Provider"></button>
+                            <div id="provider-list" class="flex flex-col gap-3">
+                                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
+                                    No custom providers configured.
                                 </div>
                             </div>
-                        </form>
+                        </div>
                     </div>
                 </details>
 
@@ -458,32 +440,17 @@
                     </summary>
                     <div class="p-4 pt-0 space-y-3">
                         <p class="text-sm text-txt-secondary">
-                            API keys and other credentials can be updated here. Use the form below to add new secrets or overwrite existing ones. Changes take effect immediately—no container restart required.
+                            API keys and other credentials can be updated here. Changes take effect immediately—no container restart required.
                         </p>
-                        <div class="bg-app-elevated border border-border-primary rounded-md p-4">
-                            <form id="secret-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label for="secret-name" class="block text-sm font-medium text-txt-primary mb-1">Secret Name</label>
-                                    <input id="secret-name" name="secret-name" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="e.g. LOCAL_MODEL_TOKEN" required>
-                                    <p class="text-xs text-txt-secondary mt-1">Use uppercase letters, numbers, or underscores. The name becomes available to providers immediately.</p>
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div id="secret-feedback" class="flex-1 text-sm text-txt-secondary"></div>
+                                <button id="secret-add-row" type="button" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Secret"></button>
+                            </div>
+                            <div id="secrets-list" class="flex flex-col gap-3">
+                                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
+                                    Loading secrets…
                                 </div>
-                                <div>
-                                    <label for="secret-value" class="block text-sm font-medium text-txt-primary mb-1">Secret Value</label>
-                                    <input id="secret-value" name="secret-value" type="password" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="Enter the credential" required>
-                                    <p class="text-xs text-txt-secondary mt-1">Values are stored as plain text inside <code>system/secrets.yaml</code>.</p>
-                                </div>
-                                <div class="md:col-span-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                    <span id="secret-form-status" class="text-sm text-txt-secondary"></span>
-                                    <div class="flex items-center gap-2">
-                                        <button type="button" id="secret-reset" class="ui-icon-button" data-icon="x" data-icon-label="Cancel secret edit"></button>
-                                        <button type="submit" id="secret-submit" class="ui-icon-button is-primary" data-icon="save" data-icon-label="Save Secret"></button>
-                                    </div>
-                                </div>
-                            </form>
-                        </div>
-                        <div id="secrets-list" class="flex flex-col gap-3">
-                            <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
-                                Loading secrets…
                             </div>
                         </div>
                     </div>

@@ -262,7 +262,7 @@
                     />
                     <div class="session-dropdown-row-actions">
                         ${renderRowActionButton('save-title', sessionId, 'Save title', icons.CHECK_ICON_SVG)}
-                        ${renderRowActionButton('cancel-title', sessionId, 'Cancel title edit', icons.X_ICON_SVG)}
+                        ${renderRowActionButton('cancel-title', sessionId, 'Cancel title edit', icons.CIRCLE_X_ICON_SVG)}
                     </div>
                 </div>
             `;

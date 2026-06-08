@@ -2,7 +2,6 @@
     function createVaultActivityController({ state, elements, utils, callbacks }) {
         const { escapeHtml, formatShortDate } = utils;
         const icons = window.AssistantMDIcons;
-
         function renderVaultActivityResult(vaultName) {
             if (!vaultName) {
                 return '<p class="text-sm text-txt-secondary">No vault selected.</p>';
@@ -41,19 +40,16 @@
                                     </td>
                                     <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
                                     <td>
-                                        <div class="inline-flex items-center gap-2">
-                                            <span>${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}</span>
-                                            <button
-                                                type="button"
-                                                class="ui-icon-button is-compact"
-                                                data-vault-activity-vault="${escapeHtml(vaultName)}"
-                                                data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
-                                                aria-label="View activity files"
-                                                title="View activity files"
-                                            >
-                                                ${icons.EYE_ICON_SVG}
-                                            </button>
-                                        </div>
+                                        <button
+                                            type="button"
+                                            class="font-medium text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm text-left"
+                                            data-vault-activity-vault="${escapeHtml(vaultName)}"
+                                            data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
+                                            aria-label="View activity files"
+                                            title="View activity files"
+                                        >
+                                            ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
+                                        </button>
                                     </td>
                                 </tr>
                             `).join('')}
@@ -352,6 +348,11 @@
 
         function attachEventListeners() {
             if (!elements.vaultActivityStatus) return;
+            document.addEventListener('click', (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                handleVaultActivityClick(target);
+            });
             elements.vaultActivityStatus.addEventListener('change', (event) => {
                 if (event.target?.id !== 'vault-activity-selector') return;
                 state.selectedActivityVault = event.target.value || '';
@@ -375,7 +376,6 @@
                     }
                     return;
                 }
-                handleVaultActivityClick(target);
             });
         }
 

@@ -2,6 +2,7 @@
     function createSessionSummaryController({ state, elements, icons, utils, callbacks }) {
         const {
             ARROW_LEFT_ICON_SVG,
+            CIRCLE_X_ICON_SVG,
             EDIT_ICON_SVG,
             SAVE_ICON_SVG,
             SESSION_SUMMARY_ICON_SVG,
@@ -374,7 +375,7 @@
                                 ${SAVE_ICON_SVG}
                             </button>
                             <button type="button" class="hidden ui-icon-button is-compact" data-session-summary-cancel-edit="true" aria-label="Cancel edit" title="Cancel edit">
-                                ${X_ICON_SVG}
+                                ${CIRCLE_X_ICON_SVG}
                             </button>
                             <button type="button" class="ui-icon-button is-compact" data-session-summary-close="true" aria-label="Close" title="Close">
                                 ${X_ICON_SVG}
