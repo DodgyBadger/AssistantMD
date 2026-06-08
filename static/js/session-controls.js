@@ -531,6 +531,7 @@
         }
 
         function handleSummaryPreviewMouseover(event) {
+            if (!shouldShowSummaryPreview()) return;
             const target = event.target;
             if (!(target instanceof Element)) return;
             const previewTarget = target.closest('[data-session-summary-preview-id]');
@@ -553,6 +554,7 @@
         }
 
         function handleSummaryPreviewFocusin(event) {
+            if (!shouldShowSummaryPreview()) return;
             const target = event.target;
             if (!(target instanceof Element)) return;
             const previewTarget = target.closest('[data-session-summary-preview-focus-id]');
@@ -568,6 +570,10 @@
             if (target.closest('[data-session-summary-preview-focus-id]')) {
                 sessionSummary.closePreview();
             }
+        }
+
+        function shouldShowSummaryPreview() {
+            return !window.matchMedia?.('(hover: none), (pointer: coarse)').matches;
         }
 
         function cssEscape(value) {

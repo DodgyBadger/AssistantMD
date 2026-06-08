@@ -708,6 +708,7 @@ details summary::-webkit-details-marker {
     z-index: 70;
     width: min(22rem, calc(100vw - 2rem));
     overflow: hidden;
+    pointer-events: none;
     border: 1px solid rgb(var(--border-primary));
     border-radius: 0.375rem;
     background: rgb(var(--bg-card));
@@ -957,10 +958,12 @@ details summary::-webkit-details-marker {
     z-index: 1;
 }
 .app-modal-title-block {
+    flex: 1 1 auto;
     min-width: 0;
     overflow-wrap: anywhere;
 }
 .app-modal-actions {
+    flex: 0 0 auto;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -973,17 +976,15 @@ details summary::-webkit-details-marker {
         border-left: 0;
     }
     .app-modal-header {
-        flex-direction: column;
+        flex-direction: row;
+        align-items: flex-start;
     }
     .app-modal-actions {
-        width: 100%;
-        justify-content: stretch;
+        width: auto;
+        margin-left: auto;
+        justify-content: flex-end;
     }
     .app-modal-actions > button {
-        flex: 1 1 auto;
-    }
-    .app-modal-actions > .session-browser-close-button,
-    .app-modal-actions > .session-summary-back-button {
         flex: 0 0 auto;
     }
 }

@@ -1030,24 +1030,29 @@
             ? model.capabilities.join(', ')
             : 'text';
 
-                const actions = editable
-                    ? `
-                        <button data-action="edit" data-model="${escapeHtml(model.name)}" ${iconButton('edit', 'Edit model', 'is-primary')}>${iconSvg('edit')}</button>
-                        <button data-action="delete" data-model="${escapeHtml(model.name)}" ${iconButton('trash', 'Delete model', 'is-danger')}>${iconSvg('trash')}</button>
-                    `
-                    : `<span class="inline-block px-2 py-0.5 text-xs text-txt-secondary bg-app-elevated rounded border border-border-primary">Read-only</span>`;
+        const actions = editable
+            ? `
+                <button data-action="edit" data-model="${escapeHtml(model.name)}" ${iconButton('edit', 'Edit model', 'is-primary')}>${iconSvg('edit')}</button>
+                <button data-action="delete" data-model="${escapeHtml(model.name)}" ${iconButton('trash', 'Delete model', 'is-danger')}>${iconSvg('trash')}</button>
+            `
+            : `<span class="inline-block px-2 py-0.5 text-xs text-txt-secondary bg-app-elevated rounded border border-border-primary">Read-only</span>`;
 
         return `
             <div class="model-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-row="${escapeHtml(model.name)}" data-mode="view" style="max-width: 1400px;">
-                <div class="grid gap-4 md:grid-cols-[minmax(180px,1fr)_minmax(400px,2.5fr)_minmax(140px,auto)] md:items-center">
-                    <div>
-                        <div class="font-semibold text-txt-primary text-sm">${escapeHtml(model.name)}</div>
-                        <div class="flex items-center gap-2 mt-1">
-                            <div class="w-fit">${availabilityBadge}</div>
+                <div class="space-y-4">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <div class="font-semibold text-txt-primary text-sm">${escapeHtml(model.name)}</div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <div class="w-fit">${availabilityBadge}</div>
+                            </div>
+                            ${reasonLine}
                         </div>
-                        ${reasonLine}
+                        <div class="flex gap-2 shrink-0">
+                            ${actions}
+                        </div>
                     </div>
-                    <div class="flex gap-6 items-start">
+                    <div class="flex gap-6 items-start flex-wrap">
                         <div>
                             <div class="text-xs font-medium text-txt-secondary mb-1">Provider</div>
                             <div class="text-sm text-txt-primary">${escapeHtml(model.provider)}</div>
@@ -1060,9 +1065,6 @@
                             <div class="text-xs font-medium text-txt-secondary mb-1">Capabilities</div>
                             <div class="text-xs text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(capabilities)}</div>
                         </div>
-                    </div>
-                    <div class="flex gap-2 justify-start md:justify-end shrink-0">
-                        ${actions}
                     </div>
                 </div>
             </div>
@@ -1555,19 +1557,21 @@ async function saveModelRow(rowKey) {
 
                 return `
                     <div class="secret-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-secret="${escapeHtml(entry.name)}" style="max-width: 1400px;">
-                        <div class="grid gap-4 md:grid-cols-[minmax(200px,2fr)_minmax(140px,auto)] md:items-center">
-                            <div>
-                                <div class="flex items-center gap-2">
-                                    <div class="font-medium text-txt-primary text-sm">${escapeHtml(label)}</div>
-                                    <div class="w-fit">${statusBadge}</div>
+                        <div class="space-y-4">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <div class="font-medium text-txt-primary text-sm">${escapeHtml(label)}</div>
+                                        <div class="w-fit">${statusBadge}</div>
+                                    </div>
+                                    <div class="font-mono text-xs text-txt-secondary mt-0.5 break-all">${escapeHtml(entry.name)}</div>
+                                    ${description}
                                 </div>
-                                <div class="font-mono text-xs text-txt-secondary mt-0.5">${escapeHtml(entry.name)}</div>
-                                ${description}
-                            </div>
-                            <div class="flex items-center gap-2 justify-start md:justify-end shrink-0 flex-wrap">
-                                <button data-secret-action="set" ${iconButton('edit', 'Update secret', 'is-primary')}>${iconSvg('edit')}</button>
-                                <button data-secret-action="clear" ${iconButton('x', 'Clear secret', 'is-danger')}>${iconSvg('x')}</button>
-                                ${deleteButton}
+                                <div class="flex items-center gap-2 justify-end shrink-0 flex-wrap">
+                                    <button data-secret-action="set" ${iconButton('edit', 'Update secret', 'is-primary')}>${iconSvg('edit')}</button>
+                                    <button data-secret-action="clear" ${iconButton('x', 'Clear secret', 'is-danger')}>${iconSvg('x')}</button>
+                                    ${deleteButton}
+                                </div>
                             </div>
                         </div>
                     </div>

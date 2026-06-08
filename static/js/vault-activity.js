@@ -359,7 +359,7 @@
             });
             elements.vaultActivityStatus.addEventListener('click', (event) => {
                 const target = event.target;
-                if (!(target instanceof HTMLElement)) return;
+                if (!(target instanceof Element)) return;
                 const sortButton = target.closest('[data-vault-activity-sort]');
                 if (sortButton instanceof HTMLElement) {
                     state.vaultActivitySort = {
@@ -369,7 +369,7 @@
                     updateVaultActivityContainer(state.selectedActivityVault);
                     return;
                 }
-                if (target.id === 'vault-activity-refresh') {
+                if (target.closest('#vault-activity-refresh')) {
                     if (state.selectedActivityVault) {
                         loadVaultActivity(state.selectedActivityVault);
                     }
