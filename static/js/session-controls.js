@@ -285,18 +285,29 @@
                             <p id="session-browser-count" class="mt-1 text-xs text-txt-secondary"></p>
                         </div>
                         <div class="app-modal-actions">
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-browser-close="true">
-                                Close
+                            <button type="button" class="session-browser-close-button" data-session-browser-close="true" aria-label="Close chat settings" title="Close">
+                                ${icons.X_ICON_SVG}
                             </button>
                         </div>
                     </div>
                     <div class="session-browser-body flex-1">
-                        <div id="chat-settings-modal-controls" class="chat-settings-modal-controls"></div>
+                        <details class="chat-settings-options" open>
+                            <summary class="chat-settings-options-summary">
+                                <span>Options</span>
+                                <svg class="chat-settings-options-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                    <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                                </svg>
+                            </summary>
+                            <div id="chat-settings-modal-controls" class="chat-settings-modal-controls"></div>
+                        </details>
                         <div class="session-browser-section-header">
                             <div>
                                 <h3 class="session-browser-section-title">Sessions</h3>
                                 <p class="session-browser-section-subtitle">Filter, open, summarize, export, or delete chat sessions.</p>
                             </div>
+                            <button type="button" class="session-browser-new-button" data-session-browser-new="true" aria-label="New session" title="New session">
+                                ${icons.PLUS_ICON_SVG}
+                            </button>
                         </div>
                         <input
                             id="session-browser-filter"
@@ -467,6 +478,13 @@
                 return;
             }
 
+            const newTarget = target.closest('[data-session-browser-new]');
+            if (newTarget) {
+                closeSessionBrowserModal();
+                await selectSession('');
+                return;
+            }
+
             const actionButton = target.closest('[data-session-action]');
             if (actionButton instanceof HTMLButtonElement) {
                 event.preventDefault();
@@ -560,6 +578,12 @@
         }
 
         function attachEventListeners() {
+            if (elements.newSessionTrigger) {
+                elements.newSessionTrigger.addEventListener('click', () => {
+                    closeSessionBrowserModal();
+                    selectSession('');
+                });
+            }
             if (elements.sessionBrowserTrigger) {
                 elements.sessionBrowserTrigger.addEventListener('click', openSessionBrowserModal);
             }

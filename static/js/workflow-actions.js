@@ -1,5 +1,6 @@
 (function workflowActionsModule(window, document) {
     function createWorkflowActionsController({ state, elements, utils, callbacks }) {
+        const icons = window.AssistantMDIcons;
         // Rescan vaults
         async function rescanVaults() {
             if (!elements.rescanResult) return;
@@ -129,11 +130,11 @@
                             <p id="workflow-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">Loading...</p>
                         </div>
                         <div class="app-modal-actions">
-                            <button type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-workflow-file-save="true" disabled>
-                                Save
+                            <button type="button" class="ui-icon-button is-primary is-compact" data-workflow-file-save="true" aria-label="Save workflow file" title="Save workflow file" disabled>
+                                ${icons.SAVE_ICON_SVG}
                             </button>
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workflow-file-close="true">
-                                Close
+                            <button type="button" class="ui-icon-button is-compact" data-workflow-file-close="true" aria-label="Close" title="Close">
+                                ${icons.X_ICON_SVG}
                             </button>
                         </div>
                     </div>
@@ -158,14 +159,14 @@
 
             overlay.addEventListener('click', async (event) => {
                 const target = event.target;
-                if (!(target instanceof HTMLElement)) {
+                if (!(target instanceof Element)) {
                     return;
                 }
-                if (target.dataset.workflowFileClose === 'true') {
+                if (target.closest('[data-workflow-file-close="true"]')) {
                     closeWorkflowFileEditor();
                     return;
                 }
-                if (target.dataset.workflowFileSave === 'true' && editor instanceof HTMLTextAreaElement) {
+                if (target.closest('[data-workflow-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
                     saveButton.disabled = true;
                     statusLabel.textContent = 'Saving...';
                     try {
@@ -319,7 +320,7 @@
             if (!taskId) return;
             if (triggerButton) {
                 triggerButton.disabled = true;
-                triggerButton.textContent = 'Stopping...';
+                icons.setIconButtonLabel(triggerButton, 'Stopping workflow...');
             }
             try {
                 const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}/cancel`, {
@@ -342,7 +343,7 @@
                 elements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
                 if (triggerButton) {
                     triggerButton.disabled = false;
-                    triggerButton.textContent = 'Stop';
+                    icons.setIconButtonLabel(triggerButton, 'Stop workflow');
                 }
             }
         }
@@ -359,7 +360,7 @@
             }
             if (triggerButton) {
                 triggerButton.disabled = true;
-                triggerButton.textContent = 'Stopping...';
+                icons.setIconButtonLabel(triggerButton, 'Stopping all workflows...');
             }
             try {
                 const results = await Promise.allSettled(
@@ -394,7 +395,7 @@
             } finally {
                 if (triggerButton) {
                     triggerButton.disabled = false;
-                    triggerButton.textContent = 'Stop All';
+                    icons.setIconButtonLabel(triggerButton, 'Stop all workflows');
                 }
             }
         }

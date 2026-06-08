@@ -1,6 +1,7 @@
 (function workspacePickerModule(window, document) {
     function createWorkspacePickerController({ state, elements, utils, callbacks }) {
         const { escapeHtml } = utils;
+        const icons = window.AssistantMDIcons;
 
         function syncControls() {
             const input = elements.workspacePathInput;
@@ -88,7 +89,7 @@
                             <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(elements.vaultSelector?.value || 'No vault selected')}</p>
                         </div>
                         <div class="app-modal-actions">
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workspace-picker-close>Close</button>
+                            <button type="button" class="ui-icon-button is-compact" data-workspace-picker-close aria-label="Close" title="Close">${icons.X_ICON_SVG}</button>
                         </div>
                     </div>
                     <div id="workspace-picker-body" class="p-4 flex-1 overflow-y-auto">

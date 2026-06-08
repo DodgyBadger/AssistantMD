@@ -1,6 +1,7 @@
 (function dashboardViewModule(window) {
     function createDashboardViewController({ state, elements, utils, callbacks }) {
         const { escapeHtml, formatShortDate } = utils;
+        const icons = window.AssistantMDIcons;
 
         // Display system status information
         function displaySystemStatus() {
@@ -177,8 +178,8 @@
                             `).join('') : '<option value="">No vaults detected</option>'}
                         </select>
                     </div>
-                    <button id="vault-activity-refresh" type="button" class="w-full md:w-auto px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
-                        Refresh Activity
+                    <button id="vault-activity-refresh" type="button" class="ui-icon-button self-start md:self-auto" aria-label="Refresh Activity" title="Refresh Activity">
+                        ${icons.REFRESH_ICON_SVG}
                     </button>
                 </div>
                 <div id="vault-activity-result" class="mt-3">
@@ -349,10 +350,12 @@
             return `
                 <button
                     type="button"
-                    class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
+                    class="ui-icon-button is-primary is-compact"
                     data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"${systemAttribute}
+                    aria-label="Run workflow"
+                    title="Run workflow"
                 >
-                    Run
+                    ${icons.PLAY_ICON_SVG}
                 </button>
             `;
         }
@@ -376,10 +379,12 @@
                         </div>
                         <button
                             type="button"
-                            class="chat-stop-btn px-3 py-1.5 text-sm text-white rounded-md focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed"
+                            class="chat-stop-btn ui-icon-button is-danger"
                             data-dashboard-workflow-stop-all="true"
+                            aria-label="Stop all workflows"
+                            title="Stop all workflows"
                         >
-                            Stop All
+                            ${icons.STOP_ICON_SVG}
                         </button>
                     </div>
                     <div class="dashboard-table-wrap" role="region" aria-label="Running workflows" tabindex="0">
@@ -408,10 +413,12 @@
                                         <td class="cell-center">
                                             <button
                                                 type="button"
-                                                class="chat-stop-btn px-3 py-1.5 text-sm text-white rounded-md focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed"
+                                                class="chat-stop-btn ui-icon-button is-danger is-compact"
                                                 data-dashboard-workflow-stop="${escapeHtml(task.task_id || '')}"
+                                                aria-label="Stop workflow"
+                                                title="Stop workflow"
                                             >
-                                                Stop
+                                                ${icons.STOP_ICON_SVG}
                                             </button>
                                         </td>
                                     </tr>

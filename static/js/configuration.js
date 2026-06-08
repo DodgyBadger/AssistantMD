@@ -152,6 +152,29 @@
         warning: 'state-warning',
         error: 'state-error'
     };
+
+    function iconButton(iconName, label, extraClass = '', attrs = '') {
+        return `class="ui-icon-button is-compact ${extraClass}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attrs}`;
+    }
+
+    function iconSvg(iconName) {
+        const icon = window.AssistantMDIcons;
+        const svgByName = {
+            clean: icon.CLEAN_ICON_SVG,
+            database: icon.DATABASE_ICON_SVG,
+            edit: icon.EDIT_ICON_SVG,
+            refresh: icon.REFRESH_ICON_SVG,
+            save: icon.SAVE_ICON_SVG,
+            trash: icon.TRASH_ICON_SVG,
+            x: icon.X_ICON_SVG,
+        };
+        return svgByName[iconName] || icon.SETTINGS_ICON_SVG;
+    }
+
+    function setIconButtonLabel(button, label) {
+        window.AssistantMDIcons.setIconButtonLabel(button, label);
+    }
+
     function cacheElements() {
         elements.activityLogViewer = document.getElementById('activity-log-viewer');
         elements.refreshActivityLogBtn = document.getElementById('refresh-activity-log');
@@ -290,11 +313,11 @@
 
         state.isLoadingLog = true;
         const refreshBtn = elements.refreshActivityLogBtn;
-        const prevLabel = refreshBtn ? refreshBtn.textContent : '';
+        const prevLabel = refreshBtn ? (refreshBtn.dataset.iconLabel || refreshBtn.title || 'Refresh Activity Log') : '';
 
         if (refreshBtn) {
             refreshBtn.disabled = true;
-            refreshBtn.textContent = 'Refreshing…';
+            setIconButtonLabel(refreshBtn, 'Refreshing activity log...');
         }
 
         elements.activityLogViewer.textContent = 'Loading system log…';
@@ -314,7 +337,7 @@
         } finally {
             if (refreshBtn) {
                 refreshBtn.disabled = false;
-                refreshBtn.textContent = prevLabel;
+                setIconButtonLabel(refreshBtn, prevLabel);
             }
             state.isLoadingLog = false;
         }
@@ -387,9 +410,7 @@
                     </div>
                     <div class="flex items-center gap-4">
                         <div class="text-sm text-txt-primary font-mono bg-app-elevated px-3 py-2 rounded border border-border-primary break-words inline-block max-w-xs">${escapeHtml(setting.value ?? '')}</div>
-                        <button data-action="edit-setting" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors shrink-0">
-                            Edit
-                        </button>
+                        <button data-action="edit-setting" ${iconButton('edit', 'Edit setting', 'is-primary shrink-0')}>${iconSvg('edit')}</button>
                     </div>
                 </div>
             </div>
@@ -415,12 +436,8 @@
                         <p class="text-xs text-txt-secondary">Values are stored as plain text; lists/objects use JSON.</p>
                     </div>
                     <div class="flex justify-end gap-2">
-                        <button data-action="cancel-setting" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Cancel
-                        </button>
-                        <button data-action="save-setting" class="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Save
-                        </button>
+                        <button data-action="cancel-setting" ${iconButton('x', 'Cancel setting edit')}>${iconSvg('x')}</button>
+                        <button data-action="save-setting" ${iconButton('save', 'Save setting', 'is-primary')}>${iconSvg('save')}</button>
                     </div>
                 </div>
             </div>
@@ -584,8 +601,8 @@
 
             const actions = editable
                 ? `
-                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Edit</button>
-                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Delete</button>
+                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" ${iconButton('edit', 'Edit provider', 'is-primary')}>${iconSvg('edit')}</button>
+                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" ${iconButton('trash', 'Delete provider', 'is-danger')}>${iconSvg('trash')}</button>
                 `
                 : '';
 
@@ -1015,12 +1032,8 @@
 
                 const actions = editable
                     ? `
-                        <button data-action="edit" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Edit
-                        </button>
-                        <button data-action="delete" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Delete
-                        </button>
+                        <button data-action="edit" data-model="${escapeHtml(model.name)}" ${iconButton('edit', 'Edit model', 'is-primary')}>${iconSvg('edit')}</button>
+                        <button data-action="delete" data-model="${escapeHtml(model.name)}" ${iconButton('trash', 'Delete model', 'is-danger')}>${iconSvg('trash')}</button>
                     `
                     : `<span class="inline-block px-2 py-0.5 text-xs text-txt-secondary bg-app-elevated rounded border border-border-primary">Read-only</span>`;
 
@@ -1094,12 +1107,8 @@
                         <p class="text-xs text-txt-secondary mt-1">Comma-separated values. Example: <code>text, vision</code>.</p>
                     </div>
                     <div class="flex justify-end gap-2">
-                        <button data-action="cancel-model" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Cancel
-                        </button>
-                        <button data-action="save-model" class="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Save
-                        </button>
+                        <button data-action="cancel-model" ${iconButton('x', 'Cancel model edit')}>${iconSvg('x')}</button>
+                        <button data-action="save-model" ${iconButton('save', 'Save model', 'is-primary')}>${iconSvg('save')}</button>
                     </div>
                 </div>
             </div>
@@ -1355,7 +1364,7 @@ async function saveModelRow(rowKey) {
         elements.providerForm.dataset.currentBaseUrl = provider.base_url || '';
 
         state.editingProviderName = provider.name;
-        elements.providerSubmitBtn.textContent = 'Update Provider';
+        setIconButtonLabel(elements.providerSubmitBtn, 'Update Provider');
         setStatus(elements.providerFormStatus, `Editing ${provider.name}`, 'info');
     }
 
@@ -1372,7 +1381,7 @@ async function saveModelRow(rowKey) {
             elements.providerBaseUrlInput.placeholder = 'SECRET_NAME (optional)';
         }
         state.editingProviderName = null;
-        elements.providerSubmitBtn.textContent = 'Save Provider';
+        setIconButtonLabel(elements.providerSubmitBtn, 'Save Provider');
         setStatus(elements.providerFormStatus, '', 'info');
     }
 
@@ -1398,7 +1407,7 @@ async function saveModelRow(rowKey) {
 
         state.isSavingProvider = true;
         elements.providerSubmitBtn.disabled = true;
-        elements.providerSubmitBtn.textContent = 'Saving…';
+        setIconButtonLabel(elements.providerSubmitBtn, 'Saving provider...');
         setStatus(elements.providerFormStatus, 'Saving provider…', 'info');
 
         try {
@@ -1427,7 +1436,7 @@ async function saveModelRow(rowKey) {
         if (!hasChanges) {
             setStatus(elements.providerFormStatus, 'No provider changes to save.', 'info');
             elements.providerSubmitBtn.disabled = false;
-            elements.providerSubmitBtn.textContent = state.editingProviderName ? 'Update Provider' : 'Save Provider';
+            setIconButtonLabel(elements.providerSubmitBtn, state.editingProviderName ? 'Update Provider' : 'Save Provider');
             state.isSavingProvider = false;
             return;
         }
@@ -1455,7 +1464,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.providerFormStatus, `Failed to save provider: ${error.message}`, 'error');
         } finally {
             elements.providerSubmitBtn.disabled = false;
-            elements.providerSubmitBtn.textContent = state.editingProviderName ? 'Update Provider' : 'Save Provider';
+            setIconButtonLabel(elements.providerSubmitBtn, state.editingProviderName ? 'Update Provider' : 'Save Provider');
             state.isSavingProvider = false;
         }
     }
@@ -1541,7 +1550,7 @@ async function saveModelRow(rowKey) {
                     : '';
 
                 const deleteButton = stored
-                    ? '<button data-secret-action="delete" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Delete</button>'
+                    ? `<button data-secret-action="delete" ${iconButton('trash', 'Delete secret', 'is-danger')}>${iconSvg('trash')}</button>`
                     : '';
 
                 return `
@@ -1556,8 +1565,8 @@ async function saveModelRow(rowKey) {
                                 ${description}
                             </div>
                             <div class="flex items-center gap-2 justify-start md:justify-end shrink-0 flex-wrap">
-                                <button data-secret-action="set" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Update</button>
-                                <button data-secret-action="clear" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Clear</button>
+                                <button data-secret-action="set" ${iconButton('edit', 'Update secret', 'is-primary')}>${iconSvg('edit')}</button>
+                                <button data-secret-action="clear" ${iconButton('x', 'Clear secret', 'is-danger')}>${iconSvg('x')}</button>
                                 ${deleteButton}
                             </div>
                         </div>
@@ -1681,7 +1690,7 @@ async function saveModelRow(rowKey) {
         state.isSavingSecret = true;
         if (elements.secretSubmitBtn) {
             elements.secretSubmitBtn.disabled = true;
-            elements.secretSubmitBtn.textContent = 'Saving…';
+            setIconButtonLabel(elements.secretSubmitBtn, 'Saving secret...');
         }
         setStatus(elements.secretFormStatus, `Saving ${name}…`, 'info');
 
@@ -1695,7 +1704,7 @@ async function saveModelRow(rowKey) {
         } finally {
             if (elements.secretSubmitBtn) {
                 elements.secretSubmitBtn.disabled = false;
-                elements.secretSubmitBtn.textContent = 'Save Secret';
+                setIconButtonLabel(elements.secretSubmitBtn, 'Save Secret');
             }
             state.isSavingSecret = false;
         }
@@ -1795,8 +1804,8 @@ async function saveModelRow(rowKey) {
         if (!confirm(`Delete ${ageLabel} in vault "${vaultName}"? This cannot be undone.`)) return;
 
         btn.disabled = true;
-        const originalLabel = btn.textContent;
-        btn.textContent = 'Purging…';
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Purge Sessions';
+        setIconButtonLabel(btn, 'Purging sessions...');
         setStatus(elements.purgeSessionsFeedback, 'Purging sessions…', 'info');
 
         try {
@@ -1817,7 +1826,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.purgeSessionsFeedback, `Failed to purge sessions: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
         }
     }
 
@@ -1826,9 +1835,9 @@ async function saveModelRow(rowKey) {
 
         state.isPurgingCache = true;
         const button = elements.purgeExpiredCacheBtn;
-        const originalLabel = button.textContent;
+        const originalLabel = button.dataset.iconLabel || button.title || 'Purge Expired Cache';
         button.disabled = true;
-        button.textContent = 'Purging…';
+        setIconButtonLabel(button, 'Purging expired cache...');
         setStatus(elements.miscFeedback, 'Purging expired cache artifacts…', 'info');
 
         try {
@@ -1851,7 +1860,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.miscFeedback, `Failed to purge cache: ${error.message}`, 'error');
         } finally {
             button.disabled = false;
-            button.textContent = originalLabel;
+            setIconButtonLabel(button, originalLabel);
             state.isPurgingCache = false;
         }
     }
@@ -1869,9 +1878,9 @@ async function saveModelRow(rowKey) {
 
         state.isRefreshingSystemAuthoring = true;
         const button = elements.refreshSystemAuthoringBtn;
-        const originalLabel = button.textContent;
+        const originalLabel = button.dataset.iconLabel || button.title || 'Refresh System Scripts';
         button.disabled = true;
-        button.textContent = 'Refreshing…';
+        setIconButtonLabel(button, 'Refreshing system scripts...');
         setStatus(elements.refreshSystemAuthoringFeedback, 'Refreshing system authoring scripts…', 'info');
 
         try {
@@ -1899,7 +1908,7 @@ async function saveModelRow(rowKey) {
             );
         } finally {
             button.disabled = false;
-            button.textContent = originalLabel;
+            setIconButtonLabel(button, originalLabel);
             state.isRefreshingSystemAuthoring = false;
         }
     }
@@ -1909,9 +1918,9 @@ async function saveModelRow(rowKey) {
 
         state.isCleaningVaultState = true;
         const button = elements.cleanupVaultStateBtn;
-        const originalLabel = button.textContent;
+        const originalLabel = button.dataset.iconLabel || button.title || 'Clean Up Vault State';
         button.disabled = true;
-        button.textContent = 'Cleaning…';
+        setIconButtonLabel(button, 'Cleaning vault state...');
         setStatus(elements.cleanupVaultStateFeedback, 'Cleaning expired vault-state artifacts…', 'info');
 
         try {
@@ -1939,7 +1948,7 @@ async function saveModelRow(rowKey) {
             );
         } finally {
             button.disabled = false;
-            button.textContent = originalLabel;
+            setIconButtonLabel(button, originalLabel);
             state.isCleaningVaultState = false;
         }
     }
@@ -1949,10 +1958,10 @@ async function saveModelRow(rowKey) {
 
         state.isLoadingSystemJobs = true;
         const button = elements.refreshSystemJobsBtn;
-        const originalLabel = button ? button.textContent : '';
+        const originalLabel = button ? (button.dataset.iconLabel || button.title || 'Refresh System Jobs') : '';
         if (button) {
             button.disabled = true;
-            button.textContent = 'Refreshing…';
+            setIconButtonLabel(button, 'Refreshing system jobs...');
         }
 
         try {
@@ -1970,7 +1979,7 @@ async function saveModelRow(rowKey) {
         } finally {
             if (button) {
                 button.disabled = false;
-                button.textContent = originalLabel;
+                setIconButtonLabel(button, originalLabel);
             }
             state.isLoadingSystemJobs = false;
         }
@@ -2028,10 +2037,10 @@ async function saveModelRow(rowKey) {
 
         state.isLoadingSystemMigrations = true;
         const button = elements.refreshSystemMigrationsBtn;
-        const originalLabel = button ? button.textContent : '';
+        const originalLabel = button ? (button.dataset.iconLabel || button.title || 'Refresh Database Migrations') : '';
         if (button) {
             button.disabled = true;
-            button.textContent = 'Refreshing…';
+            setIconButtonLabel(button, 'Refreshing database migrations...');
         }
 
         try {
@@ -2052,7 +2061,7 @@ async function saveModelRow(rowKey) {
         } finally {
             if (button) {
                 button.disabled = false;
-                button.textContent = originalLabel;
+                setIconButtonLabel(button, originalLabel);
             }
             state.isLoadingSystemMigrations = false;
         }
@@ -2066,7 +2075,7 @@ async function saveModelRow(rowKey) {
         state.isRunningSystemMigrations = true;
         const button = elements.runSystemMigrationsBtn;
         button.disabled = true;
-        button.textContent = 'Running…';
+        setIconButtonLabel(button, 'Running database migrations...');
         if (elements.refreshSystemMigrationsBtn) {
             elements.refreshSystemMigrationsBtn.disabled = true;
         }
@@ -2175,9 +2184,8 @@ async function saveModelRow(rowKey) {
         const pendingCount = Number(payload?.pending_count ?? 0);
         const hasPending = pendingCount > 0;
         button.disabled = !hasPending;
-        button.textContent = hasPending ? `Run ${pendingCount} Migration${pendingCount === 1 ? '' : 's'}` : 'Up to date';
-        button.classList.remove('btn-secondary', 'btn-warning');
-        button.classList.add(hasPending ? 'btn-warning' : 'btn-secondary');
+        setIconButtonLabel(button, hasPending ? `Run ${pendingCount} Migration${pendingCount === 1 ? '' : 's'}` : 'Database migrations up to date');
+        button.classList.toggle('is-primary', hasPending);
     }
 
     function formatDateTime(value) {
@@ -2318,9 +2326,9 @@ async function saveModelRow(rowKey) {
     async function handleImportVaultRescan() {
         if (!elements.importRefreshVaultsBtn || state.isLoadingImportVaults) return;
         const btn = elements.importRefreshVaultsBtn;
-        const originalLabel = btn.textContent;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Refresh Vaults';
         btn.disabled = true;
-        btn.textContent = 'Rescanning…';
+        setIconButtonLabel(btn, 'Rescanning vaults...');
         setStatus(elements.importStatus, 'Rescanning vaults…', 'info');
         try {
             const response = await fetch('api/vaults/rescan', {
@@ -2339,7 +2347,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.importStatus, `Rescan failed: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
         }
     }
 
@@ -2511,9 +2519,9 @@ async function saveModelRow(rowKey) {
         state.importUrlResult = null;
         renderImportResults();
         const btn = elements.importScanBtn;
-        const originalLabel = btn.textContent;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Import Files';
         btn.disabled = true;
-        btn.textContent = queueOnly ? 'Queueing…' : 'Importing…';
+        setIconButtonLabel(btn, queueOnly ? 'Queueing import jobs...' : 'Importing files...');
         setStatus(
             elements.importStatus,
             queueOnly ? 'Queueing import jobs…' : 'Scanning import folder and processing…',
@@ -2540,7 +2548,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.importStatus, `Import failed: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
             state.isScanningImport = false;
         }
     }
@@ -2560,9 +2568,9 @@ async function saveModelRow(rowKey) {
         renderImportResults();
         state.isImportingUrl = true;
         const btn = elements.importUrlSubmit;
-        const originalLabel = btn.textContent;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Import URL';
         btn.disabled = true;
-        btn.textContent = 'Ingesting…';
+        setIconButtonLabel(btn, 'Ingesting URL...');
         setStatus(elements.importStatus, 'Ingesting URL…', 'info');
 
         try {
@@ -2581,7 +2589,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.importStatus, `Import failed: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
             state.isImportingUrl = false;
         }
     }

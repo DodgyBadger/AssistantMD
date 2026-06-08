@@ -1,6 +1,13 @@
 (function sessionSummaryModule(window, document) {
     function createSessionSummaryController({ state, elements, icons, utils, callbacks }) {
-        const { ARROW_LEFT_ICON_SVG, SESSION_SUMMARY_ICON_SVG } = icons;
+        const {
+            ARROW_LEFT_ICON_SVG,
+            EDIT_ICON_SVG,
+            SAVE_ICON_SVG,
+            SESSION_SUMMARY_ICON_SVG,
+            TRASH_ICON_SVG,
+            X_ICON_SVG,
+        } = icons;
         const { escapeHtml, truncateText, formatShortDate } = utils;
 
         function cacheKey(vault, sessionId) {
@@ -262,7 +269,7 @@
             const sessionId = existing?.session_id || '';
             if (!sessionId || !vault) return;
             triggerButton.disabled = true;
-            triggerButton.textContent = 'Saving...';
+            icons.setIconButtonLabel(triggerButton, 'Saving summary...');
             const payload = {};
             editableFields().forEach(field => {
                 const input = modal.querySelector(`[data-session-summary-field="${field.key}"]`);
@@ -295,7 +302,7 @@
                 }
             } finally {
                 triggerButton.disabled = false;
-                triggerButton.textContent = 'Save';
+                icons.setIconButtonLabel(triggerButton, 'Save summary');
             }
         }
 
@@ -307,7 +314,7 @@
             const confirmed = window.confirm('Delete this derived summary record? The chat session will not be deleted.');
             if (!confirmed) return;
             triggerButton.disabled = true;
-            triggerButton.textContent = 'Deleting...';
+            icons.setIconButtonLabel(triggerButton, 'Deleting summary...');
             try {
                 const response = await fetch(
                     `api/chat/sessions/${encodeURIComponent(sessionId)}/summary?vault_name=${encodeURIComponent(vault)}`,
@@ -327,7 +334,7 @@
                     body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to delete summary: ${escapeHtml(error.message)}</p>`);
                 }
                 triggerButton.disabled = false;
-                triggerButton.textContent = 'Delete Summary';
+                icons.setIconButtonLabel(triggerButton, 'Delete summary');
             }
         }
 
@@ -357,20 +364,20 @@
                                     ${ARROW_LEFT_ICON_SVG}
                                 </button>
                             ` : ''}
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error" data-session-summary-delete="true">
-                                Delete Summary
+                            <button type="button" class="ui-icon-button is-danger is-compact" data-session-summary-delete="true" aria-label="Delete summary" title="Delete summary">
+                                ${TRASH_ICON_SVG}
                             </button>
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-edit="true">
-                                Edit
+                            <button type="button" class="ui-icon-button is-compact" data-session-summary-edit="true" aria-label="Edit summary" title="Edit summary">
+                                ${EDIT_ICON_SVG}
                             </button>
-                            <button type="button" class="hidden px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-session-summary-save="true">
-                                Save
+                            <button type="button" class="hidden ui-icon-button is-primary is-compact" data-session-summary-save="true" aria-label="Save summary" title="Save summary">
+                                ${SAVE_ICON_SVG}
                             </button>
-                            <button type="button" class="hidden px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-cancel-edit="true">
-                                Cancel
+                            <button type="button" class="hidden ui-icon-button is-compact" data-session-summary-cancel-edit="true" aria-label="Cancel edit" title="Cancel edit">
+                                ${X_ICON_SVG}
                             </button>
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-close="true">
-                                Close
+                            <button type="button" class="ui-icon-button is-compact" data-session-summary-close="true" aria-label="Close" title="Close">
+                                ${X_ICON_SVG}
                             </button>
                         </div>
                     </div>
@@ -381,29 +388,32 @@
             `;
             popover.addEventListener('click', (event) => {
                 const target = event.target;
-                if (target instanceof HTMLElement && target.dataset.sessionSummaryBack === 'true') {
+                if (!(target instanceof Element)) return;
+                if (target.closest('[data-session-summary-back="true"]')) {
                     closeModal();
                     options.onBack();
                     return;
                 }
-                if (target instanceof HTMLElement && target.dataset.sessionSummaryClose === 'true') {
+                if (target.closest('[data-session-summary-close="true"]')) {
                     closeModal();
                     return;
                 }
-                if (target instanceof HTMLElement && target.dataset.sessionSummaryEdit === 'true') {
+                if (target.closest('[data-session-summary-edit="true"]')) {
                     setModalEditing(popover, currentModalSummary());
                     return;
                 }
-                if (target instanceof HTMLElement && target.dataset.sessionSummarySave === 'true') {
-                    saveModal(popover, target);
+                const saveButton = target.closest('[data-session-summary-save="true"]');
+                if (saveButton instanceof HTMLElement) {
+                    saveModal(popover, saveButton);
                     return;
                 }
-                if (target instanceof HTMLElement && target.dataset.sessionSummaryCancelEdit === 'true') {
+                if (target.closest('[data-session-summary-cancel-edit="true"]')) {
                     cancelEdit(popover);
                     return;
                 }
-                if (target instanceof HTMLElement && target.dataset.sessionSummaryDelete === 'true') {
-                    deleteFromModal(popover, target);
+                const deleteButton = target.closest('[data-session-summary-delete="true"]');
+                if (deleteButton instanceof HTMLElement) {
+                    deleteFromModal(popover, deleteButton);
                 }
             });
             document.body.appendChild(popover);

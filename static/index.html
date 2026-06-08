@@ -66,6 +66,12 @@
                     <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                         <option value="">Select vault...</option>
                     </select>
+                    <button id="new-session-trigger" type="button" class="chat-topbar-icon-button" aria-label="New session" title="New session">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                        </svg>
+                    </button>
                     <button id="session-browser-trigger" type="button" class="session-browser-trigger" aria-label="Open chat settings" title="Open chat settings">
                         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.32-1.915" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -181,8 +187,13 @@
                         <button
                             id="send-btn"
                             class="px-6 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Send message"
+                            title="Send message"
                         >
-                            Send
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M3.714 3.048a.5.5 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.5.5 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M6 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -194,9 +205,7 @@
             <!-- Rescan Vaults - Compact Control -->
             <div class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm p-3">
                 <div class="flex items-center gap-3">
-                    <button id="rescan-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent whitespace-nowrap">
-                        🔄 Rescan Vaults
-                    </button>
+                    <button id="rescan-btn" type="button" class="ui-icon-button is-primary" data-icon="refresh" data-icon-label="Rescan Vaults"></button>
                     <span class="text-sm text-txt-secondary">Discover new vaults and reload workflow configurations</span>
                 </div>
                 <div id="rescan-result" class="mt-2 text-sm"></div>
@@ -224,9 +233,7 @@
                                 </select>
                             </div>
                             <div class="flex items-end">
-                                <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent h-10">
-                                    Refresh Vaults
-                                </button>
+                                <button id="import-refresh-vaults" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh Vaults"></button>
                             </div>
                         </div>
 
@@ -253,9 +260,7 @@
                                 </label>
                             </div>
                             <div class="flex items-end justify-end">
-                                <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
-                                    Import Files
-                                </button>
+                                <button id="import-scan" type="button" class="ui-icon-button is-primary" data-icon="fileDown" data-icon-label="Import Files"></button>
                             </div>
                         </div>
 
@@ -264,9 +269,7 @@
                                 <input id="import-url-input" type="text" placeholder="https://example.com/article" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
                             </div>
                             <div class="flex items-end justify-end">
-                                <button id="import-url-submit" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
-                                    Import URL
-                                </button>
+                                <button id="import-url-submit" type="button" class="ui-icon-button is-primary" data-icon="fileDown" data-icon-label="Import URL"></button>
                             </div>
                         </div>
 
@@ -366,9 +369,7 @@
                         <div class="flex flex-col gap-3">
                             <div class="flex items-center justify-between gap-3">
                                 <div id="model-feedback" class="flex-1 text-sm text-txt-secondary"></div>
-                                <button id="model-add-row" type="button" class="shrink-0 px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent">
-                                    Add Model
-                                </button>
+                                <button id="model-add-row" type="button" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Model"></button>
                             </div>
                             <div id="model-list" class="flex flex-col gap-3">
                                 <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
@@ -416,12 +417,8 @@
                             <div class="md:col-span-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                 <span id="provider-form-status" class="text-sm text-txt-secondary"></span>
                                 <div class="flex items-center gap-2">
-                                    <button type="button" id="provider-reset" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent">
-                                        Cancel
-                                    </button>
-                                    <button type="submit" id="provider-submit" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent">
-                                        Save Provider
-                                    </button>
+                                    <button type="button" id="provider-reset" class="ui-icon-button" data-icon="x" data-icon-label="Cancel provider edit"></button>
+                                    <button type="submit" id="provider-submit" class="ui-icon-button is-primary" data-icon="save" data-icon-label="Save Provider"></button>
                                 </div>
                             </div>
                         </form>
@@ -478,12 +475,8 @@
                                 <div class="md:col-span-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                     <span id="secret-form-status" class="text-sm text-txt-secondary"></span>
                                     <div class="flex items-center gap-2">
-                                        <button type="button" id="secret-reset" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent">
-                                            Cancel
-                                        </button>
-                                        <button type="submit" id="secret-submit" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent">
-                                            Save Secret
-                                        </button>
+                                        <button type="button" id="secret-reset" class="ui-icon-button" data-icon="x" data-icon-label="Cancel secret edit"></button>
+                                        <button type="submit" id="secret-submit" class="ui-icon-button is-primary" data-icon="save" data-icon-label="Save Secret"></button>
                                     </div>
                                 </div>
                             </form>
@@ -510,9 +503,7 @@
                             <p class="text-sm text-txt-secondary">
                                 Runtime events are written to <code>system/activity.log</code>. Refresh to load the latest entries.
                             </p>
-                            <button id="refresh-activity-log" type="button" class="self-start md:self-auto px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                Refresh
-                            </button>
+                            <button id="refresh-activity-log" type="button" class="ui-icon-button is-primary self-start md:self-auto" data-icon="refresh" data-icon-label="Refresh Activity Log"></button>
                         </div>
                         <div class="activity-log-controls">
                             <label class="block">
@@ -584,9 +575,7 @@
                                         Built-in scheduler jobs managed by AssistantMD.
                                     </div>
                                 </div>
-                                <button id="refresh-system-jobs" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Refresh
-                                </button>
+                                <button id="refresh-system-jobs" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh System Jobs"></button>
                             </div>
                             <div id="system-jobs-list" class="text-sm text-txt-secondary">
                                 Loading system jobs…
@@ -601,12 +590,8 @@
                                     </div>
                                 </div>
                                 <div class="flex gap-2">
-                                    <button id="refresh-system-migrations" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                        Refresh
-                                    </button>
-                                    <button id="run-system-migrations" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" disabled>
-                                        Checking…
-                                    </button>
+                                    <button id="refresh-system-migrations" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh Database Migrations"></button>
+                                    <button id="run-system-migrations" type="button" class="ui-icon-button" data-icon="database" data-icon-label="Check Database Migrations" disabled></button>
                                 </div>
                             </div>
                             <div id="system-migrations-status" class="text-sm text-txt-secondary">
@@ -622,9 +607,7 @@
                                 </div>
                             </div>
                             <div class="flex flex-col md:items-end gap-2">
-                                <button id="refresh-system-authoring" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Refresh System Scripts
-                                </button>
+                                <button id="refresh-system-authoring" type="button" class="ui-icon-button is-primary" data-icon="refresh" data-icon-label="Refresh System Scripts"></button>
                                 <div id="refresh-system-authoring-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
@@ -636,9 +619,7 @@
                                 </div>
                             </div>
                             <div class="flex flex-col md:items-end gap-2">
-                                <button id="purge-expired-cache" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Purge Expired Cache
-                                </button>
+                                <button id="purge-expired-cache" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Purge Expired Cache"></button>
                                 <div id="misc-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
@@ -650,9 +631,7 @@
                                 </div>
                             </div>
                             <div class="flex flex-col md:items-end gap-2">
-                                <button id="cleanup-vault-state" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Clean Up Vault State
-                                </button>
+                                <button id="cleanup-vault-state" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Clean Up Vault State"></button>
                                 <div id="cleanup-vault-state-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
@@ -674,9 +653,7 @@
                                         <option value="90">Older than 90 days</option>
                                         <option value="">All sessions</option>
                                     </select>
-                                    <button id="purge-sessions-btn" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                        Purge Sessions
-                                    </button>
+                                    <button id="purge-sessions-btn" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Purge Sessions"></button>
                                 </div>
                                 <div id="purge-sessions-feedback" class="text-sm text-txt-secondary"></div>
                             </div>

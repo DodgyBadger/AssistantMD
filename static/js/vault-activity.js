@@ -1,6 +1,7 @@
 (function vaultActivityModule(window, document) {
     function createVaultActivityController({ state, elements, utils, callbacks }) {
         const { escapeHtml, formatShortDate } = utils;
+        const icons = window.AssistantMDIcons;
 
         function renderVaultActivityResult(vaultName) {
             if (!vaultName) {
@@ -40,14 +41,19 @@
                                     </td>
                                     <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
                                     <td>
-                                        <button
-                                            type="button"
-                                            class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                                            data-vault-activity-vault="${escapeHtml(vaultName)}"
-                                            data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
-                                        >
-                                            ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
-                                        </button>
+                                        <div class="inline-flex items-center gap-2">
+                                            <span>${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}</span>
+                                            <button
+                                                type="button"
+                                                class="ui-icon-button is-compact"
+                                                data-vault-activity-vault="${escapeHtml(vaultName)}"
+                                                data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
+                                                aria-label="View activity files"
+                                                title="View activity files"
+                                            >
+                                                ${icons.EYE_ICON_SVG}
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             `).join('')}
@@ -205,8 +211,8 @@
                             <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${renderActivityKindEmoji(group)} ${escapeHtml(renderActivityTaskTitle(group))}</h2>
                         </div>
                         <div class="app-modal-actions">
-                            <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
-                                Close
+                            <button type="button" class="ui-icon-button is-compact" data-vault-activity-close="true" aria-label="Close" title="Close">
+                                ${icons.X_ICON_SVG}
                             </button>
                         </div>
                     </div>
@@ -243,6 +249,7 @@
             `;
             overlay.addEventListener('click', (event) => {
                 const target = event.target;
+                if (!(target instanceof Element)) return;
                 if (target instanceof HTMLElement) {
                     const sortButton = target.closest('[data-vault-activity-mutation-sort]');
                     if (sortButton instanceof HTMLElement) {
@@ -254,7 +261,7 @@
                         return;
                     }
                 }
-                if (target instanceof HTMLElement && target.dataset.vaultActivityClose === 'true') {
+                if (target.closest('[data-vault-activity-close="true"]')) {
                     closeVaultActivityDetails();
                 }
             });

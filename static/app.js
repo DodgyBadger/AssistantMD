@@ -56,6 +56,7 @@ const chatElements = {
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
     thinkingSelector: document.getElementById('thinking-selector'),
+    newSessionTrigger: document.getElementById('new-session-trigger'),
     sessionBrowserTrigger: document.getElementById('session-browser-trigger'),
     toolDropdown: document.getElementById('tool-dropdown'),
     toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
@@ -496,17 +497,51 @@ function syncSendButtonState() {
     if (!btn) return;
 
     btn.classList.toggle('chat-stop-btn', state.isLoading);
-    btn.textContent = state.isLoading
-        ? (state.isCancellingChat ? 'Stopping...' : 'Stop')
-        : 'Send';
+    btn.innerHTML = state.isLoading
+        ? window.AssistantMDIcons.STOP_ICON_SVG
+        : window.AssistantMDIcons.SEND_HORIZONTAL_ICON_SVG;
     btn.title = state.isLoading
-        ? 'Stop the active response'
+        ? (state.isCancellingChat ? 'Stopping active response' : 'Stop the active response')
         : 'Send message';
     btn.setAttribute(
         'aria-label',
-        state.isLoading ? 'Stop the active response' : 'Send message'
+        state.isLoading
+            ? (state.isCancellingChat ? 'Stopping active response' : 'Stop the active response')
+            : 'Send message'
     );
     btn.disabled = state.isLoading && state.isCancellingChat;
+}
+
+function parseSseEvent(rawEvent) {
+    if (!rawEvent) return null;
+
+    const lines = rawEvent.split('\n');
+    const dataLines = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data:')) {
+            dataLines.push(trimmed.slice(5).trim());
+        }
+    }
+
+    if (!dataLines.length) {
+        try {
+            return JSON.parse(rawEvent);
+        } catch {
+            return null;
+        }
+    }
+
+    const dataPayload = dataLines.join('\n');
+    if (!dataPayload) return null;
+
+    try {
+        return JSON.parse(dataPayload);
+    } catch (error) {
+        console.warn('Failed to parse SSE chunk:', dataPayload, error);
+        return null;
+    }
 }
 
 function syncChatControlLocks() {
@@ -526,6 +561,9 @@ function syncChatControlLocks() {
     }
     if (chatElements.sessionBrowserTrigger) {
         chatElements.sessionBrowserTrigger.disabled = state.isLoading;
+    }
+    if (chatElements.newSessionTrigger) {
+        chatElements.newSessionTrigger.disabled = state.isLoading;
     }
     workspacePicker.syncControls();
     syncSendButtonState();
@@ -725,6 +763,7 @@ const themeManager = {
 
 // Initialize app
 async function init() {
+    window.AssistantMDIcons.hydrateIconButtons(document);
     themeManager.init();
     setupTabs();
     setupEventListeners();
@@ -1635,13 +1674,12 @@ function updateStatus(message) {
         if (repairNeeded) {
             messageHtml += `
                 <div class="mt-2">
-                    <button id="repair-settings-btn" type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60">
-                        Repair settings from template
-                    </button>
+                    <button id="repair-settings-btn" type="button" class="ui-icon-button is-primary" data-icon="clean" data-icon-label="Repair settings from template"></button>
                 </div>
             `;
         }
         configElements.statusMessages.innerHTML = messageHtml;
+        window.AssistantMDIcons.hydrateIconButtons(configElements.statusMessages);
         configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
         configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
         configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
@@ -1655,7 +1693,7 @@ function updateStatus(message) {
                 if (!confirmed) return;
 
                 repairBtn.disabled = true;
-                repairBtn.textContent = 'Repairing…';
+                window.AssistantMDIcons.setIconButtonLabel(repairBtn, 'Repairing settings...');
                 let alertEl = document.getElementById('config-repair-alert');
                 if (!alertEl && configElements.statusMessages) {
                     alertEl = document.createElement('div');
@@ -1678,7 +1716,7 @@ function updateStatus(message) {
                     showAlert('Settings repair failed: ' + err.message, 'error');
                 } finally {
                     repairBtn.disabled = false;
-                    repairBtn.textContent = 'Repair settings from template';
+                    window.AssistantMDIcons.setIconButtonLabel(repairBtn, 'Repair settings from template');
                 }
             });
         }
