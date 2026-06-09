@@ -782,8 +782,8 @@ async function init() {
         });
     }
     await fetchMetadata();
-    renderChatEmptyState();
     await fetchSystemStatus();
+    renderChatEmptyState();
     renderPendingAttachments();
     updateCollapsibleArrows();
 }
@@ -1029,6 +1029,7 @@ async function fetchSystemStatus() {
         await fetchWorkflowTasks({ render: false });
         displaySystemStatus();
         updateStatus();
+        refreshChatEmptyState();
     } catch (error) {
         console.error('Error fetching status:', error);
         dashElements.systemStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch system status</p>';
