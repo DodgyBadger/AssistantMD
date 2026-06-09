@@ -79,6 +79,12 @@
                 <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"></circle>
             </svg>
         `.trim(),
+        FOLDER_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+        `.trim(),
         DOWNLOAD_ICON_SVG: `
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -213,6 +219,7 @@
         edit: icons.EDIT_ICON_SVG,
         eye: icons.EYE_ICON_SVG,
         fileDown: icons.FILE_DOWN_ICON_SVG,
+        folder: icons.FOLDER_ICON_SVG,
         import: icons.IMPORT_ICON_SVG,
         link: icons.LINK_ICON_SVG,
         play: icons.PLAY_ICON_SVG,

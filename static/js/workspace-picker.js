@@ -113,6 +113,7 @@
                 const selectPath = target.closest('[data-workspace-select]')?.getAttribute('data-workspace-select');
                 if (selectPath !== null && selectPath !== undefined) {
                     elements.workspacePathInput.value = selectPath;
+                    elements.workspacePathInput.dispatchEvent(new Event('input', { bubbles: true }));
                     state.isWorkspaceUnlocked = true;
                     syncControls();
                     await savePath();

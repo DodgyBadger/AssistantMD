@@ -143,6 +143,8 @@ const chatRendering = window.ChatRendering.create({
         scrollChatToBottom,
         fetchSessions,
         loadSession,
+        openWorkspacePicker: () => workspacePicker.openModal(),
+        openChatSettings: () => sessionControls.openSessionBrowserModal(),
     },
 });
 
@@ -352,6 +354,10 @@ function handleChatScroll() {
 
 function renderChatEmptyState(message) {
     chatRendering.renderEmptyState(message);
+}
+
+function refreshChatEmptyState() {
+    chatRendering.refreshEmptyState();
 }
 
 function addChatErrorMessage(errorText) {
@@ -776,6 +782,7 @@ async function init() {
         });
     }
     await fetchMetadata();
+    renderChatEmptyState();
     await fetchSystemStatus();
     renderPendingAttachments();
     updateCollapsibleArrows();
@@ -872,7 +879,7 @@ function populateSelectors() {
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
     chatElements.toolsCheckboxes.innerHTML = '';
     if (chatElements.templateSelector) {
-        chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
+        chatElements.templateSelector.innerHTML = '<option value="">No context script</option>';
         chatElements.templateSelector.disabled = true;
     }
     populateThinkingSelector();
@@ -1113,6 +1120,7 @@ function setupEventListeners() {
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.addEventListener('input', () => {
             workspacePicker.syncControls();
+            refreshChatEmptyState();
         });
         chatElements.workspacePathInput.addEventListener('blur', workspacePicker.savePath);
         chatElements.workspacePathInput.addEventListener('keydown', (event) => {
@@ -1121,6 +1129,14 @@ function setupEventListeners() {
                 workspacePicker.savePath();
             }
         });
+    }
+
+    if (chatElements.modelSelector) {
+        chatElements.modelSelector.addEventListener('change', refreshChatEmptyState);
+    }
+
+    if (chatElements.thinkingSelector) {
+        chatElements.thinkingSelector.addEventListener('change', refreshChatEmptyState);
     }
 
     if (chatElements.workspacePickerBtn) {
@@ -1266,7 +1282,7 @@ function handleVaultChange() {
 function populateTemplates(templates, preferredTemplate = '') {
     if (!chatElements.templateSelector) return;
     const templateList = Array.isArray(templates) ? templates : [];
-    chatElements.templateSelector.innerHTML = '<option value="">No template</option>';
+    chatElements.templateSelector.innerHTML = '<option value="">No context script</option>';
     templateList.forEach((tmpl) => {
         const option = document.createElement('option');
         option.value = tmpl.name;
