@@ -13,9 +13,8 @@ ships with a default composition that can cover many needs by editing
 only a few markdown files in your vault. Start by customizing the default
 composition before building your own from scratch.
 
-The chat agent can help get you set up. Just open a new chat session and
-ask the agent for help. It will ask you a few questions to understand your
-goal and then help you customize AssistantMD.
+The chat agent can help. Just open a new chat session and ask the agent for help.
+It will ask a few questions to understand your goal and then help you customize AssistantMD.
 
 The default context assembly script looks for the following files:
 
@@ -34,8 +33,8 @@ in the UI.
 
 The default composition can also be used as an example of how to build your own from scratch. See:
 
-- `system/Authoring/default.md` (context script that loads all of the above markdown files)
-- `system/nightly-session-summarization.md` (summarizes chat sessions)
+- https://github.com/DodgyBadger/AssistantMD/blob/main/core/authoring/seed_templates/context/default.md
+- https://github.com/DodgyBadger/AssistantMD/blob/main/core/authoring/seed_templates/workflows/nightly-session-summarization.md
 
 The rest of this guide explains the building blocks individually.
 
@@ -53,18 +52,17 @@ Open the app, pick a model, and start talking. The chat agent can read, search, 
 
 ### Workspace folders
 
-When starting or continuing a chat, you can set a workspace to a vault-relative
-folder. Workspace does not restrict what the agent can access and does not
-change the vault root; it is a session-level hint that context assembly scripts
-can use to load local orientation files.
+When starting or continuing a chat, you can set a workspace to a folder in
+the selected vault. Workspace does not restrict what the agent can access;
+it is a session-level hint that context assembly scripts can use to load local
+orientation files.
 
 The default context assembly script uses two workspace conventions:
 
 - `{workspace}/README.md` introduces the folder: what it is, current state,
   important files, active goals, or constraints.
 - `{workspace}/playbook.md` adds workspace-specific working policy. It is
-  loaded after `AssistantMD/playbook.md`, so it is treated as more specific
-  when the two directly conflict.
+  loaded after `AssistantMD/playbook.md`.
 
 Leave either file out when you do not need it. If you want only workspace-local
 working policy, omit `AssistantMD/playbook.md` and keep the local playbook in
@@ -76,7 +74,7 @@ the workspace folder.
 
 When you find yourself giving the same instructions repeatedly, or when a task needs a precise procedure, write a **skill file**.
 
-A skill is a plain markdown file describing a task in clear English. The built-in default script will discover skill files from both of the following structures using `name` and `description` frontmatter as the discovery surface:
+A skill is a plain markdown file describing a task. The built-in default script will discover skill files from both of the following structures using `name` and `description` frontmatter as the discovery surface:
 - `AssistantMD/Skills/skill-name/SKILL.md`
 - `AssistantMD/Skills/skill-name.md`
 
@@ -94,6 +92,8 @@ Use a workflow script when you need a task to run on a schedule, or when the tas
 
 Skills and workflow scripts can work together. A skill can instruct the agent to trigger a specific workflow script as part of its procedure. A workflow script can read a skill file and follow its instructions as one of its steps. Mix and match however makes sense for the task.
 
+Workflow scripts live in `AssistantMD/Authoring/` with `run_type: workflow`.
+
 You don't need to write the Python yourself: describe what you want to the chat
 agent and it will draft the file for you. You can then run it manually, refine
 it, and enable scheduling when you're happy with it. Manual and scheduled runs
@@ -109,16 +109,17 @@ For the full authoring reference, see [Authoring](authoring.md).
 A Context Assembly Script controls what the chat agent knows at the start of
 every conversation. It is the place where the other building blocks can come
 together: prior messages, selected files, user preferences, skills, project
-policy, and summary records.
+policy, and summary records. This is usually the least-used building block:
+most users can customize the default script with playbooks, skills, workspace
+README files, and workflows, and may only need one or two custom context
+scripts, if any, for clearly distinct work styles.
 
-For more control — curating message history, loading specific files, searching
-session summaries, or adding different long-term notes — create a context script
-in `AssistantMD/Authoring/` with `run_type: context`.
+Context scripts live in `AssistantMD/Authoring/` with `run_type: context`.
 
 Like workflow scripts, you don't need to write these by hand. Describe what you
-want to the chat agent and it will draft the file. See
-[Authoring](authoring.md) for script shape, helper functions, scheduling, and
-runtime details.
+want to the chat agent and it will draft the file.
+
+For the full authoring reference, see [Authoring](authoring.md).
 
 ---
 

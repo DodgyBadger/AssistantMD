@@ -5,6 +5,9 @@ description: Default template for regular chat. Passes full history. Loads soul.
 ```python
 """Default chat context: pass history, inject soul.md, playbooks, user context, and skills catalog if present."""
 
+# Fallback instructions used when `AssistantMD/playbook.md` does not exist.
+# Customize `AssistantMD/playbook.md` in the vault when you want durable
+# vault-wide guidance without editing this context script.
 DEFAULT_PLAYBOOK = (
     "## Vault Work Policy\n"
     "Treat the active vault as the user's source of truth for their files, "
@@ -14,9 +17,12 @@ DEFAULT_PLAYBOOK = (
     "conflict."
 )
 
+# Keep the normal chat transcript in context. The context script adds
+# instructions and reference material, but does not replace session history.
 history_result = await retrieve_history(scope="session", limit="all")
 history = list(history_result.items)
 
+# `soul.md` is optional. It is a good place for broad assistant tone and stance.
 soul_result = await file_ops_safe(operation="read", path="AssistantMD/soul.md")
 soul_instructions = (
     soul_result.return_value.strip()
@@ -37,6 +43,8 @@ DEFAULT_USER_NOTES_CHAR_LIMIT = 6000
 
 
 def split_parent_filename(path):
+    # Return the containing folder and filename so convention-file lookups can
+    # fall back to case-insensitive matching inside the parent folder.
     parts = path.rsplit("/", 1)
     if len(parts) == 1:
         return ".", parts[0]
@@ -44,6 +52,8 @@ def split_parent_filename(path):
 
 
 async def read_convention_file(path):
+    # First try the exact path. If that fails, list the parent folder and accept
+    # a single case-insensitive filename match such as README.md vs readme.md.
     exact_result = await file_ops_safe(operation="read", path=path)
     if exact_result.metadata.get("status") == "completed":
         return path, exact_result
@@ -71,6 +81,7 @@ async def read_convention_file(path):
 
 
 def bounded_text(value, max_chars):
+    # Keep optional files from overwhelming the chat context.
     text = value.strip()
     if len(text) <= max_chars:
         return text
@@ -78,6 +89,7 @@ def bounded_text(value, max_chars):
 
 
 def frontmatter_value(result, key, default_value):
+    # Read optional configuration values from a skill file's frontmatter.
     if result.metadata.get("status") != "completed":
         return default_value
     items = result.metadata.get("items", [])
@@ -89,6 +101,7 @@ def frontmatter_value(result, key, default_value):
 
 
 def parse_positive_int(value, default_value):
+    # Treat invalid or non-positive frontmatter values as "use the default."
     try:
         parsed = int(value)
     except Exception:
@@ -105,6 +118,8 @@ playbook_instructions = (
 
 workspace_playbook_instructions = ""
 if workspace.exists:
+    # Workspace playbooks layer on top of the vault-level playbook. Use them for
+    # project-local rules, terminology, formats, or source preferences.
     workspace_playbook_path = f"{workspace.path}/playbook.md"
     workspace_playbook_path, workspace_playbook_result = await read_convention_file(workspace_playbook_path)
     if workspace_playbook_result.metadata.get("status") == "completed":
@@ -132,6 +147,8 @@ USER_NOTES_char_limit = parse_positive_int(
 USER_NOTES_result = await file_ops_safe(operation="read", path=USER_NOTES_file)
 USER_NOTES_instructions = ""
 if USER_NOTES_result.metadata.get("status") == "completed":
+    # User notes are editable memory. They should guide the agent, but they are
+    # intentionally visible and mutable rather than hidden system authority.
     USER_NOTES_text = USER_NOTES_result.return_value
     if USER_NOTES_text.strip():
         USER_NOTES_instructions = (
@@ -143,6 +160,8 @@ if USER_NOTES_result.metadata.get("status") == "completed":
 
 workspace_instructions = ""
 if workspace.exists:
+    # A workspace README is the lightweight onboarding file for the current
+    # project folder. Set the workspace path in Chat Settings to activate it.
     workspace_overview_path = f"{workspace.path}/README.md"
     workspace_overview_path, workspace_overview_result = await read_convention_file(workspace_overview_path)
     if workspace_overview_result.metadata.get("status") == "completed":
@@ -176,6 +195,7 @@ folder_skills_result = await file_ops_safe(
 
 skill_items_by_path = {}
 for result in (flat_skills_result, folder_skills_result):
+    # Support both flat skill files and folder-style skills with SKILL.md.
     if result.metadata.get("status") == "completed":
         for item in result.metadata.get("items", []):
             path = item.get("path", "")
@@ -190,6 +210,8 @@ for path, item in skill_items_by_path.items():
     skills_lines.append(f"- **{name}** (`{path}`): {description}" if description else f"- **{name}** (`{path}`)")
 
 instructions = soul_instructions
+# Assemble the final instruction stack from broad to specific:
+# stance -> vault policy -> workspace policy -> user notes -> workspace README -> skills.
 instructions += "\n\n" + playbook_instructions
 if workspace_playbook_instructions:
     instructions += "\n\n" + workspace_playbook_instructions

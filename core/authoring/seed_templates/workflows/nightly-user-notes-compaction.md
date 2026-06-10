@@ -14,6 +14,8 @@ skill policy and confirming you want nightly automatic curation of
 ```python
 """Compact vault-native user notes when they approach the configured limit."""
 
+# Editable settings. The skill frontmatter can override the notes file and
+# character limit; these defaults are used when the skill is missing a value.
 DEFAULT_CONTEXT_NOTES_FILE = "AssistantMD/user.md"
 DEFAULT_CONTEXT_NOTES_CHAR_LIMIT = 6000
 TRIGGER_RATIO = 0.8
@@ -23,6 +25,7 @@ ARCHIVE_DIR = "AssistantMD/user_notes_archive"
 
 
 def frontmatter_value(result, key, default_value):
+    # Read optional configuration from the Save User Note skill frontmatter.
     if result.metadata.get("status") != "completed":
         return default_value
     items = result.metadata.get("items", [])
@@ -34,6 +37,7 @@ def frontmatter_value(result, key, default_value):
 
 
 def parse_positive_int(value, default_value):
+    # Invalid frontmatter values should fall back to the safe default.
     try:
         parsed = int(value)
     except Exception:
@@ -42,6 +46,8 @@ def parse_positive_int(value, default_value):
 
 
 def strip_markdown_fence(value):
+    # Delegated models sometimes wrap markdown in a code fence. The notes file
+    # should contain the markdown body only.
     text = value.strip()
     if not text.startswith("```"):
         return text
@@ -52,11 +58,15 @@ def strip_markdown_fence(value):
 
 
 def archive_path_for_today(index):
+    # Keep the original notes file before replacing it. Multiple runs in one
+    # day get numbered archive filenames instead of overwriting older archives.
     suffix = "" if index == 0 else f"-{index}"
     return f"{ARCHIVE_DIR}/user-notes-{date.today('%Y-%m-%d')}{suffix}.md"
 
 
 def compaction_prompt(context_notes_text, skill_policy, context_notes_file, target_chars, previous_text=""):
+    # The prompt asks for a complete replacement file, not a diff, so the write
+    # step can replace user notes atomically after archiving the original.
     retry_instruction = ""
     if previous_text:
         retry_instruction = (
@@ -91,12 +101,15 @@ context_notes_char_limit = parse_positive_int(
 )
 trigger_chars = int(context_notes_char_limit * TRIGGER_RATIO)
 
+# Skip cleanly when there is no notes file yet. Users can create it manually or
+# through the Save User Note skill.
 context_notes_result = await file_ops_safe(operation="read", path=context_notes_file)
 if context_notes_result.metadata.get("status") != "completed":
     await finish(status="skipped", reason=f"{context_notes_file} not found")
 
 context_notes_text = context_notes_result.return_value.strip()
 if len(context_notes_text) <= trigger_chars:
+    # Do nothing until the notes file approaches the configured limit.
     await finish(
         status="skipped",
         reason=f"{context_notes_file} is {len(context_notes_text)} chars; trigger is {trigger_chars}",
@@ -109,6 +122,8 @@ skill_policy = (
     else "Preserve durable facts and preferences. Remove duplicates and stale detail."
 )
 
+# Delegate the actual curation to a model so duplicate or stale notes can be
+# merged semantically rather than trimmed mechanically.
 compaction = await delegate(
     model=CURATION_MODEL,
     options={"thinking": "low"},
@@ -118,6 +133,7 @@ curated_text = strip_markdown_fence(compaction.return_value)
 
 retried = False
 if curated_text and len(curated_text) > trigger_chars:
+    # Give the model one chance to tighten the output before declining to write.
     retried = True
     retry = await delegate(
         model=CURATION_MODEL,
@@ -152,10 +168,13 @@ elif len(curated_text) > trigger_chars:
         "retried": retried,
     }
 else:
+    # Successful writes are two-step: archive the original, then write the
+    # curated replacement. If either step fails, report it instead of hiding it.
     await file_ops_safe(operation="mkdir", path=ARCHIVE_DIR)
 
     archive_path = ""
     for index in range(10):
+        # Avoid overwriting an archive from an earlier run on the same date.
         candidate = archive_path_for_today(index)
         existing = await file_ops_safe(operation="read", path=candidate)
         if existing.metadata.get("status") != "completed":

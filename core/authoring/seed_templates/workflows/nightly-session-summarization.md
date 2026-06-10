@@ -13,20 +13,26 @@ size, then enable it when the summarization behavior looks right.
 ```python
 """Summarize a bounded batch of chat sessions with missing or stale summaries."""
 
-# Editable settings
+# Editable settings. Start with a small batch while testing so a misconfigured
+# summarization model or prompt policy fails quickly and visibly.
 BATCH_SIZE = 5
 SUMMARIZATION_MODEL = "gpt-mini"
 
 
+# The helper returns only sessions whose stored summaries are missing or stale.
+# That keeps nightly runs bounded and avoids re-summarizing unchanged sessions.
 pending = await retrieve_sessions(selection="pending_or_stale_summary", limit=BATCH_SIZE)
 sessions = list(pending.items)
 
 if not sessions:
+    # `skipped` is a successful workflow outcome: there was simply no work to do.
     await finish(status="skipped", reason="no sessions pending or stale summarization")
 
 summarized = []
 
 for item in sessions:
+    # Session metadata is included so the final workflow result is useful in the
+    # activity log without requiring the user to inspect each session manually.
     metadata = item.metadata or {}
     session_id = metadata.get("session_id", "")
     title = metadata.get("title", "")
@@ -37,6 +43,8 @@ for item in sessions:
     if not session_id:
         raise ValueError("Cannot summarize a session item without session_id")
 
+    # `summarize_session` reads the transcript, extracts durable summary fields,
+    # stores the summary, and refreshes the vector index for session search.
     result = await session_ops(
         operation="summarize_session",
         session_id=session_id,
@@ -54,6 +62,7 @@ for item in sessions:
     )
 
 {
+    # The last expression is the workflow result returned to the activity log.
     "status": "completed",
     "selected": len(sessions),
     "summarized": len(summarized),
