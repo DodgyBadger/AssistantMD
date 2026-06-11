@@ -1007,7 +1007,7 @@ function isChatSelectableModel(model) {
 // Fetch system status
 async function fetchSystemStatus() {
     try {
-        const response = await fetch('api/status');
+        const response = await fetch('api/status', { cache: 'no-store' });
         if (!response.ok) throw new Error('Failed to fetch status');
 
         state.systemStatus = await response.json();
@@ -1044,7 +1044,7 @@ async function fetchSystemStatus() {
 
 async function fetchWorkflowTasks({ render = true } = {}) {
     try {
-        const response = await fetch('api/tasks?kind=workflow&include_terminal=false');
+        const response = await fetch('api/tasks?kind=workflow&include_terminal=false', { cache: 'no-store' });
         if (!response.ok) throw new Error('Failed to fetch workflow tasks');
         const data = await response.json();
         state.workflowTasks = data.tasks || [];

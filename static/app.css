@@ -1822,11 +1822,11 @@ details[open] summary.collapsible-summary .chevron {
 .chat-stop-btn {
     background: rgb(var(--state-error)) !important;
     border-color: rgb(var(--state-error)) !important;
-    color: rgb(var(--text-on-accent)) !important;
+    color: #fff !important;
 }
 .chat-stop-btn:hover {
     background: rgb(var(--state-error) / 0.88) !important;
-    color: rgb(var(--text-on-accent)) !important;
+    color: #fff !important;
 }
 .chat-attach-badge {
     display: none;

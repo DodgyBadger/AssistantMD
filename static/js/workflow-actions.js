@@ -259,6 +259,7 @@
 
                 const response = await fetch('api/workflows/execute', {
                     method: 'POST',
+                    cache: 'no-store',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
@@ -299,7 +300,7 @@
             try {
                 while (true) {
                     await new Promise(resolve => window.setTimeout(resolve, 1000));
-                    const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}`);
+                    const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}`, { cache: 'no-store' });
                     if (!response.ok) {
                         return;
                     }
@@ -324,7 +325,8 @@
             }
             try {
                 const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}/cancel`, {
-                    method: 'POST'
+                    method: 'POST',
+                    cache: 'no-store'
                 });
                 if (!response.ok) {
                     const errorData = await response.json();
@@ -364,7 +366,10 @@
             }
             try {
                 const results = await Promise.allSettled(
-                    tasks.map(task => fetch(`api/tasks/${encodeURIComponent(task.task_id)}/cancel`, { method: 'POST' }))
+                    tasks.map(task => fetch(`api/tasks/${encodeURIComponent(task.task_id)}/cancel`, {
+                        method: 'POST',
+                        cache: 'no-store'
+                    }))
                 );
                 const failures = [];
                 for (const result of results) {

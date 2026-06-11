@@ -78,6 +78,19 @@ app.include_router(api_router)
 # Register API exception handlers
 register_exception_handlers(app)
 
+
+@app.middleware("http")
+async def prevent_runtime_response_caching(request, call_next):
+    """Keep the single-page app and runtime API out of proxy/browser caches."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/api/") or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # Mount static files with absolute path
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")

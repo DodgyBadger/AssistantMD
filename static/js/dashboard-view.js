@@ -379,7 +379,7 @@
                         </div>
                         <button
                             type="button"
-                            class="chat-stop-btn ui-icon-button is-danger"
+                            class="chat-stop-btn ui-icon-button"
                             data-dashboard-workflow-stop-all="true"
                             aria-label="Stop all workflows"
                             title="Stop all workflows"
@@ -413,7 +413,7 @@
                                         <td class="cell-center">
                                             <button
                                                 type="button"
-                                                class="chat-stop-btn ui-icon-button is-danger is-compact"
+                                                class="chat-stop-btn ui-icon-button is-compact"
                                                 data-dashboard-workflow-stop="${escapeHtml(task.task_id || '')}"
                                                 aria-label="Stop workflow"
                                                 title="Stop workflow"
