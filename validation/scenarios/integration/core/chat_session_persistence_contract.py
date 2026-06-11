@@ -377,6 +377,48 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 "Continue only in the forked session." not in source_message_text,
                 "Continuing a fork should not append messages to the source session",
             )
+            with sqlite3.connect(chat_sessions_db) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO chat_tool_events (
+                        session_id,
+                        vault_name,
+                        tool_call_id,
+                        tool_name,
+                        event_type,
+                        args_json,
+                        result_text
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        vault.name,
+                        "cancelled-turn-call",
+                        "session_probe",
+                        "call",
+                        '{"cancelled": true}',
+                        None,
+                    ),
+                )
+                conn.commit()
+
+            detail_after_orphan = self.call_api(
+                f"/api/chat/sessions/{session_id}?vault_name={vault.name}",
+                method="GET",
+            )
+            assert detail_after_orphan.status_code == 200, "Session detail should load persisted chat state"
+            detail_tool_event_ids = {
+                event["tool_call_id"]
+                for event in detail_after_orphan.json().get("tool_events", [])
+            }
+            self.soft_assert(
+                "cancelled-turn-call" not in detail_tool_event_ids,
+                "Session detail should not expose tool events from uncommitted turns",
+            )
+            self.soft_assert(
+                detail_tool_event_ids,
+                "Session detail should still expose committed tool events",
+            )
 
             await self.restart_system()
 

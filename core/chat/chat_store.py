@@ -611,11 +611,24 @@ class ChatStore:
         vault_name: str,
         *,
         limit: int | None = None,
+        committed_only: bool = False,
     ) -> list[StoredChatToolEvent]:
         """Return persisted structured tool events for one session."""
         conn = self._connect()
         try:
-            if limit is None:
+            committed_tool_call_ids = (
+                self._committed_tool_call_ids(
+                    conn,
+                    session_id=session_id,
+                    vault_name=vault_name,
+                )
+                if committed_only
+                else None
+            )
+            if committed_tool_call_ids == set():
+                return []
+
+            if limit is None or committed_tool_call_ids is not None:
                 rows = conn.execute(
                     """
                     SELECT tool_call_id, tool_name, event_type, created_at, args_json, result_text, result_metadata_json, artifact_ref
@@ -625,6 +638,13 @@ class ChatStore:
                     """,
                     (session_id, vault_name),
                 ).fetchall()
+                if committed_tool_call_ids is not None:
+                    rows = [
+                        row for row in rows
+                        if str(row[0]) in committed_tool_call_ids
+                    ]
+                if limit is not None:
+                    rows = rows[-limit:]
             else:
                 rows = conn.execute(
                     """
@@ -665,6 +685,27 @@ class ChatStore:
                 artifact_ref,
             ) in rows
         ]
+
+    def _committed_tool_call_ids(
+        self,
+        conn: Any,
+        *,
+        session_id: str,
+        vault_name: str,
+    ) -> set[str]:
+        rows = conn.execute(
+            """
+            SELECT message_json
+            FROM chat_messages
+            WHERE session_id = ? AND vault_name = ?
+            ORDER BY sequence_index ASC
+            """,
+            (session_id, vault_name),
+        ).fetchall()
+        ids: set[str] = set()
+        for (message_json,) in rows:
+            ids.update(_tool_call_ids_from_json(str(message_json)))
+        return ids
 
     def list_sessions(self, vault_name: str, *, limit: int | None = None) -> list[StoredChatSession]:
         """Return chat sessions for one vault ordered by latest activity descending."""

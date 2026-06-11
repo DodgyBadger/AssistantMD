@@ -1089,7 +1089,7 @@ def _session_summary_response(session_summary) -> dict:
 def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDetailResponse:
     """Return persisted chat messages for one session."""
     messages = _chat_store.get_stored_messages(session_id, vault_name)
-    tool_events = _chat_store.get_tool_events(session_id, vault_name)
+    tool_events = _chat_store.get_tool_events(session_id, vault_name, committed_only=True)
     return ChatSessionDetailResponse(
         session_id=session_id,
         vault_name=vault_name,
