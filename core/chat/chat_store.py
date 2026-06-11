@@ -44,6 +44,16 @@ class StoredChatMessage:
     message_json: str
     message: ModelMessage
 
+    @property
+    def tool_call_ids(self) -> tuple[str, ...]:
+        """Tool call IDs declared by this provider-native message."""
+        return _ordered_tool_call_ids_from_message(self.message)
+
+    @property
+    def tool_return_ids(self) -> tuple[str, ...]:
+        """Tool return IDs declared by this provider-native message."""
+        return _ordered_tool_return_ids_from_message(self.message)
+
 
 @dataclass(frozen=True)
 class StoredCompactionCheckpoint:
@@ -1379,13 +1389,19 @@ def _tool_call_ids_from_json(message_json: str) -> set[str]:
 
 
 def _tool_call_ids_from_message(message: ModelMessage) -> set[str]:
+    return set(_ordered_tool_call_ids_from_message(message))
+
+
+def _ordered_tool_call_ids_from_message(message: ModelMessage) -> tuple[str, ...]:
     ids: set[str] = set()
+    ordered_ids: list[str] = []
     for part in getattr(message, "parts", ()) or ():
         if isinstance(part, ToolCallPart):
             tool_call_id = getattr(part, "tool_call_id", None)
-            if tool_call_id:
+            if tool_call_id and str(tool_call_id) not in ids:
                 ids.add(str(tool_call_id))
-    return ids
+                ordered_ids.append(str(tool_call_id))
+    return tuple(ordered_ids)
 
 
 def _tool_return_ids_from_json(message_json: str) -> set[str]:
@@ -1393,10 +1409,20 @@ def _tool_return_ids_from_json(message_json: str) -> set[str]:
         message = _MODEL_MESSAGE_ADAPTER.validate_json(message_json)
     except Exception:
         return set()
+    return _tool_return_ids_from_message(message)
+
+
+def _tool_return_ids_from_message(message: ModelMessage) -> set[str]:
+    return set(_ordered_tool_return_ids_from_message(message))
+
+
+def _ordered_tool_return_ids_from_message(message: ModelMessage) -> tuple[str, ...]:
     ids: set[str] = set()
+    ordered_ids: list[str] = []
     for part in getattr(message, "parts", ()) or ():
         if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
             tool_call_id = getattr(part, "tool_call_id", None)
-            if tool_call_id:
+            if tool_call_id and str(tool_call_id) not in ids:
                 ids.add(str(tool_call_id))
-    return ids
+                ordered_ids.append(str(tool_call_id))
+    return tuple(ordered_ids)

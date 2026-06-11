@@ -185,8 +185,8 @@
             elements.chatMessages.innerHTML = '';
 
             const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-            const toolEventsQueue = Array.isArray(payload?.tool_events) ? [...payload.tool_events] : [];
-            const pendingToolEvents = [];
+            const toolEventsById = groupToolEventsById(payload?.tool_events);
+            const pendingToolCallIds = new Set();
 
             if (messages.length === 0) {
                 renderChatEmptyState('Selected session has no persisted messages.');
@@ -195,29 +195,63 @@
 
             messages.forEach((message) => {
                 if (message.is_tool_message) {
-                    const nextToolEvent = toolEventsQueue.shift();
-                    if (nextToolEvent) {
-                        pendingToolEvents.push(nextToolEvent);
-                    }
+                    collectToolIds(message.tool_call_ids, pendingToolCallIds);
+                    collectToolIds(message.tool_return_ids, pendingToolCallIds);
                     return;
                 }
 
                 if (message.role === 'assistant') {
-                    const assistantToolEvents = pendingToolEvents.splice(0, pendingToolEvents.length);
+                    const assistantToolEvents = toolEventsForIds(toolEventsById, pendingToolCallIds);
+                    pendingToolCallIds.clear();
                     renderPersistedAssistantMessage(message.content || '', assistantToolEvents, {
                         sequenceIndex: message.sequence_index
                     });
                     return;
                 }
 
+                pendingToolCallIds.clear();
                 addMessage('user', message.content || '', {
                     sequenceIndex: message.sequence_index
                 });
             });
+        }
 
-            if (pendingToolEvents.length > 0) {
-                renderPersistedAssistantMessage('', pendingToolEvents.splice(0, pendingToolEvents.length));
+        function groupToolEventsById(toolEvents) {
+            const grouped = new Map();
+            if (!Array.isArray(toolEvents)) {
+                return grouped;
             }
+            toolEvents.forEach((event) => {
+                if (!event || !event.tool_call_id) {
+                    return;
+                }
+                const existing = grouped.get(event.tool_call_id) || [];
+                existing.push(event);
+                grouped.set(event.tool_call_id, existing);
+            });
+            return grouped;
+        }
+
+        function collectToolIds(toolIds, target) {
+            if (!Array.isArray(toolIds)) {
+                return;
+            }
+            toolIds.forEach((toolId) => {
+                if (toolId) {
+                    target.add(toolId);
+                }
+            });
+        }
+
+        function toolEventsForIds(toolEventsById, toolCallIds) {
+            const selected = [];
+            toolCallIds.forEach((toolId) => {
+                const events = toolEventsById.get(toolId);
+                if (Array.isArray(events)) {
+                    selected.push(...events);
+                }
+            });
+            return selected;
         }
 
         function renderPersistedAssistantMessage(content, toolEvents, options = {}) {

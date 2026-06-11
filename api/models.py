@@ -467,6 +467,8 @@ class ChatSessionMessageInfo(BaseModel):
     message_type: str = Field(..., description="Provider-native message class name")
     direction: str = Field(..., description="Request/response direction for the provider-native message")
     is_tool_message: bool = Field(False, description="Whether this row represents a tool call/return message")
+    tool_call_ids: List[str] = Field(default_factory=list, description="Tool calls declared by this message")
+    tool_return_ids: List[str] = Field(default_factory=list, description="Tool returns declared by this message")
 
 
 class ChatSessionToolEventInfo(BaseModel):

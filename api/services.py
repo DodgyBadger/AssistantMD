@@ -1101,7 +1101,13 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
                 content=message.content_text,
                 message_type=message.message_type,
                 direction=message.direction,
-                is_tool_message=_is_tool_message_text(message.content_text),
+                is_tool_message=(
+                    _is_tool_message_text(message.content_text)
+                    or bool(message.tool_call_ids)
+                    or bool(message.tool_return_ids)
+                ),
+                tool_call_ids=list(message.tool_call_ids),
+                tool_return_ids=list(message.tool_return_ids),
             )
             for message in messages
         ],
