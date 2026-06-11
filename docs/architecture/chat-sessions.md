@@ -64,6 +64,7 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
 
 - Non-streaming and streaming chat runs both use the same task kind (`chat`) and API source (`api`).
 - `chat_tool_calls_limit` applies Pydantic AI `UsageLimits(tool_calls_limit=...)` to chat runs when the setting is positive; `0` disables this guard.
+- `delegate_tool_calls_limit` separately bounds tool calls inside child agents launched by `delegate(...)`.
 - `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.
 - `/api/chat/sessions/{session_id}/cancel` requests cancellation for the active chat task.
 - A cancelled chat task reaches terminal status `cancelled`; the session remains queryable through normal session detail endpoints.

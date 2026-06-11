@@ -32,6 +32,10 @@ settings:
     value: 0
     description: "Maximum tool calls allowed in one chat response. 0 disables the limit. Set a low value to force tighter tool use or encourage code_execution for batch work."
     restart_required: false
+  delegate_tool_calls_limit:
+    value: 32
+    description: "Maximum tool calls allowed inside one delegate child-agent run. 0 disables the limit. Increase for broad delegated searches, or lower it to force tighter scoped delegation."
+    restart_required: false
   default_api_timeout:
     value: 120
     description: "Default timeout in seconds for external API calls."

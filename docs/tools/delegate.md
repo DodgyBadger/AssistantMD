@@ -21,6 +21,9 @@ Use `delegate` for efficient delegation, not as a larger context bucket. Before 
 - `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution` are always excluded regardless of what is passed. Include `file_ops_safe` when the child agent needs to read files.
 - `options`: optional dictionary. Supported key: `thinking`, which accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`.
 
+Delegate child runs are also bounded by the `delegate_tool_calls_limit` general
+setting. The default is `32` child tool calls; `0` disables this limit.
+
 ## Examples
 
 ```python
@@ -80,6 +83,7 @@ The `audit` metadata is a compact child-run summary for debugging and validation
 - `delegate` and `code_execution` are always removed from the child tool list — recursive delegation is not permitted
 - the child agent runs in isolation; its messages do not appear in the parent chat transcript
 - child runs are bounded; if the child exceeds its tool-call or timeout guardrail, `delegate` returns a failed tool result with guidance instead of crashing the parent run
+- `delegate_tool_calls_limit` controls the child tool-call guardrail globally; use scoped prompts and multiple delegate calls rather than one broad child run when the limit is reached
 - to work with files, include the file path in the prompt and add `file_ops_safe` to `tools` — the child agent reads them the same way the parent agent does
 - markdown files with embedded local images are handled by `file_ops_safe(read)` inside the child agent, preserving the same multimodal tool-return path used by chat
 - when `model` is omitted, the child agent uses the same default model as the runtime

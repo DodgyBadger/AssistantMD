@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai.exceptions import UsageLimitExceeded
 
 from core.constants import (
-    DELEGATE_DEFAULT_MAX_TOOL_CALLS,
     DELEGATE_DEFAULT_TIMEOUT_SECONDS,
 )
 from validation.core.base_scenario import BaseScenario
@@ -34,6 +33,14 @@ class DelegateToolScenario(BaseScenario):
         )
 
         await self.start_system()
+
+        configured_delegate_limit = 12
+        delegate_limit_update = self.call_api(
+            "/api/system/settings/general/delegate_tool_calls_limit",
+            method="PUT",
+            data={"value": str(configured_delegate_limit)},
+        )
+        assert delegate_limit_update.status_code == 200, "Delegate tool-call limit setting updates"
 
         import core.chat.executor as chat_executor
         from pydantic_ai.models.test import TestModel
@@ -124,7 +131,7 @@ class DelegateToolScenario(BaseScenario):
                 expected={
                     "workflow_id": "delegate_basic",
                     "model": "test",
-                    "max_tool_calls": DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+                    "max_tool_calls": configured_delegate_limit,
                     "timeout_seconds": DELEGATE_DEFAULT_TIMEOUT_SECONDS,
                 },
             )
@@ -134,7 +141,7 @@ class DelegateToolScenario(BaseScenario):
                 expected={
                     "workflow_id": "delegate_basic",
                     "model": "test",
-                    "max_tool_calls": DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+                    "max_tool_calls": configured_delegate_limit,
                     "timeout_seconds": DELEGATE_DEFAULT_TIMEOUT_SECONDS,
                 },
             )

@@ -1181,7 +1181,7 @@ async def _stream_prepared_chat_prompt(
                 "details": limit_error.details,
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
-            raise limit_error from exc
+            return
         except Exception as e:
             _log_chat_failure(
                 "Streaming chat execution failed",

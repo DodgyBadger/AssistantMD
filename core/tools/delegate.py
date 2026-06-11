@@ -28,7 +28,6 @@ from core.constants import (
     DELEGATE_AUDIT_MAX_ARGUMENT_CHARS,
     DELEGATE_AUDIT_MAX_RESULT_CHARS,
     DELEGATE_AUDIT_MAX_TOOL_CALLS,
-    DELEGATE_DEFAULT_MAX_TOOL_CALLS,
     DELEGATE_DEFAULT_TIMEOUT_SECONDS,
 )
 from core.llm.agents import create_agent
@@ -37,7 +36,7 @@ from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
-from core.settings import get_default_model_thinking
+from core.settings import get_default_model_thinking, get_delegate_tool_calls_limit
 from core.tools.base import BaseTool
 
 
@@ -138,7 +137,7 @@ class DelegateTool(BaseTool):
                 if instructions:
                     agent.instructions(lambda _ctx, text=instructions: text)
 
-                usage_limits = UsageLimits(tool_calls_limit=max_tool_calls)
+                usage_limits = _delegate_usage_limits(max_tool_calls)
                 run_coro = agent.run(prompt, usage_limits=usage_limits)
                 result = await asyncio.wait_for(run_coro, timeout=timeout_seconds)
                 output = result.output
@@ -418,6 +417,12 @@ def _parse_options(options: dict[str, Any]) -> tuple[object, int, float]:
 
     return (
         requested_thinking,
-        DELEGATE_DEFAULT_MAX_TOOL_CALLS,
+        get_delegate_tool_calls_limit(),
         DELEGATE_DEFAULT_TIMEOUT_SECONDS,
     )
+
+
+def _delegate_usage_limits(max_tool_calls: int) -> UsageLimits | None:
+    if max_tool_calls <= 0:
+        return None
+    return UsageLimits(tool_calls_limit=max_tool_calls)
