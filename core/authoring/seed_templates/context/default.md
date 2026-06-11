@@ -29,26 +29,41 @@ DEFAULT_SOUL_INSTRUCTIONS = (
 
 TRUNCATION_NOTICE = "[User notes truncated by default context script.]"
 
-USER_NOTES_PREAMBLE = (
+USER_NOTES_PREAMBLE_START = (
     "## User Notes\n"
-    "The following user-maintained notes were loaded from `{path}`. "
+    "The following user-maintained notes were loaded from `"
+)
+USER_NOTES_PREAMBLE_END = (
+    "`. "
     "Treat them as editable context, not hidden authority.\n\n"
 )
 
-WORKSPACE_PREAMBLE = (
+WORKSPACE_PREAMBLE_START = (
     "## Workspace\n"
-    "The current chat workspace is `{workspace_path}`. Treat this as the default "
+    "The current chat workspace is `"
+)
+WORKSPACE_PREAMBLE_END = (
+    "`. Treat this as the default "
     "vault-relative folder for vague requests to read, scan, create, or save "
     "files in the current work area.\n\n"
 )
 
-WORKSPACE_README_PREAMBLE = (
-    "The following workspace README was loaded from `{readme_path}`.\n\n"
+WORKSPACE_README_PREAMBLE_START = (
+    "The following workspace README was loaded from `"
+)
+WORKSPACE_README_PREAMBLE_END = "`.\n\n"
+
+WORKSPACE_README_MISSING_INSTRUCTIONS = (
+    "No workspace README was found. Offer to scan the workspace and create a "
+    "README.md to help orient future chats to the workspace.\n"
 )
 
-WORKSPACE_PLAYBOOK_PREAMBLE = (
+WORKSPACE_PLAYBOOK_PREAMBLE_START = (
     "## Workspace Playbook\n"
-    "The following workspace-specific playbook was loaded from `{path}`. "
+    "The following workspace-specific playbook was loaded from `"
+)
+WORKSPACE_PLAYBOOK_PREAMBLE_END = (
+    "`. "
     "Treat it as more specific than the vault-level playbook when the two directly conflict.\n\n"
 )
 
@@ -122,6 +137,22 @@ def bounded_text(value, max_chars):
     return text[:max_chars].rstrip() + f"\n\n{TRUNCATION_NOTICE}"
 
 
+def user_notes_preamble(path):
+    return f"{USER_NOTES_PREAMBLE_START}{path}{USER_NOTES_PREAMBLE_END}"
+
+
+def workspace_preamble(path):
+    return f"{WORKSPACE_PREAMBLE_START}{path}{WORKSPACE_PREAMBLE_END}"
+
+
+def workspace_readme_preamble(path):
+    return f"{WORKSPACE_README_PREAMBLE_START}{path}{WORKSPACE_README_PREAMBLE_END}"
+
+
+def workspace_playbook_preamble(path):
+    return f"{WORKSPACE_PLAYBOOK_PREAMBLE_START}{path}{WORKSPACE_PLAYBOOK_PREAMBLE_END}"
+
+
 def frontmatter_value(result, key, default_value):
     # Read optional configuration values from a skill file's frontmatter.
     if result.metadata.get("status") != "completed":
@@ -160,7 +191,7 @@ if workspace.exists:
         workspace_playbook_text = workspace_playbook_result.return_value
         if workspace_playbook_text.strip():
             workspace_playbook_instructions = (
-                WORKSPACE_PLAYBOOK_PREAMBLE.format(path=workspace_playbook_path)
+                workspace_playbook_preamble(workspace_playbook_path)
                 + bounded_text(workspace_playbook_text, 6000)
             )
 
@@ -184,25 +215,29 @@ if USER_NOTES_result.metadata.get("status") == "completed":
     USER_NOTES_text = USER_NOTES_result.return_value
     if USER_NOTES_text.strip():
         USER_NOTES_instructions = (
-            USER_NOTES_PREAMBLE.format(path=USER_NOTES_file)
+            user_notes_preamble(USER_NOTES_file)
             + bounded_text(USER_NOTES_text, USER_NOTES_char_limit)
         )
 
 workspace_instructions = ""
 if workspace.exists:
-    workspace_instructions = WORKSPACE_PREAMBLE.format(workspace_path=workspace.path)
+    workspace_instructions = workspace_preamble(workspace.path)
 
     # A workspace README is the lightweight onboarding file for the current
     # project folder. If it exists, append it to the workspace section.
     workspace_overview_path = f"{workspace.path}/README.md"
     workspace_overview_path, workspace_overview_result = await read_convention_file(workspace_overview_path)
+    workspace_readme_loaded = False
     if workspace_overview_result.metadata.get("status") == "completed":
         workspace_overview_text = workspace_overview_result.return_value
         if workspace_overview_text.strip():
             workspace_instructions += (
-                WORKSPACE_README_PREAMBLE.format(readme_path=workspace_overview_path)
+                workspace_readme_preamble(workspace_overview_path)
                 + bounded_text(workspace_overview_text, 6000)
             )
+            workspace_readme_loaded = True
+    if not workspace_readme_loaded:
+        workspace_instructions += WORKSPACE_README_MISSING_INSTRUCTIONS
 
 def skill_name_from_path(path):
     parts = path.split("/")
@@ -237,7 +272,10 @@ for path, item in skill_items_by_path.items():
     fm = item.get("frontmatter", {})
     name = fm.get("name") or skill_name_from_path(path)
     description = fm.get("description", "")
-    skills_lines.append(f"- **{name}** (`{path}`): {description}" if description else f"- **{name}** (`{path}`)")
+    skill_line = f"- **{name}** (`{path}`)"
+    if description:
+        skill_line += f": {description}"
+    skills_lines.append(skill_line)
 
 instructions = soul_instructions
 # Assemble the final instruction stack from broad to specific:

@@ -78,6 +78,14 @@ This workspace is for validating workspace README loading.
 Use the workspace-specific validation playbook.
 """,
         )
+        self.create_file(
+            vault,
+            "Projects/WorkspaceB/notes.md",
+            """# Workspace B Notes
+
+This workspace intentionally has no README.
+""",
+        )
 
         await self.start_system()
 
@@ -155,6 +163,44 @@ Use the workspace-specific validation playbook.
         self.soft_assert(
             system_text.count("Filler context note line") < 500,
             "Expected default context to truncate oversized user notes content",
+        )
+
+        missing_readme_processor = build_context_manager_history_processor(
+            session_id="default_context_missing_readme_session",
+            vault_name=vault.name,
+            vault_path=str(vault),
+            model_alias="gpt",
+            template_name="default.md",
+            workspace_path="Projects/WorkspaceB",
+        )
+
+        missing_readme_processed = await missing_readme_processor(
+            SimpleNamespace(prompt="Scan the workspace.", deps=SimpleNamespace()),
+            [
+                ModelRequest(
+                    parts=[UserPromptPart(content="Scan the workspace.")],
+                    run_id="run-missing-readme",
+                )
+            ],
+        )
+
+        missing_readme_system_text = "\n\n".join(
+            getattr(part, "content", "")
+            for message in missing_readme_processed
+            for part in getattr(message, "parts", ())
+            if getattr(part, "part_kind", None) == "system-prompt"
+        )
+        self.soft_assert(
+            "The current chat workspace is `Projects/WorkspaceB`." in missing_readme_system_text,
+            "Expected workspace instructions to include the workspace path without a README",
+        )
+        self.soft_assert(
+            "No workspace README was found." in missing_readme_system_text,
+            "Expected default context to explain missing workspace README handling",
+        )
+        self.soft_assert(
+            "offer to scan the workspace and create a README.md" in missing_readme_system_text,
+            "Expected default context to suggest creating a workspace README",
         )
 
         activity_log = self.call_api("/api/system/activity-log")
