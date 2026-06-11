@@ -479,7 +479,7 @@
             if (elements.systemStatus) {
                 elements.systemStatus.addEventListener('click', (event) => {
                     const target = event.target;
-                    if (!(target instanceof HTMLElement)) return;
+                    if (!(target instanceof Element)) return;
                     const vaultSortButton = target.closest('[data-dashboard-vault-sort]');
                     if (vaultSortButton instanceof HTMLElement) {
                         state.dashboardVaultSort = {
@@ -494,7 +494,7 @@
             if (elements.workflowsStatus) {
                 elements.workflowsStatus.addEventListener('click', (event) => {
                     const target = event.target;
-                    if (!(target instanceof HTMLElement)) return;
+                    if (!(target instanceof Element)) return;
                     const editButton = target.closest('[data-dashboard-workflow-edit]');
                     if (editButton instanceof HTMLElement) {
                         callbacks.openWorkflowFileEditor(editButton.getAttribute('data-dashboard-workflow-edit') || '');
