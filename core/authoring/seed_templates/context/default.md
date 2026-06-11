@@ -17,6 +17,51 @@ DEFAULT_PLAYBOOK = (
     "conflict."
 )
 
+DEFAULT_SOUL_INSTRUCTIONS = (
+    "Default stance: concise and curious. Act as a guide, not a sage.\n"
+    "- Start with the minimum useful answer.\n"
+    "- Ask brief clarifying questions when intent, scope, or constraints are unclear.\n"
+    "- Avoid long explanations until the user asks for depth.\n"
+    "- Prefer next-step guidance over broad monologues.\n"
+    "- Use active voice. Avoid contrast / framing-by-negation. \n"
+    "- Prefer tool-grounded answers when current facts or user files matter."
+)
+
+TRUNCATION_NOTICE = "[User notes truncated by default context script.]"
+
+USER_NOTES_PREAMBLE = (
+    "## User Notes\n"
+    "The following user-maintained notes were loaded from `{path}`. "
+    "Treat them as editable context, not hidden authority.\n\n"
+)
+
+WORKSPACE_PREAMBLE = (
+    "## Workspace\n"
+    "The current chat workspace is `{workspace_path}`. Treat this as the default "
+    "vault-relative folder for vague requests to read, scan, create, or save "
+    "files in the current work area.\n\n"
+)
+
+WORKSPACE_README_PREAMBLE = (
+    "The following workspace README was loaded from `{readme_path}`.\n\n"
+)
+
+WORKSPACE_PLAYBOOK_PREAMBLE = (
+    "## Workspace Playbook\n"
+    "The following workspace-specific playbook was loaded from `{path}`. "
+    "Treat it as more specific than the vault-level playbook when the two directly conflict.\n\n"
+)
+
+SKILLS_PREAMBLE = (
+    "\n\n## Skills\n"
+    "The following skills are available. When a skill seems relevant to the user's request, "
+    "read the full skill file before responding. For explicit requests to remember, save, "
+    "or persist facts for future chats, use the Save User Note skill.\n"
+)
+
+DEFAULT_USER_NOTES_FILE = "AssistantMD/user.md"
+DEFAULT_USER_NOTES_CHAR_LIMIT = 6000
+
 # Keep the normal chat transcript in context. The context script adds
 # instructions and reference material, but does not replace session history.
 history_result = await retrieve_history(scope="session", limit="all")
@@ -27,19 +72,8 @@ soul_result = await file_ops_safe(operation="read", path="AssistantMD/soul.md")
 soul_instructions = (
     soul_result.return_value.strip()
     if soul_result.metadata.get("status") == "completed"
-    else (
-        "Default stance: concise and curious. Act as a guide, not a sage.\n"
-        "- Start with the minimum useful answer.\n"
-        "- Ask brief clarifying questions when intent, scope, or constraints are unclear.\n"
-        "- Avoid long explanations until the user asks for depth.\n"
-        "- Prefer next-step guidance over broad monologues.\n"
-        "- Use active voice. Avoid contrast / framing-by-negation. \n"
-        "- Prefer tool-grounded answers when current facts or user files matter."
-    )
+    else DEFAULT_SOUL_INSTRUCTIONS
 )
-
-DEFAULT_USER_NOTES_FILE = "AssistantMD/user.md"
-DEFAULT_USER_NOTES_CHAR_LIMIT = 6000
 
 
 def split_parent_filename(path):
@@ -85,7 +119,7 @@ def bounded_text(value, max_chars):
     text = value.strip()
     if len(text) <= max_chars:
         return text
-    return text[:max_chars].rstrip() + "\n\n[User notes truncated by default context script.]"
+    return text[:max_chars].rstrip() + f"\n\n{TRUNCATION_NOTICE}"
 
 
 def frontmatter_value(result, key, default_value):
@@ -126,9 +160,7 @@ if workspace.exists:
         workspace_playbook_text = workspace_playbook_result.return_value
         if workspace_playbook_text.strip():
             workspace_playbook_instructions = (
-                "## Workspace Playbook\n"
-                f"The following workspace-specific playbook was loaded from `{workspace_playbook_path}`. "
-                "Treat it as more specific than the vault-level playbook when the two directly conflict.\n\n"
+                WORKSPACE_PLAYBOOK_PREAMBLE.format(path=workspace_playbook_path)
                 + bounded_text(workspace_playbook_text, 6000)
             )
 
@@ -152,25 +184,23 @@ if USER_NOTES_result.metadata.get("status") == "completed":
     USER_NOTES_text = USER_NOTES_result.return_value
     if USER_NOTES_text.strip():
         USER_NOTES_instructions = (
-            "## User Notes\n"
-            f"The following user-maintained notes were loaded from `{USER_NOTES_file}`. "
-            "Treat them as editable context, not hidden authority.\n\n"
+            USER_NOTES_PREAMBLE.format(path=USER_NOTES_file)
             + bounded_text(USER_NOTES_text, USER_NOTES_char_limit)
         )
 
 workspace_instructions = ""
 if workspace.exists:
+    workspace_instructions = WORKSPACE_PREAMBLE.format(workspace_path=workspace.path)
+
     # A workspace README is the lightweight onboarding file for the current
-    # project folder. Set the workspace path in Chat Settings to activate it.
+    # project folder. If it exists, append it to the workspace section.
     workspace_overview_path = f"{workspace.path}/README.md"
     workspace_overview_path, workspace_overview_result = await read_convention_file(workspace_overview_path)
     if workspace_overview_result.metadata.get("status") == "completed":
         workspace_overview_text = workspace_overview_result.return_value
         if workspace_overview_text.strip():
-            workspace_instructions = (
-                "## Workspace\n"
-                f"The current chat workspace is `{workspace.path}`. "
-                f"The following workspace README was loaded from `{workspace_overview_path}`.\n\n"
+            workspace_instructions += (
+                WORKSPACE_README_PREAMBLE.format(readme_path=workspace_overview_path)
                 + bounded_text(workspace_overview_text, 6000)
             )
 
@@ -221,10 +251,7 @@ if workspace_instructions:
     instructions += "\n\n" + workspace_instructions
 if skills_lines:
     instructions += (
-        "\n\n## Skills\n"
-        "The following skills are available. When a skill seems relevant to the user's request, "
-        "read the full skill file before responding. For explicit requests to remember, save, "
-        "or persist facts for future chats, use the Save User Note skill.\n"
+        SKILLS_PREAMBLE
         + "\n".join(skills_lines)
     )
 
