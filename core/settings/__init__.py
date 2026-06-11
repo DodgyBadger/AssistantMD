@@ -477,6 +477,23 @@ def get_delegate_tool_calls_limit() -> int:
     return parsed if parsed > 0 else 0
 
 
+def get_delegate_timeout_seconds() -> float:
+    """Return delegate child-run timeout seconds; 0 disables the timeout."""
+    entry = get_general_settings().get("delegate_timeout_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        from core.constants import DELEGATE_DEFAULT_TIMEOUT_SECONDS
+
+        return DELEGATE_DEFAULT_TIMEOUT_SECONDS
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        from core.constants import DELEGATE_DEFAULT_TIMEOUT_SECONDS
+
+        return DELEGATE_DEFAULT_TIMEOUT_SECONDS
+    return parsed if parsed > 0 else 0.0
+
+
 def get_compaction_type() -> str:
     """Return the configured chat-history compaction policy."""
     entry = get_general_settings().get("compaction_type")

@@ -13,6 +13,12 @@ Run a focused child agent over a prompt with optional tools, and return its text
 
 Use `delegate` for efficient delegation, not as a larger context bucket. Before using `delegate` in chat, briefly tell the user the delegation strategy and wait for confirmation. If one deterministic tool call can answer, use that directly. For large vault or web exploration, split work into bounded subtasks and make multiple delegate calls if needed. Each child should inspect a scoped path, query, source group, or hypothesis and return a compact summary, decision, or saved artifact path. Prefer instructions such as "inspect these likely paths first", "sample this directory and report whether deeper inventory is needed", or "write the full report to `Reports/...` and return only counts and the saved path" over instructions that require one child to enumerate and reason over an entire vault in one pass.
 
+`delegate` is blocking: the parent chat or workflow step waits until the child
+run completes, fails, or reaches its guardrail. Use direct delegation for
+shorter focused tasks. If the work is likely to run for a long time, process
+many files, or should not block the chat session, write or use a workflow and
+start that workflow asynchronously instead.
+
 ## Arguments
 
 - `prompt`: required. Primary prompt passed to the child agent. Include file paths here when the child agent should read files.
@@ -23,6 +29,8 @@ Use `delegate` for efficient delegation, not as a larger context bucket. Before 
 
 Delegate child runs are also bounded by the `delegate_tool_calls_limit` general
 setting. The default is `32` child tool calls; `0` disables this limit.
+`delegate_timeout_seconds` controls the child-run timeout. The default is `120`
+seconds; `0` disables this timeout.
 
 ## Examples
 
@@ -82,8 +90,10 @@ The `audit` metadata is a compact child-run summary for debugging and validation
 
 - `delegate` and `code_execution` are always removed from the child tool list — recursive delegation is not permitted
 - the child agent runs in isolation; its messages do not appear in the parent chat transcript
+- `delegate` blocks the parent chat turn or workflow step until the child run finishes; use asynchronous workflows for long-running delegated work that should be visible, cancellable, or able to save intermediate artifacts
 - child runs are bounded; if the child exceeds its tool-call or timeout guardrail, `delegate` returns a failed tool result with guidance instead of crashing the parent run
 - `delegate_tool_calls_limit` controls the child tool-call guardrail globally; use scoped prompts and multiple delegate calls rather than one broad child run when the limit is reached
+- `delegate_timeout_seconds` controls the child timeout globally; raise it for slower models or larger delegated tasks, or split broad work into smaller child runs
 - to work with files, include the file path in the prompt and add `file_ops_safe` to `tools` — the child agent reads them the same way the parent agent does
 - markdown files with embedded local images are handled by `file_ops_safe(read)` inside the child agent, preserving the same multimodal tool-return path used by chat
 - when `model` is omitted, the child agent uses the same default model as the runtime
