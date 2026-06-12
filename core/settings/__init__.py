@@ -498,8 +498,8 @@ def get_compaction_type() -> str:
     """Return the configured chat-history compaction policy."""
     entry = get_general_settings().get("compaction_type")
     value = getattr(entry, "value", None) if entry is not None else None
-    normalized = str(value or "suggested").strip().lower()
-    return normalized if normalized in {"none", "suggested", "auto"} else "suggested"
+    normalized = str(value or "auto").strip().lower()
+    return normalized if normalized in {"none", "suggested", "auto"} else "auto"
 
 
 def get_compaction_keep_recent() -> int:

@@ -108,8 +108,8 @@ Current SOTA patterns converge on the same few requirements, but AssistantMD sho
 3. Compaction is chat-history oriented, not goal-oriented.
    Current compaction summarizes older messages plus recent raw messages. It already works well for long-lived sessions when the summary behaves like operational recovery state, but the prompt contract is not explicit enough about goal state: active objective, plan, next action, blockers, artifacts, source refs, failed attempts, and check-in requirements.
 
-4. Automatic compaction policy is under-specified for long-running tasks.
-   AssistantMD already supports automatic post-turn compaction through `compaction_type: auto`. The right model is not "auto-compaction is dangerous"; it is "auto-compaction is acceptable when the summary contract is operational enough." Long-running tasks may need automatic context-window management before the goal is complete. Hardening target: make compaction summaries function as recovery cards, define the trigger/audit contract, and decide whether long-running mode should inherit ordinary chat settings or use an explicit per-goal policy.
+4. Automatic compaction policy needs to be a strong ordinary-chat default.
+   AssistantMD already supports automatic post-turn compaction through `compaction_type: auto`. The right model is not "auto-compaction is dangerous"; it is "auto-compaction is acceptable when the summary contract is operational enough." Long-running tasks may need automatic context-window management before the goal is complete. Hardening target: make compaction summaries function as recovery cards, make `auto` the default ordinary chat/session policy, keep the behavior settings-controlled, and avoid introducing a separate goal-oriented compaction mode in this phase.
 
 5. Cost accounting is incomplete for long runs.
    AssistantMD estimates prompt/history tokens and enforces tool-call limits, but it does not appear to persist provider-reported per-request usage, cached tokens, reasoning tokens, per-subagent cost, or goal-level budgets.
@@ -241,7 +241,7 @@ The compaction prompt strategy should be audited against long-running work. `CHA
 - failed attempts, retry/cancellation state, and uncertainty;
 - budget/context pressure or compaction trigger reason.
 
-The summary should merge prior summaries with newer turns idempotently: keep what still governs future work, remove superseded detail, and avoid accumulating stale narrative. Automatic compaction should remain settings-controlled and auditable. Ordinary chat can continue to use the existing `compaction_type` policy. Long-running mode may need an explicit per-goal policy such as `inherit`, `suggest`, `auto_at_threshold`, or `pause_for_user`. Any automatic compaction should emit a clear lifecycle event and update session/goal state with compaction id, trigger reason, estimated tokens, threshold, keep-recent count, preserved recent slice, and prompt contract version.
+The summary should merge prior summaries with newer turns idempotently: keep what still governs future work, remove superseded detail, and avoid accumulating stale narrative. Automatic compaction should remain settings-controlled and auditable. Ordinary chat should use the existing `compaction_type` policy with `auto` as the default, and long-running work should rely on that default rather than introducing a separate goal-oriented compaction mode in this phase. Any automatic compaction should emit a clear lifecycle event and update session state with compaction id, trigger reason, estimated tokens, threshold, keep-recent count, preserved recent slice, and prompt contract version.
 
 ### 3. Add a Small `goal_ops` Primitive
 
@@ -467,10 +467,9 @@ Deliverables:
 - Completed: audit `CHAT_HISTORY_COMPACTION_INSTRUCTION` against long-running task needs and Codex-style recovery-card behavior: objective, active plan/step state, artifact refs, source refs, validation evidence, open blockers, failed attempts, uncertainty, user check-in requirements, and next action.
 - Completed: add explicit prompt contract versioning (`recovery-card-v1`) to the generated compaction prompt and durable checkpoint/session metadata.
 - Completed: add explicit compaction trigger metadata for existing paths: `manual/api_requested`, `manual/agent_tool_requested`, and `auto/token_threshold`, plus estimated tokens, threshold, keep-recent count, compaction type, and prompt contract version.
+- Completed: keep compaction as ordinary chat/session behavior rather than introducing a goal-specific mode; default `compaction_type` is `auto`, and users should tune `compaction_token_threshold` before switching to `suggested` or `none`.
 - Make repeated compaction idempotent: summary plus newer turns should produce a fresher recovery state without accumulating stale narrative or losing the active thread.
-- Define automatic compaction policy for long-running mode: inherit ordinary chat settings, force suggested mode, auto at threshold, or pause for user approval.
-- Add validation for automatic post-turn compaction when `compaction_type: auto` crosses threshold, including that the summary preserves long-running task state and emits auditable trigger metadata. Initial metadata coverage now exists in `chat_history_compaction.py`; a full automatic post-turn scenario remains.
-- Decide whether long-running goals need a separate setting from ordinary chat, such as `goal_compaction_policy`, or whether `goal_ops` should pass an explicit policy per run.
+- Completed: add validation for automatic post-turn compaction when `compaction_type: auto` crosses threshold, including that the summary preserves long-running task state and emits auditable trigger metadata.
 
 Exit criteria:
 

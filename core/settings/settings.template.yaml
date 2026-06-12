@@ -74,8 +74,8 @@ settings:
     description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
     restart_required: false
   compaction_type:
-    value: suggested
-    description: "Chat history compaction policy: none, suggested, or auto."
+    value: auto
+    description: "Chat history compaction policy: auto, suggested, or none. Auto is recommended for long-running tasks; suggested or none may reduce reliability as context grows. To compact less often, increase compaction_token_threshold first."
     restart_required: false
   compaction_keep_recent:
     value: 8
@@ -83,7 +83,7 @@ settings:
     restart_required: false
   compaction_token_threshold:
     value: 80000
-    description: "Estimated chat-history token threshold for suggested or automatic compaction."
+    description: "Estimated chat-history token threshold for suggested or automatic compaction. Increase this first if automatic compaction happens too often."
     restart_required: false
   file_search_timeout_seconds:
     value: 10
