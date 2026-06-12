@@ -13,6 +13,8 @@ List authored automations in the current vault and run, start, inspect, cancel, 
 
 ## Operation Policy
 
+Always provide a high level summary and key details of the workflow (e.g. model and thinking level used in delegation) and get user confirmation before running.
+
 Use `run` by default. It is synchronous: the call waits for the workflow to finish and returns the final result. This is the right choice for normal workflows that are expected to complete quickly.
 
 Use `start` only for workflows that may take a long time or when the user explicitly wants the workflow to continue in the background. `start` returns immediately with a `task_id`; it does not mean the workflow has finished.

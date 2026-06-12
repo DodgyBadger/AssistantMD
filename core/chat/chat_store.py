@@ -44,6 +44,16 @@ class StoredChatMessage:
     message_json: str
     message: ModelMessage
 
+    @property
+    def tool_call_ids(self) -> tuple[str, ...]:
+        """Tool call IDs declared by this provider-native message."""
+        return _ordered_tool_call_ids_from_message(self.message)
+
+    @property
+    def tool_return_ids(self) -> tuple[str, ...]:
+        """Tool return IDs declared by this provider-native message."""
+        return _ordered_tool_return_ids_from_message(self.message)
+
 
 @dataclass(frozen=True)
 class StoredCompactionCheckpoint:
@@ -257,6 +267,164 @@ class ChatStore:
         finally:
             conn.close()
 
+    def fork_session(
+        self,
+        *,
+        source_session_id: str,
+        new_session_id: str,
+        vault_name: str,
+        through_sequence_index: int,
+        title: str | None,
+        metadata_update: dict[str, Any] | None = None,
+    ) -> int:
+        """Create a new session from one source session's raw message prefix."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            source = conn.execute(
+                """
+                SELECT metadata_json
+                FROM chat_sessions
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (source_session_id, vault_name),
+            ).fetchone()
+            if source is None:
+                raise ValueError(f"Chat session not found: {source_session_id}")
+
+            source_metadata: dict[str, Any] = {}
+            if source[0]:
+                try:
+                    parsed_metadata = json.loads(str(source[0]))
+                    if isinstance(parsed_metadata, dict):
+                        source_metadata = parsed_metadata
+                except Exception:
+                    source_metadata = {}
+            if metadata_update:
+                source_metadata.update(metadata_update)
+
+            source_rows = conn.execute(
+                """
+                SELECT sequence_index, direction, message_type, role, content_text, message_json
+                FROM chat_messages
+                WHERE session_id = ? AND vault_name = ?
+                ORDER BY sequence_index ASC
+                """,
+                (source_session_id, vault_name),
+            ).fetchall()
+            rows = _fork_prefix_rows(source_rows, through_sequence_index)
+            if not rows:
+                raise ValueError(
+                    f"No chat messages found through sequence {through_sequence_index}"
+                )
+
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (
+                    session_id,
+                    vault_name,
+                    title,
+                    metadata_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    new_session_id,
+                    vault_name,
+                    title or None,
+                    json.dumps(source_metadata, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+
+            copied_tool_call_ids: set[str] = set()
+            for new_sequence_index, row in enumerate(rows):
+                _sequence_index, direction, message_type, role, content_text, message_json = row
+                conn.execute(
+                    """
+                    INSERT INTO chat_messages (
+                        session_id,
+                        vault_name,
+                        sequence_index,
+                        direction,
+                        message_type,
+                        role,
+                        content_text,
+                        message_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_session_id,
+                        vault_name,
+                        new_sequence_index,
+                        direction,
+                        message_type,
+                        role,
+                        content_text,
+                        message_json,
+                    ),
+                )
+                copied_tool_call_ids.update(_tool_call_ids_from_json(str(message_json)))
+
+            if copied_tool_call_ids:
+                event_rows = conn.execute(
+                    """
+                    SELECT tool_call_id, tool_name, event_type, args_json, result_text,
+                           result_metadata_json, artifact_ref
+                    FROM chat_tool_events
+                    WHERE session_id = ? AND vault_name = ?
+                    ORDER BY id ASC
+                    """,
+                    (source_session_id, vault_name),
+                ).fetchall()
+                for event_row in event_rows:
+                    (
+                        tool_call_id,
+                        tool_name,
+                        event_type,
+                        args_json,
+                        result_text,
+                        result_metadata_json,
+                        artifact_ref,
+                    ) = event_row
+                    if str(tool_call_id) not in copied_tool_call_ids:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO chat_tool_events (
+                            session_id,
+                            vault_name,
+                            tool_call_id,
+                            tool_name,
+                            event_type,
+                            args_json,
+                            result_text,
+                            result_metadata_json,
+                            artifact_ref
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            new_session_id,
+                            vault_name,
+                            tool_call_id,
+                            tool_name,
+                            event_type,
+                            args_json,
+                            result_text,
+                            result_metadata_json,
+                            artifact_ref,
+                        ),
+                    )
+
+            self._touch_session(
+                conn,
+                session_id=new_session_id,
+                vault_name=vault_name,
+                advance_history_revision=True,
+            )
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
     def set_session_title(self, session_id: str, vault_name: str, title: str | None) -> None:
         """Set or clear the user-defined title for a session."""
         conn = self._connect()
@@ -453,11 +621,24 @@ class ChatStore:
         vault_name: str,
         *,
         limit: int | None = None,
+        committed_only: bool = False,
     ) -> list[StoredChatToolEvent]:
         """Return persisted structured tool events for one session."""
         conn = self._connect()
         try:
-            if limit is None:
+            committed_tool_call_ids = (
+                self._committed_tool_call_ids(
+                    conn,
+                    session_id=session_id,
+                    vault_name=vault_name,
+                )
+                if committed_only
+                else None
+            )
+            if committed_tool_call_ids == set():
+                return []
+
+            if limit is None or committed_tool_call_ids is not None:
                 rows = conn.execute(
                     """
                     SELECT tool_call_id, tool_name, event_type, created_at, args_json, result_text, result_metadata_json, artifact_ref
@@ -467,6 +648,13 @@ class ChatStore:
                     """,
                     (session_id, vault_name),
                 ).fetchall()
+                if committed_tool_call_ids is not None:
+                    rows = [
+                        row for row in rows
+                        if str(row[0]) in committed_tool_call_ids
+                    ]
+                if limit is not None:
+                    rows = rows[-limit:]
             else:
                 rows = conn.execute(
                     """
@@ -507,6 +695,27 @@ class ChatStore:
                 artifact_ref,
             ) in rows
         ]
+
+    def _committed_tool_call_ids(
+        self,
+        conn: Any,
+        *,
+        session_id: str,
+        vault_name: str,
+    ) -> set[str]:
+        rows = conn.execute(
+            """
+            SELECT message_json
+            FROM chat_messages
+            WHERE session_id = ? AND vault_name = ?
+            ORDER BY sequence_index ASC
+            """,
+            (session_id, vault_name),
+        ).fetchall()
+        ids: set[str] = set()
+        for (message_json,) in rows:
+            ids.update(_tool_call_ids_from_json(str(message_json)))
+        return ids
 
     def list_sessions(self, vault_name: str, *, limit: int | None = None) -> list[StoredChatSession]:
         """Return chat sessions for one vault ordered by latest activity descending."""
@@ -1155,3 +1364,65 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
         return role, content
 
     return role, ""
+
+
+def _fork_prefix_rows(rows: list[Any], through_sequence_index: int) -> list[Any]:
+    copied: list[Any] = []
+    pending_tool_call_ids: set[str] = set()
+    for row in rows:
+        sequence_index = int(row[0])
+        if sequence_index > through_sequence_index and not pending_tool_call_ids:
+            break
+        copied.append(row)
+        message_json = str(row[5])
+        pending_tool_call_ids.update(_tool_call_ids_from_json(message_json))
+        pending_tool_call_ids.difference_update(_tool_return_ids_from_json(message_json))
+    return copied
+
+
+def _tool_call_ids_from_json(message_json: str) -> set[str]:
+    try:
+        message = _MODEL_MESSAGE_ADAPTER.validate_json(message_json)
+    except Exception:
+        return set()
+    return _tool_call_ids_from_message(message)
+
+
+def _tool_call_ids_from_message(message: ModelMessage) -> set[str]:
+    return set(_ordered_tool_call_ids_from_message(message))
+
+
+def _ordered_tool_call_ids_from_message(message: ModelMessage) -> tuple[str, ...]:
+    ids: set[str] = set()
+    ordered_ids: list[str] = []
+    for part in getattr(message, "parts", ()) or ():
+        if isinstance(part, ToolCallPart):
+            tool_call_id = getattr(part, "tool_call_id", None)
+            if tool_call_id and str(tool_call_id) not in ids:
+                ids.add(str(tool_call_id))
+                ordered_ids.append(str(tool_call_id))
+    return tuple(ordered_ids)
+
+
+def _tool_return_ids_from_json(message_json: str) -> set[str]:
+    try:
+        message = _MODEL_MESSAGE_ADAPTER.validate_json(message_json)
+    except Exception:
+        return set()
+    return _tool_return_ids_from_message(message)
+
+
+def _tool_return_ids_from_message(message: ModelMessage) -> set[str]:
+    return set(_ordered_tool_return_ids_from_message(message))
+
+
+def _ordered_tool_return_ids_from_message(message: ModelMessage) -> tuple[str, ...]:
+    ids: set[str] = set()
+    ordered_ids: list[str] = []
+    for part in getattr(message, "parts", ()) or ():
+        if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+            tool_call_id = getattr(part, "tool_call_id", None)
+            if tool_call_id and str(tool_call_id) not in ids:
+                ids.add(str(tool_call_id))
+                ordered_ids.append(str(tool_call_id))
+    return tuple(ordered_ids)

@@ -305,6 +305,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert memory_preview.json().get("summary") == "Original session summary.", (
             "Session summary preview returns summary"
         )
+        assert memory_preview.json().get("vector_index", {}).get("expected_fields") == 4, (
+            "Session summary preview exposes expected vector index coverage"
+        )
 
         memory_update = self.call_api(
             f"/api/chat/sessions/{session_id}/summary?vault_name={vault.name}",
@@ -322,6 +325,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert memory_update.status_code == 200, "Session summary update endpoint succeeds"
         assert memory_update.json().get("summary") == "Edited session summary.", (
             "Session summary update replaces summary"
+        )
+        assert memory_update.json().get("vector_index", {}).get("indexed_fields") == 4, (
+            "Session summary update returns refreshed vector index coverage"
         )
 
         title_update = self.call_api(
@@ -416,6 +422,16 @@ class ApiEndpointsScenario(BaseScenario):
                     "tools": ["first_limited_tool", "second_limited_tool"],
                 },
             )
+            limited_stream = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    **chat_payload,
+                    "stream": True,
+                    "prompt": "This streaming run should hit the configured tool-call limit.",
+                    "tools": ["first_limited_tool", "second_limited_tool"],
+                },
+            )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
             reset_limit = self.call_api(
@@ -432,6 +448,11 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert limited_payload.get("details", {}).get("setting") == "chat_tool_calls_limit", (
             "Tool-call limit response identifies the controlling setting"
+        )
+        assert limited_stream.status_code == 200, "Streaming tool-call limit returns an SSE response"
+        assert '"event": "error"' in limited_stream.text, "Streaming tool-call limit emits error event"
+        assert "Tool-call limit reached" in limited_stream.text, (
+            "Streaming tool-call limit returns actionable error text"
         )
 
         image_path = vault / "tiny.png"

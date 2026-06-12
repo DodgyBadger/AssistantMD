@@ -5,6 +5,11 @@
 - Prefer adding or adjusting scenario files by feature area (for example, `validation/scenarios/integration/`).
 - Scenario names should be descriptive and behavior-oriented (for example, `context_manager_cache_modes.py`).
 
+## Integration Scenario Assertions
+- Never assert on non-deterministic LLM prose in integration scenarios.
+- Prefer deterministic artifacts: API responses, file contents, persisted state, validation events, tool calls, exact helper outputs, or stable contract fragments from static templates.
+- If a scenario needs to prove that an LLM-visible instruction exists, assert only the smallest stable contract terms rather than a full sentence that may be edited for tone.
+
 ## Validation-First Workflow
 
 Use the validation framework to shape feature design from day one, not as a final verification pass.

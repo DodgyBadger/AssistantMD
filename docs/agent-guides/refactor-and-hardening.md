@@ -12,7 +12,7 @@
 - Extract mixed-responsibility functions into focused helpers.
 - Centralize cross-cutting utilities when drift risk is high.
 - Improve error quality:
-  avoid broad catches, preserve diagnostics, and keep user-facing failures specific.
+  fail fast - avoid broad catches, preserve diagnostics, and keep user-facing failures specific.
 - Verify logging coverage for changed paths:
   start, decision, success, and failure milestones with structured context.
 - Confirm docs and validation still describe the post-refactor behavior.

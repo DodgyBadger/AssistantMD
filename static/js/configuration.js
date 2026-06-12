@@ -51,7 +51,10 @@
         settingDraftValue: '',
         modelEdit: null,
         modelDraft: null,
-        editingProviderName: null
+        providerEdit: null,
+        providerDraft: null,
+        secretEdit: null,
+        secretDraft: null
     };
 
     const SECRET_METADATA = {
@@ -100,21 +103,11 @@
 
         providerFeedback: null,
         providerList: null,
-        providerForm: null,
-        providerFormStatus: null,
-        providerNameInput: null,
-        providerApiKeyInput: null,
-        providerBaseUrlInput: null,
-        providerResetBtn: null,
-        providerSubmitBtn: null,
+        providerAddBtn: null,
 
         secretsList: null,
-        secretForm: null,
-        secretNameInput: null,
-        secretValueInput: null,
-        secretFormStatus: null,
-        secretSubmitBtn: null,
-        secretResetBtn: null,
+        secretFeedback: null,
+        secretAddBtn: null,
 
         miscFeedback: null,
         refreshSystemAuthoringBtn: null,
@@ -152,6 +145,30 @@
         warning: 'state-warning',
         error: 'state-error'
     };
+
+    function iconButton(iconName, label, extraClass = '', attrs = '') {
+        return `class="ui-icon-button is-compact ${extraClass}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attrs}`;
+    }
+
+    function iconSvg(iconName) {
+        const icon = window.AssistantMDIcons;
+        const svgByName = {
+            clean: icon.CLEAN_ICON_SVG,
+            database: icon.DATABASE_ICON_SVG,
+            edit: icon.EDIT_ICON_SVG,
+            refresh: icon.REFRESH_ICON_SVG,
+            save: icon.SAVE_ICON_SVG,
+            trash: icon.TRASH_ICON_SVG,
+            x: icon.X_ICON_SVG,
+            circleX: icon.CIRCLE_X_ICON_SVG,
+        };
+        return svgByName[iconName] || icon.SETTINGS_ICON_SVG;
+    }
+
+    function setIconButtonLabel(button, label) {
+        window.AssistantMDIcons.setIconButtonLabel(button, label);
+    }
+
     function cacheElements() {
         elements.activityLogViewer = document.getElementById('activity-log-viewer');
         elements.refreshActivityLogBtn = document.getElementById('refresh-activity-log');
@@ -178,21 +195,11 @@
 
         elements.providerFeedback = document.getElementById('provider-feedback');
         elements.providerList = document.getElementById('provider-list');
-        elements.providerForm = document.getElementById('provider-form');
-        elements.providerFormStatus = document.getElementById('provider-form-status');
-        elements.providerNameInput = document.getElementById('provider-name');
-        elements.providerApiKeyInput = document.getElementById('provider-api-key');
-        elements.providerBaseUrlInput = document.getElementById('provider-base-url');
-        elements.providerResetBtn = document.getElementById('provider-reset');
-        elements.providerSubmitBtn = document.getElementById('provider-submit');
+        elements.providerAddBtn = document.getElementById('provider-add-row');
 
         elements.secretsList = document.getElementById('secrets-list');
-        elements.secretForm = document.getElementById('secret-form');
-        elements.secretNameInput = document.getElementById('secret-name');
-        elements.secretValueInput = document.getElementById('secret-value');
-        elements.secretFormStatus = document.getElementById('secret-form-status');
-        elements.secretSubmitBtn = document.getElementById('secret-submit');
-        elements.secretResetBtn = document.getElementById('secret-reset');
+        elements.secretFeedback = document.getElementById('secret-feedback');
+        elements.secretAddBtn = document.getElementById('secret-add-row');
 
         elements.miscFeedback = document.getElementById('misc-feedback');
         elements.refreshSystemAuthoringBtn = document.getElementById('refresh-system-authoring');
@@ -242,13 +249,13 @@
         elements.modelList?.addEventListener('input', handleModelInputChange);
         elements.modelList?.addEventListener('change', handleModelInputChange);
 
+        elements.providerAddBtn?.addEventListener('click', startNewProvider);
         elements.providerList?.addEventListener('click', handleProviderTableClick);
-        elements.providerForm?.addEventListener('submit', handleProviderSubmit);
-        elements.providerResetBtn?.addEventListener('click', resetProviderForm);
+        elements.providerList?.addEventListener('input', handleProviderInputChange);
 
+        elements.secretAddBtn?.addEventListener('click', startNewSecret);
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
-        elements.secretForm?.addEventListener('submit', handleSecretFormSubmit);
-        elements.secretResetBtn?.addEventListener('click', () => resetSecretForm());
+        elements.secretsList?.addEventListener('input', handleSecretInputChange);
         elements.refreshSystemAuthoringBtn?.addEventListener('click', handleRefreshSystemAuthoring);
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
         elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
@@ -290,11 +297,11 @@
 
         state.isLoadingLog = true;
         const refreshBtn = elements.refreshActivityLogBtn;
-        const prevLabel = refreshBtn ? refreshBtn.textContent : '';
+        const prevLabel = refreshBtn ? (refreshBtn.dataset.iconLabel || refreshBtn.title || 'Refresh Activity Log') : '';
 
         if (refreshBtn) {
             refreshBtn.disabled = true;
-            refreshBtn.textContent = 'Refreshing…';
+            setIconButtonLabel(refreshBtn, 'Refreshing activity log...');
         }
 
         elements.activityLogViewer.textContent = 'Loading system log…';
@@ -314,7 +321,7 @@
         } finally {
             if (refreshBtn) {
                 refreshBtn.disabled = false;
-                refreshBtn.textContent = prevLabel;
+                setIconButtonLabel(refreshBtn, prevLabel);
             }
             state.isLoadingLog = false;
         }
@@ -387,9 +394,7 @@
                     </div>
                     <div class="flex items-center gap-4">
                         <div class="text-sm text-txt-primary font-mono bg-app-elevated px-3 py-2 rounded border border-border-primary break-words inline-block max-w-xs">${escapeHtml(setting.value ?? '')}</div>
-                        <button data-action="edit-setting" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors shrink-0">
-                            Edit
-                        </button>
+                        <button data-action="edit-setting" ${iconButton('edit', 'Edit setting', 'is-primary shrink-0')}>${iconSvg('edit')}</button>
                     </div>
                 </div>
             </div>
@@ -415,12 +420,8 @@
                         <p class="text-xs text-txt-secondary">Values are stored as plain text; lists/objects use JSON.</p>
                     </div>
                     <div class="flex justify-end gap-2">
-                        <button data-action="cancel-setting" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Cancel
-                        </button>
-                        <button data-action="save-setting" class="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Save
-                        </button>
+                        <button data-action="cancel-setting" ${iconButton('circleX', 'Cancel setting edit')}>${iconSvg('circleX')}</button>
+                        <button data-action="save-setting" ${iconButton('save', 'Save setting', 'is-primary')}>${iconSvg('save')}</button>
                     </div>
                 </div>
             </div>
@@ -527,6 +528,13 @@
 
             const data = await response.json();
             state.providers = Array.isArray(data) ? data : [];
+            if (state.providerEdit && state.providerEdit.mode === 'existing') {
+                const stillExists = state.providers.some(provider => provider.name === state.providerEdit.key);
+                if (!stillExists) {
+                    state.providerEdit = null;
+                    state.providerDraft = null;
+                }
+            }
 
             renderProviders();
             populateProviderOptions();
@@ -543,19 +551,33 @@
     function renderProviders(emptyOnError = false) {
         if (!elements.providerList) return;
 
+        const cards = [];
+        const editing = state.providerEdit;
+        const draft = state.providerDraft || {};
+
+        if (editing && editing.mode === 'new') {
+            cards.push(renderProviderEditCard(draft, { isNew: true }));
+        }
+
         if (!state.providers.length) {
             const message = emptyOnError
                 ? 'Unable to load providers.'
                 : 'No custom providers configured.';
-            elements.providerList.innerHTML = `
+            cards.push(`
                 <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     ${escapeHtml(message)}
                 </div>
-            `;
+            `);
+            elements.providerList.innerHTML = cards.join('');
+            focusProviderInput();
             return;
         }
 
-        const cards = state.providers.map((provider) => {
+        state.providers.forEach((provider) => {
+            if (editing && editing.mode === 'existing' && editing.key === provider.name) {
+                cards.push(renderProviderEditCard(draft, { isNew: false }));
+                return;
+            }
             const editable = provider.user_editable === true;
 
             const apiKeyDisplay = provider.api_key
@@ -584,8 +606,8 @@
 
             const actions = editable
                 ? `
-                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Edit</button>
-                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Delete</button>
+                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" ${iconButton('edit', 'Edit provider', 'is-primary')}>${iconSvg('edit')}</button>
+                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" ${iconButton('trash', 'Delete provider', 'is-danger')}>${iconSvg('trash')}</button>
                 `
                 : '';
 
@@ -593,7 +615,7 @@
                 ? '<div class="text-xs text-txt-secondary mt-0.5">Built-in provider</div>'
                 : '';
 
-            return `
+            cards.push(`
                 <div class="provider-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-provider-row="${escapeHtml(provider.name)}" style="max-width: 1400px;">
                     <div class="space-y-4">
                         <div class="flex items-center justify-between gap-4">
@@ -617,14 +639,63 @@
                         </div>
                     </div>
                 </div>
-            `;
-        }).join('');
+            `);
+        });
 
-        elements.providerList.innerHTML = cards;
+        elements.providerList.innerHTML = cards.join('');
+        focusProviderInput();
     }
 
     function populateProviderOptions() {
         // provider options are built per-row during render; nothing to do here.
+    }
+
+    function renderProviderEditCard(draft, { isNew }) {
+        const rowKey = isNew ? '__new' : (state.providerEdit?.key || draft.name || '');
+        const nameReadonly = isNew ? '' : 'readonly';
+        const nameHelp = isNew
+            ? 'Provider names identify custom endpoints used by models.'
+            : 'Provider names are identities and cannot be renamed here.';
+        return `
+            <div class="provider-card rounded-lg border border-border-primary bg-app-card editing-highlight px-5 py-4 shadow-sm" data-provider-row="${escapeHtml(rowKey)}" data-mode="edit" style="max-width: 1400px;">
+                <div class="space-y-4">
+                    <div class="grid gap-4 md:grid-cols-3">
+                        <div>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Provider Name</label>
+                            <input data-provider-field="name" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="e.g. local-ollama" value="${escapeHtml(draft.name || '')}" ${nameReadonly} />
+                            <p class="text-xs text-txt-secondary mt-1">${nameHelp}</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">API Key Secret</label>
+                            <input data-provider-field="api_key" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="SECRET_NAME (optional)" value="${escapeHtml(draft.api_key || '')}" />
+                            <p class="text-xs text-txt-secondary mt-1">Enter the secret name; set the value in Secrets.</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Base URL Secret</label>
+                            <input data-provider-field="base_url" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="SECRET_NAME (optional)" value="${escapeHtml(draft.base_url || '')}" />
+                            <p class="text-xs text-txt-secondary mt-1">Store base URLs as secrets; enter the secret name here.</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button data-action="cancel-provider" ${iconButton('circleX', 'Cancel provider edit')}>${iconSvg('circleX')}</button>
+                        <button data-action="save-provider" ${iconButton('save', 'Save provider', 'is-primary')}>${iconSvg('save')}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function focusProviderInput(field = 'name') {
+        if (!state.providerEdit) return;
+        requestAnimationFrame(() => {
+            const editableName = state.providerEdit?.mode === 'new';
+            const targetField = editableName ? field : (field === 'name' ? 'api_key' : field);
+            const el = elements.providerList?.querySelector(`[data-provider-row][data-mode="edit"] [data-provider-field="${targetField}"]`);
+            if (el instanceof HTMLInputElement) {
+                el.focus();
+                el.select();
+            }
+        });
     }
 
     async function loadModels() {
@@ -1013,28 +1084,29 @@
             ? model.capabilities.join(', ')
             : 'text';
 
-                const actions = editable
-                    ? `
-                        <button data-action="edit" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Edit
-                        </button>
-                        <button data-action="delete" data-model="${escapeHtml(model.name)}" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Delete
-                        </button>
-                    `
-                    : `<span class="inline-block px-2 py-0.5 text-xs text-txt-secondary bg-app-elevated rounded border border-border-primary">Read-only</span>`;
+        const actions = editable
+            ? `
+                <button data-action="edit" data-model="${escapeHtml(model.name)}" ${iconButton('edit', 'Edit model', 'is-primary')}>${iconSvg('edit')}</button>
+                <button data-action="delete" data-model="${escapeHtml(model.name)}" ${iconButton('trash', 'Delete model', 'is-danger')}>${iconSvg('trash')}</button>
+            `
+            : `<span class="inline-block px-2 py-0.5 text-xs text-txt-secondary bg-app-elevated rounded border border-border-primary">Read-only</span>`;
 
         return `
             <div class="model-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-row="${escapeHtml(model.name)}" data-mode="view" style="max-width: 1400px;">
-                <div class="grid gap-4 md:grid-cols-[minmax(180px,1fr)_minmax(400px,2.5fr)_minmax(140px,auto)] md:items-center">
-                    <div>
-                        <div class="font-semibold text-txt-primary text-sm">${escapeHtml(model.name)}</div>
-                        <div class="flex items-center gap-2 mt-1">
-                            <div class="w-fit">${availabilityBadge}</div>
+                <div class="space-y-4">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <div class="font-semibold text-txt-primary text-sm">${escapeHtml(model.name)}</div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <div class="w-fit">${availabilityBadge}</div>
+                            </div>
+                            ${reasonLine}
                         </div>
-                        ${reasonLine}
+                        <div class="flex gap-2 shrink-0">
+                            ${actions}
+                        </div>
                     </div>
-                    <div class="flex gap-6 items-start">
+                    <div class="flex gap-6 items-start flex-wrap">
                         <div>
                             <div class="text-xs font-medium text-txt-secondary mb-1">Provider</div>
                             <div class="text-sm text-txt-primary">${escapeHtml(model.provider)}</div>
@@ -1047,9 +1119,6 @@
                             <div class="text-xs font-medium text-txt-secondary mb-1">Capabilities</div>
                             <div class="text-xs text-txt-primary bg-app-elevated px-2 py-1 rounded border border-border-primary inline-block max-w-xs break-words">${escapeHtml(capabilities)}</div>
                         </div>
-                    </div>
-                    <div class="flex gap-2 justify-start md:justify-end shrink-0">
-                        ${actions}
                     </div>
                 </div>
             </div>
@@ -1094,12 +1163,8 @@
                         <p class="text-xs text-txt-secondary mt-1">Comma-separated values. Example: <code>text, vision</code>.</p>
                     </div>
                     <div class="flex justify-end gap-2">
-                        <button data-action="cancel-model" class="px-4 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Cancel
-                        </button>
-                        <button data-action="save-model" class="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
-                            Save
-                        </button>
+                        <button data-action="cancel-model" ${iconButton('circleX', 'Cancel model edit')}>${iconSvg('circleX')}</button>
+                        <button data-action="save-model" ${iconButton('save', 'Save model', 'is-primary')}>${iconSvg('save')}</button>
                     </div>
                 </div>
             </div>
@@ -1334,103 +1399,103 @@ async function saveModelRow(rowKey) {
             startProviderEdit(providerName);
         } else if (action === 'delete') {
             await deleteProvider(providerName);
+        } else if (action === 'cancel-provider') {
+            cancelProviderEdit();
+        } else if (action === 'save-provider') {
+            await saveProviderRow(actionButton);
         }
     }
 
+    function handleProviderInputChange(event) {
+        const target = event.target;
+        if (!state.providerEdit || !(target instanceof HTMLInputElement) || !target.dataset.providerField) {
+            return;
+        }
+        if (!state.providerDraft) {
+            state.providerDraft = {};
+        }
+        state.providerDraft[target.dataset.providerField] = target.value;
+    }
+
+    function startNewProvider() {
+        if (state.providerEdit) {
+            setStatus(elements.providerFeedback, 'Finish editing the current provider before adding another.', 'warning');
+            return;
+        }
+        state.providerEdit = { mode: 'new', key: '__new' };
+        state.providerDraft = {
+            name: '',
+            api_key: '',
+            base_url: ''
+        };
+        renderProviders();
+        setStatus(elements.providerFeedback, 'Enter details for the new provider and click Save.', 'info');
+        focusProviderInput('name');
+    }
+
     function startProviderEdit(providerName) {
+        if (state.providerEdit) {
+            setStatus(elements.providerFeedback, 'Finish editing the current provider before editing another.', 'warning');
+            return;
+        }
         const provider = state.providers.find(p => p.name === providerName);
         if (!provider) return;
 
         if (provider.user_editable === false) {
-            setStatus(elements.providerFormStatus, 'Built-in providers cannot be edited.', 'warning');
+            setStatus(elements.providerFeedback, 'Built-in providers cannot be edited.', 'warning');
             return;
         }
 
-        elements.providerNameInput.value = provider.name;
-        elements.providerApiKeyInput.value = provider.api_key || '';
-        elements.providerApiKeyInput.placeholder = 'SECRET_NAME (optional)';
-        elements.providerBaseUrlInput.value = provider.base_url || '';
-        elements.providerBaseUrlInput.placeholder = 'SECRET_NAME (optional)';
-        elements.providerForm.dataset.currentApiKeySecret = provider.api_key || '';
-        elements.providerForm.dataset.currentBaseUrl = provider.base_url || '';
-
-        state.editingProviderName = provider.name;
-        elements.providerSubmitBtn.textContent = 'Update Provider';
-        setStatus(elements.providerFormStatus, `Editing ${provider.name}`, 'info');
+        state.providerEdit = { mode: 'existing', key: provider.name };
+        state.providerDraft = {
+            name: provider.name,
+            api_key: provider.api_key || '',
+            base_url: provider.base_url || ''
+        };
+        renderProviders();
+        setStatus(elements.providerFeedback, `Editing '${provider.name}'.`, 'info');
+        focusProviderInput('api_key');
     }
 
-    function resetProviderForm() {
-        if (elements.providerForm) {
-            elements.providerForm.reset();
-            delete elements.providerForm.dataset.currentApiKeySecret;
-            delete elements.providerForm.dataset.currentBaseUrl;
+    function cancelProviderEdit(showStatus = true) {
+        state.providerEdit = null;
+        state.providerDraft = null;
+        renderProviders();
+        if (showStatus) {
+            setStatus(elements.providerFeedback, 'Editing cancelled.', 'info');
         }
-        if (elements.providerApiKeyInput) {
-            elements.providerApiKeyInput.placeholder = 'SECRET_NAME (optional)';
-        }
-        if (elements.providerBaseUrlInput) {
-            elements.providerBaseUrlInput.placeholder = 'SECRET_NAME (optional)';
-        }
-        state.editingProviderName = null;
-        elements.providerSubmitBtn.textContent = 'Save Provider';
-        setStatus(elements.providerFormStatus, '', 'info');
     }
 
-    async function handleProviderSubmit(event) {
-        event.preventDefault();
-        if (state.isSavingProvider || !elements.providerForm) return;
+    async function saveProviderRow(button) {
+        if (state.isSavingProvider || !state.providerEdit || !state.providerDraft) return;
 
-        const name = elements.providerNameInput.value.trim();
-        const apiKeyInput = (elements.providerApiKeyInput.value || '').trim();
-        const baseUrlInput = (elements.providerBaseUrlInput.value || '').trim();
-        const currentApiKeySecret = elements.providerForm?.dataset.currentApiKeySecret ?? '';
-        const currentBaseUrl = elements.providerForm?.dataset.currentBaseUrl ?? '';
+        const draft = state.providerDraft;
+        const name = (draft.name || '').trim();
+        const apiKeyInput = (draft.api_key || '').trim();
+        const baseUrlInput = (draft.base_url || '').trim();
 
         if (!name) {
-            setStatus(elements.providerFormStatus, 'Provider name is required.', 'error');
+            setStatus(elements.providerFeedback, 'Provider name is required.', 'error');
             return;
         }
 
         if (baseUrlInput && baseUrlInput.includes('://')) {
-            setStatus(elements.providerFormStatus, 'Base URL must reference a secret name; store the actual URL via the Secrets form.', 'error');
+            setStatus(elements.providerFeedback, 'Base URL must reference a secret name; store the actual URL via the Secrets form.', 'error');
             return;
         }
 
         state.isSavingProvider = true;
-        elements.providerSubmitBtn.disabled = true;
-        elements.providerSubmitBtn.textContent = 'Saving…';
-        setStatus(elements.providerFormStatus, 'Saving provider…', 'info');
+        if (button) {
+            button.disabled = true;
+            setIconButtonLabel(button, 'Saving provider...');
+        }
+        setStatus(elements.providerFeedback, 'Saving provider…', 'info');
 
         try {
-        const payload = {};
-        let hasChanges = false;
-
-        if (apiKeyInput !== currentApiKeySecret) {
-            if (apiKeyInput) {
-                const normalizedSecret = normalizeSecretName(apiKeyInput);
-                payload.api_key = normalizedSecret;
-            } else {
-                payload.api_key = '';
-            }
-            hasChanges = true;
-        }
-
-        if (baseUrlInput !== currentBaseUrl) {
-            if (baseUrlInput) {
-                payload.base_url = normalizeSecretName(baseUrlInput);
-            } else {
-                payload.base_url = '';
-            }
-            hasChanges = true;
-        }
-
-        if (!hasChanges) {
-            setStatus(elements.providerFormStatus, 'No provider changes to save.', 'info');
-            elements.providerSubmitBtn.disabled = false;
-            elements.providerSubmitBtn.textContent = state.editingProviderName ? 'Update Provider' : 'Save Provider';
-            state.isSavingProvider = false;
-            return;
-        }
+            const payload = {
+                api_key: apiKeyInput ? normalizeSecretName(apiKeyInput) : '',
+                base_url: baseUrlInput ? normalizeSecretName(baseUrlInput) : ''
+            };
 
             const response = await fetch(`api/system/providers/${encodeURIComponent(name)}`, {
                 method: 'PUT',
@@ -1444,18 +1509,20 @@ async function saveModelRow(rowKey) {
             }
 
             const providerResult = await response.json();
-            resetProviderForm();
+            cancelProviderEdit(false);
             await loadProviders();
             await loadModels(); // provider availability can update model availability
             await loadSecrets();
             await notifyConfigChanged();
             const resultMessage = withRestartNotice(`Saved provider '${name}'.`, providerResult);
-            setStatus(elements.providerFormStatus, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
+            setStatus(elements.providerFeedback, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
         } catch (error) {
-            setStatus(elements.providerFormStatus, `Failed to save provider: ${error.message}`, 'error');
+            setStatus(elements.providerFeedback, `Failed to save provider: ${error.message}`, 'error');
         } finally {
-            elements.providerSubmitBtn.disabled = false;
-            elements.providerSubmitBtn.textContent = state.editingProviderName ? 'Update Provider' : 'Save Provider';
+            if (button) {
+                button.disabled = false;
+                setIconButtonLabel(button, 'Save provider');
+            }
             state.isSavingProvider = false;
         }
     }
@@ -1481,8 +1548,8 @@ async function saveModelRow(rowKey) {
             await loadModels();
             await loadSecrets();
             await notifyConfigChanged();
-            if (state.editingProviderName === providerName) {
-                resetProviderForm();
+            if (state.providerEdit?.key === providerName) {
+                cancelProviderEdit(false);
             }
             const resultMessage = withRestartNotice(`Removed provider '${providerName}'.`, result);
             setStatus(elements.providerFeedback, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
@@ -1501,6 +1568,13 @@ async function saveModelRow(rowKey) {
 
             const data = await response.json();
             state.secrets = Array.isArray(data) ? data : [];
+            if (state.secretEdit && state.secretEdit.mode === 'existing') {
+                const stillExists = state.secrets.some(secret => secret.name === state.secretEdit.key);
+                if (!stillExists) {
+                    state.secretEdit = null;
+                    state.secretDraft = null;
+                }
+            }
             renderSecretsTable();
             updateImportOcrAvailability();
         } catch (error) {
@@ -1517,56 +1591,115 @@ async function saveModelRow(rowKey) {
     function renderSecretsTable() {
         if (!elements.secretsList) return;
 
+        const cards = [];
+        const editing = state.secretEdit;
+        const draft = state.secretDraft || {};
+
+        if (editing && editing.mode === 'new') {
+            cards.push(renderSecretEditCard(draft, { isNew: true }));
+        }
+
         if (!state.secrets.length) {
-            elements.secretsList.innerHTML = `
+            cards.push(`
                 <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     No secrets registered yet.
                 </div>
-            `;
+            `);
+            elements.secretsList.innerHTML = cards.join('');
+            focusSecretInput();
             return;
         }
 
-        const cards = state.secrets
-            .map((entry) => {
-                const metadata = SECRET_METADATA[entry.name] || null;
-                const label = metadata?.label || entry.name;
-                const hasValue = Boolean(entry.has_value);
-                const stored = Boolean(entry.stored);
-                const statusBadge = hasValue
-                    ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-success border">Set</span>'
-                    : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-error border">Not set</span>';
+        state.secrets.forEach((entry) => {
+            if (editing && editing.mode === 'existing' && editing.key === entry.name) {
+                cards.push(renderSecretEditCard(draft, { isNew: false }));
+                return;
+            }
+            const metadata = SECRET_METADATA[entry.name] || null;
+            const label = metadata?.label || entry.name;
+            const hasValue = Boolean(entry.has_value);
+            const stored = Boolean(entry.stored);
+            const statusBadge = hasValue
+                ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-success border">Set</span>'
+                : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium pill-error border">Not set</span>';
 
-                const description = metadata?.description
-                    ? `<div class="text-xs text-txt-secondary mt-1">${escapeHtml(metadata.description)}</div>`
-                    : '';
+            const description = metadata?.description
+                ? `<div class="text-xs text-txt-secondary mt-1">${escapeHtml(metadata.description)}</div>`
+                : '';
 
-                const deleteButton = stored
-                    ? '<button data-secret-action="delete" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Delete</button>'
-                    : '';
+            const deleteButton = stored
+                ? `<button data-secret-action="delete" ${iconButton('trash', 'Delete secret', 'is-danger')}>${iconSvg('trash')}</button>`
+                : '';
 
-                return `
-                    <div class="secret-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-secret="${escapeHtml(entry.name)}" style="max-width: 1400px;">
-                        <div class="grid gap-4 md:grid-cols-[minmax(200px,2fr)_minmax(140px,auto)] md:items-center">
-                            <div>
-                                <div class="flex items-center gap-2">
+            cards.push(`
+                <div class="secret-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-secret="${escapeHtml(entry.name)}" style="max-width: 1400px;">
+                    <div class="space-y-4">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
                                     <div class="font-medium text-txt-primary text-sm">${escapeHtml(label)}</div>
                                     <div class="w-fit">${statusBadge}</div>
                                 </div>
-                                <div class="font-mono text-xs text-txt-secondary mt-0.5">${escapeHtml(entry.name)}</div>
+                                <div class="font-mono text-xs text-txt-secondary mt-0.5 break-all">${escapeHtml(entry.name)}</div>
                                 ${description}
                             </div>
-                            <div class="flex items-center gap-2 justify-start md:justify-end shrink-0 flex-wrap">
-                                <button data-secret-action="set" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Update</button>
-                                <button data-secret-action="clear" class="px-3 py-1.5 text-sm rounded-md border state-surface-error focus:outline-none focus:ring-2 focus:ring-accent transition-colors">Clear</button>
+                            <div class="flex items-center gap-2 justify-end shrink-0 flex-wrap">
+                                <button data-secret-action="set" ${iconButton('edit', 'Update secret', 'is-primary')}>${iconSvg('edit')}</button>
+                                <button data-secret-action="clear" ${iconButton('x', 'Clear secret', 'is-danger')}>${iconSvg('x')}</button>
                                 ${deleteButton}
                             </div>
                         </div>
                     </div>
-                `;
-            }).join('');
+                </div>
+            `);
+        });
 
-        elements.secretsList.innerHTML = cards;
+        elements.secretsList.innerHTML = cards.join('');
+        focusSecretInput();
         updateImportOcrAvailability();
+    }
+
+    function renderSecretEditCard(draft, { isNew }) {
+        const rowKey = isNew ? '__new' : (state.secretEdit?.key || draft.name || '');
+        const nameReadonly = isNew ? '' : 'readonly';
+        const nameHelp = isNew
+            ? 'Use uppercase letters, numbers, or underscores.'
+            : 'Secret names are identities and cannot be renamed here.';
+        return `
+            <div class="secret-card rounded-lg border border-border-primary bg-app-card editing-highlight px-5 py-4 shadow-sm" data-secret="${escapeHtml(rowKey)}" data-mode="edit" style="max-width: 1400px;">
+                <div class="space-y-4">
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Secret Name</label>
+                            <input data-secret-field="name" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary font-mono text-sm transition-colors" placeholder="e.g. LOCAL_MODEL_TOKEN" value="${escapeHtml(draft.name || '')}" ${nameReadonly} />
+                            <p class="text-xs text-txt-secondary mt-1">${nameHelp}</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Secret Value</label>
+                            <input data-secret-field="value" type="password" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="Enter the credential" value="${escapeHtml(draft.value || '')}" />
+                            <p class="text-xs text-txt-secondary mt-1">Values are stored as plain text inside <code>system/secrets.yaml</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button data-secret-action="cancel-secret" ${iconButton('circleX', 'Cancel secret edit')}>${iconSvg('circleX')}</button>
+                        <button data-secret-action="save-secret" ${iconButton('save', 'Save secret', 'is-primary')}>${iconSvg('save')}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function focusSecretInput(field = 'name') {
+        if (!state.secretEdit) return;
+        requestAnimationFrame(() => {
+            const editableName = state.secretEdit?.mode === 'new';
+            const targetField = editableName ? field : (field === 'name' ? 'value' : field);
+            const el = elements.secretsList?.querySelector(`[data-secret][data-mode="edit"] [data-secret-field="${targetField}"]`);
+            if (el instanceof HTMLInputElement) {
+                el.focus();
+                el.select();
+            }
+        });
     }
 
     function updateImportOcrAvailability() {
@@ -1618,7 +1751,7 @@ async function saveModelRow(rowKey) {
         const action = actionBtn.dataset.secretAction;
 
         if (action === 'set') {
-            beginSecretEdit(name);
+            startSecretEdit(name);
         } else if (action === 'clear') {
             if (!window.confirm(`Clear the stored value for ${name}?`)) {
                 return;
@@ -1626,9 +1759,9 @@ async function saveModelRow(rowKey) {
             try {
                 const result = await updateSecretValue(name, '');
                 const resultMessage = withRestartNotice(`Cleared secret '${name}'.`, result);
-                setStatus(elements.secretFormStatus, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
+                setStatus(elements.secretFeedback, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
             } catch (error) {
-                setStatus(elements.secretFormStatus, `Failed to clear secret: ${error.message}`, 'error');
+                setStatus(elements.secretFeedback, `Failed to clear secret: ${error.message}`, 'error');
             }
         } else if (action === 'delete') {
             if (!window.confirm(`Delete secret '${name}' from the system? This cannot be undone.`)) {
@@ -1637,76 +1770,111 @@ async function saveModelRow(rowKey) {
             try {
                 const result = await deleteSecret(name);
                 const resultMessage = withRestartNotice(`Deleted secret '${name}'.`, result);
-                setStatus(elements.secretFormStatus, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
+                setStatus(elements.secretFeedback, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
             } catch (error) {
-                setStatus(elements.secretFormStatus, `Failed to delete secret: ${error.message}`, 'error');
+                setStatus(elements.secretFeedback, `Failed to delete secret: ${error.message}`, 'error');
             }
+        } else if (action === 'cancel-secret') {
+            cancelSecretEdit();
+        } else if (action === 'save-secret') {
+            await saveSecretRow(actionBtn);
         }
     }
 
-    function beginSecretEdit(name) {
-        if (!elements.secretNameInput || !elements.secretValueInput) return;
-        elements.secretNameInput.value = name;
-        elements.secretValueInput.value = '';
-        setStatus(elements.secretFormStatus, `Updating ${name}. Enter a new value and save.`, 'info');
-        requestAnimationFrame(() => {
-            elements.secretValueInput?.focus();
-        });
+    function handleSecretInputChange(event) {
+        const target = event.target;
+        if (!state.secretEdit || !(target instanceof HTMLInputElement) || !target.dataset.secretField) {
+            return;
+        }
+        if (!state.secretDraft) {
+            state.secretDraft = {};
+        }
+        state.secretDraft[target.dataset.secretField] = target.value;
     }
 
-    async function handleSecretFormSubmit(event) {
-        event.preventDefault();
-        if (state.isSavingSecret || !elements.secretNameInput || !elements.secretValueInput) return;
+    function startNewSecret() {
+        if (state.secretEdit) {
+            setStatus(elements.secretFeedback, 'Finish editing the current secret before adding another.', 'warning');
+            return;
+        }
+        state.secretEdit = { mode: 'new', key: '__new' };
+        state.secretDraft = {
+            name: '',
+            value: ''
+        };
+        renderSecretsTable();
+        setStatus(elements.secretFeedback, 'Enter details for the new secret and click Save.', 'info');
+        focusSecretInput('name');
+    }
 
-        let name = (elements.secretNameInput.value || '').trim();
-        const value = elements.secretValueInput.value;
+    function startSecretEdit(name) {
+        if (state.secretEdit) {
+            setStatus(elements.secretFeedback, 'Finish editing the current secret before editing another.', 'warning');
+            return;
+        }
+        if (!state.secrets.some(secret => secret.name === name)) return;
+        state.secretEdit = { mode: 'existing', key: name };
+        state.secretDraft = {
+            name,
+            value: ''
+        };
+        renderSecretsTable();
+        setStatus(elements.secretFeedback, `Updating '${name}'. Enter a new value and save.`, 'info');
+        focusSecretInput('value');
+    }
+
+    function cancelSecretEdit(showStatus = true) {
+        state.secretEdit = null;
+        state.secretDraft = null;
+        renderSecretsTable();
+        if (showStatus) {
+            setStatus(elements.secretFeedback, 'Editing cancelled.', 'info');
+        }
+    }
+
+    async function saveSecretRow(button) {
+        if (state.isSavingSecret || !state.secretEdit || !state.secretDraft) return;
+
+        let name = (state.secretDraft.name || '').trim();
+        const value = state.secretDraft.value || '';
 
         if (!name) {
-            setStatus(elements.secretFormStatus, 'Secret name is required.', 'error');
+            setStatus(elements.secretFeedback, 'Secret name is required.', 'error');
             return;
         }
         if (!value) {
-            setStatus(elements.secretFormStatus, 'Secret value is required.', 'error');
+            setStatus(elements.secretFeedback, 'Secret value is required.', 'error');
             return;
         }
 
         const normalized = normalizeSecretName(name);
         if (!normalized) {
-            setStatus(elements.secretFormStatus, 'Secret name must contain letters, numbers, or underscores.', 'error');
+            setStatus(elements.secretFeedback, 'Secret name must contain letters, numbers, or underscores.', 'error');
             return;
         }
-        elements.secretNameInput.value = normalized;
         name = normalized;
+        state.secretDraft.name = normalized;
 
         state.isSavingSecret = true;
-        if (elements.secretSubmitBtn) {
-            elements.secretSubmitBtn.disabled = true;
-            elements.secretSubmitBtn.textContent = 'Saving…';
+        if (button) {
+            button.disabled = true;
+            setIconButtonLabel(button, 'Saving secret...');
         }
-        setStatus(elements.secretFormStatus, `Saving ${name}…`, 'info');
+        setStatus(elements.secretFeedback, `Saving ${name}…`, 'info');
 
         try {
             const result = await updateSecretValue(name, value);
-            resetSecretForm(false);
+            cancelSecretEdit(false);
             const resultMessage = withRestartNotice(`Saved secret '${name}'.`, result);
-            setStatus(elements.secretFormStatus, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
+            setStatus(elements.secretFeedback, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
         } catch (error) {
-            setStatus(elements.secretFormStatus, `Failed to save secret: ${error.message}`, 'error');
+            setStatus(elements.secretFeedback, `Failed to save secret: ${error.message}`, 'error');
         } finally {
-            if (elements.secretSubmitBtn) {
-                elements.secretSubmitBtn.disabled = false;
-                elements.secretSubmitBtn.textContent = 'Save Secret';
+            if (button) {
+                button.disabled = false;
+                setIconButtonLabel(button, 'Save secret');
             }
             state.isSavingSecret = false;
-        }
-    }
-
-    function resetSecretForm(clearStatus = true) {
-        if (elements.secretForm) {
-            elements.secretForm.reset();
-        }
-        if (clearStatus) {
-            setStatus(elements.secretFormStatus, '', 'info');
         }
     }
 
@@ -1795,8 +1963,8 @@ async function saveModelRow(rowKey) {
         if (!confirm(`Delete ${ageLabel} in vault "${vaultName}"? This cannot be undone.`)) return;
 
         btn.disabled = true;
-        const originalLabel = btn.textContent;
-        btn.textContent = 'Purging…';
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Purge Sessions';
+        setIconButtonLabel(btn, 'Purging sessions...');
         setStatus(elements.purgeSessionsFeedback, 'Purging sessions…', 'info');
 
         try {
@@ -1817,7 +1985,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.purgeSessionsFeedback, `Failed to purge sessions: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
         }
     }
 
@@ -1826,9 +1994,9 @@ async function saveModelRow(rowKey) {
 
         state.isPurgingCache = true;
         const button = elements.purgeExpiredCacheBtn;
-        const originalLabel = button.textContent;
+        const originalLabel = button.dataset.iconLabel || button.title || 'Purge Expired Cache';
         button.disabled = true;
-        button.textContent = 'Purging…';
+        setIconButtonLabel(button, 'Purging expired cache...');
         setStatus(elements.miscFeedback, 'Purging expired cache artifacts…', 'info');
 
         try {
@@ -1851,7 +2019,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.miscFeedback, `Failed to purge cache: ${error.message}`, 'error');
         } finally {
             button.disabled = false;
-            button.textContent = originalLabel;
+            setIconButtonLabel(button, originalLabel);
             state.isPurgingCache = false;
         }
     }
@@ -1869,9 +2037,9 @@ async function saveModelRow(rowKey) {
 
         state.isRefreshingSystemAuthoring = true;
         const button = elements.refreshSystemAuthoringBtn;
-        const originalLabel = button.textContent;
+        const originalLabel = button.dataset.iconLabel || button.title || 'Refresh System Scripts';
         button.disabled = true;
-        button.textContent = 'Refreshing…';
+        setIconButtonLabel(button, 'Refreshing system scripts...');
         setStatus(elements.refreshSystemAuthoringFeedback, 'Refreshing system authoring scripts…', 'info');
 
         try {
@@ -1899,7 +2067,7 @@ async function saveModelRow(rowKey) {
             );
         } finally {
             button.disabled = false;
-            button.textContent = originalLabel;
+            setIconButtonLabel(button, originalLabel);
             state.isRefreshingSystemAuthoring = false;
         }
     }
@@ -1909,9 +2077,9 @@ async function saveModelRow(rowKey) {
 
         state.isCleaningVaultState = true;
         const button = elements.cleanupVaultStateBtn;
-        const originalLabel = button.textContent;
+        const originalLabel = button.dataset.iconLabel || button.title || 'Clean Up Vault State';
         button.disabled = true;
-        button.textContent = 'Cleaning…';
+        setIconButtonLabel(button, 'Cleaning vault state...');
         setStatus(elements.cleanupVaultStateFeedback, 'Cleaning expired vault-state artifacts…', 'info');
 
         try {
@@ -1939,7 +2107,7 @@ async function saveModelRow(rowKey) {
             );
         } finally {
             button.disabled = false;
-            button.textContent = originalLabel;
+            setIconButtonLabel(button, originalLabel);
             state.isCleaningVaultState = false;
         }
     }
@@ -1949,10 +2117,10 @@ async function saveModelRow(rowKey) {
 
         state.isLoadingSystemJobs = true;
         const button = elements.refreshSystemJobsBtn;
-        const originalLabel = button ? button.textContent : '';
+        const originalLabel = button ? (button.dataset.iconLabel || button.title || 'Refresh System Jobs') : '';
         if (button) {
             button.disabled = true;
-            button.textContent = 'Refreshing…';
+            setIconButtonLabel(button, 'Refreshing system jobs...');
         }
 
         try {
@@ -1970,7 +2138,7 @@ async function saveModelRow(rowKey) {
         } finally {
             if (button) {
                 button.disabled = false;
-                button.textContent = originalLabel;
+                setIconButtonLabel(button, originalLabel);
             }
             state.isLoadingSystemJobs = false;
         }
@@ -2028,10 +2196,10 @@ async function saveModelRow(rowKey) {
 
         state.isLoadingSystemMigrations = true;
         const button = elements.refreshSystemMigrationsBtn;
-        const originalLabel = button ? button.textContent : '';
+        const originalLabel = button ? (button.dataset.iconLabel || button.title || 'Refresh Database Migrations') : '';
         if (button) {
             button.disabled = true;
-            button.textContent = 'Refreshing…';
+            setIconButtonLabel(button, 'Refreshing database migrations...');
         }
 
         try {
@@ -2052,7 +2220,7 @@ async function saveModelRow(rowKey) {
         } finally {
             if (button) {
                 button.disabled = false;
-                button.textContent = originalLabel;
+                setIconButtonLabel(button, originalLabel);
             }
             state.isLoadingSystemMigrations = false;
         }
@@ -2066,7 +2234,7 @@ async function saveModelRow(rowKey) {
         state.isRunningSystemMigrations = true;
         const button = elements.runSystemMigrationsBtn;
         button.disabled = true;
-        button.textContent = 'Running…';
+        setIconButtonLabel(button, 'Running database migrations...');
         if (elements.refreshSystemMigrationsBtn) {
             elements.refreshSystemMigrationsBtn.disabled = true;
         }
@@ -2175,9 +2343,8 @@ async function saveModelRow(rowKey) {
         const pendingCount = Number(payload?.pending_count ?? 0);
         const hasPending = pendingCount > 0;
         button.disabled = !hasPending;
-        button.textContent = hasPending ? `Run ${pendingCount} Migration${pendingCount === 1 ? '' : 's'}` : 'Up to date';
-        button.classList.remove('btn-secondary', 'btn-warning');
-        button.classList.add(hasPending ? 'btn-warning' : 'btn-secondary');
+        setIconButtonLabel(button, hasPending ? `Run ${pendingCount} Migration${pendingCount === 1 ? '' : 's'}` : 'Database migrations up to date');
+        button.classList.toggle('is-primary', hasPending);
     }
 
     function formatDateTime(value) {
@@ -2318,9 +2485,9 @@ async function saveModelRow(rowKey) {
     async function handleImportVaultRescan() {
         if (!elements.importRefreshVaultsBtn || state.isLoadingImportVaults) return;
         const btn = elements.importRefreshVaultsBtn;
-        const originalLabel = btn.textContent;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Refresh Vaults';
         btn.disabled = true;
-        btn.textContent = 'Rescanning…';
+        setIconButtonLabel(btn, 'Rescanning vaults...');
         setStatus(elements.importStatus, 'Rescanning vaults…', 'info');
         try {
             const response = await fetch('api/vaults/rescan', {
@@ -2339,7 +2506,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.importStatus, `Rescan failed: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
         }
     }
 
@@ -2511,9 +2678,9 @@ async function saveModelRow(rowKey) {
         state.importUrlResult = null;
         renderImportResults();
         const btn = elements.importScanBtn;
-        const originalLabel = btn.textContent;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Import Files';
         btn.disabled = true;
-        btn.textContent = queueOnly ? 'Queueing…' : 'Importing…';
+        setIconButtonLabel(btn, queueOnly ? 'Queueing import jobs...' : 'Importing files...');
         setStatus(
             elements.importStatus,
             queueOnly ? 'Queueing import jobs…' : 'Scanning import folder and processing…',
@@ -2540,7 +2707,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.importStatus, `Import failed: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
             state.isScanningImport = false;
         }
     }
@@ -2560,9 +2727,9 @@ async function saveModelRow(rowKey) {
         renderImportResults();
         state.isImportingUrl = true;
         const btn = elements.importUrlSubmit;
-        const originalLabel = btn.textContent;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Import URL';
         btn.disabled = true;
-        btn.textContent = 'Ingesting…';
+        setIconButtonLabel(btn, 'Ingesting URL...');
         setStatus(elements.importStatus, 'Ingesting URL…', 'info');
 
         try {
@@ -2581,7 +2748,7 @@ async function saveModelRow(rowKey) {
             setStatus(elements.importStatus, `Import failed: ${error.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalLabel;
+            setIconButtonLabel(btn, originalLabel);
             state.isImportingUrl = false;
         }
     }

@@ -28,6 +28,8 @@ Sections:
 Runtime-relevant general settings include:
 
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
+- `delegate_tool_calls_limit`: maximum tool calls allowed inside one `delegate` child-agent run; `0` disables the limit.
+- `delegate_timeout_seconds`: maximum seconds allowed for one `delegate` child-agent run; `0` disables the timeout.
 - `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the governor timeout.
 - `max_concurrent_workflows`: maximum workflows allowed to run at once across all vaults; `0` disables the global concurrency limit.
 - `vault_state_enabled`: enable vault-state manifest refresh and change-feed maintenance.

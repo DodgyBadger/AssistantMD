@@ -67,6 +67,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check root markdown allowlist
+        run: |
+          allowed='^(AGENTS|README|RELEASE_NOTES|THIRD_PARTY_NOTICES)\.md$'
+          unexpected="$(find . -maxdepth 1 -type f -name '*.md' -printf '%f\n' | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected root markdown files:"
+            echo "$unexpected"
+            echo
+            echo "Move planning/design notes into docs/ or remove them before merge."
+            exit 1
+          fi
+
       - name: Prepare container-style paths
         run: |
           if [ -e /app ]; then

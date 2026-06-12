@@ -80,6 +80,7 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                 ModelRequest(parts=[UserPromptPart(content="Draft the wetlands donor report.")]),
             ],
         )
+        chat_store.ensure_session("riparian-grant-session", vault_name)
         chat_store.add_messages(
             "unsummarized-session",
             vault_name,
@@ -335,6 +336,43 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                 ctx,
                 operation="search_sessions",
             )
+            chat_store.add_messages(
+                "index-failure-session",
+                vault_name,
+                [
+                    ModelRequest(
+                        parts=[
+                            UserPromptPart(
+                                content="Help me draft an update that will fail indexing."
+                            )
+                        ]
+                    ),
+                    ModelResponse(
+                        parts=[TextPart(content="This summary should not be persisted.")]
+                    ),
+                ],
+            )
+            session_ops_module.VectorService = lambda: VectorService(
+                embedding_model_overrides={
+                    "embeddings": FailingEmbeddingModel()
+                }
+            )
+            index_failure_ctx = SimpleNamespace(
+                deps=SimpleNamespace(
+                    session_id="index-failure-session",
+                    vault_name=vault_name,
+                    message_history=(),
+                )
+            )
+            indexing_failure_error = await _call_exception(
+                tool,
+                index_failure_ctx,
+                operation="summarize_session",
+            )
+            index_failure_summary = store.get_session_summary(
+                vault_name=vault_name,
+                session_id="index-failure-session",
+            )
         finally:
             session_ops_module.VectorService = original_vector_service
             session_ops_module.create_agent = original_create_agent
@@ -358,6 +396,10 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "natural_language_search": natural_language_search,
             "all_limit_error": all_limit_error,
             "no_query_search_error": no_query_search_error,
+            "indexing_failure_error": indexing_failure_error,
+            "index_failure_summary": index_failure_summary.to_dict()
+            if index_failure_summary
+            else None,
         }
         (self.artifacts_dir / "session_ops_session_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
@@ -379,6 +421,20 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             extracted["session_summary"]["summary"],
             "Drafted a donor update about wetland restoration.",
             "summarize_session should persist extracted summary",
+        )
+        self.soft_assert_equal(
+            extracted["session_summary"]["title"],
+            "conservation fundraising",
+            "summarize_session should use extracted domain as title when session has no custom title",
+        )
+        extracted_session = chat_store.get_session(
+            session_id="extract-session",
+            vault_name=vault_name,
+        )
+        self.soft_assert_equal(
+            extracted_session.title if extracted_session else None,
+            "conservation fundraising",
+            "summarize_session should save generated domain title to the chat session",
         )
         self.soft_assert_equal(
             extracted["indexed_fields"],
@@ -536,6 +592,14 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "plain natural-language query" in no_query_search_error,
             "default search mode should require a query",
         )
+        self.soft_assert(
+            "Failed to index session summary fields" in indexing_failure_error,
+            "summarize_session should fail when vector indexing fails",
+        )
+        self.soft_assert(
+            index_failure_summary is None,
+            "summarize_session should not leave a partial summary when vector indexing fails",
+        )
         self.teardown_scenario()
         self.assert_no_failures()
 
@@ -553,6 +617,14 @@ async def _call_model_retry(tool, ctx, **kwargs) -> str:
     except ModelRetry as exc:
         return str(exc)
     raise AssertionError("Expected session_ops call to raise ModelRetry")
+
+
+async def _call_exception(tool, ctx, **kwargs) -> str:
+    try:
+        await tool.function(ctx, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)
+    raise AssertionError("Expected session_ops call to fail")
 
 
 def _insert_chat_mutation_rows(
@@ -662,6 +734,28 @@ class SemanticProbeEmbeddingModel(EmbeddingModel):
             provider_name=self.system,
             usage=RequestUsage(input_tokens=sum(len(text.split()) for text in input_list)),
         )
+
+
+class FailingEmbeddingModel(EmbeddingModel):
+    """Embedding model that simulates provider/indexing failure."""
+
+    @property
+    def model_name(self) -> str:
+        return "failing-embedding"
+
+    @property
+    def system(self) -> str:
+        return "test"
+
+    async def embed(
+        self,
+        inputs: str | Sequence[str],
+        *,
+        input_type: EmbedInputType,
+        settings: dict[str, Any] | None = None,
+    ) -> EmbeddingResult:
+        del inputs, input_type, settings
+        raise RuntimeError("simulated vector indexing failure")
 
 
 def _semantic_probe_vector(text: str, dimensions: int) -> list[float]:

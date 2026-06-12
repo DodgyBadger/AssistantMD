@@ -6,6 +6,7 @@ AssistantMD is a single-user, markdown-first agent system with a Python backend,
 This codebase will outlive any single contributor.  
 Every shortcut becomes future maintenance cost.  
 Fight entropy and leave the codebase better than you found it.
+Fail fast so we can see and then fix bugs.
 
 ## Always True
 - Python version: `3.13`.

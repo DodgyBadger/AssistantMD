@@ -1,24 +1,12 @@
-// Shared SVG icon for copy buttons
-const COPY_ICON_SVG = `
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <rect x="6.5" y="6.5" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.4"></rect>
-        <rect x="4.5" y="4.5" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.85"></rect>
-    </svg>
-`.trim();
+const {
+    SESSION_SUMMARY_ICON_SVG,
+} = window.AssistantMDIcons;
 
-const TYPING_DOTS_HTML = `
-    <span class="typing-dot"></span>
-    <span class="typing-dot"></span>
-    <span class="typing-dot"></span>
-`.trim();
-
-const STATUS_EMOJIS = {
-    thinking: '💬',
-    tools: '🛠️',
-    done: '✅',
-    error: '⚠️'
-};
-const CHAT_EMPTY_STATE_MESSAGE = 'Start a conversation...';
+const {
+    escapeHtml,
+    truncateText,
+    formatShortDate,
+} = window.AssistantMDUtils;
 
 // State management
 const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
@@ -59,8 +47,6 @@ const chatComposeState = {
     toolMenuOpen: false
 };
 
-let mathTypesetQueue = Promise.resolve();
-
 // DOM elements - Chat
 const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
@@ -70,8 +56,8 @@ const chatElements = {
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
     thinkingSelector: document.getElementById('thinking-selector'),
-    sessionSelector: document.getElementById('session-selector'),
-    sessionSummaryTrigger: document.getElementById('session-summary-trigger'),
+    newSessionTrigger: document.getElementById('new-session-trigger'),
+    sessionBrowserTrigger: document.getElementById('session-browser-trigger'),
     toolDropdown: document.getElementById('tool-dropdown'),
     toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
     toolDropdownMenu: document.getElementById('tool-dropdown-menu'),
@@ -89,11 +75,6 @@ const chatElements = {
     composer: document.getElementById('chat-composer'),
     compactionTrack: document.getElementById('chat-compaction-track'),
     compactionFill: document.getElementById('chat-compaction-fill'),
-    sessionTitleRow: document.getElementById('session-title-row'),
-    sessionTitleInput: document.getElementById('session-title-input'),
-    sessionTitleSave: document.getElementById('session-title-save'),
-    sessionExportBtn: document.getElementById('session-export-btn'),
-    sessionDeleteBtn: document.getElementById('session-delete-btn'),
 };
 
 // DOM elements - Dashboard
@@ -113,6 +94,103 @@ const configElements = {
     statusMessages: document.getElementById('config-status-messages'),
     configTab: document.getElementById('configuration-tab')
 };
+
+let sessionControls;
+
+const sessionSummary = window.SessionSummary.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        renderSessionSelector: () => sessionControls.renderSelector(),
+        fetchSessions,
+    },
+});
+
+const workspacePicker = window.WorkspacePicker.create({
+    state,
+    elements: chatElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        fetchSessions,
+        addChatErrorMessage,
+    },
+});
+
+sessionControls = window.SessionControls.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    sessionSummary,
+    callbacks: {
+        loadSession,
+        clearSession,
+        clearPendingAttachments,
+        renderChatEmptyState,
+        syncChatControlLocks,
+        updateStatus,
+    },
+});
+
+const chatRendering = window.ChatRendering.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        scrollChatToBottom,
+        fetchSessions,
+        loadSession,
+        openWorkspacePicker: () => workspacePicker.openModal(),
+        openChatSettings: () => sessionControls.openSessionBrowserModal(),
+    },
+});
+
+const vaultActivity = window.VaultActivity.create({
+    state,
+    elements: dashElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        formatChatSessionLabel: (session) => sessionControls.formatOptionLabel(session),
+    },
+});
+
+let dashboardView;
+
+const workflowActions = window.WorkflowActions.create({
+    state,
+    elements: dashElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        fetchMetadata,
+        populateSelectors,
+        fetchSystemStatus,
+        fetchWorkflowTasks,
+        displaySystemStatus,
+        isTerminalTaskStatus,
+        activeWorkflowTasks: () => dashboardView.activeWorkflowTasks(),
+        selectedVault: () => chatElements.vaultSelector?.value || '',
+    },
+});
+
+dashboardView = window.DashboardView.create({
+    state,
+    elements: dashElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        renderVaultActivityResult: vaultActivity.renderResult,
+        loadVaultActivity: vaultActivity.loadActivity,
+        fetchWorkflowTasks,
+        isTerminalTaskStatus,
+        openWorkflowFileEditor: workflowActions.openFileEditor,
+        toggleWorkflowEnabled: workflowActions.toggleWorkflowEnabled,
+        executeWorkflow: workflowActions.executeWorkflow,
+        stopWorkflow: workflowActions.stopWorkflow,
+        stopAllWorkflows: workflowActions.stopAllWorkflows,
+    },
+});
 
 function isChatNearBottom(element, threshold = 64) {
     if (!element) return true;
@@ -274,43 +352,18 @@ function handleChatScroll() {
     state.shouldAutoScroll = isChatNearBottom(container);
 }
 
-function isChatPlaceholderNode(node) {
-    if (!node || !(node instanceof HTMLElement)) return false;
-    return node.classList.contains('text-center') &&
-        node.classList.contains('text-txt-secondary') &&
-        node.classList.contains('text-sm');
+function renderChatEmptyState(message) {
+    chatRendering.renderEmptyState(message);
 }
 
-function clearChatPlaceholderIfPresent() {
-    const container = chatElements.chatMessages;
-    if (!container) return;
-    if (container.children.length !== 1) return;
-    if (!isChatPlaceholderNode(container.children[0])) return;
-    container.innerHTML = '';
-}
-
-function appendChatMessageNode(node, { forceScroll = true } = {}) {
-    const container = chatElements.chatMessages;
-    if (!container || !node) return;
-    clearChatPlaceholderIfPresent();
-    container.appendChild(node);
-    scrollChatToBottom(forceScroll);
-}
-
-function renderChatEmptyState(message = CHAT_EMPTY_STATE_MESSAGE) {
-    const container = chatElements.chatMessages;
-    if (!container) return;
-    container.innerHTML = '';
-    const placeholder = document.createElement('div');
-    placeholder.className = 'text-center text-txt-secondary text-sm';
-    placeholder.textContent = message;
-    container.appendChild(placeholder);
-    state.shouldAutoScroll = true;
+function refreshChatEmptyState() {
+    chatRendering.refreshEmptyState();
 }
 
 function addChatErrorMessage(errorText) {
-    addMessage('error', `Error: ${errorText || 'Streaming failed'}`);
+    chatRendering.addErrorMessage(errorText);
 }
+
 
 function formatAttachmentSize(sizeBytes) {
     if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return '0 B';
@@ -450,17 +503,51 @@ function syncSendButtonState() {
     if (!btn) return;
 
     btn.classList.toggle('chat-stop-btn', state.isLoading);
-    btn.textContent = state.isLoading
-        ? (state.isCancellingChat ? 'Stopping...' : 'Stop')
-        : 'Send';
+    btn.innerHTML = state.isLoading
+        ? window.AssistantMDIcons.STOP_ICON_SVG
+        : window.AssistantMDIcons.SEND_HORIZONTAL_ICON_SVG;
     btn.title = state.isLoading
-        ? 'Stop the active response'
+        ? (state.isCancellingChat ? 'Stopping active response' : 'Stop the active response')
         : 'Send message';
     btn.setAttribute(
         'aria-label',
-        state.isLoading ? 'Stop the active response' : 'Send message'
+        state.isLoading
+            ? (state.isCancellingChat ? 'Stopping active response' : 'Stop the active response')
+            : 'Send message'
     );
     btn.disabled = state.isLoading && state.isCancellingChat;
+}
+
+function parseSseEvent(rawEvent) {
+    if (!rawEvent) return null;
+
+    const lines = rawEvent.split('\n');
+    const dataLines = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data:')) {
+            dataLines.push(trimmed.slice(5).trim());
+        }
+    }
+
+    if (!dataLines.length) {
+        try {
+            return JSON.parse(rawEvent);
+        } catch {
+            return null;
+        }
+    }
+
+    const dataPayload = dataLines.join('\n');
+    if (!dataPayload) return null;
+
+    try {
+        return JSON.parse(dataPayload);
+    } catch (error) {
+        console.warn('Failed to parse SSE chunk:', dataPayload, error);
+        return null;
+    }
 }
 
 function syncChatControlLocks() {
@@ -478,250 +565,14 @@ function syncChatControlLocks() {
     if (chatElements.thinkingSelector) {
         chatElements.thinkingSelector.disabled = state.isLoading;
     }
-    if (chatElements.sessionSelector) {
-        chatElements.sessionSelector.disabled = state.isLoading;
+    if (chatElements.sessionBrowserTrigger) {
+        chatElements.sessionBrowserTrigger.disabled = state.isLoading;
     }
-    if (chatElements.sessionTitleInput) {
-        chatElements.sessionTitleInput.disabled = state.isLoading;
+    if (chatElements.newSessionTrigger) {
+        chatElements.newSessionTrigger.disabled = state.isLoading;
     }
-    if (chatElements.sessionTitleSave) {
-        chatElements.sessionTitleSave.disabled = state.isLoading;
-    }
-    if (chatElements.sessionExportBtn) {
-        chatElements.sessionExportBtn.disabled = state.isLoading || !state.sessionId;
-    }
-    if (chatElements.sessionDeleteBtn) {
-        chatElements.sessionDeleteBtn.disabled = state.isLoading || !state.sessionId;
-    }
-    syncWorkspaceControlState();
+    workspacePicker.syncControls();
     syncSendButtonState();
-}
-
-function syncWorkspaceControlState() {
-    const input = chatElements.workspacePathInput;
-    if (!input) return;
-
-    const hasSession = Boolean(state.sessionId);
-    const hasWorkspace = Boolean(input.value.trim());
-    const locked = state.isLoading || (hasSession && hasWorkspace && !state.isWorkspaceUnlocked);
-
-    input.disabled = locked;
-    input.title = locked
-        ? 'Workspace is locked for this session. Unlock to edit.'
-        : '';
-
-    if (chatElements.workspacePickerBtn) {
-        chatElements.workspacePickerBtn.disabled = state.isLoading || (locked && !state.isWorkspaceUnlocked);
-    }
-    if (chatElements.workspaceUnlockBtn) {
-        chatElements.workspaceUnlockBtn.classList.toggle('hidden', !(hasSession && hasWorkspace && locked));
-        chatElements.workspaceUnlockBtn.disabled = state.isLoading;
-    }
-}
-
-function currentWorkspacePath() {
-    return (chatElements.workspacePathInput?.value || '').trim();
-}
-
-async function saveWorkspacePath() {
-    const input = chatElements.workspacePathInput;
-    const vault = chatElements.vaultSelector?.value || '';
-    const sessionId = state.sessionId || '';
-    if (!input || !vault || !sessionId || state.isLoading) return;
-
-    const path = currentWorkspacePath();
-    try {
-        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/workspace`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault_name: vault, path }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const payload = await response.json().catch(() => null);
-        input.value = payload?.path || '';
-        state.isWorkspaceUnlocked = false;
-        await fetchSessions(vault, sessionId);
-    } catch (error) {
-        console.error('Failed to save workspace path:', error);
-        addChatErrorMessage(`Workspace not saved: ${error.message}`);
-    } finally {
-        syncWorkspaceControlState();
-    }
-}
-
-function unlockWorkspacePath() {
-    if (!chatElements.workspacePathInput || state.isLoading) return;
-    const confirmed = window.confirm(
-        'Unlock workspace editing for this session? Future turns will use the updated workspace path.'
-    );
-    if (!confirmed) return;
-    state.isWorkspaceUnlocked = true;
-    syncWorkspaceControlState();
-    chatElements.workspacePathInput.focus();
-}
-
-function openWorkspacePickerModal() {
-    if (!chatElements.workspacePathInput) return;
-    const vault = chatElements.vaultSelector?.value || '';
-    if (!vault) {
-        alert('Select a vault before choosing a workspace.');
-        return;
-    }
-    closeWorkspacePickerModal();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'workspace-picker-modal';
-    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    overlay.innerHTML = `
-        <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="workspace-picker-modal-title">
-            <div class="app-modal-header flex-none">
-                <div class="app-modal-title-block">
-                    <h2 id="workspace-picker-modal-title" class="text-lg font-semibold text-txt-primary">Workspace</h2>
-                    <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(chatElements.vaultSelector?.value || 'No vault selected')}</p>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workspace-picker-close>Close</button>
-                </div>
-            </div>
-            <div id="workspace-picker-body" class="p-4 flex-1 overflow-y-auto">
-                <div class="text-sm text-txt-secondary">Loading folders...</div>
-            </div>
-        </section>
-    `;
-
-    overlay.addEventListener('click', async (event) => {
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        if (event.target === overlay || event.target.closest('[data-workspace-picker-close]')) {
-            closeWorkspacePickerModal();
-            return;
-        }
-        const toggle = target.closest('[data-workspace-toggle]');
-        if (toggle instanceof HTMLElement) {
-            await toggleWorkspaceTreeNode(toggle);
-            return;
-        }
-        const selectPath = target.closest('[data-workspace-select]')?.getAttribute('data-workspace-select');
-        if (selectPath !== null && selectPath !== undefined) {
-            chatElements.workspacePathInput.value = selectPath;
-            state.isWorkspaceUnlocked = true;
-            syncWorkspaceControlState();
-            await saveWorkspacePath();
-            closeWorkspacePickerModal();
-        }
-    });
-
-    document.body.appendChild(overlay);
-    loadWorkspaceDirectory(overlay).catch((error) => {
-        const body = overlay.querySelector('#workspace-picker-body');
-        if (body) {
-            body.innerHTML = `<p class="state-error">Unable to load folders: ${escapeHtml(error.message)}</p>`;
-        }
-    });
-}
-
-function closeWorkspacePickerModal() {
-    document.getElementById('workspace-picker-modal')?.remove();
-}
-
-async function loadWorkspaceDirectory(modal, path) {
-    const body = modal.querySelector('#workspace-picker-body');
-    const vault = chatElements.vaultSelector?.value || '';
-    if (!body || !vault) return;
-
-    body.innerHTML = '<div class="text-sm text-txt-secondary">Loading folders...</div>';
-    const payload = await fetchWorkspaceDirectories(path || '');
-    const directories = Array.isArray(payload.directories) ? payload.directories : [];
-    const selectedPath = currentWorkspacePath();
-
-    body.innerHTML = `
-        <div class="space-y-3">
-            <div class="p-3 rounded border border-border-primary bg-app-elevated">
-                <div class="text-xs uppercase text-txt-secondary">Selected workspace</div>
-                <div class="mt-1 text-sm cell-mono text-txt-primary">${escapeHtml(selectedPath || 'No workspace')}</div>
-            </div>
-            <div class="workspace-tree" role="tree">
-                ${directories.length ? directories.map((directory) => renderWorkspaceDirectoryRow(directory, 0)).join('') : '<p class="text-sm text-txt-secondary">No folders available.</p>'}
-            </div>
-        </div>
-    `;
-}
-
-async function fetchWorkspaceDirectories(path) {
-    const vault = chatElements.vaultSelector?.value || '';
-    const params = new URLSearchParams();
-    if (path) params.set('path', path);
-    const suffix = params.toString() ? `?${params.toString()}` : '';
-    const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/directories${suffix}`);
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${response.status}`);
-    }
-    return response.json();
-}
-
-async function toggleWorkspaceTreeNode(toggle) {
-    const row = toggle.closest('[data-workspace-row]');
-    if (!(row instanceof HTMLElement)) return;
-
-    const path = row.getAttribute('data-workspace-row') || '';
-    const children = row.querySelector(':scope > [data-workspace-children]');
-    if (!(children instanceof HTMLElement)) return;
-
-    const expanded = toggle.getAttribute('aria-expanded') === 'true';
-    if (expanded) {
-        toggle.setAttribute('aria-expanded', 'false');
-        children.classList.add('hidden');
-        return;
-    }
-
-    toggle.setAttribute('aria-expanded', 'true');
-    children.classList.remove('hidden');
-    if (children.dataset.loaded === 'true') return;
-
-    children.innerHTML = '<div class="py-1 text-xs text-txt-secondary">Loading...</div>';
-    try {
-        const payload = await fetchWorkspaceDirectories(path);
-        const directories = Array.isArray(payload.directories) ? payload.directories : [];
-        const depth = Number.parseInt(row.getAttribute('data-workspace-depth') || '0', 10) + 1;
-        children.innerHTML = directories.length
-            ? directories.map((directory) => renderWorkspaceDirectoryRow(directory, depth)).join('')
-            : '<div class="py-1 text-xs text-txt-secondary">No child folders.</div>';
-        children.dataset.loaded = 'true';
-    } catch (error) {
-        children.innerHTML = `<div class="py-1 text-xs state-error">Unable to load folders: ${escapeHtml(error.message)}</div>`;
-    }
-}
-
-function renderWorkspaceDirectoryRow(directory, depth) {
-    const path = String(directory.path || '');
-    const name = String(directory.name || path || 'Folder');
-    const indent = Math.min(Math.max(depth, 0) * 1.25, 5);
-    return `
-        <div data-workspace-row="${escapeHtml(path)}" data-workspace-depth="${depth}">
-            <div class="workspace-tree-row" role="treeitem" style="padding-left: ${indent}rem;">
-                ${directory.has_children
-                    ? `<button type="button" class="workspace-tree-toggle" data-workspace-toggle aria-expanded="false" aria-label="Expand ${escapeHtml(name)}">
-                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <path d="M7.25 4.75 12.75 10l-5.5 5.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                    </button>`
-                    : '<span class="workspace-tree-spacer" aria-hidden="true"></span>'}
-                <button type="button" class="workspace-tree-select" data-workspace-select="${escapeHtml(path)}">
-                    <svg class="workspace-tree-folder-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path d="M2.75 5.75A1.75 1.75 0 0 1 4.5 4h3.1c.46 0 .9.18 1.22.5l1.05 1.05c.23.23.54.35.86.35h5.77A1.75 1.75 0 0 1 18.25 7.65v6.6A1.75 1.75 0 0 1 16.5 16H4.5a1.75 1.75 0 0 1-1.75-1.75v-8.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" />
-                    </svg>
-                    <span class="workspace-tree-label min-w-0">
-                        <span class="workspace-tree-name">${escapeHtml(name)}</span>
-                    </span>
-                </button>
-            </div>
-            <div class="workspace-tree-children hidden" data-workspace-children></div>
-        </div>
-    `;
 }
 
 function populateThinkingSelector() {
@@ -762,453 +613,11 @@ function setToolMenuOpen(open) {
     }
 }
 
-function formatSessionOptionLabel(session) {
-    if (!session || !session.session_id) {
-        return 'New session';
-    }
-    const title = String(session.title || '').trim();
-    const rawDate = session.last_activity_at || session.created_at || '';
-    const parsed = rawDate ? new Date(rawDate.replace(' ', 'T')) : null;
-    const timeStr = parsed && !Number.isNaN(parsed.getTime())
-        ? parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-        : rawDate;
-    const base = title || session.session_id;
-    const summaryMarker = session.has_summary ? ' 🧠' : '';
-    return timeStr ? `${base}${summaryMarker} (last activity: ${timeStr})` : `${base}${summaryMarker}`;
-}
-
-function sessionSummaryCacheKey(vault, sessionId) {
-    return `${vault || ''}::${sessionId || ''}`;
-}
-
-function selectedSessionWithSummary() {
-    const sessionId = chatElements.sessionSelector?.value || '';
-    if (!sessionId) return null;
-    const session = state.sessions.find((item) => item.session_id === sessionId);
-    return session?.has_summary ? session : null;
-}
-
-function renderSessionSelector() {
-    if (!chatElements.sessionSelector) return;
-
-    const previousValue = chatElements.sessionSelector.value;
-    chatElements.sessionSelector.innerHTML = '<option value="">New session</option>';
-
-    state.sessions.forEach((session) => {
-        const option = document.createElement('option');
-        option.value = session.session_id;
-        option.textContent = formatSessionOptionLabel(session);
-        chatElements.sessionSelector.appendChild(option);
-    });
-
-    const activeValue = state.sessionId || previousValue || '';
-    if (activeValue && state.sessions.some((session) => session.session_id === activeValue)) {
-        chatElements.sessionSelector.value = activeValue;
-    } else {
-        chatElements.sessionSelector.value = '';
-    }
-    updateSessionSummaryTrigger();
-}
-
-function updateSessionSummaryTrigger() {
-    if (!chatElements.sessionSummaryTrigger) return;
-    const session = selectedSessionWithSummary();
-    if (!session) {
-        chatElements.sessionSummaryTrigger.classList.remove('is-visible');
-        chatElements.sessionSummaryTrigger.setAttribute('aria-hidden', 'true');
-        return;
-    }
-    const vault = chatElements.vaultSelector?.value || '';
-    const cached = state.sessionSummaryPreviewCache[sessionSummaryCacheKey(vault, session.session_id)];
-    chatElements.sessionSummaryTrigger.classList.add('is-visible');
-    chatElements.sessionSummaryTrigger.removeAttribute('aria-hidden');
-    chatElements.sessionSummaryTrigger.title = cached?.summary
-        ? truncateText(cached.summary, 700)
-        : 'Show session summary';
-    if (!cached) {
-        warmSelectedSessionSummaryPreview();
-    }
-}
-
-async function fetchSelectedSessionSummaryPreview() {
-    const session = selectedSessionWithSummary();
-    if (!session) return null;
-
-    const vault = chatElements.vaultSelector?.value || '';
-    const cacheKey = sessionSummaryCacheKey(vault, session.session_id);
-    const cached = state.sessionSummaryPreviewCache[cacheKey];
-    if (cached) {
-        return cached;
-    }
-    if (state.sessionSummaryPreviewInFlight[cacheKey]) {
-        return state.sessionSummaryPreviewInFlight[cacheKey];
-    }
-
-    state.sessionSummaryPreviewInFlight[cacheKey] = (async () => {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(session.session_id)}/summary?vault_name=${encodeURIComponent(vault)}`
-        );
-        if (!response.ok) {
-            throw new Error('Failed to fetch session summary');
-        }
-        const data = await response.json();
-        state.sessionSummaryPreviewCache[cacheKey] = data;
-        updateSessionSummaryTrigger();
-        return data;
-    })();
-
-    try {
-        return await state.sessionSummaryPreviewInFlight[cacheKey];
-    } finally {
-        delete state.sessionSummaryPreviewInFlight[cacheKey];
-    }
-}
-
-async function warmSelectedSessionSummaryPreview() {
-    try {
-        await fetchSelectedSessionSummaryPreview();
-    } catch (error) {
-        console.error('Error fetching session summary preview:', error);
-    }
-}
-
-function renderSessionSummaryDetails(summary) {
-    const fields = sessionSummaryEditableFields();
-    const artifacts = Array.isArray(summary.artifacts) ? summary.artifacts : [];
-    const metadata = summary.metadata && typeof summary.metadata === 'object' ? summary.metadata : {};
-    return `
-        <div class="space-y-4">
-            <div class="state-surface-warning p-3 rounded border text-sm">
-                Manual edits update this derived session summary only. If this chat session is continued later, session summarization may replace these edits.
-            </div>
-            ${fields.map(field => renderSessionSummaryReadonlyField(summary, field)).join('')}
-            <div>
-                <p class="font-semibold text-txt-primary">Artifacts</p>
-                ${artifacts.length
-                    ? `<ul class="mt-1 list-disc list-inside text-sm text-txt-primary">${artifacts.map(artifact => `<li><span class="cell-mono">${escapeHtml(artifact.path || '')}</span>${artifact.artifact_role ? ` <span class="text-txt-secondary">(${escapeHtml(artifact.artifact_role)})</span>` : ''}</li>`).join('')}</ul>`
-                    : '<p class="text-sm text-txt-secondary">No artifacts linked.</p>'}
-            </div>
-            <div>
-                <p class="font-semibold text-txt-primary">Metadata</p>
-                <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(metadata, null, 2))}</pre>
-            </div>
-            <div class="text-xs text-txt-secondary">
-                Created ${escapeHtml(formatShortDate(summary.created_at || ''))} · Updated ${escapeHtml(formatShortDate(summary.updated_at || ''))}
-            </div>
-        </div>
-    `;
-}
-
-function sessionSummaryEditableFields() {
-    return [
-        { key: 'summary', label: 'Summary', rows: 6 },
-        { key: 'user_intent', label: 'User Intent', rows: 3 },
-        { key: 'domain', label: 'Domain', rows: 2 },
-        { key: 'work_product', label: 'Work Product', rows: 2 },
-        { key: 'workspace_path', label: 'Workspace', rows: 2 },
-        { key: 'named_entities', label: 'Named Entities', rows: 2 },
-        { key: 'source_summary', label: 'Source Summary', rows: 6 },
-    ];
-}
-
-function renderSessionSummaryReadonlyField(summary, field) {
-    const value = String(summary?.[field.key] || '').trim();
-    return `
-        <div>
-            <p class="font-semibold text-txt-primary">${escapeHtml(field.label)}</p>
-            ${value
-                ? `<p class="text-sm text-txt-primary whitespace-pre-wrap">${escapeHtml(value)}</p>`
-                : '<p class="text-sm text-txt-secondary">Not captured.</p>'}
-        </div>
-    `;
-}
-
-function renderSessionSummaryEditForm(summary) {
-    return `
-        <div class="space-y-4">
-            <div class="state-surface-warning p-3 rounded border text-sm">
-                Manual edits update this derived session summary only. If this chat session is continued later, session summarization may replace these edits.
-            </div>
-            ${sessionSummaryEditableFields().map(field => `
-                <label class="block">
-                    <span class="font-semibold text-txt-primary">${escapeHtml(field.label)}</span>
-                    <textarea
-                        data-session-summary-field="${escapeHtml(field.key)}"
-                        rows="${field.rows}"
-                        class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    >${escapeHtml(summary?.[field.key] || '')}</textarea>
-                </label>
-            `).join('')}
-            <div>
-                <p class="font-semibold text-txt-primary">Metadata</p>
-                <pre class="mt-1 whitespace-pre-wrap rounded-md border border-border-primary bg-app-bg p-3 text-xs text-txt-secondary">${escapeHtml(JSON.stringify(summary?.metadata || {}, null, 2))}</pre>
-            </div>
-        </div>
-    `;
-}
-
-async function openSelectedSessionSummaryModal() {
-    const session = selectedSessionWithSummary();
-    if (!session) return;
-
-    closeSessionSummaryModal();
-    const popover = document.createElement('div');
-    popover.id = 'session-summary-modal';
-    popover.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    popover.innerHTML = `
-        <div class="absolute inset-0" data-session-summary-close="true"></div>
-        <section class="app-modal-panel relative overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="session-summary-modal-title">
-            <div class="app-modal-header sticky top-0">
-                <div class="app-modal-title-block">
-                    <h2 id="session-summary-modal-title" class="text-lg font-semibold text-txt-primary">🧠 Session Summary</h2>
-                    <p class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(session.session_id)}</p>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error" data-session-summary-delete="true">
-                        Delete Summary
-                    </button>
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-edit="true">
-                        Edit
-                    </button>
-                    <button type="button" class="hidden px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-session-summary-save="true">
-                        Save
-                    </button>
-                    <button type="button" class="hidden px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-cancel-edit="true">
-                        Cancel
-                    </button>
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-session-summary-close="true">
-                        Close
-                    </button>
-                </div>
-            </div>
-            <div id="session-summary-modal-body" class="p-4 text-sm text-txt-primary">
-                <p class="text-txt-secondary">Loading summary details...</p>
-            </div>
-        </section>
-    `;
-    popover.addEventListener('click', (event) => {
-        const target = event.target;
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryClose === 'true') {
-            closeSessionSummaryModal();
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryEdit === 'true') {
-            const summary = currentSessionSummaryFromModal();
-            setSessionSummaryModalEditing(popover, summary);
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummarySave === 'true') {
-            saveSessionSummaryModal(popover, target);
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryCancelEdit === 'true') {
-            cancelSessionSummaryEdit(popover);
-            return;
-        }
-        if (target instanceof HTMLElement && target.dataset.sessionSummaryDelete === 'true') {
-            deleteSessionSummaryFromModal(popover, target);
-        }
-    });
-    document.body.appendChild(popover);
-
-    const body = popover.querySelector('#session-summary-modal-body');
-    try {
-        const summary = await fetchSelectedSessionSummaryPreview();
-        if (!body) return;
-        popover._sessionSummary = summary;
-        body.innerHTML = summary?.has_summary
-            ? renderSessionSummaryDetails(summary)
-            : '<p class="text-sm text-txt-secondary">No summary record found for this session.</p>';
-    } catch (error) {
-        console.error('Error opening session summary modal:', error);
-        if (body) {
-            body.innerHTML = '<p class="text-sm state-error">Unable to load summary details.</p>';
-        }
-    }
-}
-
-function closeSessionSummaryModal() {
-    document.getElementById('session-summary-modal')?.remove();
-}
-
-function currentSessionSummaryFromModal() {
-    return document.getElementById('session-summary-modal')?._sessionSummary || null;
-}
-
-function setSessionSummaryModalEditing(modal, summary) {
-    const body = modal.querySelector('#session-summary-modal-body');
-    const editButton = modal.querySelector('[data-session-summary-edit]');
-    const saveButton = modal.querySelector('[data-session-summary-save]');
-    const cancelButton = modal.querySelector('[data-session-summary-cancel-edit]');
-    if (body) {
-        body.innerHTML = renderSessionSummaryEditForm(summary);
-    }
-    editButton?.classList.add('hidden');
-    saveButton?.classList.remove('hidden');
-    cancelButton?.classList.remove('hidden');
-}
-
-function setSessionSummaryModalReadonly(modal, summary) {
-    const body = modal.querySelector('#session-summary-modal-body');
-    const editButton = modal.querySelector('[data-session-summary-edit]');
-    const saveButton = modal.querySelector('[data-session-summary-save]');
-    const cancelButton = modal.querySelector('[data-session-summary-cancel-edit]');
-    if (body) {
-        body.innerHTML = summary?.has_summary
-            ? renderSessionSummaryDetails(summary)
-            : '<p class="text-sm text-txt-secondary">No summary record found for this session.</p>';
-    }
-    editButton?.classList.remove('hidden');
-    saveButton?.classList.add('hidden');
-    cancelButton?.classList.add('hidden');
-}
-
-function cancelSessionSummaryEdit(modal) {
-    setSessionSummaryModalReadonly(modal, currentSessionSummaryFromModal());
-}
-
-async function saveSessionSummaryModal(modal, triggerButton) {
-    const session = selectedSessionWithSummary();
-    const vault = chatElements.vaultSelector?.value || '';
-    if (!session || !vault) return;
-    triggerButton.disabled = true;
-    triggerButton.textContent = 'Saving...';
-    const payload = {};
-    sessionSummaryEditableFields().forEach(field => {
-        const input = modal.querySelector(`[data-session-summary-field="${field.key}"]`);
-        payload[field.key] = input ? input.value : '';
-    });
-    const existing = currentSessionSummaryFromModal();
-    payload.metadata = existing?.metadata || {};
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(session.session_id)}/summary?vault_name=${encodeURIComponent(vault)}`,
-            {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            }
-        );
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const summary = await response.json();
-        const cacheKey = sessionSummaryCacheKey(vault, session.session_id);
-        state.sessionSummaryPreviewCache[cacheKey] = summary;
-        modal._sessionSummary = summary;
-        updateSessionSummaryTrigger();
-        setSessionSummaryModalReadonly(modal, summary);
-    } catch (error) {
-        console.error('Error saving session summary:', error);
-        const body = modal.querySelector('#session-summary-modal-body');
-        if (body) {
-            body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to save summary: ${escapeHtml(error.message)}</p>`);
-        }
-    } finally {
-        triggerButton.disabled = false;
-        triggerButton.textContent = 'Save';
-    }
-}
-
-async function deleteSessionSummaryFromModal(modal, triggerButton) {
-    const session = selectedSessionWithSummary();
-    const vault = chatElements.vaultSelector?.value || '';
-    if (!session || !vault) return;
-    const confirmed = window.confirm('Delete this derived summary record? The chat session will not be deleted.');
-    if (!confirmed) return;
-    triggerButton.disabled = true;
-    triggerButton.textContent = 'Deleting...';
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(session.session_id)}/summary?vault_name=${encodeURIComponent(vault)}`,
-            { method: 'DELETE' }
-        );
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        delete state.sessionSummaryPreviewCache[sessionSummaryCacheKey(vault, session.session_id)];
-        closeSessionSummaryModal();
-        await fetchSessions(vault, session.session_id);
-    } catch (error) {
-        console.error('Error deleting session summary:', error);
-        const body = modal.querySelector('#session-summary-modal-body');
-        if (body) {
-            body.insertAdjacentHTML('afterbegin', `<p class="mb-3 state-error">Unable to delete summary: ${escapeHtml(error.message)}</p>`);
-        }
-        triggerButton.disabled = false;
-        triggerButton.textContent = 'Delete Summary';
-    }
-}
-
-function renderCompactionProgress(status) {
-    const fill = chatElements.compactionFill;
-    const track = chatElements.compactionTrack;
-    if (!fill || !track) return;
-
-    fill.classList.remove('compaction-warm', 'compaction-hot');
-    if (!status || !status.compaction_token_threshold || status.compaction_type === 'none') {
-        fill.style.width = '0%';
-        track.title = status && status.compaction_type === 'none'
-            ? 'Chat history compaction is disabled'
-            : 'Chat history compaction status unavailable';
-        return;
-    }
-
-    const threshold = Math.max(Number(status.compaction_token_threshold) || 0, 1);
-    const tokens = Math.max(Number(status.estimated_tokens_before) || 0, 0);
-    const percent = Math.round((tokens / threshold) * 100);
-    const boundedPercent = tokens > 0 ? Math.max(2, Math.min(percent, 100)) : 0;
-    fill.style.width = `${boundedPercent}%`;
-    if (percent >= 100) {
-        fill.classList.add('compaction-hot');
-    } else if (percent >= 70) {
-        fill.classList.add('compaction-warm');
-    }
-    const actionText = status.compaction_type === 'auto'
-        ? 'Chat will be automatically compacted at 100%.'
-        : 'Ask chat to compact when ready.';
-    track.title = `${percent}% (${tokens.toLocaleString()} / ${threshold.toLocaleString()} threshold). ${actionText}`;
-}
-
-function clearCompactionProgress() {
-    state.compactionStatusRequestId += 1;
-    renderCompactionProgress(null);
-}
-
-async function refreshCompactionProgress() {
-    const vault = chatElements.vaultSelector?.value || '';
-    const sessionId = state.sessionId || '';
-    if (!vault || !sessionId) {
-        clearCompactionProgress();
-        return;
-    }
-
-    const requestId = state.compactionStatusRequestId + 1;
-    state.compactionStatusRequestId = requestId;
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}/compaction-status?vault_name=${encodeURIComponent(vault)}`
-        );
-        if (requestId !== state.compactionStatusRequestId) return;
-        if (!response.ok) {
-            throw new Error('Failed to fetch chat compaction status');
-        }
-        renderCompactionProgress(await response.json());
-    } catch (error) {
-        if (requestId === state.compactionStatusRequestId) {
-            console.error('Error fetching chat compaction status:', error);
-            renderCompactionProgress(null);
-        }
-    }
-}
-
 async function fetchSessions(vault, preferredSessionId = '') {
     state.sessions = [];
-    renderSessionSelector();
+    sessionControls.renderSelector();
     if (!vault) {
-        clearCompactionProgress();
+        sessionControls.clearCompactionProgress();
         return;
     }
     try {
@@ -1217,11 +626,12 @@ async function fetchSessions(vault, preferredSessionId = '') {
             throw new Error('Failed to fetch chat sessions');
         }
         state.sessions = await response.json();
-        renderSessionSelector();
+        sessionControls.renderSelector();
         if (preferredSessionId && state.sessions.some((session) => session.session_id === preferredSessionId)) {
-            chatElements.sessionSelector.value = preferredSessionId;
+            state.sessionId = preferredSessionId;
+            sessionControls.renderSelector();
         }
-        await refreshCompactionProgress();
+        await sessionControls.refreshCompactionProgress();
     } catch (error) {
         console.error('Error fetching chat sessions:', error);
     }
@@ -1234,8 +644,8 @@ async function loadSession(sessionId) {
     }
     try {
         state.sessionId = sessionId;
-        renderSessionSelector();
-        refreshCompactionProgress();
+        sessionControls.renderSelector();
+        sessionControls.refreshCompactionProgress();
         state.isLoading = true;
         syncChatControlLocks();
         const response = await fetch(
@@ -1251,10 +661,10 @@ async function loadSession(sessionId) {
             chatElements.workspacePathInput.value = payload.workspace?.path || '';
         }
         renderPersistedSession(payload);
-        renderSessionSelector();
-        updateSessionTitleRow();
+        sessionControls.renderSelector();
+        sessionControls.updateTitleRow();
         updateStatus();
-        await refreshCompactionProgress();
+        await sessionControls.refreshCompactionProgress();
     } catch (error) {
         console.error('Error loading chat session:', error);
         addChatErrorMessage(error.message);
@@ -1265,99 +675,9 @@ async function loadSession(sessionId) {
 }
 
 function renderPersistedSession(payload) {
-    chatElements.chatMessages.innerHTML = '';
-
-    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-    const toolEventsQueue = Array.isArray(payload?.tool_events) ? [...payload.tool_events] : [];
-    const pendingToolEvents = [];
-
-    if (messages.length === 0) {
-        renderChatEmptyState('Selected session has no persisted messages.');
-        return;
-    }
-
-    messages.forEach((message) => {
-        if (message.is_tool_message) {
-            const nextToolEvent = toolEventsQueue.shift();
-            if (nextToolEvent) {
-                pendingToolEvents.push(nextToolEvent);
-            }
-            return;
-        }
-
-        if (message.role === 'assistant') {
-            const assistantToolEvents = pendingToolEvents.splice(0, pendingToolEvents.length);
-            renderPersistedAssistantMessage(message.content || '', assistantToolEvents);
-            return;
-        }
-
-        addMessage('user', message.content || '');
-    });
-
-    if (pendingToolEvents.length > 0) {
-        renderPersistedAssistantMessage('', pendingToolEvents.splice(0, pendingToolEvents.length));
-    }
+    chatRendering.renderPersistedSession(payload);
 }
 
-function renderPersistedAssistantMessage(content, toolEvents) {
-    const context = createAssistantStreamingMessage();
-    context.fullText = content || '';
-    renderAssistantMarkdown(context, { finalize: true });
-    hydratePersistedToolEvents(context, toolEvents);
-    finalizeAssistantMessage(context, {
-        sessionId: state.sessionId || 'unknown',
-        messageCount: 1,
-        toolCount: Array.isArray(toolEvents) ? toolEvents.length : 0,
-        status: 'done'
-    });
-}
-
-function hydratePersistedToolEvents(context, toolEvents) {
-    if (!context || !Array.isArray(toolEvents) || toolEvents.length === 0) {
-        return;
-    }
-
-    toolEvents.forEach((event) => {
-        if (!event || !event.tool_call_id) {
-            return;
-        }
-
-        let entry = context.toolStatusMap.get(event.tool_call_id);
-        if (!entry) {
-            ensureToolCallsSection(context);
-            entry = createToolStatusEntry(context, event.tool_call_id, {
-                tool_name: event.tool_name,
-                arguments: event.args || null
-            });
-        }
-
-        entry.container.classList.remove('tool-status-running');
-        entry.container.classList.add('tool-status-complete');
-
-        if (event.args) {
-            entry.args = event.args;
-        }
-
-        if (event.event_type !== 'call') {
-            const resultPayload = {};
-            if (event.result_text) {
-                resultPayload.text = event.result_text;
-            }
-            if (event.artifact_ref) {
-                resultPayload.artifact_ref = event.artifact_ref;
-            }
-            if (event.result_metadata && Object.keys(event.result_metadata).length > 0) {
-                resultPayload.metadata = event.result_metadata;
-            }
-            entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
-        }
-
-        updateToolDetail(entry);
-        entry.chevron.textContent = entry.container.open ? '▾' : '▸';
-    });
-
-    updateToolCallsSummary(context);
-}
 
 // Tab management
 const tabs = {
@@ -1449,6 +769,7 @@ const themeManager = {
 
 // Initialize app
 async function init() {
+    window.AssistantMDIcons.hydrateIconButtons(document);
     themeManager.init();
     setupTabs();
     setupEventListeners();
@@ -1462,6 +783,7 @@ async function init() {
     }
     await fetchMetadata();
     await fetchSystemStatus();
+    renderChatEmptyState();
     renderPendingAttachments();
     updateCollapsibleArrows();
 }
@@ -1557,7 +879,7 @@ function populateSelectors() {
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
     chatElements.toolsCheckboxes.innerHTML = '';
     if (chatElements.templateSelector) {
-        chatElements.templateSelector.innerHTML = '<option value="">Select template...</option>';
+        chatElements.templateSelector.innerHTML = '<option value="">No context script</option>';
         chatElements.templateSelector.disabled = true;
     }
     populateThinkingSelector();
@@ -1671,7 +993,7 @@ function populateSelectors() {
     });
 
     updateToolDropdownSummary();
-    renderSessionSelector();
+    sessionControls.renderSelector();
     syncChatControlLocks();
 }
 
@@ -1685,7 +1007,7 @@ function isChatSelectableModel(model) {
 // Fetch system status
 async function fetchSystemStatus() {
     try {
-        const response = await fetch('api/status');
+        const response = await fetch('api/status', { cache: 'no-store' });
         if (!response.ok) throw new Error('Failed to fetch status');
 
         state.systemStatus = await response.json();
@@ -1707,6 +1029,7 @@ async function fetchSystemStatus() {
         await fetchWorkflowTasks({ render: false });
         displaySystemStatus();
         updateStatus();
+        refreshChatEmptyState();
     } catch (error) {
         console.error('Error fetching status:', error);
         dashElements.systemStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch system status</p>';
@@ -1721,807 +1044,26 @@ async function fetchSystemStatus() {
 
 async function fetchWorkflowTasks({ render = true } = {}) {
     try {
-        const response = await fetch('api/tasks?kind=workflow&include_terminal=false');
+        const response = await fetch('api/tasks?kind=workflow&include_terminal=false', { cache: 'no-store' });
         if (!response.ok) throw new Error('Failed to fetch workflow tasks');
         const data = await response.json();
         state.workflowTasks = data.tasks || [];
-        syncWorkflowTaskPolling();
+        dashboardView.syncWorkflowTaskPolling();
         if (render) {
             displaySystemStatus();
         }
     } catch (error) {
         console.error('Error fetching workflow tasks:', error);
         state.workflowTasks = [];
-        syncWorkflowTaskPolling();
+        dashboardView.syncWorkflowTaskPolling();
         if (render && dashElements.executeWorkflowResult) {
             dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
         }
     }
 }
 
-// Display system status information
 function displaySystemStatus() {
-    const status = state.systemStatus;
-    if (!status) return;
-    renderDashboardVaults(status);
-    renderDashboardWorkflows(status);
-    renderDashboardVaultActivity(status);
-}
-
-function renderDashboardVaults(status) {
-    if (!dashElements.systemStatus) return;
-    const sortedVaults = sortDashboardVaults(status.vaults || []);
-
-    dashElements.systemStatus.innerHTML = `
-        <div class="dashboard-table-wrap" role="region" aria-label="Vaults" tabindex="0">
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        ${renderDashboardVaultSortHeader('name', 'Name')}
-                        ${renderDashboardVaultSortHeader('path', 'Path inside container')}
-                        ${renderDashboardVaultSortHeader('workflows', 'Workflows', 'cell-center')}
-                        ${renderDashboardVaultSortHeader('files', 'Files', 'cell-center')}
-                        ${renderDashboardVaultSortHeader('file_delta', '+/- 7d', 'cell-center')}
-                        ${renderDashboardVaultSortHeader('latest_change', 'Latest Change')}
-                    </tr>
-                </thead>
-                <tbody>
-                    ${sortedVaults.map(v => `
-                        <tr>
-                            <td><strong>${escapeHtml(v.name)}</strong></td>
-                            <td class="cell-mono cell-xs subtle">${escapeHtml(v.path)}</td>
-                            <td class="cell-center">${v.workflow_count}</td>
-                            <td class="cell-center">${v.tracked_files ?? '—'}</td>
-                            <td class="cell-center">${formatVaultFileDelta(v)}</td>
-                            <td class="cell-xs">${formatShortDate(v.latest_vault_change_at)}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-function renderDashboardWorkflows(status) {
-    if (!dashElements.workflowsStatus) return;
-    const enabledWorkflows = status.enabled_workflows || [];
-    const disabledWorkflows = status.disabled_workflows || [];
-    const systemWorkflowTemplates = status.system_workflow_templates || [];
-    const templateWorkflows = systemWorkflowTemplates.map(template => ({
-        global_id: `system/${template.name}`,
-        name: template.name,
-        vault: 'system',
-        enabled: Boolean(template.enabled),
-        run_type: template.run_type || 'workflow',
-        schedule_cron: template.schedule_cron || '',
-        description: template.description || '',
-        is_system_template: true
-    }));
-    const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows, ...templateWorkflows];
-    const schedulerJobs = status.scheduler?.job_details || [];
-    const schedulerRunning = Boolean(status.scheduler?.running);
-    const jobByWorkflowId = new Map(
-        schedulerJobs.map(job => [job.id.replace('__', '/'), job])
-    );
-    const schedulerBadge = schedulerRunning
-        ? '<span class="badge badge-scheduler-running">SCHEDULER RUNNING</span>'
-        : '<span class="badge badge-scheduler-stopped">SCHEDULER STOPPED</span>';
-    if (dashElements.workflowSchedulerBadge) {
-        dashElements.workflowSchedulerBadge.innerHTML = schedulerBadge;
-    }
-    if (combinedWorkflows.length === 0) {
-        dashElements.workflowsStatus.innerHTML = `
-            ${renderDashboardBadgeStyles()}
-            ${renderRunningWorkflowTasks()}
-            <p class="text-sm text-txt-secondary">No workflows loaded.</p>
-        `;
-        return;
-    }
-    const sortedWorkflows = sortDashboardWorkflows(combinedWorkflows, jobByWorkflowId);
-
-    dashElements.workflowsStatus.innerHTML = `
-        ${renderDashboardBadgeStyles()}
-        ${renderRunningWorkflowTasks()}
-        <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        ${renderDashboardWorkflowSortHeader('id', 'ID')}
-                        ${renderDashboardWorkflowSortHeader('status', 'Status')}
-                        ${renderDashboardWorkflowSortHeader('last_run', 'Last Run')}
-                        ${renderDashboardWorkflowSortHeader('next_run', 'Next Run')}
-                        <th>Description</th>
-                        <th class="cell-center" aria-label="Run"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${sortedWorkflows.map(workflow => {
-                        const job = workflow.is_system_template
-                            ? dashboardSystemWorkflowTemplateJob(workflow, schedulerJobs)
-                            : jobByWorkflowId.get(workflow.global_id);
-                        const nextRun = job?.next_run_time
-                            ? new Date(job.next_run_time).toLocaleString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            })
-                            : '—';
-                        const lastRun = job?.last_run_time
-                            ? new Date(job.last_run_time).toLocaleString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            })
-                            : '—';
-                        const description = workflow.description || '—';
-                        const { statusLabel, statusClass } = dashboardWorkflowStatus(workflow, job);
-                        const toggleLabel = workflow.enabled ? 'Disable workflow' : 'Enable workflow';
-                        const nextEnabled = workflow.enabled ? 'false' : 'true';
-                        const statusButton = `
-                            <button
-                                type="button"
-                                class="badge ${statusClass}"
-                                data-dashboard-workflow-toggle="${escapeHtml(workflow.global_id)}"
-                                data-dashboard-workflow-enabled="${nextEnabled}"
-                                title="${toggleLabel}"
-                                aria-label="${toggleLabel}"
-                            >
-                                ${statusLabel}
-                            </button>
-                        `;
-                        const runButton = renderDashboardWorkflowRunButton(workflow);
-                        return `
-                            <tr>
-                                <td>
-                                    <button
-                                        type="button"
-                                        class="font-semibold text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm text-left"
-                                        data-dashboard-workflow-edit="${escapeHtml(workflow.global_id)}"
-                                    >
-                                        ${escapeHtml(workflow.global_id)}
-                                    </button>
-                                </td>
-                                <td>${statusButton}</td>
-                                <td class="cell-xs">${lastRun}</td>
-                                <td class="cell-xs">${nextRun}</td>
-                                <td class="cell-xs subtle">${escapeHtml(description)}</td>
-                                <td class="cell-center">${runButton}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-function renderDashboardVaultActivity(status) {
-    if (!dashElements.vaultActivityStatus) return;
-    const activityVaults = status.vaults || [];
-    const selectedActivityVault = state.selectedActivityVault && activityVaults.some(v => v.name === state.selectedActivityVault)
-        ? state.selectedActivityVault
-        : activityVaults[0]?.name || '';
-    state.selectedActivityVault = selectedActivityVault;
-
-    dashElements.vaultActivityStatus.innerHTML = `
-        <div class="flex flex-col md:flex-row md:items-end gap-3">
-            <div class="flex-1 min-w-0">
-                <select id="vault-activity-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-bg text-txt-primary">
-                    ${activityVaults.length ? activityVaults.map(v => `
-                        <option value="${escapeHtml(v.name)}" ${v.name === selectedActivityVault ? 'selected' : ''}>${escapeHtml(v.name)}</option>
-                    `).join('') : '<option value="">No vaults detected</option>'}
-                </select>
-            </div>
-            <button id="vault-activity-refresh" type="button" class="w-full md:w-auto px-4 py-2 bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent self-start md:self-auto">
-                Refresh Activity
-            </button>
-        </div>
-        <div id="vault-activity-result" class="mt-3">
-            ${renderVaultActivityResult(selectedActivityVault)}
-        </div>
-    `;
-
-    if (selectedActivityVault && !state.vaultActivity[selectedActivityVault]) {
-        loadVaultActivity(selectedActivityVault);
-    }
-}
-
-function renderDashboardBadgeStyles() {
-    return `
-        <style>
-            .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-            button.badge { cursor: pointer; border: 1px solid currentColor; line-height: 1.2; transition: filter 120ms ease, box-shadow 120ms ease; }
-            button.badge:hover { filter: brightness(1.06); box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18); }
-            button.badge:focus-visible { outline: 2px solid rgb(var(--accent-primary)); outline-offset: 2px; }
-            button.badge:disabled { cursor: not-allowed; opacity: 0.65; }
-            .badge-scheduler-running { background: rgb(var(--accent-primary)); color: rgb(var(--text-on-accent)); }
-            .badge-scheduler-stopped { background: rgb(var(--state-warning) / 0.2); color: rgb(var(--state-warning)); }
-            .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
-            .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
-            .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
-        </style>
-    `;
-}
-
-function renderDashboardVaultSortHeader(column, label, className = '') {
-    const sort = state.dashboardVaultSort || { column: 'name', direction: 'asc' };
-    const active = sort.column === column;
-    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
-    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
-    return `
-        <th class="${className}" aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
-            <button
-                type="button"
-                class="inline-flex items-center gap-1 text-left font-semibold whitespace-nowrap hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                data-dashboard-vault-sort="${column}"
-                data-dashboard-vault-sort-next="${nextDirection}"
-            >
-                <span>${escapeHtml(label)}</span>
-                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
-            </button>
-        </th>
-    `;
-}
-
-function renderDashboardWorkflowSortHeader(column, label) {
-    const sort = state.dashboardWorkflowSort || { column: 'id', direction: 'asc' };
-    const active = sort.column === column;
-    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
-    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
-    return `
-        <th aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
-            <button
-                type="button"
-                class="inline-flex items-center gap-1 text-left font-semibold whitespace-nowrap hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                data-dashboard-workflow-sort="${column}"
-                data-dashboard-workflow-sort-next="${nextDirection}"
-            >
-                <span>${escapeHtml(label)}</span>
-                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
-            </button>
-        </th>
-    `;
-}
-
-function sortDashboardVaults(vaults) {
-    const sort = state.dashboardVaultSort || { column: 'name', direction: 'asc' };
-    const direction = sort.direction === 'asc' ? 1 : -1;
-    return [...vaults].sort((a, b) => {
-        const compared = compareDashboardVaults(a, b, sort.column);
-        if (compared !== 0) return compared * direction;
-        return String(a.name || '').localeCompare(String(b.name || ''));
-    });
-}
-
-function compareDashboardVaults(a, b, column) {
-    if (column === 'path') {
-        return String(a.path || '').localeCompare(String(b.path || ''));
-    }
-    if (column === 'workflows') {
-        return (Number(a.workflow_count) || 0) - (Number(b.workflow_count) || 0);
-    }
-    if (column === 'files') {
-        return compareNullableNumbers(a.tracked_files, b.tracked_files);
-    }
-    if (column === 'file_delta') {
-        return compareVaultFileDelta(a, b);
-    }
-    if (column === 'latest_change') {
-        return compareOptionalDates(a.latest_vault_change_at, b.latest_vault_change_at);
-    }
-    return String(a.name || '').localeCompare(String(b.name || ''));
-}
-
-function formatVaultFileDelta(vault) {
-    const created = Number(vault?.files_created_recent) || 0;
-    const deleted = Number(vault?.files_deleted_recent) || 0;
-    if (created === 0 && deleted === 0) {
-        return '<span class="subtle">0</span>';
-    }
-    return `<span class="text-state-success">+${created}</span> <span class="text-txt-secondary">/</span> <span class="text-state-error">-${deleted}</span>`;
-}
-
-function compareVaultFileDelta(a, b) {
-    const aCreated = Number(a?.files_created_recent) || 0;
-    const aDeleted = Number(a?.files_deleted_recent) || 0;
-    const bCreated = Number(b?.files_created_recent) || 0;
-    const bDeleted = Number(b?.files_deleted_recent) || 0;
-    const netCompared = (aCreated - aDeleted) - (bCreated - bDeleted);
-    if (netCompared !== 0) return netCompared;
-    return (aCreated + aDeleted) - (bCreated + bDeleted);
-}
-
-function compareNullableNumbers(a, b) {
-    const aMissing = a === null || a === undefined || Number.isNaN(Number(a));
-    const bMissing = b === null || b === undefined || Number.isNaN(Number(b));
-    if (aMissing && bMissing) return 0;
-    if (aMissing) return 1;
-    if (bMissing) return -1;
-    return Number(a) - Number(b);
-}
-
-function sortDashboardWorkflows(workflows, jobByWorkflowId) {
-    const sort = state.dashboardWorkflowSort || { column: 'id', direction: 'asc' };
-    const direction = sort.direction === 'asc' ? 1 : -1;
-    return [...workflows].sort((a, b) => {
-        const compared = compareDashboardWorkflows(a, b, jobByWorkflowId, sort.column);
-        if (compared !== 0) return compared * direction;
-        return String(a.global_id || '').localeCompare(String(b.global_id || ''));
-    });
-}
-
-function compareDashboardWorkflows(a, b, jobByWorkflowId, column) {
-    const aJob = jobByWorkflowId.get(a.global_id);
-    const bJob = jobByWorkflowId.get(b.global_id);
-    if (column === 'status') {
-        return dashboardWorkflowStatus(a, aJob).statusLabel.localeCompare(
-            dashboardWorkflowStatus(b, bJob).statusLabel
-        );
-    }
-    if (column === 'last_run') {
-        return compareOptionalDates(aJob?.last_run_time, bJob?.last_run_time);
-    }
-    if (column === 'next_run') {
-        return compareOptionalDates(aJob?.next_run_time, bJob?.next_run_time);
-    }
-    return String(a.global_id || '').localeCompare(String(b.global_id || ''));
-}
-
-function dashboardWorkflowStatus(workflow, job) {
-    if (!workflow.enabled) {
-        return { statusLabel: 'disabled', statusClass: 'badge-disabled' };
-    }
-    if (job) {
-        return { statusLabel: 'scheduled', statusClass: 'badge-scheduled' };
-    }
-    return { statusLabel: 'enabled', statusClass: 'badge-enabled' };
-}
-
-function renderDashboardWorkflowRunButton(workflow) {
-    const systemAttribute = workflow.is_system_template
-        ? ' data-dashboard-workflow-system-template="true"'
-        : '';
-    return `
-        <button
-            type="button"
-            class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed"
-            data-dashboard-workflow-run="${escapeHtml(workflow.global_id)}"${systemAttribute}
-        >
-            Run
-        </button>
-    `;
-}
-
-function renderRunningWorkflowTasks() {
-    const tasks = activeWorkflowTasks();
-    if (!tasks.length) {
-        return `
-            <div class="mb-3 rounded-md border border-border-primary bg-app-elevated p-3 text-sm text-txt-secondary">
-                No workflows are currently running.
-            </div>
-        `;
-    }
-
-    return `
-        <div class="mb-4 rounded-md border border-border-primary bg-app-elevated p-3">
-            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                    <p class="font-semibold text-txt-primary">Running Workflows</p>
-                    <p class="text-xs text-txt-secondary">${tasks.length} active workflow task${tasks.length === 1 ? '' : 's'}</p>
-                </div>
-                <button
-                    type="button"
-                    class="chat-stop-btn px-3 py-1.5 text-sm text-white rounded-md focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed"
-                    data-dashboard-workflow-stop-all="true"
-                >
-                    Stop All
-                </button>
-            </div>
-            <div class="dashboard-table-wrap" role="region" aria-label="Running workflows" tabindex="0">
-                <table class="dashboard-table">
-                    <thead>
-                        <tr>
-                            <th>Workflow</th>
-                            <th>Vault</th>
-                            <th>Status</th>
-                            <th>Started</th>
-                            <th>Source</th>
-                            <th class="cell-center" aria-label="Stop"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tasks.map(task => `
-                            <tr>
-                                <td class="cell-xs">
-                                    <strong>${escapeHtml(workflowTaskName(task))}</strong>
-                                    <div class="cell-mono subtle">${escapeHtml(task.task_id || '')}</div>
-                                </td>
-                                <td class="cell-xs">${escapeHtml(workflowTaskVault(task))}</td>
-                                <td class="cell-xs">${escapeHtml(task.status || 'running')}</td>
-                                <td class="cell-xs">${formatShortDate(task.started_at || task.created_at)}</td>
-                                <td class="cell-xs">${escapeHtml(task.source || 'unknown')}</td>
-                                <td class="cell-center">
-                                    <button
-                                        type="button"
-                                        class="chat-stop-btn px-3 py-1.5 text-sm text-white rounded-md focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed"
-                                        data-dashboard-workflow-stop="${escapeHtml(task.task_id || '')}"
-                                    >
-                                        Stop
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    `;
-}
-
-function activeWorkflowTasks() {
-    return (state.workflowTasks || []).filter(task => !isTerminalTaskStatus(task.status));
-}
-
-function workflowTaskName(task) {
-    return task?.metadata?.workflow_id || task?.label || '';
-}
-
-function workflowTaskVault(task) {
-    const scope = String(task?.scope || '');
-    const prefix = 'workflow_vault:';
-    return scope.startsWith(prefix) ? scope.slice(prefix.length) : '';
-}
-
-function syncWorkflowTaskPolling() {
-    const hasActiveWorkflowTasks = activeWorkflowTasks().length > 0;
-    if (hasActiveWorkflowTasks && !state.workflowTaskPollTimer) {
-        state.workflowTaskPollTimer = window.setInterval(() => {
-            fetchWorkflowTasks({ render: true });
-        }, 2000);
-    } else if (!hasActiveWorkflowTasks && state.workflowTaskPollTimer) {
-        window.clearInterval(state.workflowTaskPollTimer);
-        state.workflowTaskPollTimer = null;
-    }
-}
-
-function dashboardSystemWorkflowTemplateJob(workflow, schedulerJobs) {
-    const templateName = String(workflow?.name || '').replace(/\//g, '__');
-    if (!templateName) return null;
-    const jobSuffix = `__system__${templateName}`;
-    const matchingJobs = schedulerJobs.filter(job => String(job.id || '').endsWith(jobSuffix));
-    if (!matchingJobs.length) return null;
-    return matchingJobs.reduce((best, job) => {
-        const bestTime = Date.parse(best?.next_run_time || '') || Number.POSITIVE_INFINITY;
-        const jobTime = Date.parse(job?.next_run_time || '') || Number.POSITIVE_INFINITY;
-        return jobTime < bestTime ? job : best;
-    }, matchingJobs[0]);
-}
-
-function compareOptionalDates(a, b) {
-    const aTime = Date.parse(a || '') || 0;
-    const bTime = Date.parse(b || '') || 0;
-    return aTime - bTime;
-}
-
-function renderVaultActivityResult(vaultName) {
-    if (!vaultName) {
-        return '<p class="text-sm text-txt-secondary">No vault selected.</p>';
-    }
-    const activity = state.vaultActivity[vaultName];
-    if (!activity) {
-        return '<p class="text-sm text-txt-secondary">Loading task file mutations...</p>';
-    }
-    if (activity.error) {
-        return `<p class="state-error text-sm">${escapeHtml(activity.error)}</p>`;
-    }
-    const groups = activity.groups || [];
-    if (!groups.length) {
-        return '<p class="text-sm text-txt-secondary">No retained task file mutations for this vault.</p>';
-    }
-    const sortedGroups = sortVaultActivityGroups(groups);
-    return `
-        <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity" tabindex="0">
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        ${renderVaultActivitySortHeader('type', 'Type', 'cell-center')}
-                        ${renderVaultActivitySortHeader('task', 'Task')}
-                        ${renderVaultActivitySortHeader('last_run', 'Last Run')}
-                        ${renderVaultActivitySortHeader('files', 'Files Mutated')}
-                    </tr>
-                </thead>
-                <tbody>
-                    ${sortedGroups.map(group => `
-                        <tr>
-                            <td class="cell-center">
-                                <span title="${escapeHtml(renderActivityKindLabel(group))}" aria-label="${escapeHtml(renderActivityKindLabel(group))}">${renderActivityKindEmoji(group)}</span>
-                            </td>
-                            <td>
-                                <span>${escapeHtml(renderActivityTaskTitle(group))}</span>
-                            </td>
-                            <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
-                            <td>
-                                <button
-                                    type="button"
-                                    class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                                    data-vault-activity-vault="${escapeHtml(vaultName)}"
-                                    data-vault-activity-id="${escapeHtml(group.activity_id || group.task_id)}"
-                                >
-                                    ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-function renderVaultActivitySortHeader(column, label, className = '') {
-    const sort = state.vaultActivitySort || { column: 'last_run', direction: 'desc' };
-    const active = sort.column === column;
-    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
-    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
-    return `
-        <th class="${className}" aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
-            <button
-                type="button"
-                class="inline-flex items-center gap-1 text-left font-semibold hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                data-vault-activity-sort="${column}"
-                data-vault-activity-sort-next="${nextDirection}"
-            >
-                <span>${escapeHtml(label)}</span>
-                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
-            </button>
-        </th>
-    `;
-}
-
-function sortVaultActivityGroups(groups) {
-    const sort = state.vaultActivitySort || { column: 'last_run', direction: 'desc' };
-    const direction = sort.direction === 'asc' ? 1 : -1;
-    return [...groups].sort((a, b) => {
-        const compared = compareVaultActivityGroups(a, b, sort.column);
-        if (compared !== 0) return compared * direction;
-        const bTime = Date.parse(b.last_mutation_at || '') || 0;
-        const aTime = Date.parse(a.last_mutation_at || '') || 0;
-        if (bTime !== aTime) return bTime - aTime;
-        return String(a.activity_id || a.task_id || '').localeCompare(String(b.activity_id || b.task_id || ''));
-    });
-}
-
-function compareVaultActivityGroups(a, b, column) {
-    if (column === 'type') {
-        return renderActivityKindLabel(a).localeCompare(renderActivityKindLabel(b));
-    }
-    if (column === 'task') {
-        return renderActivityTaskTitle(a).localeCompare(renderActivityTaskTitle(b));
-    }
-    if (column === 'files') {
-        return (a.mutation_count || 0) - (b.mutation_count || 0);
-    }
-    const aTime = Date.parse(a.last_mutation_at || '') || 0;
-    const bTime = Date.parse(b.last_mutation_at || '') || 0;
-    return aTime - bTime;
-}
-
-function renderActivityTaskTitle(group) {
-    if (group.activity_kind === 'chat' && group.chat_session_id) {
-        return formatActivityChatSessionLabel({
-            session_id: group.chat_session_id,
-            created_at: group.chat_session_created_at,
-            last_activity_at: group.chat_session_last_activity_at,
-            title: group.chat_session_title
-        });
-    }
-    return stripActivityKindPrefix(
-        group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
-    );
-}
-
-function renderActivityKindEmoji(group) {
-    const kind = normalizedActivityKind(group);
-    if (kind === 'chat') return '💬';
-    if (kind === 'workflow') return '⚙️';
-    if (kind === 'context') return '🧩';
-    if (kind === 'ingestion') return '📥';
-    return '•';
-}
-
-function formatActivityChatSessionLabel(session) {
-    const title = String(session?.title || '').trim();
-    if (title) {
-        return title;
-    }
-    return formatSessionOptionLabel(session);
-}
-
-function renderActivityKindLabel(group) {
-    const kind = normalizedActivityKind(group);
-    if (kind === 'chat') return 'Chat';
-    if (kind === 'workflow') return 'Workflow';
-    if (kind === 'context') return 'Context assembly';
-    if (kind === 'ingestion') return 'Ingestion';
-    return 'Task';
-}
-
-function normalizedActivityKind(group) {
-    const rawKind = String(group.activity_kind || group.task_kind || '').trim().toLowerCase();
-    if (rawKind === 'chat') return 'chat';
-    if (rawKind === 'workflow') return 'workflow';
-    if (rawKind === 'ingestion') return 'ingestion';
-    if (rawKind === 'context' || rawKind === 'context_assembly' || rawKind === 'context assembly') {
-        return 'context';
-    }
-    const label = String(group.activity_label || '').trim().toLowerCase();
-    if (label.startsWith('chat:')) return 'chat';
-    if (label.startsWith('workflow:')) return 'workflow';
-    if (label.startsWith('ingestion:')) return 'ingestion';
-    if (label.startsWith('context:') || label.startsWith('context assembly:')) return 'context';
-    return rawKind || 'task';
-}
-
-function stripActivityKindPrefix(label) {
-    return String(label || '').replace(/^(chat|workflow|ingestion|context|context assembly|context_assembly):\s*/i, '');
-}
-
-function renderMutationSnapshotLink(mutation) {
-    if (!mutation.before_snapshot_id) {
-        return '<span class="subtle">—</span>';
-    }
-    const snapshotUrl = `api/vault-state/snapshots/${encodeURIComponent(mutation.before_snapshot_id)}/content`;
-    return `
-        <a
-            href="${snapshotUrl}"
-            target="_blank"
-            rel="noopener"
-            class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-        >
-            Open
-        </a>
-    `;
-}
-
-function openVaultActivityDetails(vaultName, activityId) {
-    if (!vaultName || !activityId) return;
-    const activity = state.vaultActivity[vaultName];
-    const group = (activity?.groups || []).find(item => (item.activity_id || item.task_id) === activityId);
-    if (!group) {
-        console.warn('AssistantMD activity group not found', { vaultName, activityId });
-        return;
-    }
-    closeVaultActivityDetails();
-
-    const mutations = sortVaultActivityMutations(group.mutations || []);
-
-    const overlay = document.createElement('div');
-    overlay.id = 'vault-activity-modal';
-    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    overlay.innerHTML = `
-        <div class="absolute inset-0" data-vault-activity-close="true"></div>
-        <section class="app-modal-panel relative overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="vault-activity-modal-title">
-            <div class="app-modal-header sticky top-0">
-                <div class="app-modal-title-block">
-                    <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${renderActivityKindEmoji(group)} ${escapeHtml(renderActivityTaskTitle(group))}</h2>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-vault-activity-close="true">
-                        Close
-                    </button>
-                </div>
-            </div>
-            <div class="p-4">
-                <div class="text-sm text-txt-secondary mb-3">
-                    Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
-                </div>
-                <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity files" tabindex="0">
-                    <table class="dashboard-table">
-                        <thead>
-                            <tr>
-                                ${renderVaultActivityMutationSortHeader('path', 'Path')}
-                                ${renderVaultActivityMutationSortHeader('from', 'From')}
-                                ${renderVaultActivityMutationSortHeader('operation', 'Operation')}
-                                ${renderVaultActivityMutationSortHeader('time', 'Time')}
-                                <th>Snapshot</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${mutations.map(mutation => `
-                                <tr>
-                                    <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
-                                    <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
-                                    <td>${escapeHtml(mutation.operation)}</td>
-                                    <td class="cell-xs">${formatShortDate(mutation.created_at)}</td>
-                                    <td>${renderMutationSnapshotLink(mutation)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-    `;
-    overlay.addEventListener('click', (event) => {
-        const target = event.target;
-        if (target instanceof HTMLElement) {
-            const sortButton = target.closest('[data-vault-activity-mutation-sort]');
-            if (sortButton instanceof HTMLElement) {
-                state.vaultActivityMutationSort = {
-                    column: sortButton.getAttribute('data-vault-activity-mutation-sort') || 'time',
-                    direction: sortButton.getAttribute('data-vault-activity-mutation-sort-next') || 'asc'
-                };
-                openVaultActivityDetails(vaultName, activityId);
-                return;
-            }
-        }
-        if (target instanceof HTMLElement && target.dataset.vaultActivityClose === 'true') {
-            closeVaultActivityDetails();
-        }
-    });
-    document.body.appendChild(overlay);
-}
-
-function renderVaultActivityMutationSortHeader(column, label) {
-    const sort = state.vaultActivityMutationSort || { column: 'time', direction: 'desc' };
-    const active = sort.column === column;
-    const indicator = active ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
-    const nextDirection = active && sort.direction === 'asc' ? 'desc' : 'asc';
-    return `
-        <th aria-sort="${active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}">
-            <button
-                type="button"
-                class="inline-flex items-center gap-1 text-left font-semibold hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
-                data-vault-activity-mutation-sort="${column}"
-                data-vault-activity-mutation-sort-next="${nextDirection}"
-            >
-                <span>${escapeHtml(label)}</span>
-                <span class="cell-xs subtle" aria-hidden="true">${indicator}</span>
-            </button>
-        </th>
-    `;
-}
-
-function sortVaultActivityMutations(mutations) {
-    const sort = state.vaultActivityMutationSort || { column: 'time', direction: 'desc' };
-    const direction = sort.direction === 'asc' ? 1 : -1;
-    return [...mutations].sort((a, b) => {
-        const compared = compareVaultActivityMutations(a, b, sort.column);
-        if (compared !== 0) return compared * direction;
-        const bTime = Date.parse(b.created_at || '') || 0;
-        const aTime = Date.parse(a.created_at || '') || 0;
-        if (bTime !== aTime) return bTime - aTime;
-        return (b.id || 0) - (a.id || 0);
-    });
-}
-
-function compareVaultActivityMutations(a, b, column) {
-    if (column === 'path') {
-        return String(a.path || '').localeCompare(String(b.path || ''));
-    }
-    if (column === 'from') {
-        return String(a.related_path || '').localeCompare(String(b.related_path || ''));
-    }
-    if (column === 'operation') {
-        return String(a.operation || '').localeCompare(String(b.operation || ''));
-    }
-    const aTime = Date.parse(a.created_at || '') || 0;
-    const bTime = Date.parse(b.created_at || '') || 0;
-    return aTime - bTime;
-}
-
-function handleVaultActivityClick(target) {
-    const activityButton = target.closest('[data-vault-activity-id]');
-    if (!(activityButton instanceof HTMLElement)) return;
-    const vaultName = activityButton.getAttribute('data-vault-activity-vault') || state.selectedActivityVault;
-    const activityId = activityButton.getAttribute('data-vault-activity-id') || '';
-    openVaultActivityDetails(vaultName, activityId);
-}
-
-function closeVaultActivityDetails() {
-    document.getElementById('vault-activity-modal')?.remove();
+    dashboardView.displaySystemStatus();
 }
 
 document.addEventListener('keydown', (event) => {
@@ -2530,39 +1072,10 @@ document.addEventListener('keydown', (event) => {
             setChatFocusMode(false);
             return;
         }
-        closeWorkspacePickerModal();
-        closeVaultActivityDetails();
+        workspacePicker.closeModal();
+        vaultActivity.closeDetails();
     }
 });
-
-function formatShortDate(value) {
-    if (!value) return '—';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '—';
-    return parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
-async function loadVaultActivity(vaultName) {
-    if (!vaultName) return;
-    state.vaultActivity[vaultName] = { loading: true };
-    updateVaultActivityContainer(vaultName);
-    try {
-        const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/task-mutations?limit=25`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        state.vaultActivity[vaultName] = { groups: data.groups || [] };
-    } catch (error) {
-        console.error('Error loading AssistantMD activity:', error);
-        state.vaultActivity[vaultName] = { error: `Failed to load AssistantMD activity: ${error.message}` };
-    }
-    updateVaultActivityContainer(vaultName);
-}
-
-function updateVaultActivityContainer(vaultName) {
-    const container = document.getElementById('vault-activity-result');
-    if (!container || state.selectedActivityVault !== vaultName) return;
-    container.innerHTML = renderVaultActivityResult(vaultName);
-}
 
 // Setup event listeners
 function setupEventListeners() {
@@ -2603,61 +1116,36 @@ function setupEventListeners() {
         setChatComposerHeight(current, { persist: false });
     });
 
-    if (chatElements.sessionSelector) {
-        chatElements.sessionSelector.addEventListener('change', async (event) => {
-            const selectedSessionId = event.target.value || '';
-            updateSessionSummaryTrigger();
-            if (!selectedSessionId) {
-                await clearSession(false);
-                return;
-            }
-            await loadSession(selectedSessionId);
-        });
-    }
-
-    if (chatElements.sessionSummaryTrigger) {
-        chatElements.sessionSummaryTrigger.addEventListener('mouseenter', warmSelectedSessionSummaryPreview);
-        chatElements.sessionSummaryTrigger.addEventListener('focus', warmSelectedSessionSummaryPreview);
-        chatElements.sessionSummaryTrigger.addEventListener('click', openSelectedSessionSummaryModal);
-    }
-
-    if (chatElements.sessionTitleSave) {
-        chatElements.sessionTitleSave.addEventListener('click', saveSessionTitle);
-    }
-
-    if (chatElements.sessionTitleInput) {
-        chatElements.sessionTitleInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') saveSessionTitle();
-        });
-    }
-
-    if (chatElements.sessionDeleteBtn) {
-        chatElements.sessionDeleteBtn.addEventListener('click', deleteCurrentSession);
-    }
-
-    if (chatElements.sessionExportBtn) {
-        chatElements.sessionExportBtn.addEventListener('click', exportCurrentSession);
-    }
+    sessionControls.attachEventListeners();
 
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.addEventListener('input', () => {
-            syncWorkspaceControlState();
+            workspacePicker.syncControls();
+            refreshChatEmptyState();
         });
-        chatElements.workspacePathInput.addEventListener('blur', saveWorkspacePath);
+        chatElements.workspacePathInput.addEventListener('blur', workspacePicker.savePath);
         chatElements.workspacePathInput.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                saveWorkspacePath();
+                workspacePicker.savePath();
             }
         });
     }
 
+    if (chatElements.modelSelector) {
+        chatElements.modelSelector.addEventListener('change', refreshChatEmptyState);
+    }
+
+    if (chatElements.thinkingSelector) {
+        chatElements.thinkingSelector.addEventListener('change', refreshChatEmptyState);
+    }
+
     if (chatElements.workspacePickerBtn) {
-        chatElements.workspacePickerBtn.addEventListener('click', openWorkspacePickerModal);
+        chatElements.workspacePickerBtn.addEventListener('click', workspacePicker.openModal);
     }
 
     if (chatElements.workspaceUnlockBtn) {
-        chatElements.workspaceUnlockBtn.addEventListener('click', unlockWorkspacePath);
+        chatElements.workspaceUnlockBtn.addEventListener('click', workspacePicker.unlockPath);
     }
 
     if (chatElements.toolDropdownTrigger) {
@@ -2752,107 +1240,15 @@ function setupEventListeners() {
                 setToolMenuOpen(false);
             }
         }
+
     });
 
     if (dashElements.rescanBtn) {
-        dashElements.rescanBtn.addEventListener('click', rescanVaults);
+        dashElements.rescanBtn.addEventListener('click', workflowActions.rescanVaults);
     }
 
-    if (dashElements.systemStatus) {
-        dashElements.systemStatus.addEventListener('click', (event) => {
-            const target = event.target;
-            if (!(target instanceof HTMLElement)) return;
-            const vaultSortButton = target.closest('[data-dashboard-vault-sort]');
-            if (vaultSortButton instanceof HTMLElement) {
-                state.dashboardVaultSort = {
-                    column: vaultSortButton.getAttribute('data-dashboard-vault-sort') || 'name',
-                    direction: vaultSortButton.getAttribute('data-dashboard-vault-sort-next') || 'asc'
-                };
-                displaySystemStatus();
-                return;
-            }
-        });
-    }
-
-    if (dashElements.workflowsStatus) {
-        dashElements.workflowsStatus.addEventListener('click', (event) => {
-            const target = event.target;
-            if (!(target instanceof HTMLElement)) return;
-            const editButton = target.closest('[data-dashboard-workflow-edit]');
-            if (editButton instanceof HTMLElement) {
-                openWorkflowFileEditor(editButton.getAttribute('data-dashboard-workflow-edit') || '');
-                return;
-            }
-            const toggleButton = target.closest('[data-dashboard-workflow-toggle]');
-            if (toggleButton instanceof HTMLElement) {
-                toggleWorkflowEnabled(
-                    toggleButton.getAttribute('data-dashboard-workflow-toggle') || '',
-                    toggleButton.getAttribute('data-dashboard-workflow-enabled') === 'true',
-                    toggleButton
-                );
-                return;
-            }
-            const runButton = target.closest('[data-dashboard-workflow-run]');
-            if (runButton instanceof HTMLElement) {
-                executeWorkflow(
-                    runButton.getAttribute('data-dashboard-workflow-run') || '',
-                    runButton,
-                    runButton.getAttribute('data-dashboard-workflow-system-template') === 'true'
-                );
-                return;
-            }
-            const stopButton = target.closest('[data-dashboard-workflow-stop]');
-            if (stopButton instanceof HTMLElement) {
-                stopWorkflow(
-                    stopButton.getAttribute('data-dashboard-workflow-stop') || '',
-                    stopButton
-                );
-                return;
-            }
-            const stopAllButton = target.closest('[data-dashboard-workflow-stop-all]');
-            if (stopAllButton instanceof HTMLElement) {
-                stopAllWorkflows(stopAllButton);
-                return;
-            }
-            const workflowSortButton = target.closest('[data-dashboard-workflow-sort]');
-            if (workflowSortButton instanceof HTMLElement) {
-                state.dashboardWorkflowSort = {
-                    column: workflowSortButton.getAttribute('data-dashboard-workflow-sort') || 'id',
-                    direction: workflowSortButton.getAttribute('data-dashboard-workflow-sort-next') || 'asc'
-                };
-                displaySystemStatus();
-                return;
-            }
-        });
-    }
-
-    if (dashElements.vaultActivityStatus) {
-        dashElements.vaultActivityStatus.addEventListener('change', (event) => {
-            if (event.target?.id !== 'vault-activity-selector') return;
-            state.selectedActivityVault = event.target.value || '';
-            loadVaultActivity(state.selectedActivityVault);
-        });
-        dashElements.vaultActivityStatus.addEventListener('click', (event) => {
-            const target = event.target;
-            if (!(target instanceof HTMLElement)) return;
-            const sortButton = target.closest('[data-vault-activity-sort]');
-            if (sortButton instanceof HTMLElement) {
-                state.vaultActivitySort = {
-                    column: sortButton.getAttribute('data-vault-activity-sort') || 'last_run',
-                    direction: sortButton.getAttribute('data-vault-activity-sort-next') || 'asc'
-                };
-                updateVaultActivityContainer(state.selectedActivityVault);
-                return;
-            }
-            if (target.id === 'vault-activity-refresh') {
-                if (state.selectedActivityVault) {
-                    loadVaultActivity(state.selectedActivityVault);
-                }
-                return;
-            }
-            handleVaultActivityClick(target);
-        });
-    }
+    dashboardView.attachEventListeners();
+    vaultActivity.attachEventListeners();
 
     if (chatElements.chatMessages) {
         chatElements.chatMessages.addEventListener('scroll', handleChatScroll, { passive: true });
@@ -2872,9 +1268,9 @@ function handleVaultChange() {
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';
     }
-    clearCompactionProgress();
-    renderSessionSelector();
-    updateSessionTitleRow();
+    sessionControls.clearCompactionProgress();
+    sessionControls.renderSelector();
+    sessionControls.updateTitleRow();
     renderChatEmptyState();
     updateStatus();
     populateTemplates([]); // reset while loading
@@ -2887,7 +1283,7 @@ function handleVaultChange() {
 function populateTemplates(templates, preferredTemplate = '') {
     if (!chatElements.templateSelector) return;
     const templateList = Array.isArray(templates) ? templates : [];
-    chatElements.templateSelector.innerHTML = '<option value="">No template</option>';
+    chatElements.templateSelector.innerHTML = '<option value="">No context script</option>';
     templateList.forEach((tmpl) => {
         const option = document.createElement('option');
         option.value = tmpl.name;
@@ -2964,13 +1360,13 @@ async function sendMessage() {
         .map(cb => cb.value);
 
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
-    const workspacePathValue = currentWorkspacePath() || null;
+    const workspacePathValue = workspacePicker.currentPath() || null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
     state.sessionId = requestSessionId;
     state.isWorkspaceUnlocked = false;
-    renderSessionSelector();
-    updateSessionTitleRow();
-    refreshCompactionProgress();
+    sessionControls.renderSelector();
+    sessionControls.updateTitleRow();
+    sessionControls.refreshCompactionProgress();
     syncChatControlLocks();
     state.activeChatSessionId = requestSessionId;
     const abortController = new AbortController();
@@ -3036,9 +1432,9 @@ async function sendMessage() {
         if (sessionId) {
             state.sessionId = sessionId;
             syncChatControlLocks();
-            renderSessionSelector();
-            updateSessionTitleRow();
-            refreshCompactionProgress();
+            sessionControls.renderSelector();
+            sessionControls.updateTitleRow();
+            sessionControls.refreshCompactionProgress();
         }
 
         // Fallback for environments that do not support streaming
@@ -3053,6 +1449,10 @@ async function sendMessage() {
                 toolCount: 0,
                 status: 'done'
             });
+            if (vault && state.sessionId) {
+                await fetchSessions(vault, state.sessionId);
+                await loadSession(state.sessionId);
+            }
             return;
         }
 
@@ -3136,6 +1536,9 @@ async function sendMessage() {
         });
         if (vault) {
             await fetchSessions(vault, state.sessionId || '');
+            if (state.sessionId) {
+                await loadSession(state.sessionId);
+            }
         }
 
     } catch (error) {
@@ -3154,7 +1557,7 @@ async function sendMessage() {
         chatElements.sendBtn.disabled = false;
         syncChatControlLocks();
         chatElements.chatInput.focus();
-        refreshCompactionProgress();
+        sessionControls.refreshCompactionProgress();
     }
 }
 
@@ -3188,782 +1591,40 @@ async function stopChatResponse() {
     }
 }
 
-// Loading indicator helpers
 function addLoadingMessage() {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'flex justify-start';
-    messageDiv.id = 'loading-message';
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'max-w-[80%] px-4 py-2 rounded-lg message-bubble message-assistant';
-    contentDiv.innerHTML = `<div class="flex items-center space-x-2 text-sm">
-        <span class="typing-indicator inline-flex">${TYPING_DOTS_HTML}</span>
-        <span class="ml-1">Contacting assistant…</span>
-    </div>`;
-
-    messageDiv.appendChild(contentDiv);
-
-    appendChatMessageNode(messageDiv, { forceScroll: true });
-
-    return messageDiv;
+    return chatRendering.addLoadingMessage();
 }
 
 function removeLoadingMessage(messageDiv) {
-    if (messageDiv && messageDiv.parentNode) {
-        messageDiv.parentNode.removeChild(messageDiv);
-    }
+    chatRendering.removeLoadingMessage(messageDiv);
 }
 
-function enforceExternalLinkBehavior(container) {
-    if (!container) return;
-    const links = container.querySelectorAll('a[href]');
-    links.forEach(link => {
-        link.setAttribute('target', '_blank');
-        link.setAttribute('rel', 'noopener noreferrer');
-    });
-}
-
-function renderAssistantHtml(bodyDiv, markdownContent = '') {
-    if (!bodyDiv) return;
-    const content = (markdownContent || '').trim();
-    const protectedContent = protectLatexForMarkdown(content);
-    const renderedHtml = content ? marked.parse(protectedContent.markdown) : '';
-    const restoredHtml = restoreLatexPlaceholders(renderedHtml, protectedContent.segments);
-    bodyDiv.innerHTML = sanitizeAssistantHtml(restoredHtml);
-}
-
-function protectLatexForMarkdown(markdown) {
-    if (!markdown) {
-        return { markdown: '', segments: [] };
-    }
-
-    const segments = [];
-    const codePattern = /(```[\s\S]*?```|`[^`\n]*`)/g;
-    let cursor = 0;
-    let output = '';
-    let match = codePattern.exec(markdown);
-
-    while (match) {
-        output += replaceLatexSegments(markdown.slice(cursor, match.index), segments);
-        output += match[0];
-        cursor = match.index + match[0].length;
-        match = codePattern.exec(markdown);
-    }
-
-    output += replaceLatexSegments(markdown.slice(cursor), segments);
-    return { markdown: output, segments };
-}
-
-function replaceLatexSegments(text, segments) {
-    if (!text) return '';
-
-    const pattern =
-        /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$)/g;
-
-    return text.replace(pattern, (rawMath) => {
-        const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
-        segments.push(rawMath);
-        return placeholder;
-    });
-}
-
-function restoreLatexPlaceholders(html, segments) {
-    if (!html || !segments.length) return html;
-
-    return segments.reduce((acc, rawMath, index) => {
-        const placeholder = `@@MATH_SEGMENT_${index}@@`;
-        return acc.split(placeholder).join(escapeHtml(rawMath));
-    }, html);
-}
-
-function escapeHtml(value) {
-    if (!value) return '';
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function truncateText(value, maxLength) {
-    const text = String(value || '').trim();
-    if (!text || text.length <= maxLength) return text;
-    return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
-}
-
-function getMathJax() {
-    if (typeof window === 'undefined') return null;
-    const mathJax = window.MathJax;
-    if (!mathJax || typeof mathJax.typesetPromise !== 'function') return null;
-    return mathJax;
-}
-
-function sanitizeAssistantHtml(html) {
-    if (!html) return '';
-
-    if (!window.DOMPurify || typeof window.DOMPurify.sanitize !== 'function') {
-        return html;
-    }
-
-    return window.DOMPurify.sanitize(html, {
-        USE_PROFILES: { html: true }
-    });
-}
-
-function postProcessAssistantBody(bodyDiv) {
-    if (!bodyDiv) return;
-    enforceExternalLinkBehavior(bodyDiv);
-    renderAssistantMath(bodyDiv);
-    attachCodeCopyButtons(bodyDiv);
-}
-
-function renderAssistantMath(bodyDiv) {
-    if (!bodyDiv) return;
-    const mathJax = getMathJax();
-    if (!mathJax) return;
-
-    mathTypesetQueue = mathTypesetQueue
-        .then(() => mathJax.startup?.promise)
-        .then(() => {
-            if (typeof mathJax.typesetClear === 'function') {
-                mathJax.typesetClear([bodyDiv]);
-            }
-            return mathJax.typesetPromise([bodyDiv]);
-        })
-        .catch((error) => {
-            console.warn('MathJax render failed:', error);
-        });
-}
-
-function scheduleAssistantPostProcess(context, delayMs = 120) {
-    if (!context || !context.bodyDiv) return;
-
-    if (context.postProcessTimer) {
-        clearTimeout(context.postProcessTimer);
-    }
-
-    context.postProcessTimer = window.setTimeout(() => {
-        postProcessAssistantBody(context.bodyDiv);
-        context.postProcessTimer = null;
-        scrollChatToBottom();
-    }, delayMs);
-}
-
-function flushAssistantPostProcess(context) {
-    if (!context || !context.bodyDiv) return;
-
-    if (context.postProcessTimer) {
-        clearTimeout(context.postProcessTimer);
-        context.postProcessTimer = null;
-    }
-
-    postProcessAssistantBody(context.bodyDiv);
-}
-
-// Add message to chat with copy controls
 function addMessage(role, content, options = {}) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = `max-w-[80%] px-4 py-2 rounded-lg message-bubble ${
-        role === 'user'
-            ? 'message-user'
-            : role === 'error'
-            ? 'state-surface-error border'
-            : 'message-assistant prose prose-sm max-w-none'
-    }`;
-
-    const bodyDiv = document.createElement('div');
-    bodyDiv.className = 'message-body';
-
-    if (role === 'assistant') {
-        renderAssistantHtml(bodyDiv, content);
-        postProcessAssistantBody(bodyDiv);
-    } else {
-        const escapedContent = content
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/\n/g, '<br>');
-        bodyDiv.innerHTML = escapedContent;
-    }
-
-    contentDiv.appendChild(bodyDiv);
-
-    const footerDiv = document.createElement('div');
-    footerDiv.className = 'message-footer';
-
-    const footerContent = document.createElement('div');
-    footerContent.className = 'message-footer-content';
-
-    if (role === 'assistant' && options.footerHtml) {
-        footerContent.innerHTML = options.footerHtml;
-    }
-
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'message-footer-actions';
-
-    if (role === 'user' || role === 'error') {
-        footerDiv.classList.add('message-footer-right');
-    }
-
-    const copyButton = createCopyButton(() => getCopyableText(bodyDiv), 'message-copy-button');
-    actionsDiv.appendChild(copyButton);
-
-    if (footerContent.innerHTML.trim()) {
-        footerDiv.appendChild(footerContent);
-    } else {
-        footerDiv.classList.add('message-footer-right');
-    }
-
-    footerDiv.appendChild(actionsDiv);
-    contentDiv.appendChild(footerDiv);
-
-    messageDiv.appendChild(contentDiv);
-
-    appendChatMessageNode(messageDiv, { forceScroll: true });
+    chatRendering.addMessage(role, content, options);
 }
 
 function createAssistantStreamingMessage() {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'flex justify-start';
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'max-w-[80%] px-4 py-3 rounded-lg message-bubble message-assistant prose prose-sm max-w-none shadow-sm';
-
-    const progressDiv = document.createElement('div');
-    progressDiv.className = 'stream-progress';
-
-    const indicator = document.createElement('div');
-    indicator.className = 'stream-status-indicator typing';
-    indicator.innerHTML = TYPING_DOTS_HTML;
-
-    const statusText = document.createElement('span');
-    statusText.className = 'stream-status-text';
-    statusText.textContent = 'Assistant is responding 💬';
-
-    progressDiv.appendChild(indicator);
-    progressDiv.appendChild(statusText);
-
-    const toolList = document.createElement('div');
-    toolList.className = 'tool-status-list hidden';
-
-    const bodyDiv = document.createElement('div');
-    bodyDiv.className = 'message-body prose prose-sm max-w-none';
-    bodyDiv.innerHTML = '';
-
-    contentDiv.appendChild(progressDiv);
-    contentDiv.appendChild(bodyDiv);
-    messageDiv.appendChild(contentDiv);
-
-    appendChatMessageNode(messageDiv, { forceScroll: true });
-
-    return {
-        messageDiv,
-        contentDiv,
-        progressDiv,
-        indicator,
-        statusText,
-        bodyDiv,
-        toolList,
-        toolCallsSection: null,
-        toolCallsSummaryTitle: null,
-        toolStatusMap: new Map(),
-        fullText: '',
-        errorMessages: [],
-        hasTools: false,
-        toolSummary: null,
-        postProcessTimer: null
-    };
-}
-
-function ensureToolCallsSection(context) {
-    if (context.toolCallsSection) {
-        return context.toolCallsSection;
-    }
-
-    const section = document.createElement('details');
-    section.className = 'tool-calls-section';
-
-    const summary = document.createElement('summary');
-    summary.className = 'tool-status-summary';
-
-    const chevron = document.createElement('span');
-    chevron.className = 'tool-status-chevron';
-    chevron.textContent = '▸';
-
-    const title = document.createElement('span');
-    title.className = 'tool-status-title';
-    title.textContent = 'Tool calls (0)';
-
-    summary.appendChild(chevron);
-    summary.appendChild(title);
-
-    section.appendChild(summary);
-    section.appendChild(context.toolList);
-    context.contentDiv.appendChild(section);
-    section.addEventListener('toggle', () => {
-        chevron.textContent = section.open ? '▾' : '▸';
-    });
-
-    context.toolCallsSection = section;
-    context.toolCallsSummaryTitle = title;
-    return section;
-}
-
-function updateToolCallsSummary(context) {
-    if (!context || !context.toolCallsSummaryTitle) {
-        return;
-    }
-
-    const total = context.toolStatusMap.size;
-    context.toolCallsSummaryTitle.textContent = `Tool calls (${total})`;
+    return chatRendering.createAssistantStreamingMessage();
 }
 
 function renderAssistantMarkdown(context, options = {}) {
-    const { finalize = false } = options;
-    renderAssistantHtml(context.bodyDiv, context.fullText);
-    if (finalize) {
-        flushAssistantPostProcess(context);
-    } else {
-        scheduleAssistantPostProcess(context);
-    }
-    scrollChatToBottom();
+    chatRendering.renderAssistantMarkdown(context, options);
 }
 
 function setAssistantStatus(context, label, state = 'thinking') {
-    const emoji = STATUS_EMOJIS[state] || STATUS_EMOJIS.thinking;
-    context.statusText.textContent = `${label} ${emoji}`;
-    context.indicator.className = 'stream-status-indicator';
-    if (state === 'thinking') {
-        context.indicator.classList.add('typing');
-        context.indicator.innerHTML = TYPING_DOTS_HTML;
-        return;
-    }
-
-    const stateClass = state === 'tools'
-        ? 'tool'
-        : state === 'done'
-        ? 'success'
-        : state === 'error'
-        ? 'error'
-        : '';
-    if (stateClass) {
-        context.indicator.classList.add(stateClass);
-    }
-    context.indicator.textContent = emoji;
+    chatRendering.setAssistantStatus(context, label, state);
 }
 
 function handleToolEvent(context, payload) {
-    const toolId = payload.tool_call_id || `tool-${context.toolStatusMap.size + 1}`;
-    if (!toolId) return;
-
-    let entry = context.toolStatusMap.get(toolId);
-
-    if (payload.event === 'tool_call_started' || !entry) {
-        ensureToolCallsSection(context);
-        entry = createToolStatusEntry(context, toolId, payload);
-        context.hasTools = true;
-        if (payload.event === 'tool_call_started') {
-            setAssistantStatus(context, 'Running tools', 'tools');
-        }
-    }
-
-    if (payload.event === 'tool_call_finished') {
-        entry.container.classList.remove('tool-status-running');
-        entry.container.classList.add('tool-status-complete');
-        if (payload.result !== undefined && payload.result !== null) {
-            entry.result = payload.result;
-        }
-        updateToolDetail(entry);
-        entry.chevron.textContent = entry.container.open ? '▾' : '▸';
-
-        const hasRunning = Array.from(context.toolStatusMap.values())
-            .some(item => item.container.classList.contains('tool-status-running'));
-        if (!hasRunning) {
-            setAssistantStatus(context, 'Continuing response', 'thinking');
-        }
-    } else if (payload.event === 'tool_call_started' && payload.arguments) {
-        entry.args = payload.arguments;
-        updateToolDetail(entry);
-    }
-    updateToolCallsSummary(context);
-}
-
-function createToolStatusEntry(context, toolId, payload) {
-    const container = document.createElement('details');
-    container.className = 'tool-status tool-status-running';
-
-    const summary = document.createElement('summary');
-    summary.className = 'tool-status-summary';
-
-    const chevron = document.createElement('span');
-    chevron.className = 'tool-status-chevron';
-    chevron.textContent = '▸';
-
-    const title = document.createElement('span');
-    title.className = 'tool-status-title';
-    title.textContent = payload.tool_name || 'Tool call';
-
-    const body = document.createElement('div');
-    body.className = 'tool-status-body';
-
-    const detailContainer = document.createElement('div');
-    detailContainer.className = 'tool-status-detail-container';
-    body.appendChild(detailContainer);
-
-    summary.appendChild(chevron);
-    summary.appendChild(title);
-
-    container.appendChild(summary);
-    container.appendChild(body);
-
-    container.addEventListener('toggle', () => {
-        chevron.textContent = container.open ? '▾' : '▸';
-    });
-
-    context.toolList.classList.remove('hidden');
-    context.toolList.appendChild(container);
-    const entry = {
-        container,
-        summary,
-        chevron,
-        title,
-        detailContainer,
-        args: payload.arguments || null,
-        result: null
-    };
-    updateToolDetail(entry);
-    context.toolStatusMap.set(toolId, entry);
-
-    return entry;
+    chatRendering.handleToolEvent(context, payload);
 }
 
 function finalizeAssistantMessage(context, metadata) {
-    renderAssistantMarkdown(context, { finalize: true });
-
-    const hasError = context.errorMessages.length > 0;
-    const endedEarly = metadata.status && metadata.status !== 'done' && !hasError;
-
-    if (hasError || endedEarly) {
-        const finalLabel = hasError ? 'Completed with issues' : 'Response ended early';
-        setAssistantStatus(context, finalLabel, 'error');
-    } else if (context.progressDiv && context.progressDiv.parentNode) {
-        context.progressDiv.parentNode.removeChild(context.progressDiv);
-    }
-
-    const footerDiv = document.createElement('div');
-    footerDiv.className = 'message-footer';
-
-    const footerContent = document.createElement('div');
-    footerContent.className = 'message-footer-content';
-    const hasToolSection = Boolean(context.toolCallsSection && context.toolStatusMap.size > 0);
-
-    if (hasToolSection && context.toolCallsSection) {
-        footerDiv.classList.add('message-footer-has-tools');
-        footerContent.appendChild(context.toolCallsSection);
-    }
-
-    if (endedEarly && !hasError) {
-        const span = document.createElement('span');
-        span.textContent = 'Status: Partial output';
-        footerContent.appendChild(span);
-    } else if (hasError) {
-        const span = document.createElement('span');
-        span.textContent = 'Status: Needs review';
-        footerContent.appendChild(span);
-    }
-
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'message-footer-actions';
-
-    const copyButton = createCopyButton(() => getCopyableText(context.bodyDiv), 'message-copy-button');
-    actionsDiv.appendChild(copyButton);
-
-    if (footerContent.childElementCount > 0) {
-        footerDiv.appendChild(footerContent);
-    } else {
-        footerDiv.classList.add('message-footer-right');
-    }
-    footerDiv.appendChild(actionsDiv);
-    context.contentDiv.appendChild(footerDiv);
-
-    scrollChatToBottom();
+    chatRendering.finalizeAssistantMessage(context, metadata);
 }
 
-function parseSseEvent(rawEvent) {
-    if (!rawEvent) return null;
-
-    const lines = rawEvent.split('\n');
-    const dataLines = [];
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('data:')) {
-            dataLines.push(trimmed.slice(5).trim());
-        }
-    }
-
-    if (!dataLines.length) {
-        // Attempt to parse raw JSON as fallback
-        try {
-            return JSON.parse(rawEvent);
-        } catch {
-            return null;
-        }
-    }
-
-    // Preserve SSE semantics: each `data:` line is joined with a newline.
-    const dataPayload = dataLines.join('\n');
-    if (!dataPayload) return null;
-
-    try {
-        return JSON.parse(dataPayload);
-    } catch (error) {
-        console.warn('Failed to parse SSE chunk:', dataPayload, error);
-        return null;
-    }
-}
-
-function formatToolDetail(value) {
-    if (value === undefined || value === null) return '';
-    return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-}
-
-function updateToolDetail(entry) {
-    if (!entry || !entry.detailContainer) return;
-
-    entry.detailContainer.innerHTML = '';
-
-    const sections = [];
-    if (entry.args) {
-        sections.push({ label: 'Args', value: formatToolDetail(entry.args) });
-    }
-    if (entry.result) {
-        sections.push({ label: 'Result', value: formatToolDetail(entry.result) });
-    }
-
-    if (sections.length) {
-        sections.forEach(({ label, value }) => {
-            entry.detailContainer.appendChild(createToolDetailSection(label, value));
-        });
-        return;
-    }
-
-    const placeholder = document.createElement('div');
-    placeholder.className = 'tool-status-placeholder';
-    placeholder.textContent = entry.container.classList.contains('tool-status-complete')
-        ? 'No tool details available.'
-        : 'Awaiting tool details…';
-    entry.detailContainer.appendChild(placeholder);
-}
-
-function createToolDetailSection(label, value) {
-    const section = document.createElement('div');
-    section.className = 'tool-status-section';
-
-    const heading = document.createElement('div');
-    heading.className = 'tool-status-label';
-    heading.textContent = label;
-
-    const block = document.createElement('pre');
-    block.className = 'tool-status-block';
-    block.textContent = value;
-
-    section.appendChild(heading);
-    section.appendChild(block);
-    return section;
-}
-
-function attachCodeCopyButtons(container) {
-    const codeBlocks = container.querySelectorAll('pre');
-    codeBlocks.forEach(pre => {
-        if (pre.querySelector('.code-copy-button')) return;
-        const copyButton = createCopyButton(() => getCopyableText(pre), 'code-copy-button');
-        pre.appendChild(copyButton);
-    });
-}
-
-function createCopyButton(getText, extraClass = '') {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `copy-button ${extraClass}`.trim();
-    button.setAttribute('aria-label', 'Copy to clipboard');
-    button.title = 'Copy to clipboard';
-    button.innerHTML = COPY_ICON_SVG;
-
-    button.addEventListener('click', async (event) => {
-        event.stopPropagation();
-        const text = getText();
-        if (!text) {
-            flashCopyFeedback(button, false);
-            return;
-        }
-        const didCopy = await handleCopy(text);
-        flashCopyFeedback(button, didCopy);
-    });
-
-    return button;
-}
-
-function getCopyableText(element) {
-    const clone = element.cloneNode(true);
-    clone.querySelectorAll('.copy-button').forEach(btn => btn.remove());
-    return clone.innerText.trim();
-}
-
-async function handleCopy(text) {
-    try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-        }
-    } catch (err) {
-        console.warn('navigator.clipboard.writeText failed', err);
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.top = '-1000px';
-    textarea.style.left = '-1000px';
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-
-    let didCopy = false;
-    try {
-        didCopy = document.execCommand('copy');
-    } catch (err) {
-        console.warn('document.execCommand copy failed', err);
-    }
-
-    document.body.removeChild(textarea);
-    return didCopy;
-}
-
-function flashCopyFeedback(button, didCopy) {
-    const originalLabel = button.innerHTML;
-    const originalTitle = button.title;
-    button.innerHTML = didCopy ? '✅' : '⚠️';
-    button.title = didCopy ? 'Copied!' : 'Copy failed';
-    button.disabled = true;
-
-    setTimeout(() => {
-        button.innerHTML = originalLabel;
-        button.title = originalTitle;
-        button.disabled = false;
-    }, 1200);
-}
 
 // Clear session
-function updateSessionTitleRow() {
-    const row = chatElements.sessionTitleRow;
-    const input = chatElements.sessionTitleInput;
-    if (!row || !input) return;
-
-    const sessionId = state.sessionId;
-    if (!sessionId) {
-        row.classList.add('hidden');
-        input.value = '';
-        return;
-    }
-
-    const session = state.sessions.find((s) => s.session_id === sessionId);
-    input.value = session?.title || '';
-    row.classList.remove('hidden');
-}
-
-async function saveSessionTitle() {
-    const sessionId = state.sessionId;
-    const vault = chatElements.vaultSelector?.value || '';
-    const input = chatElements.sessionTitleInput;
-    const btn = chatElements.sessionTitleSave;
-    if (!sessionId || !vault || !input || !btn) return;
-
-    const title = input.value.trim() || null;
-    btn.disabled = true;
-    try {
-        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/title`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault_name: vault, title }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        // Update local state so the picker label refreshes immediately
-        const session = state.sessions.find((s) => s.session_id === sessionId);
-        if (session) session.title = title;
-        renderSessionSelector();
-    } catch (error) {
-        console.error('Failed to save session title:', error);
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-async function exportCurrentSession() {
-    const sessionId = state.sessionId;
-    const vault = chatElements.vaultSelector?.value || '';
-    const btn = chatElements.sessionExportBtn;
-    if (!sessionId || !vault || !btn) return;
-
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Exporting...';
-    try {
-        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/export`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault_name: vault }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const payload = await response.json();
-        alert(`Transcript exported to ${payload.filename}`);
-    } catch (error) {
-        console.error('Failed to export session transcript:', error);
-        alert('Failed to export transcript');
-    } finally {
-        btn.textContent = originalText;
-        syncChatControlLocks();
-    }
-}
-
-async function deleteCurrentSession() {
-    const sessionId = state.sessionId;
-    const vault = chatElements.vaultSelector?.value || '';
-    const btn = chatElements.sessionDeleteBtn;
-    if (!sessionId || !vault || !btn) return;
-
-    if (!confirm(
-        `Delete session "${sessionId}"? This removes it from the chat session list and database only. Exported transcripts are not deleted.`
-    )) return;
-
-    btn.disabled = true;
-    try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`,
-            { method: 'DELETE' }
-        );
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        state.sessions = state.sessions.filter((s) => s.session_id !== sessionId);
-        state.sessionId = null;
-        clearPendingAttachments();
-        renderChatEmptyState();
-        renderSessionSelector();
-        updateSessionTitleRow();
-        syncChatControlLocks();
-        updateStatus();
-    } catch (error) {
-        console.error('Failed to delete session:', error);
-    } finally {
-        btn.disabled = false;
-    }
-}
 
 async function clearSession(confirmReset = true) {
     const confirmed = confirmReset
@@ -3976,437 +1637,13 @@ async function clearSession(confirmReset = true) {
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';
     }
-    clearCompactionProgress();
+    sessionControls.clearCompactionProgress();
     clearPendingAttachments();
     renderChatEmptyState();
-    renderSessionSelector();
-    updateSessionTitleRow();
+    sessionControls.renderSelector();
+    sessionControls.updateTitleRow();
     syncChatControlLocks();
     updateStatus();
-}
-
-// Rescan vaults
-async function rescanVaults() {
-    if (!dashElements.rescanResult) return;
-
-    dashElements.rescanResult.innerHTML = '<p class="text-txt-secondary">Rescanning...</p>';
-    dashElements.rescanBtn.disabled = true;
-
-    try {
-        const response = await fetch('api/vaults/rescan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const data = await response.json();
-
-        if (data.metadata) {
-            state.metadata = data.metadata;
-            window.App = window.App || {};
-            window.App.metadata = data.metadata;
-            populateSelectors();
-        } else {
-            await fetchMetadata();
-        }
-
-        await fetchSystemStatus();
-        renderRescanResult(data);
-
-    } catch (error) {
-        console.error('Error rescanning:', error);
-        dashElements.rescanResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-    } finally {
-        dashElements.rescanBtn.disabled = false;
-    }
-}
-
-function renderRescanResult(data) {
-    if (!dashElements.rescanResult) return;
-
-    const configurationErrors = state.systemStatus?.configuration_errors || [];
-    const workflowErrors = configurationErrors.filter((error) => {
-        const filePath = String(error.file_path || '');
-        return filePath.includes('/AssistantMD/Workflows/');
-    });
-
-    dashElements.rescanResult.innerHTML = `
-        <div class="state-surface-success p-3 rounded border">
-            <p class="font-medium">✅ Rescan Completed</p>
-            <p>Vaults discovered: ${data.vaults_discovered || 0}</p>
-            <p>Workflows loaded: ${data.workflows_loaded || 0}</p>
-            <p>Enabled workflows: ${data.enabled_workflows || 0}</p>
-            <p>Scheduler jobs synced: ${data.scheduler_jobs_synced || 0}</p>
-            <p class="mt-2 text-sm">${data.message || ''}</p>
-        </div>
-        ${workflowErrors.length ? `
-            <div class="state-surface-error p-3 rounded border mt-3">
-                <p class="font-medium">⚠️ Workflows Failed To Load</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    ${workflowErrors.map((error) => `
-                        <li>
-                            <span class="font-medium">${escapeHtml(error.workflow_name || error.file_path || 'workflow')}</span>:
-                            ${escapeHtml(error.error_message || 'Unknown load error')}
-                        </li>
-                    `).join('')}
-                </ul>
-            </div>
-        ` : ''}
-    `;
-}
-
-// Execute workflow manually
-async function toggleWorkflowEnabled(globalId, enabled, triggerButton = null) {
-    if (!globalId) {
-        return;
-    }
-
-    if (triggerButton) {
-        triggerButton.disabled = true;
-    }
-
-    try {
-        const response = await fetch('api/workflows/enabled', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ global_id: globalId, enabled })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-success p-3 rounded border">
-                <p class="font-medium">${escapeHtml(data.message || 'Workflow updated.')}</p>
-            </div>
-        `;
-        await fetchSystemStatus();
-    } catch (error) {
-        console.error('Error updating workflow enabled state:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-    } finally {
-        if (triggerButton) {
-            triggerButton.disabled = false;
-        }
-    }
-}
-
-async function openWorkflowFileEditor(globalId) {
-    if (!globalId) {
-        return;
-    }
-
-    closeWorkflowFileEditor();
-    const overlay = document.createElement('div');
-    overlay.id = 'workflow-file-modal';
-    overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
-    overlay.innerHTML = `
-        <div class="absolute inset-0" data-workflow-file-close="true"></div>
-        <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="workflow-file-modal-title">
-            <div class="app-modal-header flex-none">
-                <div class="app-modal-title-block">
-                    <h2 id="workflow-file-modal-title" class="text-lg font-semibold text-txt-primary">Workflow: ${escapeHtml(globalId)}</h2>
-                    <p id="workflow-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">Loading...</p>
-                </div>
-                <div class="app-modal-actions">
-                    <button type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" data-workflow-file-save="true" disabled>
-                        Save
-                    </button>
-                    <button type="button" class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent" data-workflow-file-close="true">
-                        Close
-                    </button>
-                </div>
-            </div>
-            <div class="p-4 space-y-3 flex-1 min-h-0 flex flex-col">
-                <div id="workflow-file-modal-status" class="text-sm text-txt-secondary">Loading workflow file...</div>
-                <textarea
-                    id="workflow-file-modal-editor"
-                    class="w-full flex-1 min-h-0 px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    spellcheck="false"
-                    disabled
-                ></textarea>
-            </div>
-        </section>
-    `;
-    document.body.appendChild(overlay);
-
-    const editor = overlay.querySelector('#workflow-file-modal-editor');
-    const pathLabel = overlay.querySelector('#workflow-file-modal-path');
-    const statusLabel = overlay.querySelector('#workflow-file-modal-status');
-    const saveButton = overlay.querySelector('[data-workflow-file-save]');
-    let sha256 = '';
-
-    overlay.addEventListener('click', async (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) {
-            return;
-        }
-        if (target.dataset.workflowFileClose === 'true') {
-            closeWorkflowFileEditor();
-            return;
-        }
-        if (target.dataset.workflowFileSave === 'true' && editor instanceof HTMLTextAreaElement) {
-            saveButton.disabled = true;
-            statusLabel.textContent = 'Saving...';
-            try {
-                const response = await fetch(`api/workflows/file?global_id=${encodeURIComponent(globalId)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        content: editor.value,
-                        expected_sha256: sha256
-                    })
-                });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || `HTTP ${response.status}`);
-                }
-                const data = await response.json();
-                sha256 = data.sha256 || '';
-                statusLabel.textContent = data.message || 'Saved.';
-                await fetchSystemStatus();
-                saveButton.disabled = false;
-            } catch (error) {
-                console.error('Error saving workflow file:', error);
-                statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
-                saveButton.disabled = false;
-            }
-        }
-    });
-
-    try {
-        const response = await fetch(`api/workflows/file?global_id=${encodeURIComponent(globalId)}`);
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const data = await response.json();
-        sha256 = data.sha256 || '';
-        if (pathLabel) {
-            pathLabel.textContent = data.path || '';
-        }
-        if (editor instanceof HTMLTextAreaElement) {
-            editor.value = data.content || '';
-            editor.disabled = false;
-        }
-        if (statusLabel) {
-            statusLabel.textContent = `Editing ${data.source || 'workflow'} workflow file.`;
-        }
-        if (saveButton instanceof HTMLButtonElement) {
-            saveButton.disabled = false;
-        }
-    } catch (error) {
-        console.error('Error loading workflow file:', error);
-        if (statusLabel) {
-            statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
-        }
-    }
-}
-
-function closeWorkflowFileEditor() {
-    document.getElementById('workflow-file-modal')?.remove();
-}
-
-async function executeWorkflow(globalId, triggerButton = null, isSystemTemplate = false) {
-    if (!globalId) {
-        return;
-    }
-
-    const selectedVault = chatElements.vaultSelector?.value || '';
-    const scopeLabel = isSystemTemplate
-        ? ` for vault "${selectedVault || '(none selected)'}"`
-        : '';
-    const confirmed = window.confirm(`Run workflow "${globalId}"${scopeLabel}?`);
-    if (!confirmed) {
-        return;
-    }
-    if (isSystemTemplate && !selectedVault) {
-        dashElements.executeWorkflowResult.innerHTML = '<p class="state-error">Select a vault before running a system workflow.</p>';
-        return;
-    }
-
-    dashElements.executeWorkflowResult.innerHTML = '<p class="text-txt-secondary">Starting workflow...</p>';
-    if (triggerButton) {
-        triggerButton.disabled = true;
-    }
-
-    try {
-        const payload = { global_id: globalId };
-        if (isSystemTemplate) {
-            payload.vault_name = selectedVault;
-        }
-
-        const response = await fetch('api/workflows/execute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        const task = data.task || {};
-        if (!task.task_id) {
-            throw new Error('Workflow did not return an execution task.');
-        }
-        await fetchWorkflowTasks({ render: true });
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-info p-3 rounded border">
-                <p class="font-medium">Workflow started</p>
-                <p>Workflow: ${escapeHtml(globalId)}</p>
-                <p class="text-sm">Task: ${escapeHtml(task.task_id)}</p>
-                <p class="text-sm">Use the Running Workflows list to monitor or stop this task.</p>
-            </div>
-        `;
-        monitorWorkflowTask(task.task_id);
-    } catch (error) {
-        console.error('Error executing workflow:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-        displaySystemStatus();
-    } finally {
-        if (triggerButton) {
-            triggerButton.disabled = false;
-        }
-    }
-}
-
-async function monitorWorkflowTask(taskId) {
-    if (!taskId) return;
-    try {
-        while (true) {
-            await new Promise(resolve => window.setTimeout(resolve, 1000));
-            const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}`);
-            if (!response.ok) {
-                return;
-            }
-            const task = await response.json();
-            if (!isTerminalTaskStatus(task.status)) {
-                continue;
-            }
-            await fetchWorkflowTasks({ render: true });
-            renderWorkflowTaskResult(task);
-            return;
-        }
-    } catch (error) {
-        console.error('Error monitoring workflow task:', error);
-    }
-}
-
-async function stopWorkflow(taskId, triggerButton = null) {
-    if (!taskId) return;
-    if (triggerButton) {
-        triggerButton.disabled = true;
-        triggerButton.textContent = 'Stopping...';
-    }
-    try {
-        const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}/cancel`, {
-            method: 'POST'
-        });
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-info p-3 rounded border">
-                <p class="font-medium">Stop requested</p>
-                <p class="text-sm">Task: ${escapeHtml(taskId)}</p>
-                <p class="text-sm">Files mutated by this workflow will be rolled back when cancellation completes.</p>
-            </div>
-        `;
-        await fetchWorkflowTasks({ render: true });
-    } catch (error) {
-        console.error('Error stopping workflow:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-        if (triggerButton) {
-            triggerButton.disabled = false;
-            triggerButton.textContent = 'Stop';
-        }
-    }
-}
-
-async function stopAllWorkflows(triggerButton = null) {
-    const tasks = activeWorkflowTasks();
-    if (!tasks.length) {
-        dashElements.executeWorkflowResult.innerHTML = '<p class="text-sm text-txt-secondary">No running workflows to stop.</p>';
-        return;
-    }
-    const confirmed = window.confirm(`Stop ${tasks.length} running workflow task${tasks.length === 1 ? '' : 's'}?`);
-    if (!confirmed) {
-        return;
-    }
-    if (triggerButton) {
-        triggerButton.disabled = true;
-        triggerButton.textContent = 'Stopping...';
-    }
-    try {
-        const results = await Promise.allSettled(
-            tasks.map(task => fetch(`api/tasks/${encodeURIComponent(task.task_id)}/cancel`, { method: 'POST' }))
-        );
-        const failures = [];
-        for (const result of results) {
-            if (result.status === 'rejected') {
-                failures.push(result.reason?.message || 'request failed');
-                continue;
-            }
-            if (!result.value.ok) {
-                failures.push(`HTTP ${result.value.status}`);
-            }
-        }
-        await fetchWorkflowTasks({ render: true });
-        if (failures.length) {
-            dashElements.executeWorkflowResult.innerHTML = `
-                <p class="state-error">Stop requested for ${tasks.length - failures.length} workflow task${tasks.length - failures.length === 1 ? '' : 's'}, but ${failures.length} failed.</p>
-            `;
-            return;
-        }
-        dashElements.executeWorkflowResult.innerHTML = `
-            <div class="state-surface-info p-3 rounded border">
-                <p class="font-medium">Stop requested for all running workflows</p>
-                <p class="text-sm">${tasks.length} workflow task${tasks.length === 1 ? '' : 's'} will stop and roll back mutated files where applicable.</p>
-            </div>
-        `;
-    } catch (error) {
-        console.error('Error stopping all workflows:', error);
-        dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
-    } finally {
-        if (triggerButton) {
-            triggerButton.disabled = false;
-            triggerButton.textContent = 'Stop All';
-        }
-    }
-}
-
-function renderWorkflowTaskResult(task) {
-    const result = task?.metadata?.workflow_result || null;
-    const status = String(task?.status || '').toLowerCase();
-    const success = status === 'completed' && (!result || result.success !== false);
-    const surfaceClass = success ? 'state-surface-success' : 'state-surface-error';
-    const heading = success ? '✅ Execution Completed' : `Workflow ${status || 'finished'}`;
-    const outputFiles = result?.output_files || [];
-    dashElements.executeWorkflowResult.innerHTML = `
-        <div class="${surfaceClass} p-3 rounded border">
-            <p class="font-medium">${escapeHtml(heading)}</p>
-            <p>Workflow: ${escapeHtml(result?.global_id || task?.metadata?.workflow_id || task?.label || '')}</p>
-            ${typeof result?.execution_time_seconds === 'number'
-                ? `<p>Execution time: ${result.execution_time_seconds.toFixed(2)}s</p>`
-                : ''}
-            ${outputFiles.length ? `
-                <p class="mt-2">Output files created:</p>
-                <ul class="list-disc list-inside ml-4">
-                    ${outputFiles.map(f => `<li class="text-sm">${escapeHtml(f)}</li>`).join('')}
-                </ul>
-            ` : ''}
-            <p class="mt-2 text-sm">${escapeHtml(result?.message || task?.terminal_reason || '')}</p>
-        </div>
-    `;
 }
 
 function isTerminalTaskStatus(status) {
@@ -4454,13 +1691,12 @@ function updateStatus(message) {
         if (repairNeeded) {
             messageHtml += `
                 <div class="mt-2">
-                    <button id="repair-settings-btn" type="button" class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60">
-                        Repair settings from template
-                    </button>
+                    <button id="repair-settings-btn" type="button" class="ui-icon-button is-primary" data-icon="clean" data-icon-label="Repair settings from template"></button>
                 </div>
             `;
         }
         configElements.statusMessages.innerHTML = messageHtml;
+        window.AssistantMDIcons.hydrateIconButtons(configElements.statusMessages);
         configElements.configTab.classList.remove('text-txt-secondary', 'text-txt-primary');
         configElements.configTab.classList.add('text-accent', 'font-semibold', 'bg-app-elevated', 'px-3', 'rounded-t-md');
         configElements.configTab.style.borderColor = 'rgb(var(--border-primary))';
@@ -4474,7 +1710,7 @@ function updateStatus(message) {
                 if (!confirmed) return;
 
                 repairBtn.disabled = true;
-                repairBtn.textContent = 'Repairing…';
+                window.AssistantMDIcons.setIconButtonLabel(repairBtn, 'Repairing settings...');
                 let alertEl = document.getElementById('config-repair-alert');
                 if (!alertEl && configElements.statusMessages) {
                     alertEl = document.createElement('div');
@@ -4497,7 +1733,7 @@ function updateStatus(message) {
                     showAlert('Settings repair failed: ' + err.message, 'error');
                 } finally {
                     repairBtn.disabled = false;
-                    repairBtn.textContent = 'Repair settings from template';
+                    window.AssistantMDIcons.setIconButtonLabel(repairBtn, 'Repair settings from template');
                 }
             });
         }

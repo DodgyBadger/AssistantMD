@@ -25,1351 +25,7 @@
         };
     </script>
     <script src="static/vendor/mathjax/tex-chtml.js"></script>
-    <style>
-        /* Theme Color Variables */
-        :root, [data-theme="light"] {
-            --bg-app: 249 250 251;
-            --bg-card: 255 255 255;
-            --bg-elevated: 243 244 246;
-            --text-primary: 17 24 39;
-            --text-secondary: 107 114 128;
-            --text-tertiary: 156 163 175;
-            --accent-primary: 59 130 246;
-            --accent-hover: 37 99 235;
-            --border-primary: 229 231 235;
-            --border-secondary: 209 213 219;
-            --state-success: 34 197 94;
-            --state-warning: 234 179 8;
-            --state-info: 59 130 246;
-            --state-error: 220 38 38;
-            --text-on-accent: 255 255 255;
-        }
-
-        [data-theme="dark"] {
-            --bg-app: 15 23 42;
-            --bg-card: 30 41 59;
-            --bg-elevated: 51 65 85;
-            --text-primary: 241 245 249;
-            --text-secondary: 203 213 225;
-            --text-tertiary: 148 163 184;
-            --accent-primary: 96 165 250;
-            --accent-hover: 59 130 246;
-            --border-primary: 51 65 85;
-            --border-secondary: 71 85 105;
-            --state-success: 74 222 128;
-            --state-warning: 251 191 36;
-            --state-info: 125 211 252;
-            --state-error: 239 68 68;
-            --text-on-accent: 255 255 255;
-        }
-
-        [data-theme="ocean"] {
-            --bg-app: 240 249 255;
-            --bg-card: 224 242 254;
-            --bg-elevated: 186 230 253;
-            --text-primary: 12 74 110;
-            --text-secondary: 14 116 144;
-            --text-tertiary: 22 78 99;
-            --accent-primary: 6 182 212;
-            --accent-hover: 8 145 178;
-            --border-primary: 186 230 253;
-            --border-secondary: 125 211 252;
-            --state-success: 16 185 129;
-            --state-warning: 245 158 11;
-            --state-info: 6 182 212;
-            --state-error: 239 68 68;
-            --text-on-accent: 255 255 255;
-        }
-
-        [data-theme="sunset"] {
-            --bg-app: 255 247 237;
-            --bg-card: 255 237 213;
-            --bg-elevated: 254 215 170;
-            --text-primary: 124 45 18;
-            --text-secondary: 154 52 18;
-            --text-tertiary: 194 65 12;
-            --accent-primary: 234 88 12;
-            --accent-hover: 194 65 12;
-            --border-primary: 254 215 170;
-            --border-secondary: 253 186 116;
-            --state-success: 34 197 94;
-            --state-warning: 217 119 6;
-            --state-info: 234 88 12;
-            --state-error: 239 68 68;
-            --text-on-accent: 255 255 255;
-        }
-
-        [data-theme="lavender"] {
-            --bg-app: 250 245 255;
-            --bg-card: 243 232 255;
-            --bg-elevated: 233 213 255;
-            --text-primary: 59 7 100;
-            --text-secondary: 88 28 135;
-            --text-tertiary: 107 33 168;
-            --accent-primary: 147 51 234;
-            --accent-hover: 126 34 206;
-            --border-primary: 233 213 255;
-            --border-secondary: 216 180 254;
-            --state-success: 52 211 153;
-            --state-warning: 234 179 8;
-            --state-info: 99 102 241;
-            --state-error: 220 38 38;
-            --text-on-accent: 255 255 255;
-        }
-
-        [data-theme="forest"] {
-            --bg-app: 240 253 244;
-            --bg-card: 220 252 231;
-            --bg-elevated: 187 247 208;
-            --text-primary: 20 83 45;
-            --text-secondary: 21 128 61;
-            --text-tertiary: 22 163 74;
-            --accent-primary: 34 197 94;
-            --accent-hover: 22 163 74;
-            --border-primary: 187 247 208;
-            --border-secondary: 134 239 172;
-            --state-success: 34 197 94;
-            --state-warning: 217 119 6;
-            --state-info: 34 197 94;
-            --state-error: 185 28 28;
-            --text-on-accent: 255 255 255;
-        }
-
-        html, body {
-            height: 100%;
-            margin: 0;
-        }
-        body.chat-focus-mode {
-            overflow: hidden;
-        }
-        .tab-content {
-            height: calc(100vh - 70px);
-        }
-        #chat-workspace {
-            min-height: 0;
-        }
-        .chat-focus-divider {
-            display: none;
-        }
-        body.chat-focus-mode #app-shell {
-            max-width: none;
-            width: 100%;
-            height: 100vh;
-            height: 100dvh;
-            padding: 0;
-        }
-        body.chat-focus-mode .app-tabs {
-            display: none;
-        }
-        body.chat-focus-mode #chat-content {
-            position: fixed;
-            inset: 0;
-            z-index: 45;
-            height: 100vh;
-            height: 100dvh;
-            padding: 0;
-            background: rgb(var(--bg-app));
-        }
-        body.chat-focus-mode #chat-settings-panel {
-            display: none;
-        }
-        body.chat-focus-mode #chat-workspace {
-            flex: 1 1 auto;
-            border: 0;
-            border-radius: 0;
-            box-shadow: none;
-        }
-        body.chat-focus-mode #chat-messages {
-            min-height: 8rem;
-        }
-        body.chat-focus-mode #chat-composer {
-            height: var(--chat-compose-height, 18rem);
-            min-height: 8rem;
-            max-height: min(70vh, 42rem);
-            flex: 0 0 auto;
-            padding: 0.75rem;
-        }
-        body.chat-focus-mode .chat-composer-row {
-            height: 100%;
-            min-height: 0;
-            align-items: stretch;
-        }
-        body.chat-focus-mode .chat-composer-main {
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-        }
-        body.chat-focus-mode .chat-compose-wrap {
-            min-height: 0;
-            flex: 1 1 auto;
-        }
-        body.chat-focus-mode #chat-input {
-            height: 100% !important;
-            min-height: 0;
-            resize: none;
-        }
-        body.chat-focus-mode .chat-focus-divider {
-            display: flex;
-            flex: 0 0 0.75rem;
-            align-items: center;
-            justify-content: center;
-            border-top: 1px solid rgb(var(--border-primary));
-            border-bottom: 1px solid rgb(var(--border-primary));
-            background: rgb(var(--bg-elevated));
-            cursor: row-resize;
-            touch-action: none;
-        }
-        body.chat-focus-mode .chat-focus-divider::before {
-            content: "";
-            width: 3rem;
-            height: 0.2rem;
-            border-radius: 9999px;
-            background: rgb(var(--text-tertiary));
-        }
-        @media (max-width: 639px) {
-            body.chat-focus-mode #chat-composer {
-                height: var(--chat-compose-height, 42vh);
-                max-height: 72vh;
-            }
-            body.chat-focus-mode .chat-composer-row {
-                flex-direction: column;
-            }
-            body.chat-focus-mode #send-btn {
-                width: 100%;
-            }
-        }
-        details summary {
-            cursor: pointer;
-            user-select: none;
-        }
-        details summary::-webkit-details-marker {
-            display: none;
-        }
-        .chat-settings-secondary-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr);
-            gap: 0.75rem;
-            align-items: start;
-        }
-        .chat-settings-primary-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr);
-            gap: 0.75rem;
-            align-items: start;
-        }
-        .workspace-field {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto auto;
-            gap: 0.5rem;
-            align-items: stretch;
-        }
-        .workspace-icon-button {
-            width: 2.5rem;
-            height: 2.5rem;
-            border-radius: 0.375rem;
-            border: 1px solid rgb(var(--border-secondary));
-            background: rgb(var(--bg-card));
-            color: rgb(var(--text-primary));
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-        }
-        .workspace-icon-button svg {
-            width: 1.1rem;
-            height: 1.1rem;
-        }
-        .workspace-icon-button:hover,
-        .workspace-icon-button:focus-visible {
-            border-color: rgb(var(--accent-primary));
-            background: rgb(var(--bg-elevated));
-            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
-        }
-        .workspace-icon-button:disabled {
-            opacity: 0.55;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-        .workspace-tree {
-            display: flex;
-            flex-direction: column;
-            gap: 0.05rem;
-        }
-        .workspace-tree-row {
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-            min-height: 1.8rem;
-            border-radius: 0.4rem;
-        }
-        .workspace-tree-row:hover {
-            background: rgb(var(--bg-elevated));
-        }
-        .workspace-tree-toggle,
-        .workspace-tree-spacer {
-            width: 1.35rem;
-            height: 1.35rem;
-            flex: 0 0 1.35rem;
-        }
-        .workspace-tree-toggle {
-            border-radius: 0.35rem;
-            border: 1px solid transparent;
-            background: transparent;
-            color: rgb(var(--text-primary));
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .workspace-tree-toggle:hover,
-        .workspace-tree-toggle:focus-visible {
-            background: rgb(var(--accent-primary) / 0.10);
-            border-color: transparent;
-            box-shadow: none;
-            outline: none;
-        }
-        .workspace-tree-toggle svg {
-            width: 0.85rem;
-            height: 0.85rem;
-            transition: transform 0.15s ease;
-        }
-        .workspace-tree-toggle[aria-expanded="true"] svg {
-            transform: rotate(90deg);
-        }
-        .workspace-tree-select {
-            min-width: 0;
-            flex: 1 1 auto;
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.2rem 0.3rem;
-            border-radius: 0.35rem;
-            text-align: left;
-            color: rgb(var(--text-primary));
-        }
-        .workspace-tree-select:hover,
-        .workspace-tree-select:focus-visible {
-            background: rgb(var(--accent-primary) / 0.10);
-            outline: none;
-        }
-        .workspace-tree-folder-icon {
-            width: 1rem;
-            height: 1rem;
-            flex: 0 0 1rem;
-            color: rgb(var(--text-secondary));
-        }
-        .workspace-tree-name,
-        .workspace-tree-label {
-            display: block;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .workspace-tree-name {
-            font-size: 0.88rem;
-            font-weight: 500;
-        }
-        .tool-dropdown {
-            position: relative;
-        }
-        .tool-dropdown-trigger {
-            display: inline-flex;
-            width: 100%;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.75rem;
-            padding: 0.5rem 0.875rem;
-            border: 1px solid rgb(var(--border-secondary));
-            border-radius: 0.5rem;
-            background: rgb(var(--bg-card));
-            color: rgb(var(--text-primary));
-            cursor: pointer;
-            transition: border-color 0.2s ease, background 0.2s ease;
-        }
-        .tool-dropdown-trigger:hover {
-            border-color: rgb(var(--border-primary));
-            background: rgb(var(--bg-elevated));
-        }
-        .tool-dropdown-trigger:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        .tool-dropdown-label {
-            min-width: 0;
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-            overflow: hidden;
-            white-space: nowrap;
-            font-size: 0.92rem;
-            font-weight: 500;
-        }
-        .tool-dropdown-summary-text {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .tool-dropdown-chevron {
-            width: 1rem;
-            height: 1rem;
-            color: rgb(var(--text-secondary));
-            transition: transform 0.2s ease;
-            flex-shrink: 0;
-        }
-        .tool-dropdown.open .tool-dropdown-chevron {
-            transform: rotate(180deg);
-        }
-        .tool-dropdown-menu {
-            position: absolute;
-            top: calc(100% + 0.45rem);
-            right: 0;
-            z-index: 40;
-            width: min(18rem, 80vw);
-            max-height: 15rem;
-            overflow-y: auto;
-            padding: 0.4rem;
-            border: 1px solid rgb(var(--border-primary));
-            border-radius: 0.6rem;
-            background: rgb(var(--bg-card));
-            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
-        }
-        .tool-dropdown-menu.hidden {
-            display: none;
-        }
-        .tool-dropdown-menu-header {
-            padding: 0.15rem 0.25rem 0.4rem;
-            font-size: 0.74rem;
-            color: rgb(var(--text-secondary));
-        }
-        .tool-dropdown-options {
-            display: flex;
-            flex-direction: column;
-            gap: 0.1rem;
-        }
-        .tool-checkbox-wrapper {
-            position: relative;
-        }
-        .tool-checkbox-wrapper input[type="checkbox"] {
-            width: 0.95rem;
-            height: 0.95rem;
-            margin: 0;
-            accent-color: rgb(var(--accent-primary));
-            flex-shrink: 0;
-        }
-        .tool-checkbox-wrapper label {
-            display: flex;
-            align-items: center;
-            gap: 0.55rem;
-            padding: 0.4rem 0.45rem;
-            border-radius: 0.4rem;
-            color: rgb(var(--text-primary));
-            cursor: pointer;
-            transition: background 0.2s ease;
-            user-select: none;
-            font-size: 0.88rem;
-            line-height: 1.25;
-        }
-        .tool-checkbox-wrapper label:hover {
-            background: rgb(var(--bg-elevated));
-        }
-        .tool-checkbox-name {
-            font-size: 0.88rem;
-            font-weight: 500;
-            color: inherit;
-        }
-        .tool-checkbox-wrapper:has(input[type="checkbox"]:checked) label {
-            background: rgb(var(--accent-primary) / 0.12);
-        }
-        .tool-checkbox-wrapper:has(input[type="checkbox"]:checked) .tool-checkbox-name {
-            color: rgb(var(--accent-hover));
-        }
-        .tool-checkbox-wrapper:has(input[type="checkbox"]:disabled) label {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .tool-checkbox-wrapper:has(input[type="checkbox"]:disabled) label:hover {
-            background: transparent;
-        }
-        @media (min-width: 768px) {
-            .chat-settings-primary-row {
-                grid-template-columns: minmax(0, 1fr) minmax(18rem, 1.35fr);
-            }
-            .chat-settings-secondary-row {
-                grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem) minmax(0, 1fr);
-            }
-        }
-        .session-selector-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 0.75rem;
-            align-items: center;
-        }
-        .chat-session-context-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr);
-            gap: 0.75rem;
-            align-items: center;
-        }
-        @media (min-width: 768px) {
-            .chat-session-context-row {
-                grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
-            }
-        }
-        .session-summary-trigger {
-            width: 2.5rem;
-            height: 2.5rem;
-            border-radius: 0.375rem;
-            border: 1px solid rgb(var(--border-secondary));
-            background: rgb(var(--bg-card));
-            color: rgb(var(--text-primary));
-            display: none;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-        .session-summary-trigger.is-visible {
-            display: inline-flex;
-        }
-        .session-summary-trigger:hover,
-        .session-summary-trigger:focus-visible {
-            border-color: rgb(var(--accent-primary));
-            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.18);
-        }
-        .session-title-row {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        .session-title-row.hidden {
-            display: none;
-        }
-        .session-title-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }
-        .session-title-row input {
-            min-width: 0;
-        }
-        .session-title-actions > button {
-            flex: 1 1 5.5rem;
-        }
-        @media (min-width: 640px) {
-            .session-title-row {
-                flex-direction: row;
-            }
-            .session-title-actions {
-                flex-wrap: nowrap;
-            }
-            .session-title-actions > button {
-                flex: 0 0 auto;
-            }
-        }
-        .app-modal-overlay {
-            align-items: stretch;
-            justify-content: flex-end;
-        }
-        .app-modal-panel {
-            width: 100%;
-            height: 100%;
-            max-width: 48rem;
-            background: rgb(var(--bg-card));
-            border-left: 1px solid rgb(var(--border-primary));
-            box-shadow: 0 20px 45px rgb(0 0 0 / 0.25);
-        }
-        .app-modal-header {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 0.75rem;
-            padding: 0.75rem 1rem;
-            border-bottom: 1px solid rgb(var(--border-primary));
-            background: rgb(var(--bg-card));
-            z-index: 1;
-        }
-        .app-modal-title-block {
-            min-width: 0;
-            overflow-wrap: anywhere;
-        }
-        .app-modal-actions {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 0.5rem;
-        }
-        @media (max-width: 639px) {
-            .app-modal-panel {
-                max-width: none;
-                border-left: 0;
-            }
-            .app-modal-header {
-                flex-direction: column;
-            }
-            .app-modal-actions {
-                width: 100%;
-                justify-content: stretch;
-            }
-            .app-modal-actions > button {
-                flex: 1 1 auto;
-            }
-        }
-        .tab-button.text-amber-600 {
-            font-weight: 600;
-        }
-        .message-bubble {
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-        .message-body {
-            position: relative;
-        }
-        .message-footer {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.75rem;
-            font-size: 12px;
-            color: rgb(var(--text-secondary));
-            margin-top: 0.5rem;
-            padding-top: 0.5rem;
-            border-top: 1px solid rgb(var(--border-primary) / 0.4);
-        }
-        .message-footer-right {
-            justify-content: flex-end;
-        }
-        .message-footer-has-tools {
-            align-items: flex-start;
-        }
-        .message-footer-has-tools .message-footer-content {
-            display: flex;
-            flex: 1;
-            min-width: 0;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        .message-footer-has-tools .message-footer-actions {
-            padding-top: 0.1rem;
-        }
-        .message-footer-content {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            line-height: 1.4;
-        }
-        .message-footer-content span {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-        .message-footer-actions {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .copy-button {
-            border: 1px solid rgb(var(--border-primary));
-            border-radius: 9999px;
-            background: rgb(var(--bg-elevated));
-            color: rgb(var(--text-primary));
-            padding: 2px 8px;
-            font-size: 12px;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            transition: background-color 0.15s ease, opacity 0.15s ease;
-        }
-        .copy-button:hover {
-            background: rgb(var(--accent-primary) / 0.12);
-            border-color: rgb(var(--accent-primary));
-        }
-        .copy-button:disabled {
-            cursor: default;
-            opacity: 0.6;
-        }
-        .copy-button svg {
-            width: 14px;
-            height: 14px;
-            display: block;
-        }
-        .message-bubble pre {
-            position: relative;
-            padding: 1rem 1rem 2.5rem;
-            max-width: 100%;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-        .message-bubble pre code {
-            display: block;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-        .message-bubble pre .copy-button {
-            position: absolute;
-            right: 0.75rem;
-            bottom: 0.75rem;
-            background: rgb(var(--bg-elevated));
-            color: rgb(var(--text-primary));
-            border: 1px solid rgb(var(--border-primary));
-            padding: 4px 10px;
-            border-radius: 9999px;
-            font-size: 12px;
-        }
-        .message-bubble pre .copy-button:hover {
-            background: rgb(var(--accent-primary) / 0.2);
-            border-color: rgb(var(--accent-primary));
-        }
-        .message-bubble.message-assistant .message-footer {
-            border-top: 1px solid rgb(var(--border-primary));
-            color: rgb(var(--text-secondary));
-        }
-        .message-bubble.message-assistant .copy-button {
-            background: rgb(var(--bg-elevated));
-            color: rgb(var(--text-primary));
-            border: 1px solid rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .copy-button:hover {
-            background: rgb(var(--accent-primary) / 0.2);
-            border-color: rgb(var(--accent-primary));
-        }
-        .message-bubble.message-assistant .copy-button:disabled {
-            opacity: 0.6;
-        }
-        .message-bubble.message-user {
-            background: rgb(var(--bg-elevated));
-            color: rgb(var(--text-primary));
-        }
-        .message-bubble.message-user .message-body {
-            font-size: 0.875rem;
-            line-height: 1.7142857;
-        }
-        .message-bubble.message-assistant {
-            background: rgb(var(--accent-primary) / 0.08);
-            border: 1px solid rgb(var(--border-primary));
-            color: rgb(var(--text-primary));
-        }
-        .message-bubble.message-assistant .message-body,
-        .message-bubble.message-assistant .message-body p,
-        .message-bubble.message-assistant .message-body li,
-        .message-bubble.message-assistant .message-body code,
-        .message-bubble.message-assistant .message-body strong,
-        .message-bubble.message-assistant .message-body em {
-            color: rgb(var(--text-primary));
-        }
-        .message-bubble.message-assistant .message-body h1,
-        .message-bubble.message-assistant .message-body h2,
-        .message-bubble.message-assistant .message-body h3,
-        .message-bubble.message-assistant .message-body h4,
-        .message-bubble.message-assistant .message-body h5,
-        .message-bubble.message-assistant .message-body h6 {
-            color: rgb(var(--text-primary));
-        }
-        .message-bubble.message-assistant .message-body a {
-            color: rgb(var(--accent-primary));
-        }
-        .message-bubble.message-assistant .message-body a:hover {
-            color: rgb(var(--accent-hover));
-        }
-        .message-bubble.message-assistant .message-body hr {
-            border-color: rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .message-body blockquote {
-            color: rgb(var(--text-primary));
-            border-inline-start-color: rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .message-body table {
-            color: rgb(var(--text-primary));
-        }
-        .message-bubble.message-assistant .message-body thead {
-            border-bottom-color: rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .message-body tfoot {
-            border-top-color: rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .message-body tbody tr {
-            border-bottom-color: rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .message-body th,
-        .message-bubble.message-assistant .message-body td {
-            color: rgb(var(--text-primary));
-            border-color: rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant .message-body ul > li::marker,
-        .message-bubble.message-assistant .message-body ol > li::marker {
-            color: rgb(var(--text-secondary));
-        }
-        .message-bubble.message-assistant .message-body figcaption {
-            color: rgb(var(--text-secondary));
-        }
-        .message-bubble.message-assistant .message-body kbd {
-            color: rgb(var(--text-primary));
-            box-shadow: 0 0 0 1px rgb(var(--border-primary));
-        }
-        .message-bubble.message-assistant pre {
-            background: rgb(var(--bg-elevated));
-            border: 1px solid rgb(var(--border-primary));
-            color: rgb(var(--text-primary));
-        }
-        .message-bubble.message-assistant pre code {
-            color: inherit;
-        }
-        .stream-progress {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            margin-bottom: 0.75rem;
-            font-size: 0.875rem;
-            color: rgb(var(--text-secondary));
-        }
-        .stream-status-indicator {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 1.5rem;
-            height: 1.5rem;
-            border-radius: 9999px;
-            background: rgb(var(--accent-primary) / 0.15);
-            color: rgb(var(--accent-primary));
-            font-weight: 600;
-        }
-        .stream-status-indicator.typing {
-            background: transparent;
-            width: auto;
-            height: auto;
-        }
-        .stream-status-indicator.success {
-            background: rgb(var(--state-success) / 0.15);
-            color: rgb(var(--state-success));
-        }
-        .stream-status-indicator.error {
-            background: rgb(var(--state-warning) / 0.2);
-            color: rgb(var(--state-warning));
-        }
-        .stream-status-indicator.tool {
-            background: rgb(var(--state-info) / 0.18);
-            color: rgb(var(--state-info));
-        }
-        .stream-status-text {
-            font-weight: 500;
-        }
-        .typing-indicator {
-            display: inline-flex;
-            gap: 0.35rem;
-        }
-        .typing-dot {
-            width: 0.4rem;
-            height: 0.4rem;
-            background: rgb(var(--accent-primary));
-            border-radius: 9999px;
-            opacity: 0.2;
-            animation: typing 1.2s infinite;
-        }
-        .typing-dot:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-        .typing-dot:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-        @keyframes typing {
-            0%, 80%, 100% {
-                opacity: 0.2;
-                transform: translateY(0);
-            }
-            40% {
-                opacity: 1;
-                transform: translateY(-3px);
-            }
-        }
-        .tool-status-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            margin-top: 0.75rem;
-        }
-        .tool-calls-section {
-            margin-top: 0.75rem;
-            border: 1px solid rgb(var(--border-primary) / 0.6);
-            border-radius: 0.6rem;
-            background: rgb(var(--bg-elevated) / 0.5);
-            overflow: hidden;
-        }
-        .message-footer .tool-calls-section {
-            margin-top: 0;
-            width: 100%;
-        }
-        .tool-calls-section .tool-status-list {
-            margin: 0;
-            padding: 0.65rem 0.75rem 0.75rem;
-            border-top: 1px solid rgb(var(--border-primary) / 0.45);
-        }
-        .tool-status {
-            margin: 0;
-            padding: 0;
-            border: 1px solid rgb(var(--accent-primary) / 0.25);
-            border-radius: 0.6rem;
-            background: rgb(var(--bg-elevated) / 0.7);
-            font-size: 0.85rem;
-            overflow: hidden;
-        }
-        .tool-status.tool-status-complete {
-            border-color: rgb(var(--accent-primary) / 0.45);
-        }
-        .tool-status-summary {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.55rem 0.75rem;
-            cursor: pointer;
-            list-style: none;
-            font-weight: 600;
-            color: rgb(var(--text-primary));
-        }
-        .tool-status-summary::-webkit-details-marker,
-        .tool-status-summary::marker {
-            display: none;
-            content: '';
-        }
-        .tool-status-chevron {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 1.25rem;
-            height: 1.25rem;
-            font-size: 0.9rem;
-            color: rgb(var(--accent-primary));
-            transition: color 0.15s ease;
-        }
-        .tool-status[open] .tool-status-chevron {
-            color: rgb(var(--accent-hover));
-        }
-        .tool-status.tool-status-complete .tool-status-chevron {
-            color: rgb(var(--accent-hover));
-        }
-        .tool-status-body {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            padding: 0.65rem 0.75rem 0.75rem;
-            background: rgb(var(--bg-card));
-            border-top: 1px solid rgb(var(--border-primary) / 0.5);
-        }
-        .tool-status-detail-container {
-            display: flex;
-            flex-direction: column;
-            gap: 0.65rem;
-        }
-        .tool-status-section {
-            display: flex;
-            flex-direction: column;
-            gap: 0.35rem;
-        }
-        .tool-status-label {
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: rgb(var(--accent-primary));
-        }
-        .tool-status-block {
-            margin: 0;
-            padding: 0.55rem 0.65rem;
-            background: rgb(var(--accent-primary) / 0.08);
-            border-radius: 0.5rem;
-            font-size: 0.8rem;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: 16rem;
-            max-width: 100%;
-            overflow: auto;
-            color: rgb(var(--text-primary));
-        }
-        .tool-status-placeholder {
-            font-size: 0.8rem;
-            color: rgb(var(--text-secondary));
-            font-style: italic;
-        }
-        summary.collapsible-summary {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 1rem;
-            font-weight: 600;
-            color: rgb(var(--text-primary));
-            cursor: pointer;
-            user-select: none;
-            transition: background-color 0.15s ease;
-        }
-        summary.collapsible-summary:hover {
-            background-color: rgb(var(--bg-elevated));
-        }
-        summary.collapsible-summary .summary-text {
-            display: flex;
-            flex-direction: column;
-            gap: 0.15rem;
-        }
-        summary.collapsible-summary .summary-title {
-            font-weight: 600;
-            color: rgb(var(--text-primary));
-        }
-        summary.collapsible-summary .summary-subtext {
-            font-size: 0.85rem;
-            color: rgb(var(--text-secondary));
-            font-weight: 400;
-        }
-        summary.collapsible-summary .chevron {
-            width: 1rem;
-            height: 1rem;
-            color: rgb(var(--text-secondary));
-            transition: transform 0.2s ease;
-        }
-        details[open] summary.collapsible-summary .chevron {
-            transform: rotate(180deg);
-            color: rgb(var(--text-primary));
-        }
-        /* Theme-aware state helpers */
-        .state-success {
-            color: rgb(var(--state-success));
-        }
-        .state-error {
-            color: rgb(var(--state-error));
-        }
-        .state-warning {
-            color: rgb(var(--state-warning));
-        }
-        .state-info {
-            color: rgb(var(--state-info));
-        }
-        .dashboard-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: rgb(var(--bg-card));
-            font-size: 13px;
-            margin-top: 8px;
-            color: rgb(var(--text-primary));
-        }
-        .dashboard-table-wrap {
-            width: 100%;
-            max-width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-        .dashboard-table-wrap .dashboard-table {
-            min-width: 560px;
-        }
-        .dashboard-table th {
-            background: rgb(var(--bg-elevated));
-            padding: 8px;
-            text-align: left;
-            font-weight: 600;
-            border-bottom: 2px solid rgb(var(--border-primary));
-            color: rgb(var(--text-primary));
-        }
-        .dashboard-table td {
-            padding: 8px;
-            border-bottom: 1px solid rgb(var(--border-primary));
-            color: rgb(var(--text-primary));
-        }
-        .dashboard-table tr:hover {
-            background: rgb(var(--bg-elevated));
-        }
-        .dashboard-table .subtle {
-            color: rgb(var(--text-secondary));
-        }
-        .dashboard-table .cell-center {
-            text-align: center;
-        }
-        .dashboard-table .cell-xs {
-            font-size: 11px;
-        }
-        .dashboard-table .cell-mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        }
-        .state-surface-success {
-            background: rgb(var(--state-success) / 0.12);
-            border-color: rgb(var(--state-success) / 0.35);
-            color: rgb(var(--state-success));
-        }
-        .state-surface-error {
-            background: rgb(var(--state-error) / 0.12);
-            border-color: rgb(var(--state-error) / 0.35);
-            color: rgb(var(--state-error));
-        }
-        .state-surface-warning {
-            background: rgb(var(--state-warning) / 0.12);
-            border-color: rgb(var(--state-warning) / 0.35);
-            color: rgb(var(--state-warning));
-        }
-        .state-surface-info {
-            background: rgb(var(--state-info) / 0.12);
-            border-color: rgb(var(--state-info) / 0.35);
-            color: rgb(var(--state-info));
-        }
-        .log-level-error {
-            background: rgb(var(--state-error) / 0.1);
-            color: rgb(var(--state-error));
-            border-color: rgb(var(--state-error) / 0.8);
-        }
-        .log-level-warn {
-            background: rgb(var(--state-warning) / 0.1);
-            color: rgb(var(--state-warning));
-            border-color: rgb(var(--state-warning) / 0.8);
-        }
-        .log-level-info {
-            color: rgb(var(--state-info));
-            border-color: rgb(var(--state-info) / 0.6);
-        }
-        .log-level-debug {
-            color: rgb(var(--text-tertiary));
-            border-color: rgb(var(--border-secondary));
-        }
-        .activity-log-controls {
-            display: grid;
-            grid-template-columns: minmax(220px, 1fr) minmax(130px, 160px) minmax(150px, 190px) auto;
-            gap: 0.75rem;
-            align-items: end;
-        }
-        @media (max-width: 900px) {
-            .activity-log-controls {
-                grid-template-columns: 1fr;
-                align-items: stretch;
-            }
-        }
-        .activity-log-row {
-            display: grid;
-            grid-template-columns: minmax(150px, 180px) minmax(58px, 72px) minmax(120px, 180px) minmax(180px, 1fr);
-            gap: 0.75rem;
-            align-items: start;
-            padding: 0.45rem 0.65rem;
-            border-bottom: 1px solid rgb(var(--border-primary));
-            font-size: 0.8125rem;
-        }
-        .activity-log-row:last-child {
-            border-bottom: 0;
-        }
-        .activity-log-row > div {
-            min-width: 0;
-        }
-        .activity-log-row:hover {
-            background: rgb(var(--bg-elevated) / 0.65);
-        }
-        .activity-log-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.35rem 0.75rem;
-            margin-top: 0.25rem;
-            color: rgb(var(--text-secondary));
-            font-size: 0.75rem;
-            min-width: 0;
-        }
-        .activity-log-meta span {
-            min-width: 0;
-            max-width: 100%;
-            overflow-wrap: anywhere;
-            word-break: break-word;
-        }
-        @media (max-width: 760px) {
-            .activity-log-row {
-                grid-template-columns: 1fr;
-                gap: 0.25rem;
-            }
-        }
-        .editing-highlight {
-            background: rgb(var(--accent-primary) / 0.08);
-            box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.2);
-        }
-        .pill-success {
-            background: rgb(var(--state-success) / 0.15);
-            color: rgb(var(--state-success));
-            border: 1px solid rgb(var(--state-success) / 0.4);
-        }
-        .pill-error {
-            background: rgb(var(--state-error) / 0.15);
-            color: rgb(var(--state-error));
-            border: 1px solid rgb(var(--state-error) / 0.4);
-        }
-        .pill-info {
-            background: rgb(var(--state-info) / 0.15);
-            color: rgb(var(--state-info));
-            border: 1px solid rgb(var(--state-info) / 0.35);
-        }
-        .btn-secondary {
-            background: rgb(var(--accent-primary) / 0.08);
-            border: 1px solid rgb(var(--accent-primary) / 0.35);
-            color: rgb(var(--accent-primary));
-            transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-        }
-        .btn-secondary:hover {
-            background: rgb(var(--accent-primary) / 0.14);
-            border-color: rgb(var(--accent-primary) / 0.55);
-            color: rgb(var(--accent-hover));
-        }
-        .btn-warning {
-            background: rgb(var(--state-warning) / 0.9);
-            border: 1px solid rgb(var(--state-warning));
-            color: rgb(var(--bg-app));
-            transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-        }
-        .btn-warning:hover {
-            background: rgb(var(--state-warning));
-            border-color: rgb(var(--state-warning));
-            color: rgb(var(--bg-app));
-        }
-        .chat-compose-wrap {
-            position: relative;
-        }
-        .chat-compaction-track {
-            height: 2px;
-            width: 100%;
-            margin-top: 0.35rem;
-            overflow: hidden;
-            border-radius: 9999px;
-            background: rgb(var(--border-primary));
-        }
-        .chat-compaction-fill {
-            width: 0%;
-            height: 100%;
-            border-radius: inherit;
-            background: rgb(var(--accent-primary) / 0.55);
-            transition: width 0.2s ease, background-color 0.2s ease;
-        }
-        .chat-compaction-fill.compaction-warm {
-            background: rgb(var(--state-warning) / 0.85);
-        }
-        .chat-compaction-fill.compaction-hot {
-            background: rgb(234 88 12 / 0.95);
-        }
-        .chat-attach-btn {
-            position: absolute;
-            right: 1rem;
-            bottom: 0.5rem;
-            width: 2rem;
-            height: 2rem;
-            border-radius: 9999px;
-            border: 1px solid transparent;
-            background: transparent;
-            color: rgb(var(--text-secondary));
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-        }
-        .chat-attach-btn.has-attachments {
-            color: rgb(var(--accent-primary));
-        }
-        .chat-attach-btn:hover {
-            color: rgb(var(--accent-primary));
-            border-color: transparent;
-            background: transparent;
-        }
-        .chat-focus-inline-btn {
-            position: absolute;
-            right: 1rem;
-            top: 0.5rem;
-            z-index: 2;
-            width: 2rem;
-            height: 2rem;
-            border-radius: 9999px;
-            border: 1px solid transparent;
-            background: transparent;
-            color: rgb(var(--text-secondary));
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            touch-action: manipulation;
-            -webkit-tap-highlight-color: transparent;
-            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-        }
-        .chat-focus-inline-btn:hover,
-        .chat-focus-inline-btn[aria-pressed="true"] {
-            color: rgb(var(--accent-primary));
-        }
-        .chat-stop-btn {
-            background: rgb(var(--state-error)) !important;
-        }
-        .chat-stop-btn:hover {
-            background: rgb(var(--state-error) / 0.88) !important;
-        }
-        .chat-attach-badge {
-            display: none;
-            position: absolute;
-            top: -0.2rem;
-            right: -0.2rem;
-            min-width: 1rem;
-            height: 1rem;
-            border-radius: 9999px;
-            padding: 0 0.2rem;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background: rgb(var(--accent-primary));
-            color: rgb(var(--text-on-accent));
-            font-size: 0.62rem;
-            font-weight: 700;
-            line-height: 1;
-        }
-        .chat-attachment-popover {
-            position: absolute;
-            right: 0.75rem;
-            bottom: 3rem;
-            width: min(18rem, calc(100vw - 3rem));
-            max-height: 11rem;
-            overflow: auto;
-            border-radius: 0.6rem;
-            border: 1px solid rgb(var(--border-primary));
-            background: rgb(var(--bg-card));
-            box-shadow: 0 8px 20px rgb(0 0 0 / 0.14);
-            padding: 0.45rem;
-            z-index: 30;
-        }
-        @media (max-width: 768px) {
-            .chat-attachment-popover {
-                left: 0.75rem;
-                right: 0.75rem;
-                width: auto;
-                max-width: none;
-            }
-        }
-        .chat-attachment-item {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-            width: 100%;
-            border-radius: 0.45rem;
-            color: rgb(var(--text-primary));
-            padding: 0.3rem 0.45rem;
-            font-size: 0.75rem;
-            margin-bottom: 0.2rem;
-        }
-        .chat-attachment-item:last-child {
-            margin-bottom: 0;
-        }
-        .chat-attachment-name {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            max-width: 10.5rem;
-        }
-        .chat-attachment-remove {
-            border: 0;
-            background: transparent;
-            color: rgb(var(--text-secondary));
-            cursor: pointer;
-            padding: 0;
-            line-height: 1;
-            font-size: 0.85rem;
-        }
-        .chat-attachment-remove:hover {
-            color: rgb(var(--state-error));
-        }
-    </style>
+    <link rel="stylesheet" href="static/app.css">
 </head>
 <body class="bg-app-bg transition-colors duration-200">
     <div id="app-shell" class="container mx-auto max-w-6xl px-4 pt-2 pb-0">
@@ -1389,8 +45,14 @@
                         </button>
                     </nav>
                     <div class="flex items-center gap-3 flex-shrink-0 relative z-10">
-                        <button id="theme-toggle" type="button" class="text-2xl hover:opacity-75 transition-opacity focus:outline-none cursor-pointer" style="touch-action: manipulation;" title="Change theme">
-                            🎨
+                        <button id="theme-toggle" type="button" class="theme-icon-button" style="touch-action: manipulation;" title="Change theme" aria-label="Change theme">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                                <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2c5.523 0 10 4.477 10 10 0 1.657-1.343 3-3 3h-1.8a2 2 0 0 0-1.4 3.429l.2.196A2 2 0 0 1 14.6 22z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -1399,42 +61,45 @@
 
         <!-- Chat Tab Content -->
         <div id="chat-content" class="tab-content flex flex-col">
-            <!-- Chat Settings Section -->
-            <details id="chat-settings-panel" class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm flex-shrink-0">
-                <summary class="collapsible-summary">
-                    <div class="summary-text">
-                        <span class="summary-title">Chat Settings</span>
+            <div id="chat-settings-bar" class="chat-settings-bar">
+                <div class="chat-settings-vault-row">
+                    <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
+                        <option value="">Select vault...</option>
+                    </select>
+                    <button id="new-session-trigger" type="button" class="chat-topbar-icon-button" aria-label="New session" title="New session">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                        </svg>
+                    </button>
+                    <button id="session-browser-trigger" type="button" class="session-browser-trigger" aria-label="Open chat settings" title="Open chat settings">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.32-1.915" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"></circle>
+                        </svg>
+                    </button>
+                </div>
+                <div id="chat-settings-modal-controls-source" class="hidden">
+                    <div class="workspace-field">
+                        <input id="workspace-path-input" type="text"
+                            placeholder="Workspace path..."
+                            aria-label="Workspace path"
+                            class="min-w-0 w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
+                        <button id="workspace-picker-btn" type="button" class="workspace-icon-button" aria-label="Choose workspace folder" title="Choose workspace folder">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
+                        <button id="workspace-unlock-btn" type="button" class="workspace-icon-button hidden" aria-label="Unlock workspace path" title="Unlock workspace path">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <circle cx="12" cy="16" r="1" fill="currentColor"></circle>
+                                <rect x="3" y="10" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
+                                <path d="M7 10V7a5 5 0 0 1 9.33-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
                     </div>
-                    <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                </summary>
-                <div class="p-4 pt-2 space-y-3">
-                    <!-- Row 1: Vault | Workspace -->
-                    <div class="chat-settings-primary-row">
-                        <select id="vault-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">Select vault...</option>
-                        </select>
-                        <div class="workspace-field">
-                            <input id="workspace-path-input" type="text"
-                                placeholder="Workspace path..."
-                                aria-label="Workspace path"
-                                class="min-w-0 w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
-                            <button id="workspace-picker-btn" type="button" class="workspace-icon-button" aria-label="Choose workspace folder" title="Choose workspace folder">
-                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path d="M2.75 5.75A1.75 1.75 0 0 1 4.5 4h3.1c.46 0 .9.18 1.22.5l1.05 1.05c.23.23.54.35.86.35h5.77A1.75 1.75 0 0 1 18.25 7.65v6.6A1.75 1.75 0 0 1 16.5 16H4.5a1.75 1.75 0 0 1-1.75-1.75v-8.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" />
-                                </svg>
-                            </button>
-                            <button id="workspace-unlock-btn" type="button" class="workspace-icon-button hidden" aria-label="Unlock workspace path" title="Unlock workspace path">
-                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path d="M6.25 8.5V6.75a3.75 3.75 0 0 1 7.08-1.72" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" />
-                                    <rect x="4.25" y="8.5" width="11.5" height="7.5" rx="1.75" stroke="currentColor" stroke-width="1.45" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Row 2: Model | Thinking | Tools -->
-                    <div class="chat-settings-secondary-row">
+                    <div class="chat-settings-model-row">
                         <select id="model-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
                             <option value="">Select model...</option>
                         </select>
@@ -1448,6 +113,8 @@
                             <option value="high">Thinking: High</option>
                             <option value="xhigh">Thinking: XHigh</option>
                         </select>
+                    </div>
+                    <div class="chat-settings-tools-row">
                         <div id="tool-dropdown" class="tool-dropdown">
                             <button
                                 id="tool-dropdown-trigger"
@@ -1471,42 +138,12 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Row 3: Session | Context template -->
-                    <div class="chat-session-context-row">
-                        <div class="session-selector-row">
-                            <select id="session-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                                <option value="">New session</option>
-                            </select>
-                            <button id="session-summary-trigger" type="button" class="session-summary-trigger" aria-label="Show session summary">
-                                🧠
-                            </button>
-                        </div>
                         <select id="template-selector" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary">
-                            <option value="">Select template...</option>
+                            <option value="">No context script</option>
                         </select>
                     </div>
-                    <div id="session-title-row" class="session-title-row hidden">
-                        <input id="session-title-input" type="text" maxlength="120"
-                            placeholder="Add a title…"
-                            class="min-w-0 flex-1 px-3 py-1.5 text-sm border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary placeholder-txt-secondary" />
-                        <div class="session-title-actions">
-                            <button id="session-title-save" type="button"
-                                class="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                Save
-                            </button>
-                            <button id="session-export-btn" type="button"
-                                class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-txt-primary rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                Export
-                            </button>
-                            <button id="session-delete-btn" type="button"
-                                class="px-3 py-1.5 text-sm bg-app-elevated border border-border-primary text-state-error rounded-md hover:bg-app-card focus:outline-none focus:ring-2 focus:ring-state-error disabled:opacity-70 disabled:cursor-not-allowed">
-                                Delete
-                            </button>
-                        </div>
-                    </div>
                 </div>
-            </details>
+            </div>
 
             <!-- Chat Container -->
             <div id="chat-workspace" class="bg-app-card border border-border-primary rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
@@ -1527,11 +164,18 @@
                                     class="block w-full px-3 py-2 pr-12 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
                                 ></textarea>
                                 <button id="attach-btn" type="button" class="chat-attach-btn" title="Attach image(s)" aria-label="Attach image(s)" aria-expanded="false" aria-controls="chat-attachment-popover">
-                                    📎
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657L4.757 11.757a6 6 0 1 0 8.486 8.486L21.657 11.657" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    </svg>
                                     <span id="attach-count-badge" class="chat-attach-badge" style="display:none"></span>
                                 </button>
                                 <button id="chat-focus-toggle-inline" type="button" class="chat-focus-inline-btn" title="Focus chat workspace" aria-label="Focus chat workspace" aria-pressed="false">
-                                    ⛶
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M8 3H5a2 2 0 0 0-2 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M21 8V5a2 2 0 0 0-2-2h-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M3 16v3a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M16 21h3a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                    </svg>
                                 </button>
                                 <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
                                 <div id="chat-attachment-popover" class="chat-attachment-popover hidden" role="menu" aria-label="Pending attachments"></div>
@@ -1543,8 +187,13 @@
                         <button
                             id="send-btn"
                             class="px-6 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Send message"
+                            title="Send message"
                         >
-                            Send
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M3.714 3.048a.5.5 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.5.5 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M6 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -1556,9 +205,7 @@
             <!-- Rescan Vaults - Compact Control -->
             <div class="mb-4 bg-app-card border border-border-primary rounded-lg shadow-sm p-3">
                 <div class="flex items-center gap-3">
-                    <button id="rescan-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent whitespace-nowrap">
-                        🔄 Rescan Vaults
-                    </button>
+                    <button id="rescan-btn" type="button" class="ui-icon-button is-primary" data-icon="refresh" data-icon-label="Rescan Vaults"></button>
                     <span class="text-sm text-txt-secondary">Discover new vaults and reload workflow configurations</span>
                 </div>
                 <div id="rescan-result" class="mt-2 text-sm"></div>
@@ -1586,9 +233,7 @@
                                 </select>
                             </div>
                             <div class="flex items-end">
-                                <button id="import-refresh-vaults" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent h-10">
-                                    Refresh Vaults
-                                </button>
+                                <button id="import-refresh-vaults" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh Vaults"></button>
                             </div>
                         </div>
 
@@ -1615,9 +260,7 @@
                                 </label>
                             </div>
                             <div class="flex items-end justify-end">
-                                <button id="import-scan" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
-                                    Import Files
-                                </button>
+                                <button id="import-scan" type="button" class="ui-icon-button is-primary" data-icon="fileDown" data-icon-label="Import Files"></button>
                             </div>
                         </div>
 
@@ -1626,9 +269,7 @@
                                 <input id="import-url-input" type="text" placeholder="https://example.com/article" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
                             </div>
                             <div class="flex items-end justify-end">
-                                <button id="import-url-submit" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed h-10">
-                                    Import URL
-                                </button>
+                                <button id="import-url-submit" type="button" class="ui-icon-button is-primary" data-icon="fileDown" data-icon-label="Import URL"></button>
                             </div>
                         </div>
 
@@ -1728,9 +369,7 @@
                         <div class="flex flex-col gap-3">
                             <div class="flex items-center justify-between gap-3">
                                 <div id="model-feedback" class="flex-1 text-sm text-txt-secondary"></div>
-                                <button id="model-add-row" type="button" class="shrink-0 px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent">
-                                    Add Model
-                                </button>
+                                <button id="model-add-row" type="button" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Model"></button>
                             </div>
                             <div id="model-list" class="flex flex-col gap-3">
                                 <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
@@ -1754,39 +393,17 @@
                         <p class="text-sm text-txt-secondary">
                             Providers define API keys or base URLs for custom endpoints. Built-in providers are read-only. Enter secret names in the fields below and manage their values from the Secrets section.
                         </p>
-                        <div id="provider-feedback" class="text-sm text-txt-secondary"></div>
-                        <div id="provider-list" class="flex flex-col gap-3">
-                            <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
-                                No custom providers configured.
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div id="provider-feedback" class="flex-1 text-sm text-txt-secondary"></div>
+                                <button id="provider-add-row" type="button" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Provider"></button>
                             </div>
-                        </div>
-                        <form id="provider-form" class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-app-elevated border border-border-primary rounded-md p-4">
-                            <div>
-                                <label for="provider-name" class="block text-sm font-medium text-txt-primary mb-1">Provider Name</label>
-                                <input id="provider-name" name="provider-name" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="e.g. local-ollama" required>
-                            </div>
-                            <div>
-                                <label for="provider-api-key-value" class="block text-sm font-medium text-txt-primary mb-1">API Key Secret (optional)</label>
-                                <input id="provider-api-key" name="provider-api-key" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="SECRET_NAME (optional)">
-                                <p class="text-xs text-txt-secondary mt-1">Enter the secret name; use the Secrets form below to set its value.</p>
-                            </div>
-                            <div>
-                                <label for="provider-base-url" class="block text-sm font-medium text-txt-primary mb-1">Base URL Secret (optional)</label>
-                                <input id="provider-base-url" name="provider-base-url" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="SECRET_NAME (optional)">
-                                <p class="text-xs text-txt-secondary mt-1">Base URLs are stored as secrets; enter the secret name and manage the URL value via the Secrets form.</p>
-                            </div>
-                            <div class="md:col-span-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                <span id="provider-form-status" class="text-sm text-txt-secondary"></span>
-                                <div class="flex items-center gap-2">
-                                    <button type="button" id="provider-reset" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent">
-                                        Cancel
-                                    </button>
-                                    <button type="submit" id="provider-submit" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent">
-                                        Save Provider
-                                    </button>
+                            <div id="provider-list" class="flex flex-col gap-3">
+                                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
+                                    No custom providers configured.
                                 </div>
                             </div>
-                        </form>
+                        </div>
                     </div>
                 </details>
 
@@ -1823,36 +440,17 @@
                     </summary>
                     <div class="p-4 pt-0 space-y-3">
                         <p class="text-sm text-txt-secondary">
-                            API keys and other credentials can be updated here. Use the form below to add new secrets or overwrite existing ones. Changes take effect immediately—no container restart required.
+                            API keys and other credentials can be updated here. Changes take effect immediately—no container restart required.
                         </p>
-                        <div class="bg-app-elevated border border-border-primary rounded-md p-4">
-                            <form id="secret-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label for="secret-name" class="block text-sm font-medium text-txt-primary mb-1">Secret Name</label>
-                                    <input id="secret-name" name="secret-name" type="text" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="e.g. LOCAL_MODEL_TOKEN" required>
-                                    <p class="text-xs text-txt-secondary mt-1">Use uppercase letters, numbers, or underscores. The name becomes available to providers immediately.</p>
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div id="secret-feedback" class="flex-1 text-sm text-txt-secondary"></div>
+                                <button id="secret-add-row" type="button" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Secret"></button>
+                            </div>
+                            <div id="secrets-list" class="flex flex-col gap-3">
+                                <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
+                                    Loading secrets…
                                 </div>
-                                <div>
-                                    <label for="secret-value" class="block text-sm font-medium text-txt-primary mb-1">Secret Value</label>
-                                    <input id="secret-value" name="secret-value" type="password" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-app-card text-txt-primary" placeholder="Enter the credential" required>
-                                    <p class="text-xs text-txt-secondary mt-1">Values are stored as plain text inside <code>system/secrets.yaml</code>.</p>
-                                </div>
-                                <div class="md:col-span-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                    <span id="secret-form-status" class="text-sm text-txt-secondary"></span>
-                                    <div class="flex items-center gap-2">
-                                        <button type="button" id="secret-reset" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent">
-                                            Cancel
-                                        </button>
-                                        <button type="submit" id="secret-submit" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent">
-                                            Save Secret
-                                        </button>
-                                    </div>
-                                </div>
-                            </form>
-                        </div>
-                        <div id="secrets-list" class="flex flex-col gap-3">
-                            <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
-                                Loading secrets…
                             </div>
                         </div>
                     </div>
@@ -1872,9 +470,7 @@
                             <p class="text-sm text-txt-secondary">
                                 Runtime events are written to <code>system/activity.log</code>. Refresh to load the latest entries.
                             </p>
-                            <button id="refresh-activity-log" type="button" class="self-start md:self-auto px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                Refresh
-                            </button>
+                            <button id="refresh-activity-log" type="button" class="ui-icon-button is-primary self-start md:self-auto" data-icon="refresh" data-icon-label="Refresh Activity Log"></button>
                         </div>
                         <div class="activity-log-controls">
                             <label class="block">
@@ -1946,9 +542,7 @@
                                         Built-in scheduler jobs managed by AssistantMD.
                                     </div>
                                 </div>
-                                <button id="refresh-system-jobs" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Refresh
-                                </button>
+                                <button id="refresh-system-jobs" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh System Jobs"></button>
                             </div>
                             <div id="system-jobs-list" class="text-sm text-txt-secondary">
                                 Loading system jobs…
@@ -1963,12 +557,8 @@
                                     </div>
                                 </div>
                                 <div class="flex gap-2">
-                                    <button id="refresh-system-migrations" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                        Refresh
-                                    </button>
-                                    <button id="run-system-migrations" type="button" class="px-3 py-2 text-sm btn-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed" disabled>
-                                        Checking…
-                                    </button>
+                                    <button id="refresh-system-migrations" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh Database Migrations"></button>
+                                    <button id="run-system-migrations" type="button" class="ui-icon-button" data-icon="database" data-icon-label="Check Database Migrations" disabled></button>
                                 </div>
                             </div>
                             <div id="system-migrations-status" class="text-sm text-txt-secondary">
@@ -1984,9 +574,7 @@
                                 </div>
                             </div>
                             <div class="flex flex-col md:items-end gap-2">
-                                <button id="refresh-system-authoring" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Refresh System Scripts
-                                </button>
+                                <button id="refresh-system-authoring" type="button" class="ui-icon-button is-primary" data-icon="refresh" data-icon-label="Refresh System Scripts"></button>
                                 <div id="refresh-system-authoring-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
@@ -1998,9 +586,7 @@
                                 </div>
                             </div>
                             <div class="flex flex-col md:items-end gap-2">
-                                <button id="purge-expired-cache" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Purge Expired Cache
-                                </button>
+                                <button id="purge-expired-cache" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Purge Expired Cache"></button>
                                 <div id="misc-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
@@ -2012,9 +598,7 @@
                                 </div>
                             </div>
                             <div class="flex flex-col md:items-end gap-2">
-                                <button id="cleanup-vault-state" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                    Clean Up Vault State
-                                </button>
+                                <button id="cleanup-vault-state" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Clean Up Vault State"></button>
                                 <div id="cleanup-vault-state-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
@@ -2036,9 +620,7 @@
                                         <option value="90">Older than 90 days</option>
                                         <option value="">All sessions</option>
                                     </select>
-                                    <button id="purge-sessions-btn" type="button" class="px-3 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-70 disabled:cursor-not-allowed">
-                                        Purge Sessions
-                                    </button>
+                                    <button id="purge-sessions-btn" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Purge Sessions"></button>
                                 </div>
                                 <div id="purge-sessions-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
@@ -2050,6 +632,15 @@
     </div>
 
     <script src="static/js/configuration.js"></script>
+    <script src="static/js/icons.js"></script>
+    <script src="static/js/utils.js"></script>
+    <script src="static/js/session-summary.js"></script>
+    <script src="static/js/workspace-picker.js"></script>
+    <script src="static/js/session-controls.js"></script>
+    <script src="static/js/chat-rendering.js"></script>
+    <script src="static/js/vault-activity.js"></script>
+    <script src="static/js/workflow-actions.js"></script>
+    <script src="static/js/dashboard-view.js"></script>
     <script src="static/app.js"></script>
 </body>
 </html>

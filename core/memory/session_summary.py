@@ -320,6 +320,56 @@ class SessionSummaryStore:
                 return None
             return self._session_summary_from_row(conn, row)
 
+    def get_session_summary_vector_index_status(
+        self,
+        *,
+        vault_name: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Return vector index coverage for one session summary."""
+        session_summary = self.get_session_summary(vault_name=vault_name, session_id=session_id)
+        expected_fields = tuple(
+            field_type
+            for field_type in VECTOR_FIELD_TYPES
+            if session_summary is not None and session_summary.field_value(field_type)
+        )
+        if session_summary is None or not expected_fields:
+            return {
+                "indexed_fields": 0,
+                "expected_fields": 0,
+                "indexed_field_types": [],
+                "missing_field_types": list(expected_fields),
+            }
+
+        item_ids = tuple(f"{vault_name}:{session_id}:{field_type}" for field_type in expected_fields)
+        store = self._field_vector_store()
+        indexed_field_types: set[str] = set()
+        with store._connect() as conn:
+            placeholders = ", ".join("?" for _ in item_ids)
+            rows = conn.execute(
+                f"""
+                SELECT metadata_json
+                FROM {FIELD_VECTOR_TABLE}
+                WHERE namespace = ?
+                  AND item_id IN ({placeholders})
+                """,
+                (FIELD_VECTOR_NAMESPACE, *item_ids),
+            ).fetchall()
+        for row in rows:
+            metadata = _load_json(row["metadata_json"])
+            field_type = str(metadata.get("field_type") or "")
+            if field_type in expected_fields:
+                indexed_field_types.add(field_type)
+
+        return {
+            "indexed_fields": len(indexed_field_types),
+            "expected_fields": len(expected_fields),
+            "indexed_field_types": sorted(indexed_field_types),
+            "missing_field_types": [
+                field_type for field_type in expected_fields if field_type not in indexed_field_types
+            ],
+        }
+
     def delete_session_summary(self, *, vault_name: str, session_id: str) -> bool:
         """Delete one session summary row and associated artifacts."""
         with self._connect() as conn:
@@ -577,11 +627,6 @@ class SessionSummaryStore:
         if session_summary is None:
             raise ValueError(f"Unknown session summary: {session_id}")
         store = vector_store or self._field_vector_store()
-        self._delete_field_vectors(
-            vault_name=vault_name,
-            session_id=session_id,
-            vector_store=store,
-        )
         fields = tuple(
             field_type
             for field_type in SESSION_SUMMARY_TEXT_FIELDS
@@ -601,6 +646,11 @@ class SessionSummaryStore:
             for field_type in fields
         ]
         embedding_result = await vector_service.embed_documents(inputs, model_alias=model_alias)
+        self._delete_field_vectors(
+            vault_name=vault_name,
+            session_id=session_id,
+            vector_store=store,
+        )
         for field_type, embedding in zip(fields, embedding_result.vectors, strict=True):
             value = session_summary.field_value(field_type) or ""
             store.upsert(

@@ -274,6 +274,7 @@ class SQLiteConversationHistoryProvider:
             requested_session_id,
             self.vault_name,
             limit=resolved_limit,
+            committed_only=True,
         )
         items = tuple(_normalize_tool_event(event) for event in events)
         return ConversationToolEventResult(

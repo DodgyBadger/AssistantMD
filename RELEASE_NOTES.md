@@ -1,5 +1,22 @@
 # Release Notes
 
+
+## 2026-06-07 - v0.6.5
+
+- Fork a chat session from any assistant message to branch an existing conversation while preserving the original session.
+- Newly summarized sessions without a custom title now use the extracted domain as their chat title, so session lists are easier to scan.
+- Session summaries now fail visibly if vector indexing cannot complete, so incomplete summaries do not quietly look healthy while missing searchable context.
+- Delegate tool call limits and timeouts are now configurable.
+- Updated Pydantic AI and Monty dependencies, including the recent Monty sandbox security fix.
+- Improvements to the chat UI.
+- Improvements to the build-guide.
+- Improvements to workspace-related system prompts.
+- Improvements to the authoring skill.
+- Fixed bug in chat that caused incorrect tool display after a failed or cancelled chat turn.
+- CI now catches stray root-level markdown planning files before merge.
+- Refactored monolithic app.js into smaller modules.
+
+
 ## 2026-06-06 - v0.6.4
 
 ### Workspace-aware chat sessions

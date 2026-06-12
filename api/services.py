@@ -57,6 +57,7 @@ from core.settings.secrets_store import (
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
+from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.memory.session_summary import SessionSummaryStore
 from core.system_migrations import (
@@ -107,6 +108,7 @@ from .models import (
     SystemSettingsResponse,
     TemplateInfo,
     ChatSessionInfo,
+    ChatSessionForkResponse,
     ChatWorkspaceInfo,
     ChatSessionDetailResponse,
     ChatSessionMessageInfo,
@@ -775,6 +777,125 @@ def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
     ]
 
 
+def fork_chat_session(
+    *,
+    vault_name: str,
+    source_session_id: str,
+    through_sequence_index: int,
+) -> ChatSessionForkResponse:
+    """Create a new chat session from a source session prefix."""
+    source_session = _chat_store.get_session_by_id(source_session_id)
+    if source_session is None:
+        raise APIException(
+            status_code=404,
+            error_type="ChatSessionNotFound",
+            message=f"Chat session not found: {source_session_id}",
+            details={"session_id": source_session_id, "vault_name": vault_name},
+        )
+    if source_session.vault_name != vault_name:
+        raise APIException(
+            status_code=409,
+            error_type="ChatSessionVaultMismatch",
+            message=(
+                f"Chat session '{source_session_id}' belongs to vault "
+                f"'{source_session.vault_name}' and cannot be used with vault '{vault_name}'."
+            ),
+            details={
+                "session_id": source_session_id,
+                "requested_vault": vault_name,
+                "bound_vault": source_session.vault_name,
+            },
+        )
+
+    highest_sequence = _chat_store.get_highest_message_sequence_index(source_session_id, vault_name)
+    if highest_sequence < 0:
+        raise APIException(
+            status_code=400,
+            error_type="ChatSessionForkEmpty",
+            message=f"Chat session has no messages to fork: {source_session_id}",
+            details={"session_id": source_session_id, "vault_name": vault_name},
+        )
+    if through_sequence_index > highest_sequence:
+        raise APIException(
+            status_code=400,
+            error_type="ChatSessionForkPointInvalid",
+            message=(
+                f"Fork point {through_sequence_index} is beyond the latest "
+                f"message sequence {highest_sequence}."
+            ),
+            details={
+                "session_id": source_session_id,
+                "vault_name": vault_name,
+                "through_sequence_index": through_sequence_index,
+                "highest_sequence_index": highest_sequence,
+            },
+        )
+
+    new_session_id = _generate_unique_chat_session_id(vault_name)
+    new_title = _forked_session_title(source_session)
+    copied_message_count = _chat_store.fork_session(
+        source_session_id=source_session_id,
+        new_session_id=new_session_id,
+        vault_name=vault_name,
+        through_sequence_index=through_sequence_index,
+        title=new_title,
+        metadata_update={
+            "fork": {
+                "source_session_id": source_session_id,
+                "through_sequence_index": through_sequence_index,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        },
+    )
+    new_session = _chat_store.get_session(session_id=new_session_id, vault_name=vault_name)
+    if new_session is None:  # pragma: no cover - defensive consistency check
+        raise RuntimeError(f"Forked session was not persisted: {new_session_id}")
+
+    logger.info(
+        "Chat session forked",
+        data={
+            "vault_name": vault_name,
+            "source_session_id": source_session_id,
+            "new_session_id": new_session_id,
+            "through_sequence_index": through_sequence_index,
+            "copied_message_count": copied_message_count,
+            "workspace_path": _chat_store.get_session_workspace_path(new_session_id, vault_name) or None,
+        },
+    )
+    return ChatSessionForkResponse(
+        session=ChatSessionInfo(
+            session_id=new_session.session_id,
+            created_at=new_session.created_at,
+            last_activity_at=new_session.last_activity_at,
+            title=new_session.title or None,
+            workspace=_chat_workspace_info(
+                _chat_store.get_session_workspace_path(new_session.session_id, vault_name)
+            ),
+            has_summary=False,
+        ),
+        source_session_id=source_session_id,
+        through_sequence_index=through_sequence_index,
+        copied_message_count=copied_message_count,
+    )
+
+
+def _generate_unique_chat_session_id(vault_name: str) -> str:
+    base_session_id = generate_session_id(vault_name)
+    generated_session_id = base_session_id
+    suffix = 1
+    while _chat_store.get_session_by_id(generated_session_id) is not None:
+        suffix += 1
+        generated_session_id = f"{base_session_id}_{suffix}"
+    return generated_session_id
+
+
+def _forked_session_title(source_session: StoredChatSession) -> str:
+    title = (source_session.title or "").strip()
+    if title:
+        return f"{title} (fork)"
+    return f"Fork of {source_session.session_id}"
+
+
 def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
     """Return a lightweight summary preview for one chat session."""
     session_summary = SessionSummaryStore().get_session_summary(
@@ -797,6 +918,12 @@ def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
             "source_summary": None,
             "metadata": {},
             "artifacts": [],
+            "vector_index": {
+                "indexed_fields": 0,
+                "expected_fields": 0,
+                "indexed_field_types": [],
+                "missing_field_types": [],
+            },
         }
     return _session_summary_response(session_summary)
 
@@ -817,6 +944,7 @@ async def update_chat_session_summary(
             message=f"Session summary not found: {session_id}",
             details={"session_id": session_id, "vault_name": vault_name},
         )
+    previous = existing
     session_summary = store.update_session_summary_fields(
         vault_name=vault_name,
         session_id=session_id,
@@ -829,11 +957,20 @@ async def update_chat_session_summary(
         source_summary=data.get("source_summary"),
         metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
     )
-    indexed_fields = await _maybe_index_session_summary_for_api(
-        store,
-        vault_name=vault_name,
-        session_id=session_id,
-    )
+    try:
+        indexed_fields = await _index_session_summary_for_api(
+            store,
+            vault_name=vault_name,
+            session_id=session_id,
+        )
+    except Exception:
+        _restore_session_summary_for_api(
+            store,
+            vault_name=vault_name,
+            session_id=session_id,
+            previous_summary=previous,
+        )
+        raise
     response = _session_summary_response(session_summary)
     response["indexed_fields"] = indexed_fields
     return response
@@ -852,21 +989,31 @@ def delete_chat_session_summary(vault_name: str, session_id: str) -> dict:
     }
 
 
-async def _maybe_index_session_summary_for_api(
+async def _index_session_summary_for_api(
     store: SessionSummaryStore,
     *,
     vault_name: str,
     session_id: str,
 ) -> int:
     try:
-        return await store.index_session_summary_fields(
+        indexed_fields = await store.index_session_summary_fields(
             vault_name=vault_name,
             session_id=session_id,
             vector_service=VectorService(),
         )
+        logger.info(
+            "session_summary_field_indexing_completed",
+            data={
+                "source": "api",
+                "vault_name": vault_name,
+                "session_id": session_id,
+                "indexed_fields": indexed_fields,
+            },
+        )
+        return indexed_fields
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "session_summary_field_indexing_skipped",
+        logger.error(
+            "session_summary_field_indexing_failed",
             data={
                 "source": "api",
                 "vault_name": vault_name,
@@ -875,7 +1022,45 @@ async def _maybe_index_session_summary_for_api(
                 "error": str(exc),
             },
         )
-        return 0
+        raise APIException(
+            status_code=500,
+            error_type="SessionSummaryIndexingFailed",
+            message=f"Failed to refresh session summary vector index for {session_id}",
+            details={
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        ) from exc
+
+
+def _restore_session_summary_for_api(
+    store: SessionSummaryStore,
+    *,
+    vault_name: str,
+    session_id: str,
+    previous_summary,
+) -> None:
+    store.upsert_session_summary(
+        vault_name=vault_name,
+        session_id=session_id,
+        title=previous_summary.title,
+        summary=previous_summary.summary,
+        domain=previous_summary.domain,
+        work_product=previous_summary.work_product,
+        user_intent=previous_summary.user_intent,
+        named_entities=previous_summary.named_entities,
+        source_summary=previous_summary.source_summary,
+        workspace_path=previous_summary.workspace_path,
+        metadata=previous_summary.metadata,
+    )
+    if previous_summary.artifacts:
+        store.add_session_artifacts(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifacts=tuple(previous_summary.artifacts),
+        )
 
 
 def _session_summary_response(session_summary) -> dict:
@@ -894,13 +1079,17 @@ def _session_summary_response(session_summary) -> dict:
         "source_summary": session_summary.source_summary,
         "metadata": session_summary.metadata,
         "artifacts": [artifact.to_dict() for artifact in session_summary.artifacts],
+        "vector_index": SessionSummaryStore().get_session_summary_vector_index_status(
+            vault_name=session_summary.vault_name,
+            session_id=session_summary.session_id,
+        ),
     }
 
 
 def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDetailResponse:
     """Return persisted chat messages for one session."""
     messages = _chat_store.get_stored_messages(session_id, vault_name)
-    tool_events = _chat_store.get_tool_events(session_id, vault_name)
+    tool_events = _chat_store.get_tool_events(session_id, vault_name, committed_only=True)
     return ChatSessionDetailResponse(
         session_id=session_id,
         vault_name=vault_name,
@@ -912,7 +1101,13 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
                 content=message.content_text,
                 message_type=message.message_type,
                 direction=message.direction,
-                is_tool_message=_is_tool_message_text(message.content_text),
+                is_tool_message=(
+                    _is_tool_message_text(message.content_text)
+                    or bool(message.tool_call_ids)
+                    or bool(message.tool_return_ids)
+                ),
+                tool_call_ids=list(message.tool_call_ids),
+                tool_return_ids=list(message.tool_return_ids),
             )
             for message in messages
         ],

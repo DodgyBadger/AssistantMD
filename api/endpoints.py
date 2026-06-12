@@ -65,6 +65,8 @@ from .models import (
     ChatSessionDetailResponse,
     ChatSessionExportRequest,
     ChatSessionExportResponse,
+    ChatSessionForkRequest,
+    ChatSessionForkResponse,
     ChatHistoryCompactionRequest,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -98,6 +100,7 @@ from .services import (
     update_chat_session_summary,
     delete_chat_session_summary,
     get_chat_session_detail,
+    fork_chat_session,
     export_chat_session_markdown,
     compact_chat_session_history,
     get_chat_history_compaction_status,
@@ -1067,6 +1070,19 @@ async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRe
     """Set or clear the workspace path for a chat session."""
     try:
         return set_chat_session_workspace(request.vault_name, session_id, request.path)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/fork", response_model=ChatSessionForkResponse)
+async def fork_chat_session_endpoint(session_id: str, request: ChatSessionForkRequest):
+    """Fork one persisted chat session through a specific message sequence."""
+    try:
+        return fork_chat_session(
+            vault_name=request.vault_name,
+            source_session_id=session_id,
+            through_sequence_index=request.through_sequence_index,
+        )
     except Exception as e:
         return create_error_response(e)
 

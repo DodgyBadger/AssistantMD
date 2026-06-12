@@ -392,6 +392,26 @@ class ChatSessionWorkspaceRequest(BaseModel):
     path: Optional[str] = Field(None, description="Vault-relative workspace directory path")
 
 
+class ChatSessionForkRequest(BaseModel):
+    """Request to fork one persisted chat session."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    through_sequence_index: int = Field(
+        ...,
+        ge=0,
+        description="Persisted message sequence index to fork through, inclusive",
+    )
+
+
+class ChatSessionForkResponse(BaseModel):
+    """Response returned after creating a forked chat session."""
+
+    session: ChatSessionInfo = Field(..., description="New forked session summary")
+    source_session_id: str = Field(..., description="Source session identifier")
+    through_sequence_index: int = Field(..., description="Inclusive source message sequence fork point")
+    copied_message_count: int = Field(..., description="Number of messages copied into the fork")
+
+
 class ChatSessionSummaryResponse(BaseModel):
     """Lightweight session summary payload for UI previews."""
 
@@ -409,6 +429,7 @@ class ChatSessionSummaryResponse(BaseModel):
     source_summary: Optional[str] = Field(None, description="Extracted source summary")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Summary metadata")
     artifacts: List[Dict[str, Any]] = Field(default_factory=list, description="Linked summary artifacts")
+    vector_index: Dict[str, Any] = Field(default_factory=dict, description="Vector index coverage")
 
 
 class ChatSessionSummaryUpdateRequest(BaseModel):
@@ -446,6 +467,8 @@ class ChatSessionMessageInfo(BaseModel):
     message_type: str = Field(..., description="Provider-native message class name")
     direction: str = Field(..., description="Request/response direction for the provider-native message")
     is_tool_message: bool = Field(False, description="Whether this row represents a tool call/return message")
+    tool_call_ids: List[str] = Field(default_factory=list, description="Tool calls declared by this message")
+    tool_return_ids: List[str] = Field(default_factory=list, description="Tool returns declared by this message")
 
 
 class ChatSessionToolEventInfo(BaseModel):
