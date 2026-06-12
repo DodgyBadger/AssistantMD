@@ -484,12 +484,28 @@ class ChatSessionToolEventInfo(BaseModel):
     artifact_ref: Optional[str] = Field(None, description="Cache/artifact reference when present")
 
 
+class ChatSessionFailureInfo(BaseModel):
+    """Internal recovery marker for an accepted chat turn that did not complete."""
+
+    status: str = Field(..., description="Failure marker status")
+    phase: str = Field(..., description="Execution phase where the turn failed")
+    streaming: bool = Field(..., description="Whether the failed turn was streaming")
+    error_type: str = Field(..., description="Stable exception type")
+    error: str = Field("", description="Concise failure message")
+    model: Optional[str] = Field(None, description="Model selected for the failed turn")
+    tools: List[str] = Field(default_factory=list, description="Tools selected for the failed turn")
+    accepted_user_sequence_index: int = Field(..., description="Accepted user message sequence index")
+    recorded_at: str = Field(..., description="Marker timestamp")
+    suggested_action: str = Field("", description="Agent-safe recovery guidance")
+
+
 class ChatSessionDetailResponse(BaseModel):
     """Persisted chat session payload for client-side rehydration."""
 
     session_id: str = Field(..., description="Session identifier")
     vault_name: str = Field(..., description="Owning vault name")
     workspace: Optional[ChatWorkspaceInfo] = Field(None, description="Workspace associated with this session")
+    latest_failure: Optional[ChatSessionFailureInfo] = Field(None, description="Latest unfinished-turn marker")
     messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
     tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")
 

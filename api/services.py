@@ -111,6 +111,7 @@ from .models import (
     ChatSessionForkResponse,
     ChatWorkspaceInfo,
     ChatSessionDetailResponse,
+    ChatSessionFailureInfo,
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
     VaultDirectoryInfo,
@@ -1090,10 +1091,13 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
     """Return persisted chat messages for one session."""
     messages = _chat_store.get_stored_messages(session_id, vault_name)
     tool_events = _chat_store.get_tool_events(session_id, vault_name, committed_only=True)
+    metadata = _chat_store.get_session_metadata(session_id, vault_name)
+    latest_failure = _chat_session_failure_info(metadata.get("latest_turn_failure"))
     return ChatSessionDetailResponse(
         session_id=session_id,
         vault_name=vault_name,
         workspace=_chat_workspace_info(_chat_store.get_session_workspace_path(session_id, vault_name)),
+        latest_failure=latest_failure,
         messages=[
             ChatSessionMessageInfo(
                 sequence_index=message.sequence_index,
@@ -1125,6 +1129,28 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
             for event in tool_events
         ],
     )
+
+
+def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("status") != "failed":
+        return None
+    try:
+        return ChatSessionFailureInfo(
+            status=str(value.get("status") or "failed"),
+            phase=str(value.get("phase") or "unknown"),
+            streaming=bool(value.get("streaming")),
+            error_type=str(value.get("error_type") or "Error"),
+            error=str(value.get("error") or ""),
+            model=None if value.get("model") is None else str(value.get("model")),
+            tools=[str(item) for item in value.get("tools") or ()],
+            accepted_user_sequence_index=int(value.get("accepted_user_sequence_index")),
+            recorded_at=str(value.get("recorded_at") or ""),
+            suggested_action=str(value.get("suggested_action") or ""),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def set_chat_session_title(vault_name: str, session_id: str, title: str | None) -> None:

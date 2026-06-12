@@ -820,6 +820,47 @@ class ChatStore:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def update_session_metadata(
+        self,
+        *,
+        session_id: str,
+        vault_name: str,
+        metadata_update: dict[str, Any] | None = None,
+        remove_keys: tuple[str, ...] = (),
+        advance_history_revision: bool = False,
+    ) -> None:
+        """Merge or remove session metadata keys."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            metadata = self._session_metadata(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+            for key in remove_keys:
+                metadata.pop(key, None)
+            if metadata_update:
+                metadata.update(metadata_update)
+            if advance_history_revision:
+                metadata["history_revision"] = _metadata_history_revision(metadata) + 1
+            conn.execute(
+                """
+                UPDATE chat_sessions
+                SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    session_id,
+                    vault_name,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def set_session_workspace(
         self,
         *,
