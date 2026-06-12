@@ -189,6 +189,32 @@ def _tool_exchange_to_text(
 
 
 @dataclass(frozen=True)
+class ToolExchangeBatch:
+    """One atomic batch of tool call/return exchanges."""
+
+    request_message: dict[str, Any]
+    response_message: dict[str, Any]
+    exchanges: tuple[ToolExchange, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.text:
+            object.__setattr__(
+                self,
+                "text",
+                "\n\n".join(exchange.text for exchange in self.exchanges if exchange.text.strip()),
+            )
+
+    def to_text(self) -> str:
+        """Return clean prompt text while keeping raw tool parts available separately."""
+        return self.text
+
+    def __str__(self) -> str:
+        return self.to_text()
+
+
+@dataclass(frozen=True)
 class RetrievedHistoryResult:
     """Envelope for structured history retrieval into authored Python."""
 
@@ -196,7 +222,7 @@ class RetrievedHistoryResult:
     scope: str
     session_id: str | None
     item_count: int
-    items: tuple[HistoryMessage | ToolExchange, ...] = ()
+    items: tuple[HistoryMessage | ToolExchange | ToolExchangeBatch, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
     text: str = ""
 
@@ -270,7 +296,7 @@ class ScriptToolResult:
 class AssembleContextResult:
     """Validated structured context ready for a downstream chat call."""
 
-    messages: tuple[ContextMessage | HistoryMessage | ToolExchange, ...] = ()
+    messages: tuple[ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch, ...] = ()
     instructions: tuple[str, ...] = ()
 
 

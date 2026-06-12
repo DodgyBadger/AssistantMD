@@ -11,8 +11,10 @@ from core.authoring.contracts import (
     HistoryMessage,
     RetrievedHistoryResult,
     ToolExchange,
+    ToolExchangeBatch,
 )
 from core.authoring.helpers.common import build_capability
+from core.chat.tool_history import analyze_tool_history_payloads
 from core.chat.history_service import ChatHistoryContext, ChatHistoryService
 from core.logger import UnifiedLogger
 
@@ -67,15 +69,34 @@ async def execute(
         limit=limit,
         message_filter=message_filter,
     )
+    integrity = analyze_tool_history_payloads(
+        tuple(
+            item.message
+            for item in result.items
+            if isinstance(getattr(item, "message", None), dict)
+        )
+    )
     items = tuple(_build_safe_history_items(result.items))
+    metadata = dict(result.metadata)
+    metadata["tool_history_integrity"] = integrity.to_dict()
     response = RetrievedHistoryResult(
         source=result.source,
         scope=result.scope,
         session_id=result.session_id,
         item_count=len(items),
         items=items,
-        metadata=dict(result.metadata),
+        metadata=metadata,
     )
+    if not integrity.ok:
+        logger.set_sinks(["validation"]).warning(
+            "authoring_retrieve_history_tool_integrity_issue",
+            data={
+                "workflow_id": context.workflow_id,
+                "scope": response.scope,
+                "session_id": response.session_id,
+                **integrity.to_dict(),
+            },
+        )
     logger.set_sinks(["validation"]).info(
         "authoring_retrieve_history_completed",
         data={
@@ -85,6 +106,10 @@ async def execute(
             "item_count": response.item_count,
             "source": response.source,
             "message_filter": response.metadata.get("message_filter"),
+            "tool_history_integrity_status": integrity.status,
+            "tool_history_issue_count": len(integrity.issues),
+            "multi_call_batch_count": integrity.multi_call_batch_count,
+            "multi_return_batch_count": integrity.multi_return_batch_count,
         },
     )
     return response
@@ -118,8 +143,8 @@ def _parse_limit(value: int | str) -> int | str:
     raise ValueError("limit must be a positive integer or 'all'")
 
 
-def _build_safe_history_items(items: tuple[Any, ...]) -> list[HistoryMessage | ToolExchange]:
-    safe_items: list[HistoryMessage | ToolExchange] = []
+def _build_safe_history_items(items: tuple[Any, ...]) -> list[HistoryMessage | ToolExchange | ToolExchangeBatch]:
+    safe_items: list[HistoryMessage | ToolExchange | ToolExchangeBatch] = []
     index = 0
     item_list = list(items)
     while index < len(item_list):
@@ -146,7 +171,7 @@ def _build_safe_history_items(items: tuple[Any, ...]) -> list[HistoryMessage | T
 def _consume_tool_exchange(
     items: list[Any],
     start_index: int,
-) -> tuple[ToolExchange | None, int]:
+) -> tuple[ToolExchange | ToolExchangeBatch | None, int]:
     first = items[start_index]
     first_message = first.message if isinstance(getattr(first, "message", None), dict) else None
     if first_message is None or str(getattr(first, "message_type", "") or "") != "ModelResponse":
@@ -154,13 +179,15 @@ def _consume_tool_exchange(
 
     first_parts = list(first_message.get("parts") or ())
     tool_call_parts = [part for part in first_parts if part.get("part_kind") == "tool-call"]
-    if len(tool_call_parts) != 1:
+    if not tool_call_parts:
         return None, 1
 
-    tool_call_part = tool_call_parts[0]
-    tool_call_id = str(tool_call_part.get("tool_call_id") or "").strip()
-    tool_name = str(tool_call_part.get("tool_name") or "").strip()
-    if not tool_call_id or not tool_name:
+    tool_calls_by_id = {
+        str(part.get("tool_call_id") or "").strip(): part
+        for part in tool_call_parts
+        if str(part.get("tool_call_id") or "").strip()
+    }
+    if len(tool_calls_by_id) != len(tool_call_parts):
         return None, 1
 
     if start_index + 1 >= len(items):
@@ -172,34 +199,52 @@ def _consume_tool_exchange(
 
     second_parts = list(second_message.get("parts") or ())
     tool_return_parts = [part for part in second_parts if part.get("part_kind") == "tool-return"]
-    if len(tool_return_parts) != 1:
+    if not tool_return_parts:
         return None, 1
 
-    tool_return_part = tool_return_parts[0]
-    if str(tool_return_part.get("tool_call_id") or "").strip() != tool_call_id:
+    tool_returns_by_id = {
+        str(part.get("tool_call_id") or "").strip(): part
+        for part in tool_return_parts
+        if str(part.get("tool_call_id") or "").strip()
+    }
+    if set(tool_returns_by_id) != set(tool_calls_by_id):
         return None, 1
-
-    call_arguments = tool_call_part.get("args")
-    if not isinstance(call_arguments, dict):
-        call_arguments = None
-    result_text = tool_return_part.get("content")
-    if result_text is not None:
-        result_text = str(result_text)
 
     metadata = dict(getattr(first, "metadata", {}) or {})
     metadata.update(dict(getattr(second, "metadata", {}) or {}))
-    return (
+    exchanges = tuple(
         ToolExchange(
             tool_call_id=tool_call_id,
-            tool_name=tool_name,
+            tool_name=str(tool_call_part.get("tool_name") or "").strip(),
             request_message=dict(first_message),
             response_message=dict(second_message),
-            call_arguments=call_arguments,
-            result_text=result_text,
+            call_arguments=_tool_call_arguments(tool_call_part),
+            result_text=_tool_return_text(tool_returns_by_id[tool_call_id]),
             metadata=metadata,
+        )
+        for tool_call_id, tool_call_part in tool_calls_by_id.items()
+    )
+    if len(exchanges) == 1:
+        return exchanges[0], 2
+    return (
+        ToolExchangeBatch(
+            request_message=dict(first_message),
+            response_message=dict(second_message),
+            exchanges=exchanges,
+            metadata=metadata | {"tool_exchange_count": len(exchanges)},
         ),
         2,
     )
+
+
+def _tool_call_arguments(tool_call_part: dict[str, Any]) -> dict[str, Any] | None:
+    call_arguments = tool_call_part.get("args")
+    return call_arguments if isinstance(call_arguments, dict) else None
+
+
+def _tool_return_text(tool_return_part: dict[str, Any]) -> str | None:
+    result_text = tool_return_part.get("content")
+    return None if result_text is None else str(result_text)
 
 
 def _contract() -> dict[str, object]:

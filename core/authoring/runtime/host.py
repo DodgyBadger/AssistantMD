@@ -22,6 +22,7 @@ from core.authoring.contracts import (
     RetrieveResult,
     ScriptToolResult,
     ToolExchange,
+    ToolExchangeBatch,
 )
 from core.runtime.buffers import BufferStore
 from core.runtime.paths import get_data_root
@@ -194,4 +195,5 @@ class WorkflowAuthoringHost(AuthoringHost):
             ParsedMarkdown,
             RetrievedHistoryResult,
             ToolExchange,
+            ToolExchangeBatch,
         )

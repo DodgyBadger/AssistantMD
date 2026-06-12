@@ -34,6 +34,7 @@ from core.settings import (
     get_compaction_token_threshold,
     get_compaction_type,
 )
+from core.chat.tool_history import analyze_tool_history
 from core.tools.utils import estimate_token_count
 
 from .chat_store import ChatStore
@@ -146,6 +147,18 @@ async def compact_chat_history(
     try:
         async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
             messages = chat_store.get_history(session_id, vault_name) or []
+            integrity = analyze_tool_history(messages)
+            if not integrity.ok:
+                logger.warning(
+                    "chat_compaction_tool_integrity_issue",
+                    data={
+                        "event": "chat_compaction_tool_integrity_issue",
+                        "session_id": session_id,
+                        "vault_name": vault_name,
+                        "source": source_value,
+                        **integrity.to_dict(),
+                    },
+                )
             if not messages:
                 raise ValueError("Cannot compact an empty chat session.")
 
@@ -172,6 +185,10 @@ async def compact_chat_history(
                     "configured_keep_recent": keep_recent,
                     "estimated_tokens_before": estimated_before,
                     "transcript_export": "manual_only",
+                    "tool_history_integrity_status": integrity.status,
+                    "tool_history_issue_count": len(integrity.issues),
+                    "multi_call_batch_count": integrity.multi_call_batch_count,
+                    "multi_return_batch_count": integrity.multi_return_batch_count,
                 },
             )
 

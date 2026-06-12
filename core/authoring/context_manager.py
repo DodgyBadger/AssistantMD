@@ -28,6 +28,7 @@ from core.authoring.contracts import (
     HistoryMessage,
     LatestMessage,
     ToolExchange,
+    ToolExchangeBatch,
 )
 from core.authoring.template_discovery import load_template
 from core.authoring.template_loader import parse_authoring_template_text
@@ -280,13 +281,25 @@ def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
             restored = _deserialize_model_message(item.message)
             if restored is not None:
                 return [restored]
-        return [_context_message_to_model_message(ContextMessage(role=item.role, content=item.content, metadata=item.metadata))]
-    if isinstance(item, ToolExchange):
+        return [
+            _context_message_to_model_message(
+                ContextMessage(
+                    role=item.role,
+                    content=item.content,
+                    metadata=item.metadata,
+                )
+            )
+        ]
+    if isinstance(item, (ToolExchange, ToolExchangeBatch)):
         restored: list[ModelMessage] = []
         for payload in (item.request_message, item.response_message):
             message = _deserialize_model_message(payload)
             if message is None:
-                return [_context_message_to_model_message(ContextMessage(role="system", content=item.result_text or "", metadata=item.metadata))]
+                return [
+                    _context_message_to_model_message(
+                        ContextMessage(role="system", content=item.text or "", metadata=item.metadata)
+                    )
+                ]
             restored.append(message)
         return restored
     raise ValueError("Unsupported assembled context item type")
@@ -299,6 +312,8 @@ def _history_item_role_and_text(item: Any) -> tuple[str, str]:
         return (item.role or "system").strip().lower(), item.content or ""
     if isinstance(item, ToolExchange):
         return "tool_exchange", item.result_text or ""
+    if isinstance(item, ToolExchangeBatch):
+        return "tool_exchange_batch", item.text or ""
     return extract_role_and_text(item)
 
 
@@ -312,10 +327,44 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
         if not isinstance(messages, (list, tuple)):
             raise ValueError("assemble_context result must expose 'messages' as a list or tuple")
         for item in messages:
-            if isinstance(item, (ContextMessage, HistoryMessage, ToolExchange)):
+            if isinstance(item, (ContextMessage, HistoryMessage, ToolExchange, ToolExchangeBatch)):
                 normalized_messages.append(item)
                 continue
             if isinstance(item, dict):
+                if "exchanges" in item:
+                    exchanges: list[ToolExchange] = []
+                    for exchange in item.get("exchanges") or ():
+                        if isinstance(exchange, ToolExchange):
+                            exchanges.append(exchange)
+                        elif isinstance(exchange, dict):
+                            exchanges.append(
+                                ToolExchange(
+                                    tool_call_id=str(exchange.get("tool_call_id") or ""),
+                                    tool_name=str(exchange.get("tool_name") or ""),
+                                    request_message=dict(exchange.get("request_message") or {}),
+                                    response_message=dict(exchange.get("response_message") or {}),
+                                    call_arguments=(
+                                        dict(exchange.get("call_arguments"))
+                                        if isinstance(exchange.get("call_arguments"), dict)
+                                        else None
+                                    ),
+                                    result_text=(
+                                        None
+                                        if exchange.get("result_text") is None
+                                        else str(exchange.get("result_text"))
+                                    ),
+                                    metadata=dict(exchange.get("metadata") or {}),
+                                )
+                            )
+                    normalized_messages.append(
+                        ToolExchangeBatch(
+                            request_message=dict(item.get("request_message") or {}),
+                            response_message=dict(item.get("response_message") or {}),
+                            exchanges=tuple(exchanges),
+                            metadata=dict(item.get("metadata") or {}),
+                        )
+                    )
+                    continue
                 if "request_message" in item and "response_message" in item:
                     normalized_messages.append(
                         ToolExchange(
