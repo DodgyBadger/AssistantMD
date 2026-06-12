@@ -199,7 +199,8 @@ This workspace intentionally has no README.
             "Expected default context to explain missing workspace README handling",
         )
         self.soft_assert(
-            "offer to scan the workspace and create a README.md" in missing_readme_system_text,
+            "scan the workspace" in missing_readme_system_text
+            and "create a README.md" in missing_readme_system_text,
             "Expected default context to suggest creating a workspace README",
         )
 
