@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolReturn
 
 
@@ -44,6 +45,70 @@ class FailureClassification:
 
 def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> FailureClassification:
     """Classify common network/API/tool exceptions into a stable failure envelope."""
+    if isinstance(exc, ModelHTTPError):
+        status_code = exc.status_code
+        body_text = str(exc.body or "")
+        lowered = body_text.lower()
+        if status_code == 429:
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="rate_limited",
+                retryable=True,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                suggested_action="Retry after the provider rate-limit window.",
+                metadata={"model_name": exc.model_name},
+            )
+        if 500 <= status_code <= 599:
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="provider_unavailable",
+                retryable=True,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                suggested_action="Retry with backoff; use another model/provider if the outage continues.",
+                metadata={"model_name": exc.model_name},
+            )
+        if status_code in {401, 403} or any(
+            token in lowered
+            for token in ("api key", "unauthorized", "forbidden", "authentication")
+        ):
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="configuration",
+                retryable=False,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                suggested_action="Check the model provider secret and account access before retrying.",
+                metadata={"model_name": exc.model_name},
+            )
+        if any(token in lowered for token in ("credit", "billing", "balance", "quota")):
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="billing",
+                retryable=False,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                suggested_action=(
+                    "Check provider billing, credits, or quota before retrying; "
+                    "switch models/providers if another configured option is available."
+                ),
+                metadata={"model_name": exc.model_name},
+            )
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="bad_request",
+            retryable=False,
+            phase=phase,
+            message=str(exc),
+            http_status=status_code,
+            suggested_action="Change the model request or selected model before retrying.",
+            metadata={"model_name": exc.model_name},
+        )
     if isinstance(exc, httpx.TimeoutException):
         return FailureClassification(
             error_type=type(exc).__name__,
@@ -125,6 +190,18 @@ def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> Fail
             phase=phase,
             message=str(exc),
             suggested_action="Check the provider secret, account access, or tool configuration before retrying.",
+        )
+    if any(token in lowered for token in ("credit", "billing", "balance", "quota")):
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="billing",
+            retryable=False,
+            phase=phase,
+            message=str(exc),
+            suggested_action=(
+                "Check provider billing, credits, or quota before retrying; "
+                "switch providers if another configured option is available."
+            ),
         )
     return FailureClassification(
         error_type=type(exc).__name__,

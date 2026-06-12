@@ -61,6 +61,7 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
+from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
 
 
@@ -167,19 +168,25 @@ def _build_failure_recovery_marker(
     sequence_index: int,
 ) -> dict[str, Any]:
     """Build session metadata that lets the next turn recover from a failed run."""
+    classification = classify_exception(exc, phase=phase)
+    metadata = classification.to_metadata()
     return {
         "status": "failed",
         "phase": phase,
         "streaming": streaming,
         "error_type": type(exc).__name__,
         "error": str(exc),
+        "failure_kind": classification.failure_kind,
+        "retryable": classification.retryable,
+        "http_status": classification.http_status,
+        "retry_after": classification.retry_after,
         "model": model,
         "tools": list(tools or []),
         "accepted_user_sequence_index": sequence_index,
         "recorded_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "suggested_action": (
             "Treat the previous user request as accepted but unfinished. "
-            "Briefly acknowledge the failure if relevant, then continue or ask the user how to proceed."
+            f"{metadata['suggested_action']}"
         ),
     }
 
@@ -246,6 +253,11 @@ def _failure_recovery_message(marker: dict[str, Any]) -> ModelRequest | None:
         "but the assistant response failed before it was persisted. "
         f"Failure phase: {phase}. Error type: {error_type}."
     )
+    failure_kind = str(marker.get("failure_kind") or "").strip()
+    if failure_kind:
+        text += f" Failure kind: {failure_kind}."
+    if "retryable" in marker:
+        text += f" Retryable: {bool(marker.get('retryable'))}."
     if error:
         text += f" Error: {error}."
     if sequence_index is not None:
@@ -405,6 +417,8 @@ def _log_chat_failure(
 ) -> None:
     """Emit structured failure logs for chat session execution."""
     payload = _serialize_exception(exc)
+    classification = classify_exception(exc, phase=phase)
+    payload.update(classification.to_metadata())
     if extra:
         payload.update(extra)
     rss_bytes = _get_process_rss_bytes()
@@ -1363,6 +1377,7 @@ async def _stream_prepared_chat_prompt(
             yield f"data: {json.dumps(error_chunk)}\n\n"
             return
         except Exception as e:
+            classification = classify_exception(e, phase="agent_stream")
             _log_chat_failure(
                 "Streaming chat execution failed",
                 vault_name=vault_name,
@@ -1394,6 +1409,7 @@ async def _stream_prepared_chat_prompt(
                     "index": 0,
                     "finish_reason": "error",
                 }],
+                "details": classification.to_metadata(),
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
             raise

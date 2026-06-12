@@ -1143,6 +1143,12 @@ def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:
             streaming=bool(value.get("streaming")),
             error_type=str(value.get("error_type") or "Error"),
             error=str(value.get("error") or ""),
+            failure_kind=str(value.get("failure_kind") or ""),
+            retryable=bool(value.get("retryable", False)),
+            http_status=(
+                None if value.get("http_status") is None else int(value.get("http_status"))
+            ),
+            retry_after=None if value.get("retry_after") is None else str(value.get("retry_after")),
             model=None if value.get("model") is None else str(value.get("model")),
             tools=[str(item) for item in value.get("tools") or ()],
             accepted_user_sequence_index=int(value.get("accepted_user_sequence_index")),
