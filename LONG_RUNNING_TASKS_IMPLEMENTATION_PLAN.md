@@ -108,19 +108,22 @@ Current SOTA patterns converge on the same few requirements, but AssistantMD sho
 3. Compaction is chat-history oriented, not goal-oriented.
    Current compaction summarizes older messages plus recent raw messages. It does not preserve an explicit plan state, open decisions, pending subtasks, source/artifact references, or step-level invariants.
 
-4. Cost accounting is incomplete for long runs.
+4. Automatic compaction policy is under-specified for long-running tasks.
+   AssistantMD already supports automatic post-turn compaction through `compaction_type: auto`, but the default product behavior still treats compaction as mostly suggested or user/tool initiated. Long-running tasks may need automatic context-window management before the goal is complete, which changes behavior: effective history can be rewritten without a per-run user action. Hardening target: define when automatic compaction is allowed, what settings control it, what audit events/user-visible state it produces, and whether long-running mode can opt into a different compaction policy than ordinary chat.
+
+5. Cost accounting is incomplete for long runs.
    AssistantMD estimates prompt/history tokens and enforces tool-call limits, but it does not appear to persist provider-reported per-request usage, cached tokens, reasoning tokens, per-subagent cost, or goal-level budgets.
 
-5. Network/API resilience is mostly implicit.
+6. Network/API resilience is mostly implicit.
    Model instances use a configured timeout, and workflows/delegates have timeouts. There is no centralized provider retry policy with backoff, `Retry-After` handling, retry event logging, or idempotency guidance around tool calls that should not be retried blindly.
 
-6. Subagents are synchronous child calls.
+7. Subagents are synchronous child calls.
    `delegate` is useful for bounded inference, but it does not create durable child task records, stream progress, return artifact references as a first-class contract, or let the parent continue while children run.
 
-7. Check-ins are procedural rather than system-owned.
+8. Check-ins are procedural rather than system-owned.
    A workflow or agent can ask the user questions, but there is no durable "awaiting user" task status, no resumable approval/check-in payload, and no UI/API affordance for goal checkpoint review.
 
-8. Transparency is split across logs, tasks, tool events, and vault activity.
+9. Transparency is split across logs, tasks, tool events, and vault activity.
    Each piece is useful, but long-running goal audit needs one queryable timeline that ties together goal, task, turn, step, workflow, delegate call, tool events, files, usage, retries, and user approvals.
 
 ## Existing Brittle Points and Code Smells
@@ -217,6 +220,7 @@ Before adding new goal primitives, make the current chat/workflow/tool stack mor
 Priority hardening targets:
 
 - Tool-history integrity across retrieval, compaction, context assembly, and session forking.
+- Automatic compaction policy, prompt strategy, and audit visibility for long-running tasks.
 - Structured tool/API failure metadata with retryability and suggested next action.
 - Streaming failure recovery context when a user turn is accepted but no assistant response is persisted.
 - Workflow/task heartbeat and progress metadata so "running" is distinguishable from "stalled".
@@ -224,7 +228,22 @@ Priority hardening targets:
 
 This is the highest-leverage work because `goal_ops` will only be useful if the lower-level operations it composes already report state and failures clearly.
 
-### 2. Add a Small `goal_ops` Primitive
+### 2. Define Automatic Compaction Policy Before `goal_ops`
+
+AssistantMD already has `compaction_type: none|suggested|auto`, `compaction_keep_recent`, and `compaction_token_threshold`. For ordinary chat, that is enough. For long-running tasks, automatic compaction becomes part of task execution semantics, so it needs an explicit contract before goals depend on it.
+
+The compaction prompt strategy should be audited against long-running work. `CHAT_HISTORY_COMPACTION_INSTRUCTION` already preserves facts, decisions, preferences, constraints, open tasks, paths, validation results, and tool outcomes. For long-running goals it should also explicitly preserve:
+
+- current objective and success criteria;
+- active plan/step state and next action;
+- open blockers, unresolved questions, and user check-in requirements;
+- artifact refs, source refs, file paths, and validation evidence;
+- failed attempts, retry/cancellation state, and uncertainty;
+- budget/context pressure or compaction trigger reason.
+
+Automatic compaction should remain settings-controlled and auditable. Ordinary chat can continue to use the existing `compaction_type` policy. Long-running mode may need an explicit per-goal policy such as `inherit`, `suggest`, `auto_at_threshold`, or `pause_for_user`. Any automatic compaction should emit a clear lifecycle event and update session/goal state with compaction id, trigger reason, estimated tokens, threshold, keep-recent count, preserved recent slice, and prompt contract version.
+
+### 3. Add a Small `goal_ops` Primitive
 
 Create a new SQLite-backed subsystem, likely `core/goals/`, but keep the scope intentionally small. It should support bounded knowledge-work runs tied to a vault workspace or vault-maintenance scope, not a general autonomous-agent framework.
 
@@ -259,7 +278,7 @@ Markdown remains the human-facing source of truth. A default workspace might con
 
 The ledger should link to these files rather than replacing them. Keep `TaskCoordinator` as the process-local execution handle, but mirror lifecycle changes into the durable ledger when a run opts in. On startup, reconcile non-terminal durable runs into `interrupted` or `recoverable` states instead of pretending they never existed.
 
-### 3. Add Optional Bounded Work Session Support
+### 4. Add Optional Bounded Work Session Support
 
 Add a user-facing "work on this goal" path for chat and workflows after hardening and `goal_ops` exist. The first implementation can be conservative:
 
@@ -272,7 +291,7 @@ Add a user-facing "work on this goal" path for chat and workflows after hardenin
 
 Do not replace ordinary chat. This should be opt-in for complex goals where overhead is justified.
 
-### 4. Make Checkpoints Contractual
+### 5. Make Checkpoints Contractual
 
 Add a goal checkpoint writer that runs:
 
@@ -296,7 +315,7 @@ Each checkpoint should be structured JSON, not freeform markdown:
 
 Context assembly should be able to load the latest checkpoint as a compact, high-priority context layer.
 
-### 5. Add Budget and Usage Accounting
+### 6. Add Budget and Usage Accounting
 
 Persist real usage when provider/Pydantic AI returns it, not only estimates:
 
@@ -313,7 +332,7 @@ Expose budget policy:
 
 Start with goal-level reporting and validation events before attempting aggressive cost optimization.
 
-### 6. Treat Durable Child Work as Later, Not Foundational
+### 7. Treat Durable Child Work as Later, Not Foundational
 
 Keep the existing synchronous `delegate` for quick bounded work. Do not add durable child subtasks in the first implementation unless validation shows existing delegate/workflow composition is insufficient.
 
@@ -433,6 +452,24 @@ Exit criteria:
 - Stalled or queued work is visible before users assume it is productive.
 - P0/P1 risks addressed: silent stalls, retry classification, cancellation ambiguity.
 
+### Phase 2A: Automatic Compaction and Context Window Policy
+
+Goal: make context-window management safe and auditable for long-running knowledge work before adding a goal ledger.
+
+Deliverables:
+
+- Audit `CHAT_HISTORY_COMPACTION_INSTRUCTION` against long-running task needs: objective, success criteria, active plan/step state, artifact refs, source refs, validation evidence, open blockers, failed attempts, uncertainty, user check-in requirements, and next action.
+- Define automatic compaction policy for long-running mode: inherit ordinary chat settings, force suggested mode, auto at threshold, or pause for user approval.
+- Add explicit compaction trigger metadata: `trigger=manual|tool|auto_threshold|goal_policy`, estimated tokens, threshold, keep-recent count, prompt contract version, and reason.
+- Add validation for automatic post-turn compaction when `compaction_type: auto` crosses threshold, including that the summary preserves long-running task state and emits auditable trigger metadata.
+- Decide whether long-running goals need a separate setting from ordinary chat, such as `goal_compaction_policy`, or whether `goal_ops` should pass an explicit policy per run.
+
+Exit criteria:
+
+- Automatic compaction behavior is deliberate, settings-controlled, and visible to user/agent audit.
+- Compaction summaries preserve enough goal state to resume safely after context reduction.
+- Long-running mode does not silently lose plan state, evidence, blockers, or user check-in requirements.
+
 ### Phase 3: Minimal `goal_ops` Ledger
 
 Goal: add a small composable primitive for workspace-scoped goal state after the underlying operations report reliable state and failures.
@@ -551,6 +588,7 @@ Use deterministic scenarios to lock down each slice before or alongside implemen
 - `delegate_partial_failure_audit.py`: force delegate timeout after one child tool event and assert partial audit/progress survives.
 - `workflow_heartbeat_stall.py`: run a workflow that stops emitting progress and assert status/checkpoint surfaces a stalled or no-heartbeat warning.
 - `streaming_failure_resume_context.py`: fail a streaming turn after accepted user persistence and assert resumed context includes a structured failure marker.
+- `auto_compaction_context_policy.py`: configure automatic compaction, exceed threshold during a long-running-style session, and assert trigger metadata, prompt contract version, and summary preservation of objective, plan, artifacts, blockers, failed attempts, and next action.
 - `llm_retry_policy.py`: fake provider/network failures and assert retry events, backoff classification, and no retry for permanent errors.
 - `goal_ops_lifecycle.py`: create a workspace-scoped goal, update plan steps, attach artifacts/tasks, archive it, and assert API/tool state plus validation events.
 - `goal_task_restart_recovery.py`: create a durable goal with a simulated active task, restart runtime, assert it reconciles to `interrupted` or `recoverable`.
@@ -582,4 +620,4 @@ Maintain existing scenarios for workflow async/cancellation, chat cancellation, 
 
 ## Next Phase
 
-Feature Development should continue Phase 0/1 hardening. The next concrete work should extend structured failures into API-safe error summaries or do a goal_ops readiness review against the remaining hardening backlog. `goal_ops` should remain deferred until the lower-level reliability surfaces report actionable state and failures.
+Feature Development should continue with automatic compaction policy and prompt-strategy audit before `goal_ops`. The next concrete work should define and validate automatic compaction behavior for long-running-style sessions, then revisit whether remaining structured API error summaries block the minimal `goal_ops` ledger. `goal_ops` should remain deferred until context-window management is safe and auditable.
