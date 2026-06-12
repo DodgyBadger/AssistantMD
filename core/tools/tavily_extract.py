@@ -8,6 +8,7 @@ from typing import List, Union, Literal
 from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 from core.logger import UnifiedLogger
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
@@ -55,7 +56,12 @@ class TavilyExtract(BaseTool):
                     timeout=timeout
                 )
             except Exception as exc:
-                return f"Tavily extract error: {exc}"
+                return tool_failure_return(
+                    tool_name="tavily_extract",
+                    message="Tavily extract failed",
+                    classification=classify_exception(exc, phase="web_extract"),
+                    metadata={"urls": urls},
+                )
             
             if not result.get('results'):
                 return f"No content could be extracted from: {urls}"
@@ -75,7 +81,10 @@ class TavilyExtract(BaseTool):
             # Include failed results if any
             if result.get('failed_results'):
                 failed_urls = [item.get('url', 'Unknown URL') for item in result['failed_results']]
-                extracted_content.append("\n## Failed to extract from:\n" + "\n".join(f"- {url}" for url in failed_urls))
+                extracted_content.append(
+                    "\n## Failed to extract from:\n"
+                    + "\n".join(f"- {url}" for url in failed_urls)
+                )
 
             # Format final content
             final_content = "\n\n".join(extracted_content)

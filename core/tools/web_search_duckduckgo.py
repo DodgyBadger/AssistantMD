@@ -8,6 +8,7 @@ from ddgs import DDGS
 from pydantic_ai.tools import Tool
 from core.settings import get_default_api_timeout
 from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 from core.logger import UnifiedLogger
 
 
@@ -21,7 +22,7 @@ class WebSearchDuckDuckGo(BaseTool):
     def get_tool(cls, vault_path: str = None):
         """Get the Pydantic AI tool for DuckDuckGo web search."""
 
-        def web_search(*, query: str) -> str:
+        def web_search(*, query: str):
             """Search DuckDuckGo for information on the given query.
 
             :param query: Search query to look up
@@ -52,7 +53,12 @@ class WebSearchDuckDuckGo(BaseTool):
                 return f"Search results for '{query}':\n\n" + "\n\n---\n\n".join(formatted_results)
 
             except Exception as e:
-                return f"DuckDuckGo search error: {str(e)}"
+                return tool_failure_return(
+                    tool_name="web_search_duckduckgo",
+                    message="DuckDuckGo search failed",
+                    classification=classify_exception(e, phase="web_search"),
+                    metadata={"query": query},
+                )
 
         return Tool(
             web_search,
