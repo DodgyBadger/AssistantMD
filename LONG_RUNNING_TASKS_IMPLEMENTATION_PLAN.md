@@ -456,19 +456,26 @@ Exit criteria:
 
 Goal: make context-window management reliable, automatic when appropriate, and auditable for long-running knowledge work before adding a goal ledger.
 
+Codex inspection notes:
+
+- Codex uses a small "context checkpoint compaction" prompt that asks for progress, decisions, constraints, remaining work, and references needed by a future model.
+- The stronger pattern is the surrounding lifecycle: manual/auto triggers, reason and phase metadata, pre/post compaction hooks, compaction lifecycle items, retry/trimming behavior when compaction itself hits context limits, a new context-window boundary, and tests for pre-turn/mid-turn compaction.
+- AssistantMD should adopt the recovery-card prompt contract and audit metadata now while keeping storage simple: durable chat checkpoints in SQLite remain the canonical compaction record, and markdown/workflow compositions can project those records however they prefer.
+
 Deliverables:
 
-- Audit `CHAT_HISTORY_COMPACTION_INSTRUCTION` against long-running task needs and Codex-style recovery-card behavior: objective, success criteria, active plan/step state, artifact refs, source refs, validation evidence, open blockers, failed attempts, uncertainty, user check-in requirements, and next action.
+- Completed: audit `CHAT_HISTORY_COMPACTION_INSTRUCTION` against long-running task needs and Codex-style recovery-card behavior: objective, active plan/step state, artifact refs, source refs, validation evidence, open blockers, failed attempts, uncertainty, user check-in requirements, and next action.
+- Completed: add explicit prompt contract versioning (`recovery-card-v1`) to the generated compaction prompt and durable checkpoint/session metadata.
+- Completed: add explicit compaction trigger metadata for existing paths: `manual/api_requested`, `manual/agent_tool_requested`, and `auto/token_threshold`, plus estimated tokens, threshold, keep-recent count, compaction type, and prompt contract version.
 - Make repeated compaction idempotent: summary plus newer turns should produce a fresher recovery state without accumulating stale narrative or losing the active thread.
 - Define automatic compaction policy for long-running mode: inherit ordinary chat settings, force suggested mode, auto at threshold, or pause for user approval.
-- Add explicit compaction trigger metadata: `trigger=manual|tool|auto_threshold|goal_policy`, estimated tokens, threshold, keep-recent count, prompt contract version, and reason.
-- Add validation for automatic post-turn compaction when `compaction_type: auto` crosses threshold, including that the summary preserves long-running task state and emits auditable trigger metadata.
+- Add validation for automatic post-turn compaction when `compaction_type: auto` crosses threshold, including that the summary preserves long-running task state and emits auditable trigger metadata. Initial metadata coverage now exists in `chat_history_compaction.py`; a full automatic post-turn scenario remains.
 - Decide whether long-running goals need a separate setting from ordinary chat, such as `goal_compaction_policy`, or whether `goal_ops` should pass an explicit policy per run.
 
 Exit criteria:
 
-- Automatic compaction behavior is deliberate, settings-controlled, and visible to user/agent audit.
-- Compaction summaries behave as operational recovery cards, not transcript recaps.
+- Automatic compaction behavior is deliberate, settings-controlled, and visible to user/agent audit. Existing compaction paths now persist trigger/reason/settings metadata.
+- Compaction summaries behave as operational recovery cards, not transcript recaps. Initial prompt contract is implemented.
 - Repeated compaction preserves the active thread across multiple rounds.
 - Long-running mode does not silently lose plan state, evidence, blockers, or user check-in requirements.
 

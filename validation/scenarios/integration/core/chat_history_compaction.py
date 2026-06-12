@@ -1,5 +1,6 @@
 """Integration scenario for chat history compaction primitives and API."""
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -61,6 +62,15 @@ class ChatHistoryCompactionScenario(BaseScenario):
         prompt = compaction._build_summary_prompt(
             older_messages=older_messages,
             focus="Keep decisions and tool outcomes.",
+        )
+        assert '"prompt_contract_version": "recovery-card-v1"' in prompt, (
+            "Compaction prompt declares the summary contract version"
+        )
+        assert "context checkpoint compaction" in prompt, (
+            "Compaction prompt frames the summary as resumable task state"
+        )
+        assert "Open tasks, unresolved questions, blockers, risks" in prompt, (
+            "Compaction prompt asks for recovery-card continuation details"
         )
         assert "probe result" not in prompt, (
             "Compaction prompt should not include recent turns that will be preserved verbatim"
@@ -158,11 +168,33 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         metadata = store.get_session_metadata(session_id, vault.name)
         assert "last_compaction" in metadata, "Compaction audit metadata is recorded"
+        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v1", (
+            "Session metadata records the compaction prompt contract"
+        )
+        assert metadata["last_compaction"]["trigger"] == "manual", (
+            "API compaction is recorded as a manual trigger"
+        )
+        assert metadata["last_compaction"]["reason"] == "api_requested", (
+            "API compaction records the manual reason"
+        )
+        assert metadata["last_compaction"]["compaction_keep_recent"] == 2, (
+            "Session metadata records effective compaction settings"
+        )
 
         checkpoint = store.get_latest_compaction_checkpoint(session_id, vault.name)
         assert checkpoint is not None, "Compaction records a replay checkpoint"
         assert checkpoint.last_message_sequence_index == 5, (
             "Checkpoint records the raw message high-water mark"
+        )
+        checkpoint_metadata = json.loads(checkpoint.metadata_json or "{}")
+        assert checkpoint_metadata["prompt_contract_version"] == "recovery-card-v1", (
+            "Checkpoint metadata records the prompt contract version"
+        )
+        assert checkpoint_metadata["trigger"] == "manual", (
+            "Checkpoint metadata records manual/API compaction trigger"
+        )
+        assert checkpoint_metadata["reason"] == "api_requested", (
+            "Checkpoint metadata records why compaction ran"
         )
 
         migration_conn = sqlite3.connect(runtime.config.system_root / "chat_sessions.db")

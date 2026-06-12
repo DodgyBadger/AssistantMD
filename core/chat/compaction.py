@@ -20,7 +20,10 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from core.constants import CHAT_HISTORY_COMPACTION_INSTRUCTION
+from core.constants import (
+    CHAT_HISTORY_COMPACTION_INSTRUCTION,
+    CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
+)
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -171,6 +174,7 @@ async def compact_chat_history(
                 raise ValueError("Chat session does not have older history to compact.")
 
             estimated_before = estimate_history_tokens(messages)
+            trigger, reason = _compaction_trigger_and_reason(source)
             logger.info(
                 "chat_compaction_plan_selected",
                 data={
@@ -178,6 +182,9 @@ async def compact_chat_history(
                     "session_id": session_id,
                     "vault_name": vault_name,
                     "source": source_value,
+                    "trigger": trigger,
+                    "reason": reason,
+                    "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
                     "history_mode": "effective",
                     "messages_before": len(messages),
                     "older_messages": len(older_messages),
@@ -213,6 +220,12 @@ async def compact_chat_history(
                     "compaction_id": compaction_id,
                     "compacted_at": compacted_at,
                     "source": source_value,
+                    "trigger": trigger,
+                    "reason": reason,
+                    "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
+                    "compaction_type": get_compaction_type(),
+                    "compaction_token_threshold": get_compaction_token_threshold(),
+                    "compaction_keep_recent": keep_recent,
                     "messages_before": len(messages),
                     "messages_after": len(replacement),
                     "estimated_tokens_before": estimated_before,
@@ -256,6 +269,9 @@ async def compact_chat_history(
                 data={
                     "event": "chat_compaction_completed",
                     **result.as_tool_dict(),
+                    "trigger": trigger,
+                    "reason": reason,
+                    "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
                     "history_mode": "effective",
                     "raw_messages_preserved": True,
                     "checkpoint_id": compaction_id,
@@ -307,6 +323,17 @@ def build_compaction_summary_message(summary: str) -> ModelRequest:
     """Build the system-maintained summary message stored after compaction."""
     content = f"{_SUMMARY_MARKER}\n\n{summary.strip()}"
     return ModelRequest(parts=[SystemPromptPart(content=content)])
+
+
+def _compaction_trigger_and_reason(source: ExecutionTaskSource) -> tuple[str, str]:
+    """Return stable audit labels for why compaction ran."""
+    if source == ExecutionTaskSource.SYSTEM:
+        return "auto", "token_threshold"
+    if source == ExecutionTaskSource.TOOL:
+        return "manual", "agent_tool_requested"
+    if source == ExecutionTaskSource.API:
+        return "manual", "api_requested"
+    return "manual", f"{source.value}_requested"
 
 
 async def maybe_auto_compact_after_turn(
@@ -419,6 +446,7 @@ def _build_summary_prompt(
 ) -> str:
     focus_text = (focus or "").strip()
     payload = {
+        "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
         "base_instruction": CHAT_HISTORY_COMPACTION_INSTRUCTION,
         "user_focus": focus_text or None,
         "older_history": [_message_to_compaction_source(message) for message in older_messages],

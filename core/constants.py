@@ -163,9 +163,12 @@ CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
     "without script management (for example by switching to the default script). "
 )
 
+CHAT_HISTORY_COMPACTION_PROMPT_VERSION = "recovery-card-v1"
+
 CHAT_HISTORY_COMPACTION_INSTRUCTION = """
-Summarize the older portion of a chat session so future turns can continue with
-substantially less context.
+You are performing an AssistantMD context checkpoint compaction. Create a
+handoff summary for a future assistant turn that will continue the same
+knowledge-work session with substantially less context.
 
 The source history may already contain an earlier AssistantMD compaction summary.
 When it does, treat that summary as compressed prior session state. Merge it with
@@ -175,17 +178,23 @@ outcomes from the prior summary. Remove duplication, resolve obvious
 supersession from newer turns, and do not describe the prior summary as an
 artifact of the conversation.
 
-Preserve durable facts, explicit user preferences, architecture decisions,
-open tasks, unresolved questions, important file paths, commands, validation
-results, and any constraints the assistant must still follow. Keep tool results
-only when their outcomes matter for future work. Do not invent details. Do not
-make secrets or API keys more explicit than they appeared in the source history.
-Summarize only the provided older source history; recent turns are preserved
-verbatim outside the summary and should not be restated.
+Write one concise, structured recovery-card summary. Include only sections that
+are supported by the source history and useful for continuing work:
+- Current objective and the user's intended outcome.
+- Current progress, completed work, and key decisions.
+- Important constraints, user preferences, and operating assumptions.
+- Vault/workspace files, external references, commands, tool outcomes, or
+  validation results that still matter.
+- Open tasks, unresolved questions, blockers, risks, failed attempts, and clear
+  next steps.
 
-Write one system-maintained session-history summary. It should be concise,
-structured, and directly useful to the next assistant turn. Do not include
-compaction and related session hygiene requests in the summary.
+Prioritize state needed to resume the task over a chronological transcript.
+Keep tool results only when their outcomes matter for future work. Do not invent
+details. Do not make secrets or API keys more explicit than they appeared in the
+source history. Summarize only the provided older source history; recent turns
+are preserved verbatim outside the summary and should not be restated.
+
+Do not include compaction and related session hygiene requests in the summary.
 """.strip()
 
 
