@@ -209,7 +209,11 @@ The transcript may include an AssistantMD compaction summary. Treat that block a
 compressed prior conversation state, not as a normal assistant response and not
 as the subject of the session. Merge its still-relevant substance with later
 transcript messages. Prefer newer transcript details when they supersede the
-compaction summary.
+compaction summary. When a compaction summary is present, treat it as the
+primary source of durable session substance from before the checkpoint. The
+retained raw messages after that checkpoint provide recency and supersession,
+but they should not crowd out the objective, decisions, progress, blockers,
+artifacts, or next steps preserved in the compaction summary.
 
 Task:
 Identify what happened in the session and what the user was trying to

@@ -275,6 +275,9 @@ class ChatHistoryCompactionScenario(BaseScenario):
                 assert "AssistantMD compacted chat history" in prompt, (
                     "Session summarization prompt should include effective checkpoint summary"
                 )
+                assert "primary source of durable session substance" in prompt, (
+                    "Session summarization prompt should prioritize the compaction card"
+                )
                 assert "Post-compaction follow-up." in prompt, (
                     "Session summarization prompt should include post-checkpoint raw turns"
                 )
