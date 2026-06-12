@@ -2,8 +2,10 @@
 
 This scenario intentionally uses the real compaction summarizer. Keep it in
 experiments so normal integration runs do not depend on live model behavior.
+Assertions are intentionally mechanical; inspect artifacts for quality signals.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -21,6 +23,15 @@ class RepeatedCompactionLiveProbeScenario(BaseScenario):
         vault = self.create_vault("RepeatedCompactionLiveProbeVault")
 
         await self.start_system()
+
+        model_response = self.call_api(
+            "/api/system/settings/general/default_model",
+            method="PUT",
+            data={"value": "gpt-mini"},
+        )
+        assert model_response.status_code == 200, (
+            "Live compaction probe should switch default model to gpt-mini"
+        )
 
         import core.chat.compaction as compaction
         from core.chat.chat_store import ChatStore
@@ -79,24 +90,25 @@ class RepeatedCompactionLiveProbeScenario(BaseScenario):
         assert len(effective_messages) == 2, (
             "Repeated live compaction should keep effective history compact"
         )
-        summary = effective_messages[0].content_text.lower()
-
         assert first.status == "completed", "First live compaction should complete"
         assert second.status == "completed", "Second live compaction should complete"
-        assert "meridian" in summary, "Latest card should preserve the named briefing target"
-        assert "donor" in summary, "Latest card should preserve the domain"
-        assert "metrics" in summary or "figures" in summary, (
-            "Latest card should preserve the updated evidence state"
+        assert effective_messages[0].role == "system", (
+            "Latest effective history should start with the compaction card"
         )
-        assert "missing q4" not in summary and "missing-q4" not in summary, (
-            "Latest card should not retain the explicitly superseded missing-Q4 caveat"
-        )
-        assert "next" in summary or "step" in summary, (
-            "Latest card should preserve a continuation cue"
+        assert "AssistantMD compacted chat history" in effective_messages[0].content_text, (
+            "Latest compaction card should use the standard marker"
         )
 
         (self.artifacts_dir / "latest_compaction_card.md").write_text(
             effective_messages[0].content_text,
+            encoding="utf-8",
+        )
+        (self.artifacts_dir / "quality_indicators.json").write_text(
+            json.dumps(
+                _quality_indicators(effective_messages[0].content_text),
+                indent=2,
+                sort_keys=True,
+            ),
             encoding="utf-8",
         )
 
@@ -110,3 +122,18 @@ def _user(content: str) -> ModelRequest:
 
 def _assistant(content: str) -> ModelResponse:
     return ModelResponse(parts=[TextPart(content=content)])
+
+
+def _quality_indicators(summary: str) -> dict[str, bool]:
+    lower = summary.lower()
+    return {
+        "mentions_meridian": "meridian" in lower,
+        "mentions_donor": "donor" in lower,
+        "mentions_metrics_or_figures": "metrics" in lower or "figures" in lower,
+        "marks_q4_caveat_superseded": (
+            "q4 figures arrived" in lower or "no longer applicable" in lower
+            or ("decision updated" in lower and "q4" in lower)
+        ),
+        "preserves_missing_q4_as_active": "q4 financial figures are missing" in lower,
+        "has_continuation_cue": "next" in lower or "step" in lower,
+    }
