@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 
 from validation.core.base_scenario import BaseScenario
 
@@ -239,6 +239,8 @@ class DelegateToolScenario(BaseScenario):
                 expected={
                     "workflow_id": "delegate_limit_failure",
                     "error_type": "UsageLimitExceeded",
+                    "failure_kind": "execution_limit",
+                    "retryable": False,
                 },
             )
             self.soft_assert(
@@ -281,6 +283,16 @@ class DelegateToolScenario(BaseScenario):
                 "failed",
                 "Delegate timeout should return a failed tool result",
             )
+            self.soft_assert_equal(
+                timeout_tool_result.metadata.get("failure_kind"),
+                "delegate_timeout",
+                "Delegate timeout metadata should classify the failure",
+            )
+            self.soft_assert_equal(
+                timeout_tool_result.metadata.get("retryable"),
+                False,
+                "Delegate timeout metadata should tell the caller not to retry the same broad delegate",
+            )
             timeout_events = self.events_since(checkpoint)
             self.assert_event_contains(
                 timeout_events,
@@ -290,6 +302,58 @@ class DelegateToolScenario(BaseScenario):
             self.soft_assert(
                 "timeout" in timeout_tool_result.return_value,
                 "Delegate timeout should return actionable text",
+            )
+
+            async def _billing_failure_create_agent(*_args, **_kwargs):
+                return _FailingChildAgent(
+                    ModelHTTPError(
+                        status_code=400,
+                        model_name="gpt-5-mini",
+                        body={
+                            "error": {
+                                "message": "Your credit balance is too low for this request.",
+                            },
+                        },
+                    )
+                )
+
+            delegate_module.create_agent = _billing_failure_create_agent
+            try:
+                billing_result = await invoke_bound_tool(
+                    timeout_binding.tool_functions[0],
+                    tool_name="delegate",
+                    arguments={"prompt": "Trigger child provider billing failure.", "model": "test"},
+                    run_buffers={},
+                    session_buffers={},
+                    session_id="delegate_billing_failure",
+                    vault_name=vault.name,
+                )
+            finally:
+                delegate_module.create_agent = _patched_create_agent
+            billing_tool_result = normalize_tool_result(
+                "delegate",
+                billing_result,
+                vault_path=str(vault),
+            )
+            self.soft_assert_equal(
+                billing_tool_result.metadata.get("status"),
+                "failed",
+                "Delegate provider failure should return a failed tool result",
+            )
+            self.soft_assert_equal(
+                billing_tool_result.metadata.get("failure_kind"),
+                "billing",
+                "Delegate provider billing failure should be classified",
+            )
+            self.soft_assert_equal(
+                billing_tool_result.metadata.get("retryable"),
+                False,
+                "Delegate provider billing failure should be non-retryable without user action",
+            )
+            self.soft_assert_equal(
+                billing_tool_result.metadata.get("http_status"),
+                400,
+                "Delegate provider failure metadata should include HTTP status",
             )
 
         finally:

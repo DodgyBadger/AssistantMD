@@ -41,6 +41,7 @@ from core.settings import (
     get_delegate_tool_calls_limit,
 )
 from core.tools.base import BaseTool
+from core.tools.failures import FailureClassification, classify_exception
 
 
 logger = UnifiedLogger(tag="delegate-tool")
@@ -150,6 +151,7 @@ class DelegateTool(BaseTool):
                 text = coerce_output_data(output)
                 audit = _build_child_run_audit(result.all_messages())
             except UsageLimitExceeded as exc:
+                classification = classify_exception(exc, phase="delegate_child_run")
                 return _failed_delegate_return(
                     session_id=session_id,
                     model=model_value or "default",
@@ -158,7 +160,7 @@ class DelegateTool(BaseTool):
                     thinking=thinking_value_to_label(resolved_thinking),
                     max_tool_calls=max_tool_calls,
                     timeout_seconds=timeout_seconds,
-                    error_type=type(exc).__name__,
+                    classification=classification,
                     message=(
                         f"Delegate stopped because the child agent exceeded its tool-call limit "
                         f"of {max_tool_calls}. Do not retry the same broad delegation. Split the work into "
@@ -168,6 +170,17 @@ class DelegateTool(BaseTool):
                     ),
                 )
             except asyncio.TimeoutError as exc:
+                classification = FailureClassification(
+                    error_type=type(exc).__name__,
+                    failure_kind="delegate_timeout",
+                    retryable=False,
+                    phase="delegate_child_run",
+                    message=str(exc),
+                    suggested_action=(
+                        "Do not retry the same broad delegation. Split the work into smaller delegate calls, "
+                        "narrow the file/web scope, or save an intermediate artifact."
+                    ),
+                )
                 return _failed_delegate_return(
                     session_id=session_id,
                     model=model_value or "default",
@@ -176,7 +189,7 @@ class DelegateTool(BaseTool):
                     thinking=thinking_value_to_label(resolved_thinking),
                     max_tool_calls=max_tool_calls,
                     timeout_seconds=timeout_seconds,
-                    error_type=type(exc).__name__,
+                    classification=classification,
                     message=(
                         f"Delegate stopped because the child agent exceeded its timeout of "
                         f"{timeout_seconds:g} seconds. Do not retry the same broad delegation. Split the work "
@@ -185,6 +198,22 @@ class DelegateTool(BaseTool):
                     ),
                 )
             except Exception as exc:
+                classification = classify_exception(exc, phase="delegate_child_run")
+                if classification.failure_kind != "unknown":
+                    return _failed_delegate_return(
+                        session_id=session_id,
+                        model=model_value or "default",
+                        tool_names=safe_tool_names,
+                        stripped_tools=stripped,
+                        thinking=thinking_value_to_label(resolved_thinking),
+                        max_tool_calls=max_tool_calls,
+                        timeout_seconds=timeout_seconds,
+                        classification=classification,
+                        message=(
+                            f"Delegate stopped because the child agent hit a "
+                            f"{classification.failure_kind} failure. {classification.suggested_action}"
+                        ),
+                    )
                 logger.add_sink("validation").error(
                     "delegate_failed",
                     data={
@@ -249,7 +278,7 @@ def _failed_delegate_return(
     thinking: str,
     max_tool_calls: int,
     timeout_seconds: float,
-    error_type: str,
+    classification: FailureClassification,
     message: str,
 ) -> ToolReturn:
     metadata: dict[str, Any] = {
@@ -260,9 +289,9 @@ def _failed_delegate_return(
         "output_chars": len(message),
         "max_tool_calls": max_tool_calls,
         "timeout_seconds": timeout_seconds,
-        "error_type": error_type,
         "audit": _empty_child_run_audit(),
     }
+    metadata.update(classification.to_metadata())
     if stripped_tools:
         metadata["stripped_tools"] = list(stripped_tools)
 
@@ -272,10 +301,13 @@ def _failed_delegate_return(
             "workflow_id": session_id,
             "model": model,
             "tool_names": list(tool_names),
-            "error_type": error_type,
+            "error_type": classification.error_type,
+            "failure_kind": classification.failure_kind,
+            "retryable": classification.retryable,
             "error_message": message,
             "max_tool_calls": max_tool_calls,
             "timeout_seconds": timeout_seconds,
+            "suggested_action": classification.suggested_action,
         },
     )
     return ToolReturn(return_value=message, content=None, metadata=metadata)

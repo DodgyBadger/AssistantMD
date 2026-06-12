@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import ToolReturn
 
 
@@ -45,6 +45,18 @@ class FailureClassification:
 
 def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> FailureClassification:
     """Classify common network/API/tool exceptions into a stable failure envelope."""
+    if isinstance(exc, UsageLimitExceeded):
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="execution_limit",
+            retryable=False,
+            phase=phase,
+            message=str(exc),
+            suggested_action=(
+                "Do not retry the same broad request. Split the work into smaller scoped steps "
+                "or raise the configured execution limit if the scope is intentional."
+            ),
+        )
     if isinstance(exc, ModelHTTPError):
         status_code = exc.status_code
         body_text = str(exc.body or "")
