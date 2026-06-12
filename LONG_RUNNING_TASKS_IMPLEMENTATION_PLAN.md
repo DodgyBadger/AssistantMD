@@ -357,7 +357,7 @@ This should aggregate existing task lifecycle events, chat tool events, vault mu
 
 ### Status
 
-Started Phase 0/1 with three hardening slices:
+Started Phase 0/1 with four hardening slices:
 
 - Added deterministic validation for parallel tool-call batches and orphaned tool returns.
 - Added a shared tool-history integrity helper for provider-native chat messages and stored message payloads.
@@ -368,8 +368,10 @@ Started Phase 0/1 with three hardening slices:
 - Added a shared `FailureClassification` helper and migrated DuckDuckGo search, Tavily search, and Tavily extract exception paths to structured `ToolReturn` failure envelopes.
 - Added accepted-turn failure recovery markers for streaming/chat failures that persist a user turn without an assistant response.
 - Exposed the latest unfinished-turn marker through chat session detail and injected ephemeral recovery context into the next chat preflight.
+- Added execution task heartbeat fields and workflow heartbeat events for background workflow tasks.
+- Added `workflow_run(status)` heartbeat age/stale visibility and queue reason output.
 
-Remaining hardening work should continue with broader structured failure adoption, API-safe error summaries, and workflow heartbeat/stall visibility before starting `goal_ops`.
+Remaining hardening work should continue with broader structured failure adoption and API-safe error summaries before starting `goal_ops`.
 
 ### Phase 0: Hardening Probes and Contracts
 
@@ -380,7 +382,7 @@ Deliverables:
 - `tool_history_integrity.py` scenario for parallel tool-call batches, orphaned calls/returns, and duplicate ids. Initial coverage for parallel batches and orphaned returns is complete; orphaned calls and duplicate ids remain useful follow-up probes.
 - `structured_tool_failure.py` scenario for retryable/permanent/configuration failure classification. Initial coverage is complete for the shared classifier, DuckDuckGo search failures, and Tavily search failures.
 - `streaming_failure_resume_context.py` scenario for accepted-user/no-assistant failure recovery context. Initial coverage is complete in `chat_stream_failure_logging.py`.
-- `workflow_heartbeat_stall.py` scenario that demonstrates how a long-running task can look active while making no progress.
+- `workflow_heartbeat_stall.py` scenario that demonstrates how a long-running task can look active while making no progress. Initial heartbeat/stale status coverage is complete in `workflow_run_async.py`.
 - Shared inventory of which tool operations are idempotent, retryable, non-idempotent, or external-effecting.
 - Draft contracts for `FailureClassification`, tool-history integrity checks, task heartbeat metadata, and resume-context failure markers.
 
@@ -402,6 +404,7 @@ Deliverables:
 - Structured failure metadata for web/search/extract tools and selected API-facing tool errors. Initial DuckDuckGo search, Tavily search, and Tavily extract exception paths are complete; Tavily crawl, browser, model/provider retries, and API-facing errors remain follow-ups.
 - Agent-safe API error summaries with stable `error_type`, `phase`, `retryable`, `suggested_action`, and relevant ids.
 - Streaming failure marker or event that future context assembly can include when a user turn was accepted but no assistant response persisted. Initial marker, session detail exposure, next-turn context injection, and success clearing are complete.
+- Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
 - Partial delegate audit/progress preservation where feasible for timeout/usage-limit failures.
 
 Exit criteria:
@@ -579,4 +582,4 @@ Maintain existing scenarios for workflow async/cancellation, chat cancellation, 
 
 ## Next Phase
 
-Feature Development should continue Phase 0/1 hardening. The next concrete work should extend structured failures into API-safe error summaries or start workflow heartbeat/stall visibility. Workflow heartbeat/stall visibility is the next larger runtime slice. `goal_ops` should remain deferred until those lower-level reliability surfaces report actionable state and failures.
+Feature Development should continue Phase 0/1 hardening. The next concrete work should extend structured failures into API-safe error summaries or do a goal_ops readiness review against the remaining hardening backlog. `goal_ops` should remain deferred until the lower-level reliability surfaces report actionable state and failures.

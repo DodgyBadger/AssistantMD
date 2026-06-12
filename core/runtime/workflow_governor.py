@@ -73,6 +73,13 @@ class WorkflowGovernor:
         async with task_context as task:
             lane_lock = await self._get_lane_lock(vault_name)
             if lane_lock.locked():
+                await self._task_coordinator.heartbeat(
+                    task.task_id,
+                    status="queued_for_vault",
+                    metadata={
+                        "workflow_queue_reason": f"workflow_vault_active:{vault_name}",
+                    },
+                )
                 self._log_queue_event(
                     "workflow_task_queued_for_vault",
                     global_id=global_id,
@@ -91,6 +98,13 @@ class WorkflowGovernor:
                 global_semaphore = await self._get_global_semaphore()
                 if global_semaphore is not None:
                     if global_semaphore.locked():
+                        await self._task_coordinator.heartbeat(
+                            active_task_id,
+                            status="queued_for_global_capacity",
+                            metadata={
+                                "workflow_queue_reason": "workflow_global_capacity_active",
+                            },
+                        )
                         self._log_queue_event(
                             "workflow_task_queued_for_global_capacity",
                             global_id=global_id,
@@ -104,6 +118,17 @@ class WorkflowGovernor:
                     global_permit_acquired = True
 
                 await self._task_coordinator.mark_started(active_task_id)
+                await self._task_coordinator.heartbeat(
+                    active_task_id,
+                    status="workflow_running",
+                    metadata={
+                        "workflow_queue_reason": None,
+                        "workflow_id": global_id,
+                        "workflow_name": workflow_name,
+                        "vault": vault_name,
+                        "step_name": step_name,
+                    },
+                )
                 active_task_id = task.task_id
                 self._log_workflow_event(
                     "workflow_task_started",

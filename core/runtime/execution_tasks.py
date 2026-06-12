@@ -113,6 +113,8 @@ class ExecutionTaskSnapshot:
     cancel_requested: bool = False
     terminal_reason: str | None = None
     latest_event: str | None = None
+    last_heartbeat_at: datetime | None = None
+    heartbeat_status: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -143,6 +145,8 @@ class _ExecutionTaskRecord:
     cancel_requested: bool = False
     terminal_reason: str | None = None
     latest_event: str | None = None
+    last_heartbeat_at: datetime | None = None
+    heartbeat_status: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     handle: asyncio.Task[Any] | None = None
 
@@ -161,6 +165,8 @@ class _ExecutionTaskRecord:
             cancel_requested=self.cancel_requested,
             terminal_reason=self.terminal_reason,
             latest_event=self.latest_event,
+            last_heartbeat_at=self.last_heartbeat_at,
+            heartbeat_status=self.heartbeat_status,
             metadata=dict(self.metadata),
         )
 
@@ -383,6 +389,31 @@ class TaskCoordinator:
 
         self._log_event("execution_task_metadata_updated", snapshot)
 
+    async def heartbeat(
+        self,
+        task_id: str,
+        *,
+        status: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Record observable progress for one non-terminal task."""
+        snapshot = None
+        async with self._lock:
+            record = self._records.get(task_id)
+            if record is None or record.status in TERMINAL_STATUSES:
+                return
+            now = self._now()
+            record.last_heartbeat_at = now
+            record.heartbeat_status = status
+            record.latest_event = "heartbeat"
+            record.metadata["last_heartbeat_at"] = now.isoformat()
+            record.metadata["heartbeat_status"] = status
+            if metadata:
+                record.metadata.update(metadata)
+            snapshot = record.snapshot()
+
+        self._log_event("execution_task_heartbeat", snapshot)
+
     async def mark_completed(self, task_id: str, *, reason: str | None = None) -> None:
         """Mark one task completed."""
         await self._mark_terminal(
@@ -460,9 +491,13 @@ class TaskCoordinator:
             label=label,
             status=ExecutionTaskStatus.QUEUED,
             created_at=now,
+            last_heartbeat_at=now,
+            heartbeat_status="queued",
             handle=handle,
             metadata=dict(metadata or {}),
         )
+        record.metadata.setdefault("last_heartbeat_at", now.isoformat())
+        record.metadata.setdefault("heartbeat_status", "queued")
         async with self._lock:
             self._records[task_id] = record
 
@@ -475,8 +510,13 @@ class TaskCoordinator:
             if record is None:
                 return
             record.status = ExecutionTaskStatus.RUNNING
-            record.started_at = self._now()
+            now = self._now()
+            record.started_at = now
             record.latest_event = "started"
+            record.last_heartbeat_at = now
+            record.heartbeat_status = "started"
+            record.metadata["last_heartbeat_at"] = now.isoformat()
+            record.metadata["heartbeat_status"] = "started"
             snapshot = record.snapshot()
 
         self._log_event("execution_task_started", snapshot)
@@ -497,9 +537,14 @@ class TaskCoordinator:
             if record.status in TERMINAL_STATUSES:
                 return
             record.status = status
-            record.finished_at = self._now()
+            now = self._now()
+            record.finished_at = now
             record.terminal_reason = reason
             record.latest_event = event
+            record.last_heartbeat_at = now
+            record.heartbeat_status = status.value
+            record.metadata["last_heartbeat_at"] = now.isoformat()
+            record.metadata["heartbeat_status"] = status.value
             record.handle = None
             snapshot = record.snapshot()
             self._remember_terminal(task_id)
@@ -536,6 +581,8 @@ class TaskCoordinator:
             "status": snapshot.status,
             "cancel_requested": snapshot.cancel_requested,
             "terminal_reason": snapshot.terminal_reason,
+            "last_heartbeat_at": snapshot.last_heartbeat_at.isoformat() if snapshot.last_heartbeat_at else None,
+            "heartbeat_status": snapshot.heartbeat_status,
         }
         if extra:
             data.update(extra)
