@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -42,35 +40,6 @@ class FailureClassification:
             payload["retry_after"] = self.retry_after
         if self.metadata:
             payload.update(self.metadata)
-        return payload
-
-
-@dataclass(frozen=True)
-class RetryDecision:
-    """Decision for whether and when a retry should be attempted."""
-
-    should_retry: bool
-    reason: str
-    attempt: int
-    max_attempts: int
-    delay_seconds: float | None = None
-    failure_kind: str | None = None
-    retry_after: str | None = None
-
-    def to_metadata(self) -> dict[str, Any]:
-        """Return JSON-safe retry decision metadata."""
-        payload: dict[str, Any] = {
-            "should_retry": self.should_retry,
-            "reason": self.reason,
-            "attempt": self.attempt,
-            "max_attempts": self.max_attempts,
-        }
-        if self.delay_seconds is not None:
-            payload["delay_seconds"] = self.delay_seconds
-        if self.failure_kind:
-            payload["failure_kind"] = self.failure_kind
-        if self.retry_after:
-            payload["retry_after"] = self.retry_after
         return payload
 
 
@@ -254,91 +223,6 @@ def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> Fail
         message=str(exc),
         suggested_action="Inspect the error details and adjust the request or configuration before retrying.",
     )
-
-
-def retry_decision(
-    classification: FailureClassification,
-    *,
-    attempt: int,
-    max_attempts: int,
-    base_delay_seconds: float = 1.0,
-    max_delay_seconds: float = 60.0,
-    now: datetime | None = None,
-) -> RetryDecision:
-    """Return the retry policy decision for a classified failure.
-
-    `attempt` is one-based and represents the failed attempt that just occurred.
-    A retry is allowed only when the failure classification is retryable and the
-    failed attempt has not already reached `max_attempts`.
-    """
-    normalized_attempt = max(1, int(attempt))
-    normalized_max_attempts = max(1, int(max_attempts))
-    if not classification.retryable:
-        return RetryDecision(
-            should_retry=False,
-            reason="not_retryable",
-            attempt=normalized_attempt,
-            max_attempts=normalized_max_attempts,
-            failure_kind=classification.failure_kind,
-            retry_after=classification.retry_after,
-        )
-    if normalized_attempt >= normalized_max_attempts:
-        return RetryDecision(
-            should_retry=False,
-            reason="max_attempts_exhausted",
-            attempt=normalized_attempt,
-            max_attempts=normalized_max_attempts,
-            failure_kind=classification.failure_kind,
-            retry_after=classification.retry_after,
-        )
-
-    retry_after_delay = _retry_after_delay_seconds(classification.retry_after, now=now)
-    if retry_after_delay is not None:
-        return RetryDecision(
-            should_retry=True,
-            reason="retry_after",
-            attempt=normalized_attempt,
-            max_attempts=normalized_max_attempts,
-            delay_seconds=min(retry_after_delay, max_delay_seconds),
-            failure_kind=classification.failure_kind,
-            retry_after=classification.retry_after,
-        )
-
-    delay = min(
-        max(0.0, base_delay_seconds) * (2 ** (normalized_attempt - 1)),
-        max_delay_seconds,
-    )
-    return RetryDecision(
-        should_retry=True,
-        reason="exponential_backoff",
-        attempt=normalized_attempt,
-        max_attempts=normalized_max_attempts,
-        delay_seconds=delay,
-        failure_kind=classification.failure_kind,
-        retry_after=classification.retry_after,
-    )
-
-
-def _retry_after_delay_seconds(value: str | None, *, now: datetime | None = None) -> float | None:
-    if not value:
-        return None
-    stripped = value.strip()
-    if not stripped:
-        return None
-    try:
-        return max(0.0, float(stripped))
-    except ValueError:
-        pass
-    try:
-        parsed = parsedate_to_datetime(stripped)
-    except (TypeError, ValueError, IndexError, OverflowError):
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    reference = now or datetime.now(UTC)
-    if reference.tzinfo is None:
-        reference = reference.replace(tzinfo=UTC)
-    return max(0.0, (parsed.astimezone(UTC) - reference.astimezone(UTC)).total_seconds())
 
 
 def tool_failure_return(

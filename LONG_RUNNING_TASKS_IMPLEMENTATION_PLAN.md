@@ -115,7 +115,7 @@ Current SOTA patterns converge on the same few requirements, but AssistantMD sho
    AssistantMD estimates prompt/history tokens and enforces tool-call limits, but it does not appear to persist provider-reported per-request usage, cached tokens, reasoning tokens, per-subagent cost, or goal-level budgets.
 
 6. Network/API resilience is only partially structured.
-   Model, delegate, web/search, workflow, and API error paths now share initial structured failure metadata in several important places, including retryability and suggested action. A deterministic retry decision helper exists for `FailureClassification`, including `Retry-After` and exponential backoff decisions. There is still no automatic provider retry loop, retry lifecycle event stream, or idempotency guidance around tool calls that should not be retried blindly.
+   Model, delegate, web/search, workflow, and API error paths now share initial structured failure metadata in several important places, including retryability and suggested action. Pydantic AI already provides retry transports and `wait_retry_after(...)`; AssistantMD should use those for actual provider retry execution rather than maintaining a parallel retry framework. There is still no automatic provider retry loop, retry lifecycle event stream, or idempotency guidance around tool calls that should not be retried blindly.
 
 7. Subagents are synchronous child calls.
    `delegate` is useful for bounded inference and now returns structured bounded-failure metadata for execution limits, timeouts, and provider failures. It still does not create durable child task records, stream progress, return artifact references as a first-class contract, or let the parent continue while children run.
@@ -166,8 +166,8 @@ These are lower-level risks in the current code that could derail or waste effor
 12. Usage and output limits can cause hidden churn.
    `chat_tool_calls_limit=0` disables chat tool-call limits by default; `auto_cache_max_tokens` can replace large tool outputs with cache notices; `max_output_tokens` can truncate model responses provider-side. These settings are useful but the agent has no unified view of why it is failing to make progress. Hardening target: include active limit settings and limit-trigger events in goal/task context, and classify limit-triggered failures as `budget_limited`, `context_limited`, or `tool_limited`.
 
-13. Shared retry classification and decision policy exist but are not yet automatic.
-   `FailureClassification` now gives model, selected tool, delegate, workflow, and API failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. `retry_decision(...)` provides the common policy for `Retry-After`, exponential backoff, and exhausted attempts. Long-running agents still need automatic provider retry execution, retry lifecycle events, broader adoption in remaining tools, and future goal events that preserve the same envelope.
+13. Shared retry classification exists, and retry execution should use Pydantic AI.
+   `FailureClassification` now gives model, selected tool, delegate, workflow, and API failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. Actual HTTP retry timing/execution should use Pydantic AI's `TenacityTransport`, `AsyncTenacityTransport`, and `wait_retry_after(...)` instead of AssistantMD duplicating that policy. Long-running agents still need automatic provider retry execution, retry lifecycle events, broader adoption in remaining tools, and future goal events that preserve the same envelope.
 
 14. Activity logging is good but not always agent-actionable.
    Many events are logged for validation/activity, but the agent often receives only a plain tool result or generic API error. Hardening target: make critical event ids/task ids/checkpoint ids flow back to the agent so it can inspect status or report accurately.
@@ -398,7 +398,7 @@ Phase 0/1/2A hardening is underway. Completed slices:
 - Routed manual system workflow execution through the normal workflow governor while preserving the rule that disabled system workflows can be run manually but are not scheduled.
 - Scheduled API-started background workflow tasks on the runtime event loop so request-local loops cannot cancel them after the response boundary.
 - Added agent-safe API error response envelopes with stable phase, failure kind, retryability, suggested action, HTTP status, and relevant ids.
-- Added deterministic retry decision policy for `FailureClassification`, including `Retry-After`, exponential backoff, and max-attempt exhaustion decisions.
+- Confirmed retry timing/execution should use Pydantic AI retry transports rather than an AssistantMD-specific retry framework; `FailureClassification` remains the agent-facing recovery envelope.
 
 Remaining hardening work should continue with broader structured failure adoption, automatic retry execution where safe, queue/stall visibility, and restart reconciliation. The minimal `goal_ops` ledger can start once we accept that automatic provider retry loops are a later hardening layer rather than a prerequisite.
 
@@ -452,7 +452,7 @@ Deliverables:
 - Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
 - Queue age and stalled-task warnings.
 - `workflow_run(status)` improvements that return progress, heartbeat age, blocking reason, and artifact refs when available.
-- Provider/API retry policy for retryable model/network failures. Initial deterministic retry decision helper is complete; automatic retry execution remains a follow-up.
+- Provider/API retry policy for retryable model/network failures. Pydantic AI retry transports are the intended implementation surface; automatic retry execution remains a follow-up.
 - Validation events for retry scheduled/succeeded/exhausted and task heartbeat/stall transitions. Heartbeat events are complete; retry lifecycle events remain a follow-up for automatic retry execution.
 - Clear cancellation result language distinguishing rolled-back local mutations, retained artifacts, and external/unknown effects where the current system can know.
 

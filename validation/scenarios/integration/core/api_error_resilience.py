@@ -1,4 +1,4 @@
-"""Integration scenario for API-safe error envelopes and retry decisions."""
+"""Integration scenario for API-safe error envelopes and retry readiness."""
 
 import sys
 from pathlib import Path
@@ -11,10 +11,12 @@ from validation.core.base_scenario import BaseScenario
 
 
 class ApiErrorResilienceScenario(BaseScenario):
-    """Validate actionable, safe API errors and retry policy primitives."""
+    """Validate actionable, safe API errors and Pydantic AI retry integration points."""
 
     async def test_scenario(self):
-        from core.tools.failures import classify_exception, retry_decision
+        from pydantic_ai.retries import AsyncTenacityTransport, TenacityTransport, wait_retry_after
+
+        from core.tools.failures import classify_exception
 
         self.create_vault("ApiErrorVault")
         await self.start_system()
@@ -60,59 +62,30 @@ class ApiErrorResilienceScenario(BaseScenario):
 
         rate_limited = _http_status_error(429, retry_after="11")
         rate_classification = classify_exception(rate_limited, phase="model_request")
-        rate_decision = retry_decision(
-            rate_classification,
-            attempt=1,
-            max_attempts=3,
-            base_delay_seconds=2.0,
-        )
         self.soft_assert(
-            rate_decision.should_retry,
-            "Retry policy should allow classified rate-limit retries",
+            rate_classification.retryable,
+            "Classification should mark rate limits retryable for retry transport policy",
         )
         self.soft_assert_equal(
-            rate_decision.delay_seconds,
-            11.0,
-            "Retry policy should respect numeric Retry-After",
-        )
-        self.soft_assert_equal(
-            rate_decision.reason,
-            "retry_after",
-            "Retry policy should explain Retry-After decisions",
+            rate_classification.retry_after,
+            "11",
+            "Classification should preserve Retry-After for agent-visible recovery metadata",
         )
 
         bad_request = _http_status_error(400)
         bad_classification = classify_exception(bad_request, phase="model_request")
-        bad_decision = retry_decision(
-            bad_classification,
-            attempt=1,
-            max_attempts=3,
-            base_delay_seconds=2.0,
-        )
         self.soft_assert(
-            not bad_decision.should_retry,
-            "Retry policy should not retry permanent bad requests",
-        )
-        self.soft_assert_equal(
-            bad_decision.reason,
-            "not_retryable",
-            "Retry policy should explain non-retryable failures",
+            not bad_classification.retryable,
+            "Classification should mark permanent bad requests non-retryable",
         )
 
-        exhausted_decision = retry_decision(
-            rate_classification,
-            attempt=3,
-            max_attempts=3,
-            base_delay_seconds=2.0,
+        self.soft_assert(
+            callable(wait_retry_after),
+            "Pydantic AI wait_retry_after should be available for retry timing",
         )
         self.soft_assert(
-            not exhausted_decision.should_retry,
-            "Retry policy should stop at max attempts",
-        )
-        self.soft_assert_equal(
-            exhausted_decision.reason,
-            "max_attempts_exhausted",
-            "Retry policy should explain exhausted retries",
+            AsyncTenacityTransport is not None and TenacityTransport is not None,
+            "Pydantic AI retry transports should be available for retry execution",
         )
 
         self.teardown_scenario()
