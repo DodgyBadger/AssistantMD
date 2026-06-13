@@ -36,10 +36,7 @@ class GoalOps(BaseTool):
             status: str = "",
             query: str = "",
             limit: int | str = "",
-            include_superseded: bool = False,
             workspace_path_hint: str = "",
-            source_type: str = "",
-            source_id: str = "",
             data: dict[str, Any] | None = None,
         ):
             """Create, inspect, and update durable goal state.
@@ -48,11 +45,8 @@ class GoalOps(BaseTool):
             :param goal_id: Goal id for goal-specific operations.
             :param status: Optional goal status filter for list_goals.
             :param query: Optional title/objective search for list_goals.
-            :param limit: Optional result limit for list_goals/list_events.
-            :param include_superseded: Include superseded steps when listing goal steps.
+            :param limit: Optional result limit for list_goals.
             :param workspace_path_hint: Optional non-authoritative workspace hint filter.
-            :param source_type: Optional list_goals source type filter.
-            :param source_id: Optional list_goals source id filter.
             :param data: Operation-specific payload.
             """
             op = (operation or "").strip().lower()
@@ -72,10 +66,7 @@ class GoalOps(BaseTool):
                     status=status,
                     query=query,
                     limit=limit,
-                    include_superseded=include_superseded,
                     workspace_path_hint=workspace_path_hint,
-                    source_type=source_type,
-                    source_id=source_id,
                     data=payload,
                     ctx=ctx,
                 )
@@ -123,7 +114,7 @@ class GoalOps(BaseTool):
         return Tool(
             goal_ops,
             name="goal_ops",
-            description="Track durable goals, ordered steps, events, and checkpoints.",
+            description="Track durable goals and compact recovery checkpoints.",
         )
 
     @classmethod
@@ -145,10 +136,7 @@ Full documentation:
         status: str,
         query: str,
         limit: int | str,
-        include_superseded: bool,
         workspace_path_hint: str,
-        source_type: str,
-        source_id: str,
         data: dict[str, Any],
         ctx: RunContext,
     ) -> Any:
@@ -161,7 +149,7 @@ Full documentation:
                 workspace_path_hint=data.get("workspace_path_hint"),
                 success_criteria=data.get("success_criteria"),
                 metadata=data.get("metadata"),
-                steps=data.get("steps"),
+                plan=data.get("plan"),
                 source_type=source["source_type"],
                 source_id=source["source_id"],
                 source_task_id=source["source_task_id"],
@@ -183,18 +171,17 @@ Full documentation:
                     if "success_criteria" in data
                     else GOAL_FIELD_UNSET
                 ),
+                plan=data.get("plan") if "plan" in data else GOAL_FIELD_UNSET,
                 metadata=data.get("metadata") if "metadata" in data else GOAL_FIELD_UNSET,
                 reason=data.get("reason"),
             )
         if operation == "get_goal":
-            return store.get_goal(
-                goal_id=_goal_id(goal_id, data),
-                include_superseded=include_superseded or bool(data.get("include_superseded")),
-            )
+            return store.get_goal(goal_id=_goal_id(goal_id, data))
         if operation == "list_goals":
+            source_filter = cls._resolve_list_source_filter(ctx, data)
             return store.list_goals(
                 vault_name=vault_name,
-                status=_optional_filter_text(status or data.get("status")),
+                status=_optional_status_filter(status or data.get("status")),
                 workspace_path_hint=(
                     workspace_path_hint
                     if workspace_path_hint
@@ -202,42 +189,14 @@ Full documentation:
                     if "workspace_path_hint" in data
                     else None
                 ),
-                source_type=_optional_filter_text(source_type or data.get("source_type")),
-                source_id=_optional_filter_text(source_id or data.get("source_id")),
+                source_type=source_filter["source_type"],
+                source_id=source_filter["source_id"],
                 query=_optional_filter_text(query or data.get("query")),
                 limit=_limit(limit, data, default=20),
-            )
-        if operation == "replace_steps":
-            return store.replace_steps(
-                goal_id=_goal_id(goal_id, data),
-                steps=_required_list(data.get("steps"), "steps"),
-                reason=data.get("reason"),
-            )
-        if operation == "update_steps":
-            return store.update_steps(
-                goal_id=_goal_id(goal_id, data),
-                updates=_required_list(data.get("updates"), "updates"),
-                reason=data.get("reason"),
-            )
-        if operation == "list_steps":
-            return store.list_steps(
-                goal_id=_goal_id(goal_id, data),
-                include_superseded=include_superseded or bool(data.get("include_superseded")),
-            )
-        if operation == "add_events":
-            return store.add_events(
-                goal_id=_goal_id(goal_id, data),
-                events=_required_list(data.get("events"), "events"),
-            )
-        if operation == "list_events":
-            return store.list_events(
-                goal_id=_goal_id(goal_id, data),
-                limit=_limit(limit, data, default=50),
             )
         if operation == "checkpoint":
             return store.checkpoint(
                 goal_id=_goal_id(goal_id, data),
-                step_id=data.get("step_id"),
                 summary=data.get("summary"),
                 current_state=data.get("current_state"),
                 next_actions=data.get("next_actions"),
@@ -245,24 +204,14 @@ Full documentation:
                 risks=data.get("risks"),
                 metadata=data.get("metadata"),
             )
-        if operation == "get_latest_checkpoint":
-            return store.get_latest_checkpoint(goal_id=_goal_id(goal_id, data))
         if operation == "list_activity":
             return store.list_activity(
                 goal_id=_goal_id(goal_id, data),
-                step_id=data.get("step_id"),
                 limit=_limit(limit, data, default=20),
-            )
-        if operation == "list_related_files":
-            return store.list_related_files(
-                goal_id=_goal_id(goal_id, data),
-                step_id=data.get("step_id"),
-                limit=_limit(limit, data, default=100),
             )
         raise ValueError(
             "operation must be one of: create_goal, update_goal, get_goal, list_goals, "
-            "replace_steps, update_steps, list_steps, add_events, list_events, checkpoint, "
-            "get_latest_checkpoint, list_activity, list_related_files"
+            "checkpoint, list_activity"
         )
 
     @staticmethod
@@ -305,6 +254,24 @@ Full documentation:
             "source_label": None,
         }
 
+    @staticmethod
+    def _resolve_list_source_filter(ctx: RunContext, data: dict[str, Any]) -> dict[str, str | None]:
+        source = _optional_filter_text(data.get("source"))
+        if source is None:
+            return {"source_type": None, "source_id": None}
+        if source == "current_session":
+            deps = getattr(ctx, "deps", None)
+            session_id = str(getattr(deps, "session_id", "") or "").strip()
+            if not session_id:
+                raise ValueError("list_goals source='current_session' requires an active chat session")
+            return {"source_type": "chat", "source_id": session_id}
+        if source == "session":
+            session_id = _optional_filter_text(data.get("session_id"))
+            if not session_id:
+                raise ValueError("list_goals source='session' requires data.session_id")
+            return {"source_type": "chat", "source_id": session_id}
+        raise ValueError("list_goals source must be one of: current_session, session")
+
 
 def _goal_id(goal_id: str, data: dict[str, Any]) -> str:
     resolved = str(goal_id or data.get("goal_id") or "").strip()
@@ -313,17 +280,18 @@ def _goal_id(goal_id: str, data: dict[str, Any]) -> str:
     return resolved
 
 
-def _required_list(value: Any, field_name: str) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list")
-    return value
-
-
 def _optional_filter_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_status_filter(value: Any) -> str | None:
+    text = _optional_filter_text(value)
+    if text is None or text.lower() == "any":
+        return None
+    return text
 
 
 def _limit(value: int | str, data: dict[str, Any], *, default: int) -> int:

@@ -26,7 +26,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            5,
+            7,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -68,7 +68,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 self._migration_versions(conn, "goal_ops"),
-                [1],
+                [1, 2, 3],
                 "goal_ops migration version should be recorded",
             )
 

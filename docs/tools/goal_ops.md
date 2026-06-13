@@ -1,55 +1,56 @@
 # goal_ops
 
-Track durable goals, ordered steps, events, and checkpoints for longer work.
+Track durable goals and compact recovery checkpoints for longer work.
 
 `goal_ops` records state only. It does not execute work, write files, schedule
-workflows, or automatically retry tool calls.
+workflows, or automatically retry tool calls. Use workflows for repeated or
+procedural automation; use normal vault markdown files for reports, drafts,
+evidence, and detailed work logs.
 
-Use workflows for branching, repeated execution, or procedural automation. A
-goal step can ask the agent to create or run a named workflow, but `goal_ops`
-does not become the workflow runner.
+Use `goal_ops` when work is too large, durable, or interruptible to track
+reliably in the current chat alone. Do not create goals for ordinary questions,
+quick edits, simple lookups, single-turn answers, or tasks that can be completed
+immediately.
 
 Metadata fields are freeform compact JSON objects owned by the caller. Use them
 for small, stable hints such as workflow names, local tags, ids, or source-path
 references. Do not embed large notes, reports, extracted evidence, or drafts in
-metadata; write those to normal vault markdown files and reference the path from
-events, checkpoints, or metadata.
+metadata; write those to normal vault markdown files and reference the path.
 
-Goal source provenance is system-owned. When a goal is created, `goal_ops`
-infers `source_type`, `source_id`, optional `source_task_id`, and
-`source_label` from the active chat, workflow, or context-script runtime. Do not
-provide source fields in `create_goal`; supplied source keys are ignored.
+Goal source provenance is system-owned and may appear in results for audit and
+lookup. Do not provide source fields when creating or updating goals.
 
 Common operations:
 
-- `create_goal`: create a goal, optionally with initial steps.
+- `create_goal`: create a goal.
 - `list_goals`: list goals in the active vault.
-- `get_goal`: fetch a goal with its active steps and latest checkpoint.
-- `update_goal`: update title, objective, status, workspace hint, success criteria, or metadata.
-- `replace_steps`: replace the active step plan in one transaction.
-- `update_steps`: update multiple existing steps in one transaction.
-- `list_steps`: list ordered steps.
-- `add_events`: add one or more audit events.
-- `list_events`: list goal audit events.
+- `get_goal`: fetch a goal with its latest checkpoint.
+- `update_goal`: update title, objective, status, workspace hint, success criteria, plan, or metadata.
 - `checkpoint`: record a compact recovery checkpoint.
-- `get_latest_checkpoint`: fetch the latest checkpoint.
-- `list_activity`: list existing vault mutation activity associated with a goal.
-- `list_related_files`: list unique vault files mutated under a goal.
+- `list_activity`: list existing vault mutation activity associated with a goal, including mutated file paths.
 
 Parameters:
 
 - `operation`: required operation name.
 - `goal_id`: required for goal-specific operations.
-- `status`: optional `list_goals` status filter.
+- `status`: optional `list_goals` status filter. Use `"any"` for no status filter.
 - `query`: optional `list_goals` title/objective search.
 - `limit`: optional result limit.
-- `include_superseded`: include superseded steps where supported.
 - `workspace_path_hint`: optional non-authoritative workspace hint filter.
-- `source_type`: optional `list_goals` source filter: `chat`, `workflow`, or `context`.
-- `source_id`: optional `list_goals` stable source id filter.
 - `data`: operation-specific object payload.
 
-Create a goal with initial steps:
+For `list_goals`, `data.source` can narrow results to goals created from a chat
+session without exposing internal provenance fields:
+
+- `"current_session"`: goals created from the active chat session.
+- `"session"`: goals created from `data.session_id`.
+
+`plan` is an optional JSON snapshot on the goal. Keep it lightweight: a short
+markdown string, a list of task objects, or another compact shape that helps the
+agent resume work. Replace it through `update_goal`; do not use it for large
+notes or work products.
+
+Create a goal:
 
 ```json
 {
@@ -63,44 +64,30 @@ Create a goal with initial steps:
       "Open questions are listed",
       "Source notes are cited"
     ],
-    "steps": [
-      {"title": "Review source notes"},
-      {"title": "Extract renewal risks"},
-      {"title": "Draft briefing"}
+    "plan": [
+      {"text": "Review source notes", "status": "pending"},
+      {"text": "Draft briefing", "status": "pending"},
+      {"text": "List open questions", "status": "pending"}
     ]
   }
 }
 ```
 
-Rework a plan in one call:
+Update progress:
 
 ```json
 {
-  "operation": "replace_steps",
+  "operation": "update_goal",
   "goal_id": "goal_abc",
   "data": {
-    "reason": "User asked to simplify the plan.",
-    "steps": [
-      {"title": "Review notes", "position": 10},
-      {"title": "Draft briefing", "position": 20},
-      {"title": "List open questions", "position": 30}
-    ]
-  }
-}
-```
-
-Update several steps:
-
-```json
-{
-  "operation": "update_steps",
-  "goal_id": "goal_abc",
-  "data": {
-    "reason": "Finished source review and started drafting.",
-    "updates": [
-      {"step_id": "step_1", "status": "completed"},
-      {"step_id": "step_2", "status": "in_progress", "summary": "Drafting risk table."}
-    ]
+    "plan": [
+      {"text": "Review source notes", "status": "completed"},
+      {"text": "Draft briefing", "status": "in_progress"},
+      {"text": "List open questions", "status": "pending"}
+    ],
+    "metadata": {
+      "draft_path": "Clients/Acme/renewal-briefing.md"
+    }
   }
 }
 ```
@@ -112,7 +99,6 @@ Record a checkpoint:
   "operation": "checkpoint",
   "goal_id": "goal_abc",
   "data": {
-    "step_id": "step_2",
     "summary": "Reviewed May and June notes. Main renewal risks are pricing and security review ownership.",
     "current_state": "Draft briefing is started.",
     "next_actions": ["Pull source quotes", "Finish risk table"],
@@ -122,9 +108,38 @@ Record a checkpoint:
 }
 ```
 
-Step ordering uses explicit numeric `position`, not ids or titles. If positions
-are omitted in batch operations, `goal_ops` assigns sparse positions from array
-order: `10`, `20`, `30`, and so on.
+List active goals for a workspace:
 
-Related files are derived from the existing vault mutation recorder when work
-runs with goal context. `goal_ops` does not attach files or create artifacts.
+```json
+{
+  "operation": "list_goals",
+  "status": "active",
+  "workspace_path_hint": "Clients/Acme"
+}
+```
+
+Search goals by title or objective:
+
+```json
+{
+  "operation": "list_goals",
+  "query": "renewal briefing",
+  "limit": 5
+}
+```
+
+List goals created in the current chat session:
+
+```json
+{
+  "operation": "list_goals",
+  "data": {
+    "source": "current_session",
+    "status": "any"
+  }
+}
+```
+
+Goal activity is derived from the existing vault mutation recorder when work
+runs with goal context. Use `list_activity` to inspect task-level mutation
+groups and file paths. `goal_ops` does not attach files or create artifacts.

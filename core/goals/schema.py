@@ -20,6 +20,11 @@ GOAL_OPS_MIGRATIONS = (
         name="add_goal_source_provenance",
         apply=lambda conn: _add_goal_source_provenance(conn),
     ),
+    SQLiteMigration(
+        version=3,
+        name="add_goal_plan_snapshot",
+        apply=lambda conn: _add_goal_plan_snapshot(conn),
+    ),
 )
 
 
@@ -55,6 +60,7 @@ def _create_goal_ops_tables(conn) -> None:
             title TEXT NOT NULL,
             objective TEXT NOT NULL,
             status TEXT NOT NULL,
+            plan_json TEXT,
             success_criteria_json TEXT NOT NULL DEFAULT '[]',
             metadata_json TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -176,6 +182,12 @@ def _add_goal_source_provenance(conn) -> None:
         ON goals(vault_name, source_type, source_id)
         """
     )
+
+
+def _add_goal_plan_snapshot(conn) -> None:
+    columns = _table_columns(conn, "goals")
+    if "plan_json" not in columns:
+        conn.execute("ALTER TABLE goals ADD COLUMN plan_json TEXT")
 
 
 def _table_columns(conn, table_name: str) -> set[str]:
