@@ -3,8 +3,6 @@ Service layer for API operations.
 Handles business logic for status reporting, vault management, etc.
 """
 
-import asyncio
-import contextvars
 import json
 import hashlib
 import mimetypes
@@ -13,13 +11,11 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from time import perf_counter
 from typing import List, Optional, Dict, Any
 
 import yaml
 from sqlalchemy import func, select
 
-from core.authoring.service import run_authoring_template
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
@@ -2674,27 +2670,15 @@ async def execute_workflow_manually(
             },
         )
 
-        if global_id.startswith("system/"):
-            task = await _start_system_workflow_template(
-                global_id=global_id,
-                vault_name=vault_name,
-                expect_failure=expect_failure,
-            )
-            logger.info(
-                "System workflow template execution started",
-                data={
-                    "global_id": global_id,
-                    "vault_name": vault_name or "",
-                    "task_id": task.task_id,
-                    "status": task.status,
-                },
-            )
-            return _workflow_started_response(global_id=global_id, task=task)
+        executable_global_id = _normalize_manual_workflow_global_id(
+            global_id=global_id,
+            vault_name=vault_name,
+        )
 
         try:
             runtime = get_runtime_context()
             task = await runtime.workflow_governor.start_workflow(
-                global_id=global_id,
+                global_id=executable_global_id,
                 source=ExecutionTaskSource.API,
                 expect_failure=expect_failure,
                 background_tasks=runtime.background_tasks,
@@ -2708,6 +2692,7 @@ async def execute_workflow_manually(
             "Workflow execution started",
             data={
                 "global_id": global_id,
+                "executable_global_id": executable_global_id,
                 "task_id": task.task_id,
                 "status": task.status,
             },
@@ -2736,64 +2721,25 @@ def _workflow_started_response(
     }
 
 
-async def _start_system_workflow_template(
+def _normalize_manual_workflow_global_id(
     *,
     global_id: str,
     vault_name: str | None,
-    expect_failure: bool,
-) -> object:
-    """Start one system workflow template against an explicit vault scope."""
-    if not vault_name:
-        raise ValueError("vault_name is required to run a system workflow template.")
-    runtime = get_runtime_context()
-    task = await runtime.task_coordinator.create_queued_task(
-        kind=ExecutionTaskKind.WORKFLOW,
-        scope=workflow_vault_scope(vault_name),
-        source=ExecutionTaskSource.API,
-        label=global_id,
-        metadata={
-            "workflow_id": global_id,
-            "vault": vault_name,
-            "system_template": global_id.split("/", 1)[1] if "/" in global_id else global_id,
-        },
-    )
-
-    async def _run() -> None:
-        try:
-            await _execute_system_workflow_template(
-                global_id=global_id,
-                vault_name=vault_name,
-                expect_failure=expect_failure,
-                task_id=task.task_id,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001
-            return
-
-    def _spawn() -> None:
-        background_task = asyncio.create_task(_run(), context=contextvars.Context())
-        runtime.background_tasks.add(background_task)
-        background_task.add_done_callback(runtime.background_tasks.discard)
-
-    asyncio.get_running_loop().call_soon(_spawn, context=contextvars.Context())
-    return task
-
-
-async def _execute_system_workflow_template(
-    *,
-    global_id: str,
-    vault_name: str | None,
-    expect_failure: bool,
-    task_id: str | None = None,
-) -> Dict[str, Any]:
-    """Execute one system workflow template against an explicit vault scope."""
-    if not vault_name:
-        raise ValueError("vault_name is required to run a system workflow template.")
+) -> str:
+    """Resolve public manual workflow IDs to governor-executable workflow IDs."""
     if "/" not in global_id:
-        raise ValueError(f"Invalid global_id format. Expected 'system/name', got: {global_id}")
+        raise ValueError(
+            f"Invalid global_id format. Expected 'vault/name' or 'system/name', got: {global_id}"
+        )
 
-    _system_prefix, template_name = global_id.split("/", 1)
+    normalized_id = str(global_id or "").strip()
+    if not normalized_id.startswith("system/"):
+        return normalized_id
+
+    if not vault_name:
+        raise ValueError("vault_name is required to run a system workflow template.")
+
+    template_name = normalized_id.split("/", 1)[1]
     if not template_name or template_name.startswith("/") or ".." in template_name:
         raise ValueError("Invalid system workflow template name.")
 
@@ -2802,75 +2748,14 @@ async def _execute_system_workflow_template(
     if not vault_path.exists() or not vault_path.is_dir():
         raise ValueError(f"Vault not found: {vault_name}")
 
-    template = next(
-        (
-            record
-            for record in list_system_workflow_templates(runtime.config.system_root)
-            if (record.name[:-3] if record.name.endswith(".md") else record.name) == template_name
-        ),
-        None,
+    template_exists = any(
+        (record.name[:-3] if record.name.endswith(".md") else record.name) == template_name
+        for record in list_system_workflow_templates(runtime.config.system_root)
     )
-    if template is None or not template.path:
-        raise ValueError(f"System workflow template not found: {global_id}")
+    if not template_exists:
+        raise ValueError(f"System workflow template not found: {normalized_id}")
 
-    scoped_workflow_id = f"{vault_name}/system/{template_name}"
-    started = perf_counter()
-    task_context = (
-        runtime.task_coordinator.track_existing_task(task_id)
-        if task_id
-        else runtime.task_coordinator.track_current_task(
-            kind=ExecutionTaskKind.WORKFLOW,
-            scope=workflow_vault_scope(vault_name),
-            source=ExecutionTaskSource.API,
-            label=global_id,
-            metadata={
-                "workflow_id": global_id,
-                "scoped_workflow_id": scoped_workflow_id,
-                "vault": vault_name,
-                "system_template": template_name,
-            },
-        )
-    )
-    async with task_context as task:
-        await runtime.task_coordinator.mark_started(task.task_id)
-        await runtime.task_coordinator.update_metadata(
-            task.task_id,
-            {"scoped_workflow_id": scoped_workflow_id},
-        )
-        execution_result = await run_authoring_template(
-            workflow_id=scoped_workflow_id,
-            file_path=str(template.path),
-            expect_failure=expect_failure,
-        )
-        elapsed = perf_counter() - started
-        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
-        terminal_reason = str(getattr(execution_result, "reason", "") or "")
-        result = {
-            "success": True,
-            "global_id": global_id,
-            "status": terminal_status,
-            "execution_time_seconds": elapsed,
-            "output_files": [],
-            "reason": terminal_reason or None,
-            "details": [f"task_id: {task.task_id}", f"vault_scope: {vault_name}"],
-            "message": (
-                f"System workflow template '{global_id}' executed for vault "
-                f"'{vault_name}' with status '{terminal_status}'."
-            ),
-        }
-        await runtime.task_coordinator.update_metadata(
-            task.task_id,
-            {"workflow_result": result},
-        )
-        if terminal_status == "skipped":
-            await runtime.task_coordinator.mark_skipped(task.task_id, reason=terminal_reason or None)
-        elif terminal_status == "failed":
-            await runtime.task_coordinator.mark_failed(task.task_id, reason=terminal_reason or None)
-        elif terminal_status == "cancelled":
-            await runtime.task_coordinator.mark_cancelled(task.task_id, reason=terminal_reason or None)
-        elif terminal_status == "timed_out":
-            await runtime.task_coordinator.mark_timed_out(task.task_id, reason=terminal_reason or None)
-        return result
+    return f"{vault_name}/system/{template_name}"
 
 
 async def get_metadata() -> MetadataResponse:

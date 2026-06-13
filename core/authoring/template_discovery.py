@@ -731,7 +731,7 @@ class WorkflowLoader:
                     validated_config = _validate_workflow_config(raw_config, vault, name)
                     workflow = load_workflow_from_file(file_path, vault, name, validated_config, sections)
 
-                    if not workflow.enabled:
+                    if not workflow.enabled and not target_global_id:
                         continue
 
                     if workflow.global_id in global_ids:
