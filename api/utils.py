@@ -6,12 +6,16 @@ import os
 import re
 import traceback
 from datetime import datetime
+from typing import Any
+
 from fastapi.responses import JSONResponse
+
+from core.logger import UnifiedLogger
+from core.settings.store import get_general_settings
+from core.tools.failures import FailureClassification, classify_exception
 
 from .models import ErrorResponse
 from .exceptions import APIException, InvalidVaultNameError
-from core.logger import UnifiedLogger
-from core.settings.store import get_general_settings
 
 # Create API logger
 logger = UnifiedLogger(tag="api")
@@ -106,10 +110,16 @@ def create_error_response(exception: Exception) -> JSONResponse:
         JSONResponse with standardized error format
     """
     if isinstance(exception, APIException):
+        details = build_api_error_details(exception)
         error_response = ErrorResponse(
             error=exception.error_type,
             message=exception.detail,
-            details=exception.details
+            details=details,
+        )
+        _log_api_error_response(
+            error_type=exception.error_type,
+            status_code=exception.status_code,
+            details=details,
         )
         return JSONResponse(
             status_code=exception.status_code,
@@ -122,13 +132,14 @@ def create_error_response(exception: Exception) -> JSONResponse:
         debug_setting = settings.get("debug")
         debug_mode = bool(debug_setting and getattr(debug_setting, "value", False))
         exception_details = serialize_exception(exception)
+        safe_details = build_api_error_details(exception)
         
         if debug_mode:
             error_response = ErrorResponse(
                 error="InternalServerError",
                 message=str(exception),
                 details={
-                    "error_type": exception_details["error_type"],
+                    **safe_details,
                     "traceback": exception_details["traceback"],
                 }
             )
@@ -137,7 +148,7 @@ def create_error_response(exception: Exception) -> JSONResponse:
             error_response = ErrorResponse(
                 error="InternalServerError", 
                 message="An unexpected error occurred",
-                details={"error_type": exception_details["error_type"]}
+                details=safe_details,
             )
         
         # Always log the full traceback server-side
@@ -145,11 +156,118 @@ def create_error_response(exception: Exception) -> JSONResponse:
             "Unexpected API error",
             data=exception_details,
         )
+        _log_api_error_response(
+            error_type="InternalServerError",
+            status_code=500,
+            details=safe_details,
+        )
         
         return JSONResponse(
             status_code=500,
             content=error_response.model_dump()
         )
+
+
+def build_api_error_details(exception: Exception) -> dict[str, Any]:
+    """Build stable agent-safe API error details."""
+    if isinstance(exception, APIException):
+        base_details = dict(exception.details or {})
+        classification = _classify_api_exception(exception, base_details=base_details)
+        details = {**base_details, **classification.to_metadata()}
+        details["error_type"] = exception.error_type
+        details["http_status"] = exception.status_code
+        return details
+
+    classification = classify_exception(exception, phase="api_request")
+    details = classification.to_metadata()
+    details["error_type"] = type(exception).__name__
+    details.setdefault("http_status", 500)
+    return details
+
+
+def _classify_api_exception(
+    exception: APIException,
+    *,
+    base_details: dict[str, Any],
+) -> FailureClassification:
+    phase = str(base_details.get("phase") or "api_request")
+    retryable = _api_status_retryable(exception.status_code)
+    failure_kind = _api_failure_kind(exception.status_code, exception.error_type)
+    suggested_action = _api_suggested_action(
+        status_code=exception.status_code,
+        retryable=retryable,
+        error_type=exception.error_type,
+    )
+    return FailureClassification(
+        error_type=exception.error_type,
+        failure_kind=failure_kind,
+        retryable=retryable,
+        phase=phase,
+        message=str(exception.detail or ""),
+        http_status=exception.status_code,
+        retry_after=None if base_details.get("retry_after") is None else str(base_details["retry_after"]),
+        suggested_action=suggested_action,
+    )
+
+
+def _api_status_retryable(status_code: int) -> bool:
+    return status_code in {408, 429, 502, 503, 504}
+
+
+def _api_failure_kind(status_code: int, error_type: str) -> str:
+    if status_code == 429:
+        return "rate_limited"
+    if status_code in {408, 504}:
+        return "timeout"
+    if status_code in {502, 503}:
+        return "service_unavailable"
+    if status_code in {401, 403}:
+        return "configuration"
+    if 400 <= status_code < 500:
+        return "bad_request"
+    if 500 <= status_code < 600:
+        if error_type in {"SystemConfiguration", "SchedulerError"}:
+            return "configuration"
+        return "server_error"
+    return "api_error"
+
+
+def _api_suggested_action(
+    *,
+    status_code: int,
+    retryable: bool,
+    error_type: str,
+) -> str:
+    if retryable:
+        return "Retry with backoff, respecting Retry-After when present."
+    if status_code == 404:
+        return "Check the referenced id or path before retrying."
+    if status_code in {401, 403}:
+        return "Check local configuration, credentials, or permissions before retrying."
+    if 400 <= status_code < 500:
+        return "Change the request parameters before retrying."
+    if error_type in {"SystemConfiguration", "SchedulerError"}:
+        return "Inspect system configuration and service health before retrying."
+    return "Inspect the server-side error details and adjust the request or configuration before retrying."
+
+
+def _log_api_error_response(
+    *,
+    error_type: str,
+    status_code: int,
+    details: dict[str, Any],
+) -> None:
+    logger.add_sink("validation").warning(
+        "api_error_response_created",
+        data={
+            "event": "api_error_response_created",
+            "error_type": error_type,
+            "status_code": status_code,
+            "phase": details.get("phase"),
+            "failure_kind": details.get("failure_kind"),
+            "retryable": details.get("retryable"),
+        },
+    )
 
 
 def safe_path_join(*paths) -> str:

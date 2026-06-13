@@ -115,7 +115,7 @@ Current SOTA patterns converge on the same few requirements, but AssistantMD sho
    AssistantMD estimates prompt/history tokens and enforces tool-call limits, but it does not appear to persist provider-reported per-request usage, cached tokens, reasoning tokens, per-subagent cost, or goal-level budgets.
 
 6. Network/API resilience is only partially structured.
-   Model, delegate, web/search, and workflow failure paths now share initial `FailureClassification` metadata in several important places, including retryability and suggested action. There is still no centralized provider retry policy with backoff, `Retry-After` handling, retry event logging, or idempotency guidance around tool calls that should not be retried blindly.
+   Model, delegate, web/search, workflow, and API error paths now share initial structured failure metadata in several important places, including retryability and suggested action. A deterministic retry decision helper exists for `FailureClassification`, including `Retry-After` and exponential backoff decisions. There is still no automatic provider retry loop, retry lifecycle event stream, or idempotency guidance around tool calls that should not be retried blindly.
 
 7. Subagents are synchronous child calls.
    `delegate` is useful for bounded inference and now returns structured bounded-failure metadata for execution limits, timeouts, and provider failures. It still does not create durable child task records, stream progress, return artifact references as a first-class contract, or let the parent continue while children run.
@@ -139,8 +139,8 @@ These are lower-level risks in the current code that could derail or waste effor
 3. Streaming chat error handling has an initial recovery marker.
    Streaming persists the accepted user request before model execution. Unexpected failures now leave structured unfinished-turn recovery context that session detail and the next chat preflight can surface without polluting transcript exports. Remaining hardening should broaden the same stable failure envelope across more API and tool paths.
 
-4. API error responses hide too much detail from non-debug clients.
-   `api/utils.py` returns `"An unexpected error occurred"` plus only `error_type` when debug mode is off. That is reasonable for public APIs, but poor for a local single-user agent system where the model may need actionable recovery details. Hardening target: add agent-safe error summaries with stable `error_type`, `phase`, `retryable`, `suggested_action`, and relevant ids while still avoiding secrets/tracebacks.
+4. API error responses now include an initial agent-safe envelope.
+   `api/utils.py` preserves the existing top-level error response shape while adding `details` fields for `status`, `error_type`, `phase`, `failure_kind`, `retryable`, `suggested_action`, `http_status`, and relevant ids when available. Unexpected errors still avoid tracebacks in non-debug responses and log full diagnostics server-side.
 
 5. Tool errors are mixed: selected paths are structured, others still return prose.
    DuckDuckGo search, Tavily search, Tavily extract, delegate bounded failures, and model/chat failure markers now expose structured failure metadata. Other external tools and API adapters still need the same treatment so transient network failures, rate limits, missing secrets, and true no-result states are consistently distinguishable.
@@ -166,8 +166,8 @@ These are lower-level risks in the current code that could derail or waste effor
 12. Usage and output limits can cause hidden churn.
    `chat_tool_calls_limit=0` disables chat tool-call limits by default; `auto_cache_max_tokens` can replace large tool outputs with cache notices; `max_output_tokens` can truncate model responses provider-side. These settings are useful but the agent has no unified view of why it is failing to make progress. Hardening target: include active limit settings and limit-trigger events in goal/task context, and classify limit-triggered failures as `budget_limited`, `context_limited`, or `tool_limited`.
 
-13. Shared retry classification exists but is not yet universal.
-   `FailureClassification` now gives model, selected tool, delegate, and workflow failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. Long-running agents still need a provider retry policy, broader adoption in API responses and tools, and future goal events that preserve the same envelope.
+13. Shared retry classification and decision policy exist but are not yet automatic.
+   `FailureClassification` now gives model, selected tool, delegate, workflow, and API failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. `retry_decision(...)` provides the common policy for `Retry-After`, exponential backoff, and exhausted attempts. Long-running agents still need automatic provider retry execution, retry lifecycle events, broader adoption in remaining tools, and future goal events that preserve the same envelope.
 
 14. Activity logging is good but not always agent-actionable.
    Many events are logged for validation/activity, but the agent often receives only a plain tool result or generic API error. Hardening target: make critical event ids/task ids/checkpoint ids flow back to the agent so it can inspect status or report accurately.
@@ -397,8 +397,10 @@ Phase 0/1/2A hardening is underway. Completed slices:
 - Added workflow failure recovery metadata to terminal task snapshots and workflow lifecycle events.
 - Routed manual system workflow execution through the normal workflow governor while preserving the rule that disabled system workflows can be run manually but are not scheduled.
 - Scheduled API-started background workflow tasks on the runtime event loop so request-local loops cannot cancel them after the response boundary.
+- Added agent-safe API error response envelopes with stable phase, failure kind, retryability, suggested action, HTTP status, and relevant ids.
+- Added deterministic retry decision policy for `FailureClassification`, including `Retry-After`, exponential backoff, and max-attempt exhaustion decisions.
 
-Remaining hardening work should continue with API-safe error summaries, broader structured failure adoption, retry policy, queue/stall visibility, and restart reconciliation before starting `goal_ops`.
+Remaining hardening work should continue with broader structured failure adoption, automatic retry execution where safe, queue/stall visibility, and restart reconciliation. The minimal `goal_ops` ledger can start once we accept that automatic provider retry loops are a later hardening layer rather than a prerequisite.
 
 ### Phase 0: Hardening Probes and Contracts
 
@@ -428,8 +430,8 @@ Deliverables:
 - Shared tool-history integrity helper used by `retrieve_history`, compaction split logic, session fork/prefix logic, and chat/context preflight where appropriate. Initial helper coverage is complete for `retrieve_history` and compaction diagnostics; session fork/prefix and chat/context preflight remain follow-ups.
 - Batch-safe history retrieval for adjacent multi-tool-call/multi-tool-return messages. Complete for `retrieve_history(...)` and `assemble_context(...)`.
 - Structured `FailureClassification` or `ErrorEnvelope` helper. Initial `FailureClassification` helper is complete for tool failure envelopes.
-- Structured failure metadata for web/search/extract tools and selected API-facing tool errors. Initial DuckDuckGo search, Tavily search, Tavily extract, model/chat failure markers, delegate bounded failures, and workflow failure metadata are complete; Tavily crawl, browser, provider retry loops, and API-facing errors remain follow-ups.
-- Agent-safe API error summaries with stable `error_type`, `phase`, `retryable`, `suggested_action`, and relevant ids.
+- Structured failure metadata for web/search/extract tools and selected API-facing tool errors. Initial DuckDuckGo search, Tavily search, Tavily extract, model/chat failure markers, delegate bounded failures, workflow failure metadata, and API error envelopes are complete; Tavily crawl, browser, and provider retry loops remain follow-ups.
+- Agent-safe API error summaries with stable `error_type`, `phase`, `retryable`, `suggested_action`, and relevant ids. Initial coverage is complete through `api_error_resilience.py`.
 - Streaming failure marker or event that future context assembly can include when a user turn was accepted but no assistant response persisted. Initial marker, session detail exposure, next-turn context injection, and success clearing are complete.
 - Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
 - Partial delegate audit/progress preservation where feasible for timeout/usage-limit failures.
@@ -450,8 +452,8 @@ Deliverables:
 - Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
 - Queue age and stalled-task warnings.
 - `workflow_run(status)` improvements that return progress, heartbeat age, blocking reason, and artifact refs when available.
-- Provider/API retry policy for retryable model/network failures.
-- Validation events for retry scheduled/succeeded/exhausted and task heartbeat/stall transitions.
+- Provider/API retry policy for retryable model/network failures. Initial deterministic retry decision helper is complete; automatic retry execution remains a follow-up.
+- Validation events for retry scheduled/succeeded/exhausted and task heartbeat/stall transitions. Heartbeat events are complete; retry lifecycle events remain a follow-up for automatic retry execution.
 - Clear cancellation result language distinguishing rolled-back local mutations, retained artifacts, and external/unknown effects where the current system can know.
 
 Exit criteria:
@@ -636,4 +638,4 @@ Maintain existing scenarios for workflow async/cancellation, chat cancellation, 
 
 ## Next Phase
 
-Feature Development should continue with retry/resilience hardening before `goal_ops`. The next concrete work should add an agent-safe API error envelope and start a provider/network retry policy that uses the existing `FailureClassification` vocabulary, emits retry lifecycle events, and avoids retrying permanent or non-idempotent failures blindly. `goal_ops` should remain deferred until current chat, workflow, delegate, and API surfaces consistently expose actionable failure state.
+Feature Development can now start the minimal `goal_ops` ledger if we keep it narrow: SQLite-backed goal runs, steps, events, artifacts, checkpoints, and a small `goal_ops` helper/tool that records state without deciding how to pursue work. Remaining resilience follow-ups should stay visible but separate: automatic provider retry execution, retry lifecycle events, broader structured failure adoption in remaining tools, queue/stall warnings, and restart reconciliation.
