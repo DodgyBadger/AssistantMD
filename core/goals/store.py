@@ -17,6 +17,7 @@ from core.vault_state.service import VaultStateService
 GOAL_STATUSES = {"active", "paused", "completed", "cancelled", "blocked"}
 STEP_STATUSES = {"pending", "in_progress", "completed", "skipped", "blocked", "superseded"}
 SUPERSEDED_REPLACE_STATUSES = {"pending", "in_progress", "blocked"}
+GOAL_SOURCE_TYPES = {"chat", "workflow", "context"}
 
 
 class _UnsetValue:
@@ -31,6 +32,10 @@ class GoalRecord:
     goal_id: str
     vault_name: str
     workspace_path_hint: str | None
+    source_type: str | None
+    source_id: str | None
+    source_task_id: str | None
+    source_label: str | None
     title: str
     objective: str
     status: str
@@ -113,6 +118,10 @@ class GoalOpsStore:
         success_criteria: list[Any] | tuple[Any, ...] | None = None,
         metadata: dict[str, Any] | None = None,
         steps: list[dict[str, Any]] | None = None,
+        source_type: str | None = None,
+        source_id: str | None = None,
+        source_task_id: str | None = None,
+        source_label: str | None = None,
     ) -> dict[str, Any]:
         """Create one goal, optional initial steps, and a creation event."""
         clean_vault = _required_text(vault_name, "vault_name")
@@ -123,21 +132,31 @@ class GoalOpsStore:
         criteria = _clean_string_list(success_criteria)
         clean_metadata = _clean_dict(metadata)
         clean_workspace = _optional_text(workspace_path_hint)
+        clean_source_type = _optional_source_type(source_type)
+        clean_source_id = _optional_text(source_id)
+        clean_source_task_id = _optional_text(source_task_id)
+        clean_source_label = _optional_text(source_label)
         with self._connect() as conn:
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("BEGIN")
             conn.execute(
                 """
                 INSERT INTO goals (
-                    goal_id, vault_name, workspace_path_hint, title, objective, status,
+                    goal_id, vault_name, workspace_path_hint,
+                    source_type, source_id, source_task_id, source_label,
+                    title, objective, status,
                     success_criteria_json, metadata_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     goal_id,
                     clean_vault,
                     clean_workspace,
+                    clean_source_type,
+                    clean_source_id,
+                    clean_source_task_id,
+                    clean_source_label,
                     clean_title,
                     clean_objective,
                     "active",
@@ -153,7 +172,12 @@ class GoalOpsStore:
                 goal_id=goal_id,
                 event_type="created",
                 message=f"Created goal: {clean_title}",
-                metadata={"initial_step_count": len(inserted_steps)},
+                metadata={
+                    "initial_step_count": len(inserted_steps),
+                    "source_type": clean_source_type,
+                    "source_id": clean_source_id,
+                    "source_task_id": clean_source_task_id,
+                },
                 now=now,
             )
             conn.commit()
@@ -249,6 +273,8 @@ class GoalOpsStore:
         vault_name: str,
         status: str | None = None,
         workspace_path_hint: str | None = None,
+        source_type: str | None = None,
+        source_id: str | None = None,
         query: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
@@ -266,6 +292,12 @@ class GoalOpsStore:
             else:
                 clauses.append("workspace_path_hint = ?")
                 params.append(workspace)
+        if source_type:
+            clauses.append("source_type = ?")
+            params.append(_validate_status(source_type, GOAL_SOURCE_TYPES, "goal source_type"))
+        if source_id:
+            clauses.append("source_id = ?")
+            params.append(_required_text(source_id, "source_id"))
         if query:
             clauses.append("(title LIKE ? OR objective LIKE ?)")
             like = f"%{query.strip()}%"
@@ -809,6 +841,10 @@ class GoalOpsStore:
             goal_id=str(row["goal_id"]),
             vault_name=str(row["vault_name"]),
             workspace_path_hint=row["workspace_path_hint"],
+            source_type=row["source_type"],
+            source_id=row["source_id"],
+            source_task_id=row["source_task_id"],
+            source_label=row["source_label"],
             title=str(row["title"]),
             objective=str(row["objective"]),
             status=str(row["status"]),
@@ -921,6 +957,13 @@ def _validate_status(value: str, allowed: set[str], label: str) -> str:
     if status not in allowed:
         raise ValueError(f"Invalid {label}: {status}. Expected one of: {', '.join(sorted(allowed))}")
     return status
+
+
+def _optional_source_type(value: Any) -> str | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    return _validate_status(text, GOAL_SOURCE_TYPES, "goal source_type")
 
 
 def _parse_position(value: Any, index: int | None) -> int:

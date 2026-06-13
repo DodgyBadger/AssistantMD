@@ -15,6 +15,11 @@ GOAL_OPS_MIGRATIONS = (
         name="create_goal_ops_tables",
         apply=lambda conn: _create_goal_ops_tables(conn),
     ),
+    SQLiteMigration(
+        version=2,
+        name="add_goal_source_provenance",
+        apply=lambda conn: _add_goal_source_provenance(conn),
+    ),
 )
 
 
@@ -43,6 +48,10 @@ def _create_goal_ops_tables(conn) -> None:
             goal_id TEXT PRIMARY KEY,
             vault_name TEXT NOT NULL,
             workspace_path_hint TEXT,
+            source_type TEXT,
+            source_id TEXT,
+            source_task_id TEXT,
+            source_label TEXT,
             title TEXT NOT NULL,
             objective TEXT NOT NULL,
             status TEXT NOT NULL,
@@ -63,6 +72,12 @@ def _create_goal_ops_tables(conn) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_goals_vault_workspace
         ON goals(vault_name, workspace_path_hint)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_goals_vault_source
+        ON goals(vault_name, source_type, source_id)
         """
     )
     conn.execute(
@@ -148,3 +163,21 @@ def _create_goal_ops_tables(conn) -> None:
         ON goal_checkpoints(goal_id, created_at)
         """
     )
+
+
+def _add_goal_source_provenance(conn) -> None:
+    columns = _table_columns(conn, "goals")
+    for column in ("source_type", "source_id", "source_task_id", "source_label"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE goals ADD COLUMN {column} TEXT")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_goals_vault_source
+        ON goals(vault_name, source_type, source_id)
+        """
+    )
+
+
+def _table_columns(conn, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows}

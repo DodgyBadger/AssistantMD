@@ -12,6 +12,7 @@ from pydantic_ai.tools import Tool
 
 from core.goals.store import GOAL_FIELD_UNSET, GoalOpsStore
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import get_current_execution_task
 from core.tools.failures import FailureClassification, tool_failure_return
 
 from .base import BaseTool
@@ -37,6 +38,8 @@ class GoalOps(BaseTool):
             limit: int | str = "",
             include_superseded: bool = False,
             workspace_path_hint: str = "",
+            source_type: str = "",
+            source_id: str = "",
             data: dict[str, Any] | None = None,
         ):
             """Create, inspect, and update durable goal state.
@@ -48,6 +51,8 @@ class GoalOps(BaseTool):
             :param limit: Optional result limit for list_goals/list_events.
             :param include_superseded: Include superseded steps when listing goal steps.
             :param workspace_path_hint: Optional non-authoritative workspace hint filter.
+            :param source_type: Optional list_goals source type filter.
+            :param source_id: Optional list_goals source id filter.
             :param data: Operation-specific payload.
             """
             op = (operation or "").strip().lower()
@@ -69,7 +74,10 @@ class GoalOps(BaseTool):
                     limit=limit,
                     include_superseded=include_superseded,
                     workspace_path_hint=workspace_path_hint,
+                    source_type=source_type,
+                    source_id=source_id,
                     data=payload,
+                    ctx=ctx,
                 )
                 return json.dumps(
                     {"status": "ok", "operation": op, "result": result},
@@ -139,9 +147,13 @@ Full documentation:
         limit: int | str,
         include_superseded: bool,
         workspace_path_hint: str,
+        source_type: str,
+        source_id: str,
         data: dict[str, Any],
+        ctx: RunContext,
     ) -> Any:
         if operation == "create_goal":
+            source = cls._infer_source(ctx)
             return store.create_goal(
                 vault_name=vault_name,
                 title=data.get("title"),
@@ -150,6 +162,10 @@ Full documentation:
                 success_criteria=data.get("success_criteria"),
                 metadata=data.get("metadata"),
                 steps=data.get("steps"),
+                source_type=source["source_type"],
+                source_id=source["source_id"],
+                source_task_id=source["source_task_id"],
+                source_label=source["source_label"],
             )
         if operation == "update_goal":
             return store.update_goal(
@@ -186,6 +202,8 @@ Full documentation:
                     if "workspace_path_hint" in data
                     else None
                 ),
+                source_type=_optional_filter_text(source_type or data.get("source_type")),
+                source_id=_optional_filter_text(source_id or data.get("source_id")),
                 query=_optional_filter_text(query or data.get("query")),
                 limit=_limit(limit, data, default=20),
             )
@@ -256,6 +274,36 @@ Full documentation:
         if vault_path:
             return Path(vault_path).name
         raise ValueError("goal_ops requires active vault context")
+
+    @staticmethod
+    def _infer_source(ctx: RunContext) -> dict[str, str | None]:
+        deps = getattr(ctx, "deps", None)
+        authoring_workflow_id = str(getattr(deps, "authoring_workflow_id", "") or "").strip()
+        session_id = str(getattr(deps, "session_id", "") or "").strip()
+        current_task = get_current_execution_task()
+        source_task_id = current_task.task_id if current_task is not None else None
+
+        if authoring_workflow_id:
+            source_type = "context" if "/context/" in authoring_workflow_id else "workflow"
+            return {
+                "source_type": source_type,
+                "source_id": authoring_workflow_id,
+                "source_task_id": source_task_id,
+                "source_label": authoring_workflow_id,
+            }
+        if session_id:
+            return {
+                "source_type": "chat",
+                "source_id": session_id,
+                "source_task_id": source_task_id,
+                "source_label": f"chat:{session_id}",
+            }
+        return {
+            "source_type": None,
+            "source_id": None,
+            "source_task_id": source_task_id,
+            "source_label": None,
+        }
 
 
 def _goal_id(goal_id: str, data: dict[str, Any]) -> str:

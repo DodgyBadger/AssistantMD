@@ -224,6 +224,7 @@ async def invoke_bound_tool(
     session_id: str | None = None,
     chat_session_id: str | None = None,
     vault_name: str | None = None,
+    authoring_workflow_id: str | None = None,
     message_history: list[ModelMessage] | tuple[ModelMessage, ...] | None = None,
     prefer_message_history: bool = False,
 ) -> Any:
@@ -237,6 +238,7 @@ async def invoke_bound_tool(
             session_id=session_id or chat_session_id,
             chat_session_id=chat_session_id,
             vault_name=vault_name,
+            authoring_workflow_id=authoring_workflow_id,
             message_history=list(message_history or ()),
             prefer_message_history=prefer_message_history,
         ),

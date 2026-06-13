@@ -217,6 +217,7 @@ def _build_direct_tool_functions(
                     vault_name=str(context.workflow_id).split("/", 1)[0]
                     if "/" in str(context.workflow_id)
                     else None,
+                    authoring_workflow_id=str(context.workflow_id),
                     message_history=getattr(host, "message_history", None),
                     prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
                 )

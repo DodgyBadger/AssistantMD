@@ -15,6 +15,11 @@ references. Do not embed large notes, reports, extracted evidence, or drafts in
 metadata; write those to normal vault markdown files and reference the path from
 events, checkpoints, or metadata.
 
+Goal source provenance is system-owned. When a goal is created, `goal_ops`
+infers `source_type`, `source_id`, optional `source_task_id`, and
+`source_label` from the active chat, workflow, or context-script runtime. Do not
+provide source fields in `create_goal`; supplied source keys are ignored.
+
 Common operations:
 
 - `create_goal`: create a goal, optionally with initial steps.
@@ -40,6 +45,8 @@ Parameters:
 - `limit`: optional result limit.
 - `include_superseded`: include superseded steps where supported.
 - `workspace_path_hint`: optional non-authoritative workspace hint filter.
+- `source_type`: optional `list_goals` source filter: `chat`, `workflow`, or `context`.
+- `source_id`: optional `list_goals` stable source id filter.
 - `data`: operation-specific object payload.
 
 Create a goal with initial steps:

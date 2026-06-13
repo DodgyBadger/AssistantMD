@@ -25,6 +25,10 @@ Fields:
 - `goal_id`
 - `vault_name`
 - `workspace_path_hint`
+- `source_type`: nullable system-inferred origin, initially `chat`, `workflow`, or `context`
+- `source_id`: nullable stable source id such as chat session id, workflow global id, or context global id
+- `source_task_id`: nullable execution task id for the run that created the goal, when available
+- `source_label`: nullable display/debug label for the inferred source
 - `title`
 - `objective`
 - `status`: `active`, `paused`, `completed`, `cancelled`, `blocked`
@@ -147,6 +151,14 @@ Goals are not owned by chat sessions. A chat session may store an `active_goal_i
 `workspace_path_hint` should mirror the existing AssistantMD convention: it is a session/context-script hint that can be used or ignored by the default composition. There should be no `workspaces` table and no required workspace identity in `goal_ops`.
 
 Default composition may choose to surface active goals whose `workspace_path_hint` matches the current session's workspace hint, plus vault-wide goals with no hint. That is composition policy, not a core model invariant.
+
+Goal source provenance is owned by the runtime/tool layer, not by the model payload. `create_goal` should infer source fields from the active runtime:
+
+- `chat`: source id is the chat session id.
+- `workflow`: source id is the workflow global id.
+- `context`: source id is the context global id, currently `{vault_name}/context/{template_name}/{session_id}`.
+
+The active execution task id should be captured as `source_task_id` when available. User- or model-supplied `source_*` fields in the goal payload should not determine provenance.
 
 ### Related File Activity
 
