@@ -271,6 +271,11 @@ class ApiEndpointsScenario(BaseScenario):
         assert system_task_id, "System workflow start returns a task id"
         system_task = await self._wait_for_execution_task(system_task_id)
         self.soft_assert_equal(
+            system_task.get("status"),
+            "completed",
+            "System workflow task should complete through the governor",
+        )
+        self.soft_assert_equal(
             system_task.get("label"),
             f"{vault.name}/system/api-system-probe",
             "System workflow API execution should normalize to a vault-scoped workflow id",
@@ -287,6 +292,11 @@ class ApiEndpointsScenario(BaseScenario):
                 "workflow_id": f"{vault.name}/system/api-system-probe",
                 "task_id": system_task_id,
             },
+        )
+        self.soft_assert_equal(
+            system_task.get("metadata", {}).get("workflow_result", {}).get("status"),
+            "completed",
+            "System workflow task metadata should include the terminal workflow result",
         )
 
         missing_active_chat_task = self.call_api(

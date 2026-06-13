@@ -5,6 +5,7 @@ Provides single entry point for initializing all runtime services
 with proper configuration, error handling, and lifecycle management.
 """
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -170,7 +171,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
-        workflow_governor = WorkflowGovernor(task_coordinator=task_coordinator)
+        workflow_governor = WorkflowGovernor(
+            task_coordinator=task_coordinator,
+            background_loop=asyncio.get_running_loop(),
+        )
         runtime_context = RuntimeContext(
             config=config,
             scheduler=scheduler,

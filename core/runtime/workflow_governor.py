@@ -33,9 +33,11 @@ class WorkflowGovernor:
         *,
         task_coordinator: TaskCoordinator,
         logger: UnifiedLogger | None = None,
+        background_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._task_coordinator = task_coordinator
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
+        self._background_loop = background_loop
         self._lane_guard = asyncio.Lock()
         self._lane_locks: dict[str, asyncio.Lock] = {}
         self._global_limit_guard = asyncio.Lock()
@@ -375,8 +377,17 @@ class WorkflowGovernor:
                 background_tasks.add(background_task)
                 background_task.add_done_callback(background_tasks.discard)
 
-        asyncio.get_running_loop().call_soon(_spawn, context=contextvars.Context())
+        self._schedule_background_spawn(_spawn)
         return task
+
+    def _schedule_background_spawn(self, callback) -> None:
+        """Schedule a background workflow on the runtime loop when available."""
+        current_loop = asyncio.get_running_loop()
+        target_loop = self._background_loop
+        if target_loop is not None and target_loop.is_running() and target_loop is not current_loop:
+            target_loop.call_soon_threadsafe(callback, context=contextvars.Context())
+            return
+        current_loop.call_soon(callback, context=contextvars.Context())
 
     async def _get_lane_lock(self, vault_name: str) -> asyncio.Lock:
         async with self._lane_guard:
