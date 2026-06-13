@@ -14,8 +14,15 @@ class ApiErrorResilienceScenario(BaseScenario):
     """Validate actionable, safe API errors and Pydantic AI retry integration points."""
 
     async def test_scenario(self):
+        import httpx
+        from pydantic_ai.providers.openai import OpenAIProvider
         from pydantic_ai.retries import AsyncTenacityTransport, TenacityTransport, wait_retry_after
 
+        from core.llm.model_factory import (
+            _build_retrying_model_http_client,
+            _is_retryable_model_http_exception,
+            _mark_provider_owns_http_client,
+        )
         from core.tools.failures import classify_exception
 
         self.create_vault("ApiErrorVault")
@@ -86,6 +93,50 @@ class ApiErrorResilienceScenario(BaseScenario):
         self.soft_assert(
             AsyncTenacityTransport is not None and TenacityTransport is not None,
             "Pydantic AI retry transports should be available for retry execution",
+        )
+
+        retrying_client = _build_retrying_model_http_client()
+        try:
+            self.soft_assert(
+                isinstance(retrying_client._transport, AsyncTenacityTransport),
+                "Model HTTP client should use Pydantic AI AsyncTenacityTransport",
+            )
+        finally:
+            await retrying_client.aclose()
+
+        owned_client = _build_retrying_model_http_client()
+        owned_provider = _mark_provider_owns_http_client(
+            OpenAIProvider(base_url="http://localhost:9", http_client=owned_client),
+            owned_client,
+        )
+        try:
+            self.soft_assert(
+                getattr(owned_provider, "_own_http_client", None) is owned_client,
+                "Retrying model HTTP clients should be marked provider-owned for lifecycle management",
+            )
+        finally:
+            await owned_client.aclose()
+
+        self.soft_assert(
+            _is_retryable_model_http_exception(_http_status_error(503)),
+            "Model retry predicate should retry provider 5xx responses",
+        )
+        self.soft_assert(
+            _is_retryable_model_http_exception(_http_status_error(429)),
+            "Model retry predicate should retry provider rate limits",
+        )
+        self.soft_assert(
+            _is_retryable_model_http_exception(
+                httpx.ConnectError(
+                    "synthetic connection failure",
+                    request=httpx.Request("POST", "https://api.provider.test/v1/chat"),
+                )
+            ),
+            "Model retry predicate should retry network request errors",
+        )
+        self.soft_assert(
+            not _is_retryable_model_http_exception(_http_status_error(400)),
+            "Model retry predicate should not retry permanent bad requests",
         )
 
         self.teardown_scenario()
