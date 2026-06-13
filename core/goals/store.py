@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from core.database import connect_sqlite_from_system_db
 from core.goals.schema import DB_NAME, ensure_goal_ops_schema
+from core.vault_state.service import VaultStateService
 
 
 GOAL_STATUSES = {"active", "paused", "completed", "cancelled", "blocked"}
@@ -497,6 +498,68 @@ class GoalOpsStore:
             ).fetchone()
         return self._checkpoint_from_row(row).to_dict() if row else None
 
+    def list_activity(
+        self,
+        *,
+        goal_id: str,
+        step_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return vault mutation activity associated with one goal context."""
+        clean_goal_id = _required_text(goal_id, "goal_id")
+        with self._connect() as conn:
+            goal = self._goal_from_row(self._require_goal(conn, clean_goal_id))
+            if step_id:
+                self._require_steps_belong_to_goal(conn, clean_goal_id, {_required_text(step_id, "step_id")})
+        groups = VaultStateService().list_task_mutations(
+            vault_name=goal.vault_name,
+            limit=_bounded_limit(limit),
+            goal_id=clean_goal_id,
+            step_id=_optional_text(step_id),
+        )
+        return [_mutation_group_to_dict(group) for group in groups]
+
+    def list_related_files(
+        self,
+        *,
+        goal_id: str,
+        step_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return unique vault files mutated under one goal context."""
+        activity = self.list_activity(goal_id=goal_id, step_id=step_id, limit=limit)
+        files: dict[str, dict[str, Any]] = {}
+        for group in activity:
+            for mutation in group["mutations"]:
+                path = mutation["path"]
+                current = files.get(path)
+                if current is None:
+                    files[path] = {
+                        "path": path,
+                        "vault_name": group["vault_name"],
+                        "operation_count": 0,
+                        "latest_operation": None,
+                        "latest_mutation_at": None,
+                        "task_ids": [],
+                        "goal_id": mutation.get("goal_id"),
+                        "step_id": mutation.get("step_id"),
+                    }
+                    current = files[path]
+                current["operation_count"] += 1
+                if (
+                    current["latest_mutation_at"] is None
+                    or mutation["created_at"] > current["latest_mutation_at"]
+                ):
+                    current["latest_operation"] = mutation["operation"]
+                    current["latest_mutation_at"] = mutation["created_at"]
+                if mutation["task_id"] not in current["task_ids"]:
+                    current["task_ids"].append(mutation["task_id"])
+        return sorted(
+            files.values(),
+            key=lambda item: (item["latest_mutation_at"] or "", item["path"]),
+            reverse=True,
+        )
+
     def _connect(self) -> sqlite3.Connection:
         conn = connect_sqlite_from_system_db(DB_NAME, self.system_root)
         conn.row_factory = sqlite3.Row
@@ -708,10 +771,11 @@ class GoalOpsStore:
         ).fetchone()
         return self._checkpoint_from_row(row) if row else None
 
-    def _require_goal(self, conn: sqlite3.Connection, goal_id: str) -> None:
-        row = conn.execute("SELECT 1 FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+    def _require_goal(self, conn: sqlite3.Connection, goal_id: str) -> sqlite3.Row:
+        row = conn.execute("SELECT * FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
         if row is None:
             raise ValueError(f"Goal not found: {goal_id}")
+        return row
 
     def _require_steps_belong_to_goal(
         self,
@@ -879,3 +943,43 @@ def _bounded_limit(value: Any, *, maximum: int = 100) -> int:
     except (TypeError, ValueError):
         limit = 20
     return max(1, min(maximum, limit))
+
+
+def _mutation_group_to_dict(group) -> dict[str, Any]:
+    return {
+        "activity_id": group.activity_id,
+        "activity_kind": group.activity_kind,
+        "activity_label": group.activity_label,
+        "task_id": group.task_id,
+        "task_kind": group.task_kind,
+        "task_source": group.task_source,
+        "task_scope": group.task_scope,
+        "task_label": group.task_label,
+        "goal_id": group.goal_id,
+        "step_id": group.step_id,
+        "vault_id": group.vault_id,
+        "vault_name": group.vault_name,
+        "mutation_count": group.mutation_count,
+        "first_mutation_at": group.first_mutation_at.isoformat(),
+        "last_mutation_at": group.last_mutation_at.isoformat(),
+        "mutations": [
+            {
+                "id": mutation.id,
+                "task_id": mutation.task_id,
+                "task_kind": mutation.task_kind,
+                "task_source": mutation.task_source,
+                "task_scope": mutation.task_scope,
+                "task_label": mutation.task_label,
+                "goal_id": mutation.goal_id,
+                "step_id": mutation.step_id,
+                "path": mutation.path,
+                "related_path": mutation.related_path,
+                "operation": mutation.operation,
+                "event_sequence": mutation.event_sequence,
+                "before_exists": mutation.before_exists,
+                "after_exists": mutation.after_exists,
+                "created_at": mutation.created_at.isoformat(),
+            }
+            for mutation in group.mutations
+        ],
+    }

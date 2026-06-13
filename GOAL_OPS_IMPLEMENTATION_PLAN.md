@@ -229,7 +229,7 @@ Add or extend a vault mutation scenario after goal context propagation exists:
 
 ## Rollout Phases
 
-Current status: Phase 1 is implemented on this branch. Phase 2 and Phase 3 remain planned follow-ups.
+Current status: Phase 1 and the first Phase 2 provenance slice are implemented on this branch. Phase 3 remains planned follow-up.
 
 ### Phase 1: Ledger Only
 

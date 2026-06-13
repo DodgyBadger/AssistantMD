@@ -31,6 +31,8 @@ Each task snapshot includes:
 
 Long-running task metadata may include progress and recovery details such as heartbeat timestamps, heartbeat age, stale-heartbeat flags, queue/blocking reason, workflow result summaries, and structured `workflow_failure` metadata for failed or timed-out workflow runs.
 
+Tasks may also carry optional `goal_id` and `step_id` metadata for work being tracked by `goal_ops`. Execution-task lifecycle validation events include those ids when present, and vault file mutation rows persist them so goal-related files can be derived from normal mutation provenance.
+
 Task kind, source, scope, and label values are centralized in `core/runtime/execution_tasks.py`. Callers should use `ExecutionTaskKind`, `ExecutionTaskSource`, `chat_session_scope(...)`, `workflow_vault_scope(...)`, `ingestion_vault_scope(...)`, `chat_task_label(...)`, `ingestion_task_label(...)`, and `compaction_task_label(...)` rather than constructing those strings inline.
 
 ## Lifecycle

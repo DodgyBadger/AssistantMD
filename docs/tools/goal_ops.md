@@ -5,6 +5,16 @@ Track durable goals, ordered steps, events, and checkpoints for longer work.
 `goal_ops` records state only. It does not execute work, write files, schedule
 workflows, or automatically retry tool calls.
 
+Use workflows for branching, repeated execution, or procedural automation. A
+goal step can ask the agent to create or run a named workflow, but `goal_ops`
+does not become the workflow runner.
+
+Metadata fields are freeform compact JSON objects owned by the caller. Use them
+for small, stable hints such as workflow names, local tags, ids, or source-path
+references. Do not embed large notes, reports, extracted evidence, or drafts in
+metadata; write those to normal vault markdown files and reference the path from
+events, checkpoints, or metadata.
+
 Common operations:
 
 - `create_goal`: create a goal, optionally with initial steps.
@@ -18,6 +28,8 @@ Common operations:
 - `list_events`: list goal audit events.
 - `checkpoint`: record a compact recovery checkpoint.
 - `get_latest_checkpoint`: fetch the latest checkpoint.
+- `list_activity`: list existing vault mutation activity associated with a goal.
+- `list_related_files`: list unique vault files mutated under a goal.
 
 Parameters:
 
@@ -106,3 +118,6 @@ Record a checkpoint:
 Step ordering uses explicit numeric `position`, not ids or titles. If positions
 are omitted in batch operations, `goal_ops` assigns sparse positions from array
 order: `10`, `20`, `30`, and so on.
+
+Related files are derived from the existing vault mutation recorder when work
+runs with goal context. `goal_ops` does not attach files or create artifacts.

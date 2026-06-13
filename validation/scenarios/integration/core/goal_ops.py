@@ -12,7 +12,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.goals import GoalOpsStore
+from core.runtime.execution_tasks import (
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+    goal_task_metadata,
+    workflow_vault_scope,
+)
+from core.runtime.state import get_runtime_context
 from core.system_migrations import get_system_migration_status
+from core.vault_state.file_mutations import mutate_vault_file
 from validation.core.base_scenario import BaseScenario
 
 
@@ -158,6 +166,61 @@ class GoalOpsScenario(BaseScenario):
         )
         listed = self._tool_payload(list_payload)["result"]
         self.soft_assert_equal([item["goal_id"] for item in listed], [goal_id], "list_goals should filter by workspace hint")
+
+        runtime = get_runtime_context()
+        mutation_checkpoint = self.event_checkpoint()
+        async with runtime.task_coordinator.track_current_task(
+            kind=ExecutionTaskKind.WORKFLOW,
+            scope=workflow_vault_scope(vault.name),
+            source=ExecutionTaskSource.TOOL,
+            label=f"{vault.name}/goal-scoped-write",
+            metadata={
+                "vault": vault.name,
+                **goal_task_metadata(goal_id=goal_id, step_id=second_step_id),
+            },
+        ):
+            mutate_vault_file(
+                vault_path=vault,
+                path="notes/goal-output.md",
+                operation="write",
+                mutator=lambda full_path: full_path.write_text("Goal output\n", encoding="utf-8"),
+                create_parent=True,
+            )
+        mutation_events = self.events_since(mutation_checkpoint)
+        self.assert_event_contains(
+            mutation_events,
+            name="execution_task_created",
+            expected={"goal_id": goal_id, "step_id": second_step_id},
+        )
+        self.assert_event_contains(
+            mutation_events,
+            name="task_file_mutation_recorded",
+            expected={
+                "goal_id": goal_id,
+                "step_id": second_step_id,
+                "path": "notes/goal-output.md",
+            },
+        )
+
+        activity_payload = await tool.function(ctx, operation="list_activity", goal_id=goal_id)
+        activity = self._tool_payload(activity_payload)["result"]
+        self.soft_assert_equal(len(activity), 1, "Goal activity should derive from task mutation rows")
+        if activity:
+            self.soft_assert_equal(activity[0]["goal_id"], goal_id, "Activity group should expose goal id")
+            self.soft_assert_equal(activity[0]["step_id"], second_step_id, "Activity group should expose step id")
+            self.soft_assert_equal(
+                activity[0]["mutations"][0]["path"],
+                "notes/goal-output.md",
+                "Goal activity should include the mutated path",
+            )
+
+        files_payload = await tool.function(ctx, operation="list_related_files", goal_id=goal_id)
+        related_files = self._tool_payload(files_payload)["result"]
+        self.soft_assert_equal(
+            [item["path"] for item in related_files],
+            ["notes/goal-output.md"],
+            "Related files should be derived from existing mutation provenance",
+        )
 
         self.soft_assert(not self._table_exists("goal_artifacts"), "goal_ops should not create an artifact table")
         migration_status = get_system_migration_status(self._get_system_controller()._system_root)

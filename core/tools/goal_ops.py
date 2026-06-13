@@ -229,10 +229,22 @@ Full documentation:
             )
         if operation == "get_latest_checkpoint":
             return store.get_latest_checkpoint(goal_id=_goal_id(goal_id, data))
+        if operation == "list_activity":
+            return store.list_activity(
+                goal_id=_goal_id(goal_id, data),
+                step_id=data.get("step_id"),
+                limit=_limit(limit, data, default=20),
+            )
+        if operation == "list_related_files":
+            return store.list_related_files(
+                goal_id=_goal_id(goal_id, data),
+                step_id=data.get("step_id"),
+                limit=_limit(limit, data, default=100),
+            )
         raise ValueError(
             "operation must be one of: create_goal, update_goal, get_goal, list_goals, "
             "replace_steps, update_steps, list_steps, add_events, list_events, checkpoint, "
-            "get_latest_checkpoint"
+            "get_latest_checkpoint, list_activity, list_related_files"
         )
 
     @staticmethod

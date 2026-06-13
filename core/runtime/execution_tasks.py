@@ -97,6 +97,32 @@ def get_current_execution_task() -> ExecutionTaskSnapshot | None:
     return _CURRENT_EXECUTION_TASK.get()
 
 
+def goal_task_metadata(
+    *,
+    goal_id: str | None = None,
+    step_id: str | None = None,
+) -> dict[str, str]:
+    """Return normalized goal context metadata for execution tasks."""
+    metadata: dict[str, str] = {}
+    clean_goal_id = _clean_goal_context_value(goal_id)
+    clean_step_id = _clean_goal_context_value(step_id)
+    if clean_goal_id:
+        metadata["goal_id"] = clean_goal_id
+    if clean_step_id:
+        metadata["step_id"] = clean_step_id
+    return metadata
+
+
+def goal_context_from_metadata(metadata: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    """Extract optional goal context from execution task metadata."""
+    if not isinstance(metadata, dict):
+        return None, None
+    return (
+        _clean_goal_context_value(metadata.get("goal_id")),
+        _clean_goal_context_value(metadata.get("step_id")),
+    )
+
+
 @dataclass(frozen=True)
 class ExecutionTaskSnapshot:
     """Public immutable view of an execution task."""
@@ -584,6 +610,11 @@ class TaskCoordinator:
             "last_heartbeat_at": snapshot.last_heartbeat_at.isoformat() if snapshot.last_heartbeat_at else None,
             "heartbeat_status": snapshot.heartbeat_status,
         }
+        goal_id, step_id = goal_context_from_metadata(snapshot.metadata)
+        if goal_id:
+            data["goal_id"] = goal_id
+        if step_id:
+            data["step_id"] = step_id
         if extra:
             data.update(extra)
         self._logger.add_sink("validation").info(
@@ -617,3 +648,10 @@ class TaskCoordinator:
     @staticmethod
     def _now() -> datetime:
         return datetime.now(UTC)
+
+
+def _clean_goal_context_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

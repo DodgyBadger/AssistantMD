@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.logger import UnifiedLogger
-from core.runtime.execution_tasks import get_current_execution_task
+from core.runtime.execution_tasks import get_current_execution_task, goal_context_from_metadata
 from core.utils.hash import hash_file_bytes
 from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import TaskFileMutation
@@ -523,6 +523,7 @@ def _persist_or_log_mutation(
         return
 
     with service.SessionFactory() as session:
+        goal_id, step_id = goal_context_from_metadata(getattr(task, "metadata", None))
         session.add(
             TaskFileMutation(
                 task_id=task.task_id,
@@ -530,6 +531,8 @@ def _persist_or_log_mutation(
                 task_source=task.source,
                 task_scope=task.scope,
                 task_label=task.label,
+                goal_id=goal_id,
+                step_id=step_id,
                 vault_id=result.vault_id,
                 vault_name=result.vault_name,
                 path=result.path,
@@ -558,6 +561,8 @@ def _persist_or_log_mutation(
             "task_source": task.source,
             "task_scope": task.scope,
             "task_label": task.label,
+            "goal_id": goal_id,
+            "step_id": step_id,
             "vault_id": result.vault_id,
             "vault_name": result.vault_name,
             "path": result.path,
