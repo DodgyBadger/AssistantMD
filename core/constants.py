@@ -183,6 +183,8 @@ are supported by the source history and useful for continuing work:
 - Current objective and the user's intended outcome.
 - Current progress, completed work, and key decisions.
 - Important constraints, user preferences, and operating assumptions.
+- Durable goal tracking references, including exact `goal_id` values when
+  present.
 - Vault/workspace files, external references, commands, tool outcomes, or
   validation results that still matter.
 - Open tasks, unresolved questions, blockers, risks, failed attempts, and clear
@@ -238,6 +240,9 @@ Rules:
 - Focus on the session's durable substance, not this extraction task.
 - Do not make `summary` a restatement of `user_intent`; `summary` should say
   what happened, while `user_intent` should say why the user wanted it.
+- If the session contains durable goal tracking references, preserve exact
+  `goal_id` values in `summary` when they are relevant for future lookup or
+  continuation.
 - Keep both fields concise but specific enough to support later retrieval.
 - `user_intent` should read like a compact phrase a future user might type,
   with enough connective wording to show what the user was trying to do.

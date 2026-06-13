@@ -14,7 +14,17 @@ DEFAULT_PLAYBOOK = (
     "notes, drafts, and project context.\n\n"
     "When a workspace playbook is loaded, merge it with this vault-level "
     "guidance. Treat workspace guidance as more specific when the two directly "
-    "conflict."
+    "conflict.\n\n"
+    "## Goal Tracking\n"
+    "Use `goal_ops` only when the user is asking for work that is too large, "
+    "durable, or interruptible to track reliably in the current chat alone, "
+    "such as multi-step research, report drafting, project/client work, "
+    "vault maintenance, or work that may continue through workflows or future "
+    "sessions.\n\n"
+    "Do not create a goal for ordinary questions, quick edits, simple file "
+    "lookups, single-turn answers, or tasks whose next step is obvious and "
+    "can be completed immediately. When a durable goal already exists, prefer "
+    "looking it up or updating it over creating a duplicate."
 )
 
 DEFAULT_SOUL_INSTRUCTIONS = (

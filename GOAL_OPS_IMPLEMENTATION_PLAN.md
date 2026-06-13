@@ -146,11 +146,13 @@ Use batch operations from day one to avoid mechanical tool-call churn.
 
 ### Session and Workspace Relationship
 
-Goals are not owned by chat sessions. A chat session may store an `active_goal_id` in session metadata, but the goal must remain discoverable from a new session by vault, status, recency, title search, and optional workspace hint.
+Goals are not owned by chat sessions. Do not add a session-level `active_goal_id` unless a concrete later workflow proves it is necessary. Unlike workspace, a goal is a durable record with its own id, status, steps, checkpoints, source provenance, and related file activity. Storing a second active-goal pointer on the session would duplicate authority and create switching, clearing, stale-pointer, and disagreement semantics that are not needed yet.
+
+Chat-originated goals remain discoverable by source provenance: `source_type="chat"` plus the session id as `source_id`. Workflow- and context-originated goals should pass goal ids programmatically when they continue work under a goal.
 
 `workspace_path_hint` should mirror the existing AssistantMD convention: it is a session/context-script hint that can be used or ignored by the default composition. There should be no `workspaces` table and no required workspace identity in `goal_ops`.
 
-Default composition may choose to surface active goals whose `workspace_path_hint` matches the current session's workspace hint, plus vault-wide goals with no hint. That is composition policy, not a core model invariant.
+Default composition should not auto-select or inject goals every turn yet. The first durability layer for chat-originated goal continuity is normal agent use of `goal_ops` plus chat compaction preserving relevant goal ids, names, checkpoints, next actions, and open questions. If that proves insufficient, a default or user-authored context script can later query `goal_ops` by source, workspace hint, name, or status and inject a compact goal card into every turn.
 
 Goal source provenance is owned by the runtime/tool layer, not by the model payload. `create_goal` should infer source fields from the active runtime:
 
@@ -204,14 +206,21 @@ Expected implementation surfaces:
 
 Goal tracking will eventually need to be folded into the instruction stack, but the exact prompt and composition details should be decided after the initial `goal_ops` behavior exists.
 
-Surfaces to review:
+Audit decisions so far:
+
+- `goal_ops` tool docs are the primary tool-usage instruction surface.
+- Global system instructions need little or no goal-specific change while the tool-doc lookup contract remains in place.
+- Do not add session-level active goal metadata in the default design.
+- Do not change default context goal injection yet.
+- Audit chat compaction next, because compaction is the first durability layer for preserving goal orientation in long-running chat sessions.
+
+Remaining surfaces to review:
 
 - `goal_ops` tool instruction doc and virtual-doc exposure.
-- Default system/context templates that decide whether active goal state and latest checkpoints are included.
+- Default system/context templates, only if compaction and agent-driven `goal_ops` lookup prove insufficient.
 - User-owned workspace playbooks such as `README.md`, `playbook.md`, or `goal.md` conventions.
-- Chat session metadata handling for `active_goal_id`.
 - Workflow/context scripts that may create, update, or surface goals.
-- Compaction prompts, to decide whether goal checkpoints should be included or cross-referenced.
+- Compaction prompts, to ensure goal ids/names, checkpoints, next actions, and open questions are preserved when they matter.
 
 The audit should preserve the existing AssistantMD philosophy: core instructions may provide softly opinionated defaults, while user-owned playbooks decide how goals are used in a particular vault or workspace convention.
 
@@ -259,10 +268,12 @@ Current status: Phase 1 and the first Phase 2 provenance slice are implemented o
 
 ### Phase 3: Default Composition
 
-- Teach default context/workflow composition how to surface active goal state and latest checkpoint, using session workspace hints when useful without making workspaces authoritative.
+- Audit and, if needed, revise chat compaction prompts so goal orientation survives long-running chat compaction.
+- Leave goal lookup agent-driven through `goal_ops` unless validation or real use shows the model loses goal orientation after compaction.
+- Defer default context goal injection. If needed later, implement it as a composable context-script policy that queries `goal_ops` and injects a compact goal card, not as session-owned goal authority.
 - Optionally write or update workspace markdown such as `goal.md` from normal file tools/workflows.
 - Keep markdown conventions user-editable.
-- Complete the system instruction audit and add the minimal default instructions needed for `goal_ops` without hard-coding a single workflow style.
+- Complete the system instruction audit without hard-coding a single workflow style.
 
 ## Next Phase
 
