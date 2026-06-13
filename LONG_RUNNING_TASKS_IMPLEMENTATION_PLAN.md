@@ -115,7 +115,7 @@ Current SOTA patterns converge on the same few requirements, but AssistantMD sho
    AssistantMD estimates prompt/history tokens and enforces tool-call limits, but it does not appear to persist provider-reported per-request usage, cached tokens, reasoning tokens, per-subagent cost, or goal-level budgets.
 
 6. Network/API resilience is only partially structured.
-   Model, delegate, web/search, workflow, and API error paths now share initial structured failure metadata in several important places, including retryability and suggested action. Model providers are now wired through Pydantic AI's retry transport layer for bounded retries on rate limits, provider 5xx responses, and network request errors. There is still no idempotency guidance around tool calls that should not be retried blindly, and non-model external tools still need broader retry/error-envelope adoption.
+   Model, delegate, web/search, workflow, and API error paths now share initial structured failure metadata in several important places, including retryability and suggested action. Model providers are now wired through Pydantic AI's retry transport layer for bounded retries on rate limits, provider 5xx responses, and network request errors. Tool execution should not be automatically retried by infrastructure; tool failures should instead return enough structured information for the model to decide whether to retry, switch approaches, ask the user, or stop. Non-model external tools still need broader structured failure-envelope adoption.
 
 7. Subagents are synchronous child calls.
    `delegate` is useful for bounded inference and now returns structured bounded-failure metadata for execution limits, timeouts, and provider failures. It still does not create durable child task records, stream progress, return artifact references as a first-class contract, or let the parent continue while children run.
@@ -166,8 +166,8 @@ These are lower-level risks in the current code that could derail or waste effor
 12. Usage and output limits can cause hidden churn.
    `chat_tool_calls_limit=0` disables chat tool-call limits by default; `auto_cache_max_tokens` can replace large tool outputs with cache notices; `max_output_tokens` can truncate model responses provider-side. These settings are useful but the agent has no unified view of why it is failing to make progress. Hardening target: include active limit settings and limit-trigger events in goal/task context, and classify limit-triggered failures as `budget_limited`, `context_limited`, or `tool_limited`.
 
-13. Shared retry classification exists, and retry execution should use Pydantic AI.
-   `FailureClassification` now gives model, selected tool, delegate, workflow, and API failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. Model-provider HTTP retry timing/execution uses Pydantic AI's `AsyncTenacityTransport` and `wait_retry_after(...)` instead of AssistantMD duplicating that policy. Long-running agents still need broader adoption in remaining tools and future goal events that preserve the same envelope.
+13. Shared retry classification exists, and model retry execution should use Pydantic AI.
+   `FailureClassification` now gives model, selected tool, delegate, workflow, and API failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. Model-provider HTTP retry timing/execution uses Pydantic AI's `AsyncTenacityTransport` and `wait_retry_after(...)` instead of AssistantMD duplicating that policy. Tool paths should preserve the same envelope for model-visible decision making, not automatically replay tool calls behind the model's back.
 
 14. Activity logging is good but not always agent-actionable.
    Many events are logged for validation/activity, but the agent often receives only a plain tool result or generic API error. Hardening target: make critical event ids/task ids/checkpoint ids flow back to the agent so it can inspect status or report accurately.
@@ -453,7 +453,7 @@ Deliverables:
 - Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
 - Queue age and stalled-task warnings.
 - `workflow_run(status)` improvements that return progress, heartbeat age, blocking reason, and artifact refs when available.
-- Provider/API retry policy for retryable model/network failures. Model providers are wired through Pydantic AI retry transports with bounded attempts; non-model tools remain follow-up work.
+- Provider/API retry policy for retryable model/network failures. Model providers are wired through Pydantic AI retry transports with bounded attempts; non-model tools remain follow-up work for structured, model-visible failure returns rather than automatic retry.
 - Validation events for retry scheduled/succeeded/exhausted and task heartbeat/stall transitions. Heartbeat events are complete; model retry scheduling emits validation events before retry sleeps.
 - Clear cancellation result language distinguishing rolled-back local mutations, retained artifacts, and external/unknown effects where the current system can know.
 
@@ -639,4 +639,4 @@ Maintain existing scenarios for workflow async/cancellation, chat cancellation, 
 
 ## Next Phase
 
-Feature Development can now start the minimal `goal_ops` ledger if we keep it narrow: SQLite-backed goal runs, steps, events, artifacts, checkpoints, and a small `goal_ops` helper/tool that records state without deciding how to pursue work. Remaining resilience follow-ups should stay visible but separate: broader structured failure adoption in remaining tools, queue/stall warnings, and restart reconciliation.
+Feature Development can now start the minimal `goal_ops` ledger if we keep it narrow: SQLite-backed goal runs, steps, events, artifacts, checkpoints, and a small `goal_ops` helper/tool that records state without deciding how to pursue work. Remaining resilience follow-ups should stay visible but separate: broader structured failure returns in remaining tools, queue/stall warnings, and restart reconciliation.
