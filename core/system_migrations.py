@@ -17,6 +17,12 @@ from core.chat.schema import (
 )
 from core.database import get_system_database_path
 from core.database_migrations import SQLiteMigration
+from core.goals.schema import (
+    DB_NAME as GOAL_OPS_DB_NAME,
+    GOAL_OPS_MIGRATIONS,
+    MIGRATION_NAMESPACE as GOAL_OPS_MIGRATION_NAMESPACE,
+    ensure_goal_ops_schema,
+)
 from core.logger import UnifiedLogger
 from core.memory.schema import (
     DB_NAME as SESSION_SUMMARIES_DB_NAME,
@@ -80,6 +86,15 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
         namespace=SESSION_SUMMARIES_MIGRATION_NAMESPACE,
         migrations=SESSION_SUMMARY_MIGRATIONS,
         ensure_schema=lambda system_root: ensure_session_summary_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
+    SystemMigrationTarget(
+        db_name=GOAL_OPS_DB_NAME,
+        namespace=GOAL_OPS_MIGRATION_NAMESPACE,
+        migrations=GOAL_OPS_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_goal_ops_schema(
             system_root,
             apply_migrations=True,
         ),

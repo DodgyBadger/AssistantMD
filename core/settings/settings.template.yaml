@@ -26,6 +26,7 @@ settings:
       - delegate
       - chat_history_compact
       - session_ops
+      - goal_ops
     description: "List of tool names enabled by default in the chat UI."
     restart_required: false
   chat_tool_calls_limit:
@@ -399,6 +400,12 @@ tools:
   session_ops:
     module: core.tools.session_ops
     description: "Search and summarize chat sessions"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true
+  goal_ops:
+    module: core.tools.goal_ops
+    description: "Track durable goals, ordered steps, events, and checkpoints"
     requires_secrets: []
     user_editable: false
     chat_visible: true
