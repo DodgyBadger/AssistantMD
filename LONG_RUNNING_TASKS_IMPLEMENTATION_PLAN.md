@@ -105,20 +105,20 @@ Current SOTA patterns converge on the same few requirements, but AssistantMD sho
 2. There is no first-class goal/run ledger.
    A chat session can persist messages, and a workflow can run as a task, but there is no durable object that records the goal, plan, step states, artifacts, budget, user checkpoints, subagent children, and latest recovery point.
 
-3. Compaction is chat-history oriented, not goal-oriented.
-   Current compaction summarizes older messages plus recent raw messages. It already works well for long-lived sessions when the summary behaves like operational recovery state, but the prompt contract is not explicit enough about goal state: active objective, plan, next action, blockers, artifacts, source refs, failed attempts, and check-in requirements.
+3. Compaction is still chat/session owned, not goal-ledger owned.
+   The compaction prompt now uses an explicit recovery-card contract and default `auto` policy, and prior checkpoints are fed into later compaction runs so the active thread can be merged forward. That is sufficient for the current chat-first phase, but there is still no separate goal checkpoint object that can be reconciled with workspace files or process restarts.
 
-4. Automatic compaction policy needs to be a strong ordinary-chat default.
-   AssistantMD already supports automatic post-turn compaction through `compaction_type: auto`. The right model is not "auto-compaction is dangerous"; it is "auto-compaction is acceptable when the summary contract is operational enough." Long-running tasks may need automatic context-window management before the goal is complete. Hardening target: make compaction summaries function as recovery cards, make `auto` the default ordinary chat/session policy, keep the behavior settings-controlled, and avoid introducing a separate goal-oriented compaction mode in this phase.
+4. Automatic compaction remains settings-controlled.
+   `compaction_type: auto` is now the default for new settings files, and the setting documentation recommends tuning `compaction_token_threshold` before switching to `suggested` or `none`. The remaining work is not a new goal-oriented mode; it is continued validation that repeated compaction preserves active goals, uncertainty, evidence, and next actions.
 
 5. Cost accounting is incomplete for long runs.
    AssistantMD estimates prompt/history tokens and enforces tool-call limits, but it does not appear to persist provider-reported per-request usage, cached tokens, reasoning tokens, per-subagent cost, or goal-level budgets.
 
-6. Network/API resilience is mostly implicit.
-   Model instances use a configured timeout, and workflows/delegates have timeouts. There is no centralized provider retry policy with backoff, `Retry-After` handling, retry event logging, or idempotency guidance around tool calls that should not be retried blindly.
+6. Network/API resilience is only partially structured.
+   Model, delegate, web/search, and workflow failure paths now share initial `FailureClassification` metadata in several important places, including retryability and suggested action. There is still no centralized provider retry policy with backoff, `Retry-After` handling, retry event logging, or idempotency guidance around tool calls that should not be retried blindly.
 
 7. Subagents are synchronous child calls.
-   `delegate` is useful for bounded inference, but it does not create durable child task records, stream progress, return artifact references as a first-class contract, or let the parent continue while children run.
+   `delegate` is useful for bounded inference and now returns structured bounded-failure metadata for execution limits, timeouts, and provider failures. It still does not create durable child task records, stream progress, return artifact references as a first-class contract, or let the parent continue while children run.
 
 8. Check-ins are procedural rather than system-owned.
    A workflow or agent can ask the user questions, but there is no durable "awaiting user" task status, no resumable approval/check-in payload, and no UI/API affordance for goal checkpoint review.
@@ -136,20 +136,20 @@ These are lower-level risks in the current code that could derail or waste effor
 2. Compaction preserves boundary pairs but not full malformed-history diagnostics.
    `core/chat/compaction.py` shifts the recent-history boundary when a tool call/return pair would be split, which is good. It does not appear to validate the whole effective history for orphaned returns, orphaned calls, duplicate tool ids, or multiple-call batches before summarization. Hardening target: add a shared `validate_tool_history_integrity(...)` helper used by compaction, `retrieve_history`, fork/session-prefix logic, and chat preflight.
 
-3. Streaming chat error handling may leave an accepted user turn without an explicit assistant failure record.
-   Streaming persists the accepted user request before model execution, emits an SSE error chunk on failure, logs the failure, and then raises for unexpected exceptions. It does not persist a durable assistant-visible failure message. That keeps failed model output out of history, but a long-running agent resuming from the session may see a user request with no assistant outcome. Hardening target: persist a structured internal failure marker or goal event that context assembly can include as "previous turn failed during phase X" without polluting normal transcript exports.
+3. Streaming chat error handling has an initial recovery marker.
+   Streaming persists the accepted user request before model execution. Unexpected failures now leave structured unfinished-turn recovery context that session detail and the next chat preflight can surface without polluting transcript exports. Remaining hardening should broaden the same stable failure envelope across more API and tool paths.
 
 4. API error responses hide too much detail from non-debug clients.
    `api/utils.py` returns `"An unexpected error occurred"` plus only `error_type` when debug mode is off. That is reasonable for public APIs, but poor for a local single-user agent system where the model may need actionable recovery details. Hardening target: add agent-safe error summaries with stable `error_type`, `phase`, `retryable`, `suggested_action`, and relevant ids while still avoiding secrets/tracebacks.
 
-5. Tool errors often return plain prose strings instead of structured failure metadata.
-   Web tools such as `web_search_tavily`, `web_search_duckduckgo`, and `tavily_extract` catch broad exceptions and return strings like `"Tavily API error: ..."`. This avoids crashing the parent run, but it makes transient network failures, rate limits, missing secrets, and true no-result states hard to distinguish. Hardening target: standardize tool failure returns as `ToolReturn(metadata={"status": "failed", "error_type": ..., "retryable": ...})` while keeping concise text for the model.
+5. Tool errors are mixed: selected paths are structured, others still return prose.
+   DuckDuckGo search, Tavily search, Tavily extract, delegate bounded failures, and model/chat failure markers now expose structured failure metadata. Other external tools and API adapters still need the same treatment so transient network failures, rate limits, missing secrets, and true no-result states are consistently distinguishable.
 
 6. Tool binding errors can fail an entire agent before it can adapt.
    Missing API keys for configured tools are raised during tool construction for some tools. If a user includes a tool in a long-running task and the secret is missing or stale, the chat/workflow can fail at preflight rather than letting the agent choose another tool. Hardening target: distinguish required-tool preflight failures from optional-tool unavailability; expose unavailable tools as structured capability diagnostics where safe.
 
 7. Delegate limits are global and static.
-   `delegate_tool_calls_limit` and `delegate_timeout_seconds` are blunt global settings. The current bounded-failure messages are good, but broad research tasks may churn through repeated failed delegate calls if the child scope is only slightly too large. Hardening target: add per-call optional budgets within configured maxima, return partial audit/progress when a child times out, and teach the parent through metadata whether to split, retry later, switch tools, or escalate to workflow/background child.
+   `delegate_tool_calls_limit` and `delegate_timeout_seconds` are blunt global settings. Bounded failures now tell the parent whether the failure is an execution limit, timeout, provider problem, or non-retryable configuration issue. Remaining hardening: add per-call optional budgets within configured maxima, preserve partial child audit/progress when feasible, and teach the parent whether to split, retry later, switch tools, or escalate to workflow/background child.
 
 8. Delegate failure metadata does not preserve partial child work.
    On usage-limit or timeout failures, `delegate` returns an empty audit because the exception path does not have completed child messages. That loses useful evidence about what the child tried before failure. Hardening target: capture incremental child tool events through hooks or a child event sink so partial progress survives bounded failures.
@@ -157,8 +157,8 @@ These are lower-level risks in the current code that could derail or waste effor
 9. `workflow_run(start)` is async, but child/subtask observability is shallow.
    The tool returns a task id and status polling works, but the parent agent does not get step-level progress, heartbeat, partial artifacts, or structured "still waiting because..." reasons. Hardening target: add task heartbeat/progress metadata updates for long workflows and make `workflow_run(status)` return progress plus artifact refs, not only lifecycle status.
 
-10. Background workflow exceptions can be swallowed after task marking.
-   `WorkflowGovernor.start_workflow` and system-template workflow startup catch broad exceptions in background task wrappers and return. The coordinator usually marks failures inside `execute_workflow`, but broad swallowing makes it easy for future bugs before/around task tracking to disappear into logs. Hardening target: emit a final background-task wrapper event whenever an exception is swallowed, including task id and whether the task was already terminal.
+10. Background workflow startup now uses one governor path.
+   Manual API, tool-triggered, scheduled, and system-template workflow runs now route through `WorkflowGovernor`. API-started background workflow tasks are scheduled onto the runtime event loop so request-local loops do not cancel them after a TestClient/request boundary. Remaining hardening: emit a final background-task wrapper event whenever an exception is swallowed, including task id and whether the task was already terminal.
 
 11. Queue and timeout policy can silently create starvation or runaway work.
    Vault lane locks serialize workflows per vault and `max_concurrent_workflows=0` disables global concurrency. That is flexible, but for long-running goals it means one stuck workflow can block a vault lane indefinitely unless timeout/checkpoint policy is configured. Hardening target: add queued-time metrics, heartbeat timeouts, queue-age warnings, and user-visible "blocked behind task X" messages.
@@ -166,8 +166,8 @@ These are lower-level risks in the current code that could derail or waste effor
 12. Usage and output limits can cause hidden churn.
    `chat_tool_calls_limit=0` disables chat tool-call limits by default; `auto_cache_max_tokens` can replace large tool outputs with cache notices; `max_output_tokens` can truncate model responses provider-side. These settings are useful but the agent has no unified view of why it is failing to make progress. Hardening target: include active limit settings and limit-trigger events in goal/task context, and classify limit-triggered failures as `budget_limited`, `context_limited`, or `tool_limited`.
 
-13. There is no shared retry classification for model/tool/network errors.
-   External tools and model calls use timeouts, but retryability is decided ad hoc or not at all. Long-running agents need to know if an error is transient, permanent, auth/configuration-related, or caused by bad input. Hardening target: create a shared `ErrorEnvelope`/`FailureClassification` helper used by tools, API responses, workflow execution, and future goal events.
+13. Shared retry classification exists but is not yet universal.
+   `FailureClassification` now gives model, selected tool, delegate, and workflow failure paths a common vocabulary for transient, permanent, auth/configuration, rate-limit, and timeout failures. Long-running agents still need a provider retry policy, broader adoption in API responses and tools, and future goal events that preserve the same envelope.
 
 14. Activity logging is good but not always agent-actionable.
    Many events are logged for validation/activity, but the agent often receives only a plain tool result or generic API error. Hardening target: make critical event ids/task ids/checkpoint ids flow back to the agent so it can inspect status or report accurately.
@@ -376,7 +376,7 @@ This should aggregate existing task lifecycle events, chat tool events, vault mu
 
 ### Status
 
-Started Phase 0/1 with four hardening slices:
+Phase 0/1/2A hardening is underway. Completed slices:
 
 - Added deterministic validation for parallel tool-call batches and orphaned tool returns.
 - Added a shared tool-history integrity helper for provider-native chat messages and stored message payloads.
@@ -389,8 +389,16 @@ Started Phase 0/1 with four hardening slices:
 - Exposed the latest unfinished-turn marker through chat session detail and injected ephemeral recovery context into the next chat preflight.
 - Added execution task heartbeat fields and workflow heartbeat events for background workflow tasks.
 - Added `workflow_run(status)` heartbeat age/stale visibility and queue reason output.
+- Made compaction summaries explicitly recovery-card oriented, versioned the prompt contract, included trigger/settings metadata, and changed new settings defaults to `compaction_type: auto`.
+- Added deterministic repeated-compaction coverage plus an experimental live-model scenario for manual artifact review.
+- Made session-summary extraction include the latest compaction checkpoint alongside retained effective history.
+- Added structured model failure metadata for accepted-turn recovery markers and API/SSE error payloads.
+- Added structured delegate bounded-failure metadata for execution limits, timeouts, and provider/configuration failures.
+- Added workflow failure recovery metadata to terminal task snapshots and workflow lifecycle events.
+- Routed manual system workflow execution through the normal workflow governor while preserving the rule that disabled system workflows can be run manually but are not scheduled.
+- Scheduled API-started background workflow tasks on the runtime event loop so request-local loops cannot cancel them after the response boundary.
 
-Remaining hardening work should continue with broader structured failure adoption and API-safe error summaries before starting `goal_ops`.
+Remaining hardening work should continue with API-safe error summaries, broader structured failure adoption, retry policy, queue/stall visibility, and restart reconciliation before starting `goal_ops`.
 
 ### Phase 0: Hardening Probes and Contracts
 
@@ -420,7 +428,7 @@ Deliverables:
 - Shared tool-history integrity helper used by `retrieve_history`, compaction split logic, session fork/prefix logic, and chat/context preflight where appropriate. Initial helper coverage is complete for `retrieve_history` and compaction diagnostics; session fork/prefix and chat/context preflight remain follow-ups.
 - Batch-safe history retrieval for adjacent multi-tool-call/multi-tool-return messages. Complete for `retrieve_history(...)` and `assemble_context(...)`.
 - Structured `FailureClassification` or `ErrorEnvelope` helper. Initial `FailureClassification` helper is complete for tool failure envelopes.
-- Structured failure metadata for web/search/extract tools and selected API-facing tool errors. Initial DuckDuckGo search, Tavily search, and Tavily extract exception paths are complete; Tavily crawl, browser, model/provider retries, and API-facing errors remain follow-ups.
+- Structured failure metadata for web/search/extract tools and selected API-facing tool errors. Initial DuckDuckGo search, Tavily search, Tavily extract, model/chat failure markers, delegate bounded failures, and workflow failure metadata are complete; Tavily crawl, browser, provider retry loops, and API-facing errors remain follow-ups.
 - Agent-safe API error summaries with stable `error_type`, `phase`, `retryable`, `suggested_action`, and relevant ids.
 - Streaming failure marker or event that future context assembly can include when a user turn was accepted but no assistant response persisted. Initial marker, session detail exposure, next-turn context injection, and success clearing are complete.
 - Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
@@ -439,7 +447,7 @@ Goal: make existing background work observable and recoverable without adding a 
 
 Deliverables:
 
-- Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths.
+- Heartbeat/progress metadata updates for workflows and long-running tool/workflow paths. Initial workflow task heartbeat metadata, validation events, and `workflow_run(status)` visibility are complete.
 - Queue age and stalled-task warnings.
 - `workflow_run(status)` improvements that return progress, heartbeat age, blocking reason, and artifact refs when available.
 - Provider/API retry policy for retryable model/network failures.
@@ -628,4 +636,4 @@ Maintain existing scenarios for workflow async/cancellation, chat cancellation, 
 
 ## Next Phase
 
-Feature Development should continue with automatic compaction policy and prompt-strategy audit before `goal_ops`. The next concrete work should define and validate automatic compaction behavior for long-running-style sessions, then revisit whether remaining structured API error summaries block the minimal `goal_ops` ledger. `goal_ops` should remain deferred until context-window management is safe and auditable.
+Feature Development should continue with retry/resilience hardening before `goal_ops`. The next concrete work should add an agent-safe API error envelope and start a provider/network retry policy that uses the existing `FailureClassification` vocabulary, emits retry lifecycle events, and avoids retrying permanent or non-idempotent failures blindly. `goal_ops` should remain deferred until current chat, workflow, delegate, and API surfaces consistently expose actionable failure state.

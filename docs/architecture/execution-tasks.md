@@ -29,6 +29,8 @@ Each task snapshot includes:
 - status, cancel flag, terminal reason, latest event
 - task metadata
 
+Long-running task metadata may include progress and recovery details such as heartbeat timestamps, heartbeat age, stale-heartbeat flags, queue/blocking reason, workflow result summaries, and structured `workflow_failure` metadata for failed or timed-out workflow runs.
+
 Task kind, source, scope, and label values are centralized in `core/runtime/execution_tasks.py`. Callers should use `ExecutionTaskKind`, `ExecutionTaskSource`, `chat_session_scope(...)`, `workflow_vault_scope(...)`, `ingestion_vault_scope(...)`, `chat_task_label(...)`, `ingestion_task_label(...)`, and `compaction_task_label(...)` rather than constructing those strings inline.
 
 ## Lifecycle
@@ -62,6 +64,8 @@ starts the workflow in the background and returns the created task snapshot.
 Clients should poll `/api/tasks/{task_id}` for terminal status and call
 `/api/tasks/{task_id}/cancel` to stop a running workflow. Terminal workflow
 result details are attached to task metadata as `workflow_result` when available.
+Failed or timed-out workflow terminal metadata also includes `workflow_failure`
+when the governor can classify the failure.
 
 ## Observability
 
@@ -76,5 +80,6 @@ Execution task events use the validation sink and stable event names:
 - `execution_task_cancelled`
 - `execution_task_timed_out`
 - `execution_task_skipped`
+- `workflow_task_heartbeat`
 
 Payloads include task identity fields (`task_id`, `kind`, `scope`, `source`, `label`), status, cancellation state, and terminal reason. These events are part of the scenario validation surface.

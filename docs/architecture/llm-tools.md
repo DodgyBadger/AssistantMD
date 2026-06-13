@@ -55,10 +55,10 @@ agent behavior toward Pydantic AI's composable capability model.
 
 ## Delegate and Code Execution
 
-`delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors.
+`delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors. Bounded failures also include structured classification metadata such as failure kind, retryability, and suggested action.
 
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 
-`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI.
+`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API, system-template, and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI, including heartbeat/progress metadata when available.
 
 `chat_history_compact` checks or compacts the active chat session after explicit user approval. Compaction records a replay checkpoint so default future history starts with a summary plus recent raw messages, and records a process-local history-compaction task.
