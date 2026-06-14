@@ -75,6 +75,8 @@ class DelegateToolScenario(BaseScenario):
                     }
                 if case == "limit_failure":
                     return {"prompt": "Exceed child usage limits.", "model": "test"}
+                if case == "model_request_limit_failure":
+                    return {"prompt": "Exceed child model request usage limits.", "model": "test"}
                 raise AssertionError(f"Unexpected delegate case: {case}")
 
         def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
@@ -108,6 +110,10 @@ class DelegateToolScenario(BaseScenario):
             if current_case["name"] == "limit_failure":
                 return _FailingChildAgent(
                     UsageLimitExceeded("The next tool call(s) would exceed the tool_calls_limit")
+                )
+            if current_case["name"] == "model_request_limit_failure":
+                return _FailingChildAgent(
+                    UsageLimitExceeded("The next request would exceed the request_limit of 75")
                 )
             return await original_create_agent(*args, **kwargs)
 
@@ -241,11 +247,55 @@ class DelegateToolScenario(BaseScenario):
                     "error_type": "UsageLimitExceeded",
                     "failure_kind": "execution_limit",
                     "retryable": False,
+                    "limit_kind": "tool_calls",
+                    "limit_setting": "delegate_tool_calls_limit",
                 },
             )
             self.soft_assert(
                 "tool-call limit" in limit_failure.json()["response"],
                 "Delegate limit failure should return actionable text to the parent agent",
+            )
+            self.soft_assert(
+                "goal_ops" in limit_failure.json()["response"],
+                "Delegate limit failure should instruct parent to checkpoint before continuing",
+            )
+
+            current_case["name"] = "model_request_limit_failure"
+            model_request_limit_failure = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Test delegate model-request limit handling.",
+                    "session_id": "delegate_model_request_limit_failure",
+                    "tools": ["delegate"],
+                    "model": "test",
+                },
+            )
+            assert model_request_limit_failure.status_code == 200, (
+                "Delegate model-request limit failure should not abort chat"
+            )
+            request_limit_context = delegate_module._delegate_usage_limit_context(
+                UsageLimitExceeded("The next request would exceed the request_limit of 75"),
+                max_tool_calls=configured_delegate_limit,
+            )
+            self.soft_assert_equal(
+                request_limit_context["limit_kind"],
+                "model_requests",
+                "Delegate request-limit context should classify model-request limits",
+            )
+            self.soft_assert_equal(
+                request_limit_context["limit_setting"],
+                "delegate_model_requests_limit",
+                "Delegate request-limit context should identify the controlling setting",
+            )
+            self.soft_assert(
+                "model-request limit" in model_request_limit_failure.json()["response"],
+                "Delegate request-limit failure should use model-request wording",
+            )
+            self.soft_assert(
+                "goal_ops" in model_request_limit_failure.json()["response"],
+                "Delegate request-limit failure should instruct parent to checkpoint before continuing",
             )
 
             from core.authoring.helpers.runtime_common import (

@@ -36,8 +36,8 @@ from core.llm.model_selection import ModelExecutionSpec
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
 from core.settings import (
-    get_default_model_thinking,
     get_delegate_model_requests_limit,
+    get_default_model_thinking,
     get_delegate_timeout_seconds,
     get_delegate_tool_calls_limit,
 )
@@ -152,7 +152,24 @@ class DelegateTool(BaseTool):
                 text = coerce_output_data(output)
                 audit = _build_child_run_audit(result.all_messages())
             except UsageLimitExceeded as exc:
+                limit_context = _delegate_usage_limit_context(exc, max_tool_calls=max_tool_calls)
                 classification = classify_exception(exc, phase="delegate_child_run")
+                classification = FailureClassification(
+                    error_type=classification.error_type,
+                    failure_kind=classification.failure_kind,
+                    retryable=classification.retryable,
+                    phase=classification.phase,
+                    message=classification.message,
+                    suggested_action=limit_context["suggested_action"],
+                    http_status=classification.http_status,
+                    retry_after=classification.retry_after,
+                    metadata={
+                        **classification.metadata,
+                        "limit_kind": limit_context["limit_kind"],
+                        "limit_setting": limit_context["limit_setting"],
+                        "limit": limit_context["limit"],
+                    },
+                )
                 return _failed_delegate_return(
                     session_id=session_id,
                     model=model_value or "default",
@@ -162,13 +179,7 @@ class DelegateTool(BaseTool):
                     max_tool_calls=max_tool_calls,
                     timeout_seconds=timeout_seconds,
                     classification=classification,
-                    message=(
-                        f"Delegate stopped because the child agent exceeded its tool-call limit "
-                        f"of {max_tool_calls}. Do not retry the same broad delegation. Split the work into "
-                        "smaller delegate calls scoped by path, query, source group, or hypothesis; use direct "
-                        "deterministic tools for simple retrieval; and have each child return a compact summary "
-                        "or saved artifact path."
-                    ),
+                    message=limit_context["message"],
                 )
             except asyncio.TimeoutError as exc:
                 classification = FailureClassification(
@@ -296,22 +307,70 @@ def _failed_delegate_return(
     if stripped_tools:
         metadata["stripped_tools"] = list(stripped_tools)
 
+    log_data = {
+        "workflow_id": session_id,
+        "model": model,
+        "tool_names": list(tool_names),
+        "error_type": classification.error_type,
+        "failure_kind": classification.failure_kind,
+        "retryable": classification.retryable,
+        "error_message": message,
+        "max_tool_calls": max_tool_calls,
+        "timeout_seconds": timeout_seconds,
+        "suggested_action": classification.suggested_action,
+    }
+    for key in ("limit_kind", "limit_setting", "limit"):
+        if key in metadata:
+            log_data[key] = metadata[key]
+
     logger.add_sink("validation").warning(
         "delegate_failed",
-        data={
-            "workflow_id": session_id,
-            "model": model,
-            "tool_names": list(tool_names),
-            "error_type": classification.error_type,
-            "failure_kind": classification.failure_kind,
-            "retryable": classification.retryable,
-            "error_message": message,
-            "max_tool_calls": max_tool_calls,
-            "timeout_seconds": timeout_seconds,
-            "suggested_action": classification.suggested_action,
-        },
+        data=log_data,
     )
     return ToolReturn(return_value=message, content=None, metadata=metadata)
+
+
+def _delegate_usage_limit_context(exc: UsageLimitExceeded, *, max_tool_calls: int) -> dict[str, Any]:
+    """Return model-visible details for a delegate child usage-limit failure."""
+    error_text = str(exc)
+    if "request_limit" in error_text:
+        limit = get_delegate_model_requests_limit()
+        limit_label = f" of {limit}" if limit > 0 else ""
+        return {
+            "limit_kind": "model_requests",
+            "limit_setting": "delegate_model_requests_limit",
+            "limit": limit,
+            "suggested_action": (
+                "Do not retry the same broad delegation. Split the work into smaller child runs, "
+                "ask each child to return a compact summary or saved artifact path, and checkpoint "
+                "progress with goal_ops before continuing."
+            ),
+            "message": (
+                f"Delegate stopped because the child agent reached its model-request limit{limit_label}. "
+                "Do not retry the same broad delegation unchanged. Split the work into smaller delegate calls "
+                "scoped by path, query, source group, or hypothesis; have each child return a compact summary "
+                "or saved artifact path; and checkpoint progress with goal_ops before continuing."
+            ),
+        }
+
+    limit = max_tool_calls
+    limit_label = f" of {limit}" if limit > 0 else ""
+    return {
+        "limit_kind": "tool_calls",
+        "limit_setting": "delegate_tool_calls_limit",
+        "limit": limit,
+        "suggested_action": (
+            "Do not retry the same broad delegation. Split the work into smaller child runs, use direct "
+            "deterministic tools for simple retrieval, and checkpoint progress with goal_ops before continuing."
+        ),
+        "message": (
+            f"Delegate stopped because the child agent exceeded its tool-call limit{limit_label}. "
+            "Do not retry the same broad delegation unchanged. Split the work into smaller delegate calls scoped "
+            "by path, query, source group, or hypothesis; use direct deterministic tools for simple retrieval; "
+            "have each child return a compact summary or saved artifact path; and checkpoint progress with "
+            "goal_ops before continuing."
+        ),
+    }
 
 
 def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:

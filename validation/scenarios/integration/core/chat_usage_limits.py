@@ -13,6 +13,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from core.chat.executor import (
     ChatModelRequestLimitError,
     PreparedChatExecution,
+    _failure_recovery_message,
     execute_chat_prompt,
     execute_chat_prompt_stream,
 )
@@ -86,6 +87,10 @@ class ChatUsageLimitsScenario(BaseScenario):
 
             self.soft_assert(caught is not None, "Non-streaming request limit should raise explicit chat error")
             if caught is not None:
+                self.soft_assert(
+                    "goal_ops checkpoints" in str(caught),
+                    "Request-limit message should direct continuation toward durable goal state",
+                )
                 self.soft_assert_equal(
                     caught.details.get("setting"),
                     "chat_model_requests_limit",
@@ -106,6 +111,18 @@ class ChatUsageLimitsScenario(BaseScenario):
                     latest_failure.get("error_type"),
                     "UsageLimitExceeded",
                     "Failure marker should keep original Pydantic exception type",
+                )
+                recovery_message = _failure_recovery_message(latest_failure)
+                recovery_text = ""
+                if recovery_message:
+                    recovery_text = " ".join(str(getattr(part, "content", "")) for part in recovery_message.parts)
+                self.soft_assert(
+                    "goal_ops goals/checkpoints" in recovery_text,
+                    "Recovery context should direct the next turn to durable goal checkpoints",
+                )
+                self.soft_assert(
+                    "smaller visible batch" in recovery_text,
+                    "Recovery context should ask the next turn to continue in bounded visible work",
                 )
 
             stream_session = "chat_usage_limit_stream"
@@ -133,6 +150,10 @@ class ChatUsageLimitsScenario(BaseScenario):
                 self.soft_assert(
                     "Model-request limit reached" in stream_error["choices"][0]["delta"]["content"],
                     "Streaming request limit should use model-request wording",
+                )
+                self.soft_assert(
+                    "goal_ops checkpoints" in stream_error["choices"][0]["delta"]["content"],
+                    "Streaming request-limit message should direct continuation toward durable goal state",
                 )
                 self.soft_assert_equal(
                     stream_error.get("details", {}).get("setting"),

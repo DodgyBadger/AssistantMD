@@ -274,6 +274,11 @@ def _failure_recovery_message(marker: dict[str, Any]) -> ModelRequest | None:
     suggested_action = str(marker.get("suggested_action") or "").strip()
     if suggested_action:
         text += f" Suggested action: {suggested_action}"
+    text += (
+        " For broad or long-running work, resume from durable state rather than assuming partial "
+        "failed-run tool history was persisted: inspect goal_ops goals/checkpoints, vault activity, "
+        "changed files, saved artifacts, and session history; then continue in a smaller visible batch."
+    )
     return ModelRequest(parts=[SystemPromptPart(content=text)])
 
 
@@ -328,8 +333,10 @@ def _build_model_request_limit_error(exc: UsageLimitExceeded) -> ChatModelReques
         (
             f"Chat stopped because it reached the configured model-request limit"
             f"{limit_label} for this run. "
-            "The session is intact. Ask the agent to continue in a new message, "
-            "or increase chat_model_requests_limit for larger autonomous runs."
+            "The session is intact. Ask the agent to continue in a new message; it should resume "
+            "from durable state such as goal_ops checkpoints, vault activity, changed files, saved "
+            "artifacts, and session history. Increase chat_model_requests_limit only when the larger "
+            "scope is intentional."
         ),
         details={
             "setting": "chat_model_requests_limit",
