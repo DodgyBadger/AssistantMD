@@ -2,6 +2,10 @@
 
 AssistantMD is a single-user, markdown-first agent system. This page is the primary starting point for development docs.
 
+Architecture decision records live under `docs/adr/`.
+They explain why durable system shapes were chosen; this architecture section
+remains the source of truth for how the system works now.
+
 ## System Snapshot
 
 ```
