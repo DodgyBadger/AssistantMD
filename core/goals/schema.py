@@ -37,10 +37,11 @@ def ensure_goal_ops_schema(
     conn = connect_sqlite_from_system_db(DB_NAME, system_root)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
-        _create_goal_ops_tables(conn)
-        conn.commit()
         if apply_migrations:
             apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=GOAL_OPS_MIGRATIONS)
+            conn.commit()
+        else:
+            _create_goal_ops_tables(conn)
             conn.commit()
     finally:
         conn.close()
