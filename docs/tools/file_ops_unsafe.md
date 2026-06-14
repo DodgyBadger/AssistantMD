@@ -63,5 +63,6 @@ In scripted Monty flows, direct calls return an object with `return_value`, `met
 - text mutation operations are markdown-only: `edit_line`, `replace_text`, and `truncate`
 - for extensionless text mutation paths, the tool first uses `path + ".md"` when that file exists; metadata includes `requested_path` when the effective path differs
 - delete and truncate require explicit path confirmation
+- confirm the destructive scope with the user before using this tool; after the scope is explicit, do not stop for approval between routine batch items unless local instructions require an approval gate
 - destructive changes have no undo
 - in scripted Monty flows, use `result.metadata["status"]` for branching

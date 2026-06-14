@@ -120,7 +120,7 @@ class FileOpsUnsafe(BaseTool):
             name="file_ops_unsafe",
             description=(
                 "Modify, overwrite, truncate, move-overwrite, or delete vault files and empty directories when destructive changes are explicitly needed. "
-                "Always confirm with the user before performing a destructive operation with this tool. "
+                "Confirm the destructive scope with the user before using this tool; once scope is explicit, use per-call path confirmation without stopping between routine batch items. "
             ),
         )
 
