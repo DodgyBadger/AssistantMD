@@ -27,11 +27,14 @@ logger = UnifiedLogger(tag="vault-mutations")
 
 
 class VaultMutationRejected(Exception):
-    """Raised when a requested vault mutation is rejected before writing."""
+    """Raised when a requested vault mutation is rejected or cannot be recorded safely."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+UNCERTAIN_MUTATION_STAGES = {"refresh", "persist"}
 
 
 @dataclass(frozen=True)
@@ -422,6 +425,14 @@ def move_vault_file(
             before_snapshot_id=source_snapshot_id,
             error=exc,
         )
+        if stage in UNCERTAIN_MUTATION_STAGES:
+            raise VaultMutationRejected(
+                "mutation_state_uncertain",
+                (
+                    f"Move from '{source_relative}' to '{destination_relative}' may have been applied, "
+                    f"but vault-state recording failed during {stage}: {exc}"
+                ),
+            ) from exc
         raise
     return source_result, destination_result
 
@@ -546,6 +557,14 @@ def mutate_vault_file(
             before_snapshot_id=before_snapshot_id,
             error=exc,
         )
+        if stage in UNCERTAIN_MUTATION_STAGES:
+            raise VaultMutationRejected(
+                "mutation_state_uncertain",
+                (
+                    f"{operation} for '{relative_path}' may have been applied, "
+                    f"but vault-state recording failed during {stage}: {exc}"
+                ),
+            ) from exc
         raise
     return result
 

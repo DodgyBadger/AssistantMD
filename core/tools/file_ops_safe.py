@@ -143,6 +143,16 @@ class FileOpsSafe(BaseTool):
                         error_type="unknown_operation",
                     )
 
+            except VaultMutationRejected as e:
+                return cls._result(
+                    message=str(e),
+                    operation=operation,
+                    path=path,
+                    destination=destination,
+                    search_term=search_term,
+                    status="error",
+                    error_type=e.code,
+                )
             except Exception as e:
                 return cls._result(
                     message=f"Error performing '{operation}' operation: {str(e)}",

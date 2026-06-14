@@ -96,6 +96,15 @@ class FileOpsUnsafe(BaseTool):
                         error_type="unknown_operation",
                     )
 
+            except VaultMutationRejected as e:
+                return cls._result(
+                    message=str(e),
+                    operation=operation,
+                    path=path,
+                    destination=destination,
+                    status="error",
+                    error_type=e.code,
+                )
             except Exception as e:
                 return cls._result(
                     message=f"Error performing '{operation}' operation: {str(e)}",
@@ -155,26 +164,28 @@ Full documentation:
     @classmethod
     def _edit_line(cls, path: str, line_number: int, old_content: str, new_content: str, vault_path: str) -> ToolReturn:
         """Edit a specific line in a file with exact match validation."""
-        full_path = validate_and_resolve_path(path, vault_path)
+        effective_path, full_path = cls._resolve_markdown_text_target(path, vault_path)
 
         if not os.path.exists(full_path):
             return cls._result(
-                message=f"Cannot edit '{path}' - file does not exist",
+                message=f"Cannot edit '{effective_path}' - file does not exist",
                 operation="edit_line",
-                path=path,
+                path=effective_path,
                 status="not_found",
                 exists=False,
                 error_type="file_not_found",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         if line_number < 1:
             return cls._result(
                 message=f"Invalid line_number {line_number} - must be >= 1",
                 operation="edit_line",
-                path=path,
+                path=effective_path,
                 status="error",
                 exists=True,
                 error_type="invalid_line_number",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         # Read all lines
@@ -186,11 +197,14 @@ Full documentation:
             return cls._result(
                 message=f"Line {line_number} does not exist - file only has {len(lines)} lines",
                 operation="edit_line",
-                path=path,
+                path=effective_path,
                 status="invalid_target",
                 exists=True,
                 error_type="line_not_found",
-                metadata={"line_count": len(lines)},
+                metadata={
+                    "line_count": len(lines),
+                    **cls._requested_path_metadata(path, effective_path),
+                },
             )
 
         # Get current line (remove newline for comparison)
@@ -203,11 +217,14 @@ Full documentation:
                     f"Line {line_number} content mismatch. Expected: '{old_content}', Found: '{current_line}'"
                 ),
                 operation="edit_line",
-                path=path,
+                path=effective_path,
                 status="error",
                 exists=True,
                 error_type="content_mismatch",
-                metadata={"line_number": line_number},
+                metadata={
+                    "line_number": line_number,
+                    **cls._requested_path_metadata(path, effective_path),
+                },
             )
 
         # Replace the line (handle multi-line new_content)
@@ -221,21 +238,22 @@ Full documentation:
 
         mutation = replace_vault_file_content(
             vault_path=vault_path,
-            path=path,
+            path=effective_path,
             content="".join(lines),
             operation="edit_line",
         )
 
         return cls._result(
-            message=f"Successfully edited line {line_number} in '{path}'",
+            message=f"Successfully edited line {line_number} in '{effective_path}'",
             operation="edit_line",
-            path=path,
+            path=effective_path,
             status="completed",
             exists=True,
             metadata={
                 "line_number": line_number,
                 "task_id": mutation.task_id,
                 "vault_id": mutation.vault_id,
+                **cls._requested_path_metadata(path, effective_path),
             },
         )
 
@@ -365,26 +383,28 @@ Full documentation:
     @classmethod
     def _replace_text(cls, path: str, old_text: str, new_text: str, count: int, vault_path: str) -> ToolReturn:
         """Replace text in file with limited count."""
-        full_path = validate_and_resolve_path(path, vault_path)
+        effective_path, full_path = cls._resolve_markdown_text_target(path, vault_path)
 
         if not os.path.exists(full_path):
             return cls._result(
-                message=f"Cannot replace text in '{path}' - file does not exist",
+                message=f"Cannot replace text in '{effective_path}' - file does not exist",
                 operation="replace_text",
-                path=path,
+                path=effective_path,
                 status="not_found",
                 exists=False,
                 error_type="file_not_found",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         if count < 1:
             return cls._result(
                 message=f"Invalid count {count} - must be >= 1",
                 operation="replace_text",
-                path=path,
+                path=effective_path,
                 status="error",
                 exists=True,
                 error_type="invalid_count",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         # Read file
@@ -394,12 +414,13 @@ Full documentation:
         # Check if old_text exists
         if old_text not in content:
             return cls._result(
-                message=f"Text not found in '{path}': '{old_text}'",
+                message=f"Text not found in '{effective_path}': '{old_text}'",
                 operation="replace_text",
-                path=path,
+                path=effective_path,
                 status="invalid_target",
                 exists=True,
                 error_type="text_not_found",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         # Replace with count limit
@@ -410,21 +431,22 @@ Full documentation:
 
         mutation = replace_vault_file_content(
             vault_path=vault_path,
-            path=path,
+            path=effective_path,
             content=new_content,
             operation="replace_text",
         )
 
         return cls._result(
-            message=f"Successfully replaced {replacements} occurrence(s) in '{path}'",
+            message=f"Successfully replaced {replacements} occurrence(s) in '{effective_path}'",
             operation="replace_text",
-            path=path,
+            path=effective_path,
             status="completed",
             exists=True,
             metadata={
                 "replacement_count": replacements,
                 "task_id": mutation.task_id,
                 "vault_id": mutation.vault_id,
+                **cls._requested_path_metadata(path, effective_path),
             },
         )
 
@@ -494,43 +516,70 @@ Full documentation:
                 error_type="confirmation_failed",
             )
 
-        full_path = validate_and_resolve_path(path, vault_path)
+        effective_path, full_path = cls._resolve_markdown_text_target(path, vault_path)
 
         if not os.path.exists(full_path):
             return cls._result(
-                message=f"Cannot truncate '{path}' - file does not exist",
+                message=f"Cannot truncate '{effective_path}' - file does not exist",
                 operation="truncate",
-                path=path,
+                path=effective_path,
                 status="not_found",
                 exists=False,
                 error_type="file_not_found",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         if os.path.isdir(full_path):
             return cls._result(
-                message=f"Cannot truncate '{path}' - this is a directory, not a file",
+                message=f"Cannot truncate '{effective_path}' - this is a directory, not a file",
                 operation="truncate",
-                path=path,
+                path=effective_path,
                 status="invalid_target",
                 exists=True,
                 error_type="is_directory",
+                metadata=cls._requested_path_metadata(path, effective_path),
             )
 
         mutation = replace_vault_file_content(
             vault_path=vault_path,
-            path=path,
+            path=effective_path,
             content="",
             operation="truncate",
         )
 
         return cls._result(
-            message=f"⚠️ Successfully truncated '{path}' - all contents cleared (this action cannot be undone)",
+            message=f"⚠️ Successfully truncated '{effective_path}' - all contents cleared (this action cannot be undone)",
             operation="truncate",
-            path=path,
+            path=effective_path,
             status="completed",
             exists=True,
             metadata={
                 "task_id": mutation.task_id,
                 "vault_id": mutation.vault_id,
+                **cls._requested_path_metadata(path, effective_path),
             },
         )
+
+    @classmethod
+    def _resolve_markdown_text_target(cls, path: str, vault_path: str) -> tuple[str, str]:
+        """Resolve markdown text mutation targets with the same extensionless preference as reads."""
+        requested_path = path.strip()
+        if cls._should_try_markdown_file(requested_path):
+            markdown_path = f"{requested_path}.md"
+            markdown_full_path = validate_and_resolve_path(markdown_path, vault_path)
+            if os.path.isfile(markdown_full_path):
+                return markdown_path, markdown_full_path
+        return requested_path, validate_and_resolve_path(requested_path, vault_path)
+
+    @staticmethod
+    def _should_try_markdown_file(path: str) -> bool:
+        if not path or path in {".", "/"} or path.endswith("/"):
+            return False
+        return "." not in os.path.basename(path)
+
+    @staticmethod
+    def _requested_path_metadata(requested_path: str, effective_path: str) -> dict[str, str]:
+        requested_path = requested_path.strip()
+        if requested_path and requested_path != effective_path:
+            return {"requested_path": requested_path}
+        return {}

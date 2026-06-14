@@ -104,6 +104,8 @@ Avoid broad recursive lists or searches unless the scope is already known.
 - writes and appends are markdown-only
 - `move` can move any existing vault file, including attachments and other non-markdown files
 - `list` includes all normal non-hidden vault files regardless of extension
+- `search` and `frontmatter` inspect markdown files only
+- `head` reads the first lines of text files; binary files return an unsupported result
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
 - `frontmatter` returns all keys by default; pass `keys` to filter
