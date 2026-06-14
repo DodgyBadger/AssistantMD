@@ -1000,7 +1000,7 @@ Full documentation:
 
     @classmethod
     def _search_files(cls, path: str, search_term: str, vault_path: str) -> ToolReturn:
-        """Search for text within markdown files using ripgrep."""
+        """Search for text files using ripgrep."""
         search_term = search_term.strip()
         if not search_term:
             return cls._result(
@@ -1024,8 +1024,7 @@ Full documentation:
             '--ignore-case',
         ]
 
-        glob_pattern = "*.md"
-        search_root = vault_abs
+        search_roots = [vault_abs]
         result_base_root = vault_abs
         result_prefix = ""
 
@@ -1064,8 +1063,7 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_mount",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 elif os.path.isfile(abs_scope):
                     if (
                         not abs_scope.startswith(root_abs + os.sep)
@@ -1079,11 +1077,9 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_mount",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 else:
-                    search_root = root_abs
-                    glob_pattern = rel
+                    search_roots = cls._resolve_search_glob_roots(root_abs, rel)
                 result_base_root = root_abs
                 result_prefix = mount_key
             else:
@@ -1101,8 +1097,7 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_vault",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 elif os.path.isfile(abs_scope):
                     if (
                         not abs_scope.startswith(vault_abs + os.sep)
@@ -1116,14 +1111,22 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_vault",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 else:
-                    glob_pattern = path
+                    search_roots = cls._resolve_search_glob_roots(vault_abs, path)
 
-        rg_cmd.extend(['--glob', glob_pattern])
+        if not search_roots:
+            return cls._result(
+                message=f"No matches found for '{search_term}' in text files",
+                operation="search",
+                path=path,
+                search_term=search_term,
+                status="completed",
+                exists=True,
+                metadata={"match_count": 0, "matches": []},
+            )
         rg_cmd.append(search_term)
-        rg_cmd.append(search_root)
+        rg_cmd.extend(search_roots)
 
         try:
             result = subprocess.run(
@@ -1170,7 +1173,7 @@ Full documentation:
                 )
             elif result.returncode == 1:
                 return cls._result(
-                    message=f"No matches found for '{search_term}' in markdown files",
+                    message=f"No matches found for '{search_term}' in text files",
                     operation="search",
                     path=path,
                     search_term=search_term,
@@ -1215,6 +1218,26 @@ Full documentation:
                 status="error",
                 error_type=type(e).__name__,
             )
+
+    @classmethod
+    def _resolve_search_glob_roots(cls, root_abs: str, pattern: str) -> list[str]:
+        """Resolve an explicit vault-relative search glob into bounded, non-hidden roots."""
+        if not pattern:
+            return [root_abs]
+        matches: list[str] = []
+        full_pattern = os.path.join(root_abs, pattern)
+        for match in glob.iglob(full_pattern, recursive="**" in pattern):
+            match_abs = os.path.abspath(match)
+            resolved = os.path.realpath(match_abs)
+            if not resolved.startswith(root_abs + os.sep) and resolved != root_abs:
+                continue
+            rel = os.path.relpath(match_abs, root_abs)
+            if rel == ".":
+                continue
+            if any(part.startswith(".") for part in rel.split(os.sep) if part):
+                continue
+            matches.append(resolved)
+        return sorted(dict.fromkeys(matches))
 
     @classmethod
     def _frontmatter_files(cls, path: str, keys: str, vault_path: str) -> ToolReturn:
