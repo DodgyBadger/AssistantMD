@@ -318,13 +318,18 @@ Full documentation:
 
         skipped = list(cleanup.skipped_paths)
         removed = list(cleanup.removed_paths)
+        blockers = list(cleanup.blocker_paths)
         if skipped:
+            blocker_message = ""
+            if blockers:
+                blocker_message = ". Remaining contents: " + ", ".join(blockers)
             message = (
                 f"Removed {len(removed)} empty director"
                 f"{'y' if len(removed) == 1 else 'ies'} under '{path}'. "
                 f"Skipped {len(skipped)} non-empty director"
                 f"{'y' if len(skipped) == 1 else 'ies'}: "
                 + ", ".join(skipped)
+                + blocker_message
             )
             status = "partial"
         elif removed:
@@ -347,8 +352,10 @@ Full documentation:
                 "target_type": "directory",
                 "removed_directories": removed,
                 "skipped_non_empty_directories": skipped,
+                "remaining_directory_contents": blockers,
                 "removed_count": len(removed),
                 "skipped_count": len(skipped),
+                "remaining_content_count": len(blockers),
                 "task_id": cleanup.task_id,
                 "vault_id": cleanup.vault_id,
                 "event_sequence": cleanup.event_sequence,

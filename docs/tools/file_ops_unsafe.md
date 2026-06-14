@@ -52,14 +52,14 @@ In scripted Monty flows, direct calls return an object with `return_value`, `met
 - `destination` when applicable
 - `exists` when applicable
 - operation-specific fields such as `line_number` or `replacement_count`
-- for directory deletion, `removed_directories`, `skipped_non_empty_directories`, `removed_count`, and `skipped_count`
+- for directory deletion, `removed_directories`, `skipped_non_empty_directories`, `remaining_directory_contents`, `removed_count`, `skipped_count`, and `remaining_content_count`
 
 ## Notes
 
 - this tool does not support read, list, or search
 - use `file_ops_safe` first to inspect and verify the target
 - `delete` and `move_overwrite` can operate on any existing vault file, including attachments and other non-markdown files
-- `delete` can also clean up directories, but only removes empty directories; it walks the requested directory bottom-up, removes empty descendants where possible, and returns non-empty directories in `skipped_non_empty_directories`
+- `delete` can also clean up directories, but only removes empty directories; it walks the requested directory bottom-up, removes empty descendants where possible, and returns non-empty directories in `skipped_non_empty_directories` plus remaining files, including hidden files, in `remaining_directory_contents`
 - text mutation operations are markdown-only
 - delete and truncate require explicit path confirmation
 - destructive changes have no undo

@@ -62,6 +62,7 @@ class DirectoryCleanupResult:
     path: str
     removed_paths: tuple[str, ...]
     skipped_paths: tuple[str, ...]
+    blocker_paths: tuple[str, ...]
     after_exists: bool
     task_id: str | None
     event_sequence: int | None
@@ -218,6 +219,7 @@ def delete_empty_vault_directory_tree(
         removed_paths.append(_relative_to_vault(vault_root, directory))
 
     skipped_paths = _remaining_directory_paths(vault_root, full_path)
+    blocker_paths = _remaining_directory_blockers(vault_root, full_path)
     event_sequence = None
     if removed_paths:
         refresh = service.refresh_vault(vault_root, vault_name=vault_name)
@@ -229,6 +231,7 @@ def delete_empty_vault_directory_tree(
         path=relative_path,
         removed_paths=tuple(sorted(removed_paths)),
         skipped_paths=tuple(skipped_paths),
+        blocker_paths=tuple(blocker_paths),
         after_exists=full_path.exists(),
         task_id=task.task_id if task is not None else None,
         event_sequence=event_sequence,
@@ -243,6 +246,7 @@ def delete_empty_vault_directory_tree(
             "path": result.path,
             "removed_count": len(result.removed_paths),
             "skipped_count": len(result.skipped_paths),
+            "blocker_count": len(result.blocker_paths),
             "after_exists": result.after_exists,
             "event_sequence": result.event_sequence,
         },
@@ -594,6 +598,26 @@ def _remaining_directory_paths(vault_root: Path, target: Path) -> tuple[str, ...
         root_path = Path(root)
         for directory_name in dirs:
             paths.append(_relative_to_vault(vault_root, root_path / directory_name))
+    return tuple(sorted(paths))
+
+
+def _remaining_directory_blockers(vault_root: Path, target: Path) -> tuple[str, ...]:
+    """Return files and inaccessible leaf directories still present under target."""
+    if not target.exists() or not target.is_dir():
+        return ()
+    paths: list[str] = []
+    for root, dirs, files in os.walk(target):
+        root_path = Path(root)
+        for file_name in files:
+            paths.append(_relative_to_vault(vault_root, root_path / file_name))
+        for directory_name in dirs:
+            directory = root_path / directory_name
+            try:
+                next(directory.iterdir())
+            except StopIteration:
+                paths.append(_relative_to_vault(vault_root, directory))
+            except OSError:
+                paths.append(_relative_to_vault(vault_root, directory))
     return tuple(sorted(paths))
 
 

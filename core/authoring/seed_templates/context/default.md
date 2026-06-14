@@ -118,7 +118,7 @@ async def read_convention_file(path):
         return path, exact_result
 
     parent, filename = split_parent_filename(path)
-    listing = await file_ops_safe(operation="list", path=parent, include_all=True)
+    listing = await file_ops_safe(operation="list", path=parent)
     if listing.metadata.get("status") != "completed":
         return path, exact_result
 

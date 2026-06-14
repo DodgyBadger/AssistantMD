@@ -17,6 +17,8 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
         vault = self.create_vault("FileOpsUnsafeDirectoryDeleteVault")
         self.create_file(vault, "cleanup/mixed/keep.md", "keep\n")
         self.create_file(vault, "cleanup/mixed/nonempty-child/keep.txt", "keep\n")
+        self.create_file(vault, "cleanup/hidden-only/.keep", "hidden\n")
+        self.create_file(vault, "cleanup/png-only/image.png", "png\n")
         (vault / "cleanup" / "empty-a" / "empty-b").mkdir(parents=True)
         (vault / "cleanup" / "mixed" / "empty-child").mkdir(parents=True)
 
@@ -25,7 +27,6 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
         discovery = FileOpsSafe._list_files(
             "cleanup",
             str(vault),
-            include_all=False,
             recursive=True,
             max_results=200,
         )
@@ -39,6 +40,16 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
             "cleanup/mixed/nonempty-child"
             not in set(discovery_metadata.get("empty_directory_candidates") or []),
             "Directory with descendant files should not be reported as an empty cleanup candidate",
+        )
+        self.soft_assert(
+            "cleanup/png-only"
+            not in set(discovery_metadata.get("empty_directory_candidates") or []),
+            "Directory with only non-markdown files should not be reported as an empty cleanup candidate",
+        )
+        self.soft_assert(
+            "cleanup/hidden-only"
+            not in set(discovery_metadata.get("empty_directory_candidates") or []),
+            "Directory with only hidden files should not be reported as an empty cleanup candidate",
         )
 
         first = FileOpsUnsafe._delete_path("cleanup", "cleanup", str(vault))
@@ -65,10 +76,34 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
             (vault / "cleanup" / "mixed" / "keep.md").exists(),
             "File inside non-empty directory should remain",
         )
+        self.soft_assert(
+            (vault / "cleanup" / "png-only" / "image.png").exists(),
+            "Non-markdown file inside non-empty directory should remain",
+        )
+        self.soft_assert(
+            (vault / "cleanup" / "hidden-only" / ".keep").exists(),
+            "Hidden file inside non-empty directory should remain",
+        )
         skipped = set(first_metadata.get("skipped_non_empty_directories") or [])
         self.soft_assert(
-            {"cleanup", "cleanup/mixed", "cleanup/mixed/nonempty-child"}.issubset(skipped),
+            {
+                "cleanup",
+                "cleanup/hidden-only",
+                "cleanup/mixed",
+                "cleanup/mixed/nonempty-child",
+                "cleanup/png-only",
+            }.issubset(skipped),
             "Partial cleanup should report non-empty directories for follow-up",
+        )
+        remaining_contents = set(first_metadata.get("remaining_directory_contents") or [])
+        self.soft_assert(
+            {
+                "cleanup/hidden-only/.keep",
+                "cleanup/mixed/keep.md",
+                "cleanup/mixed/nonempty-child/keep.txt",
+                "cleanup/png-only/image.png",
+            }.issubset(remaining_contents),
+            "Partial cleanup should report remaining files, including hidden files",
         )
 
         FileOpsUnsafe._delete_path(
@@ -79,6 +114,16 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
         FileOpsUnsafe._delete_path(
             "cleanup/mixed/nonempty-child/keep.txt",
             "cleanup/mixed/nonempty-child/keep.txt",
+            str(vault),
+        )
+        FileOpsUnsafe._delete_path(
+            "cleanup/png-only/image.png",
+            "cleanup/png-only/image.png",
+            str(vault),
+        )
+        FileOpsUnsafe._delete_path(
+            "cleanup/hidden-only/.keep",
+            "cleanup/hidden-only/.keep",
             str(vault),
         )
         second = FileOpsUnsafe._delete_path("cleanup", "cleanup", str(vault))

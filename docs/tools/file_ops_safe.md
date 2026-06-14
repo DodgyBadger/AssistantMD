@@ -21,7 +21,6 @@ Read, write, append, list, search, inspect frontmatter, and move files safely wi
 - `path`: file, directory, or glob pattern (used by all operations)
 - `content`: text to write or append
 - `destination`: destination path for move
-- `include_all`: include non-markdown and hidden files in listings
 - `recursive`: recurse through subdirectories for listings
 - `search_term`: text pattern to search for (search only)
 - `keys`: comma-separated frontmatter keys to extract (frontmatter only)
@@ -104,6 +103,7 @@ Avoid broad recursive lists or searches unless the scope is already known.
 
 - writes and appends are markdown-only
 - `move` can move any existing vault file, including attachments and other non-markdown files
+- `list` includes all normal non-hidden vault files regardless of extension
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
 - `frontmatter` returns all keys by default; pass `keys` to filter

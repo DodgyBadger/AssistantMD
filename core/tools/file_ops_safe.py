@@ -63,7 +63,6 @@ class FileOpsSafe(BaseTool):
             path: str = "",
             content: str = "",
             destination: str = "",
-            include_all: bool = False,
             recursive: bool = False,
             search_term: str = "",
             keys: str = "",
@@ -75,7 +74,6 @@ class FileOpsSafe(BaseTool):
             :param path: File, directory, or glob pattern
             :param content: Content for write/append
             :param destination: Destination path for move
-            :param include_all: Include non-markdown/hidden files in listings
             :param recursive: Recurse through subdirectories for listings
             :param search_term: Text pattern to search for (search operation)
             :param keys: Comma-separated frontmatter keys to extract (frontmatter operation)
@@ -112,14 +110,12 @@ class FileOpsSafe(BaseTool):
                     if get_virtual_mount_key(path):
                         return cls._list_virtual_mount(
                             path,
-                            include_all=include_all,
                             recursive=recursive,
                             max_results=get_file_ops_safe_list_max_results(),
                         )
                     return cls._list_files(
                         path,
                         vault_path,
-                        include_all=include_all,
                         recursive=recursive,
                         max_results=get_file_ops_safe_list_max_results(),
                     )
@@ -245,7 +241,6 @@ Full documentation:
                 return cls._list_files(
                     path,
                     vault_path,
-                    include_all=False,
                     recursive=False,
                     max_results=get_file_ops_safe_list_max_results(),
                 )
@@ -257,7 +252,6 @@ Full documentation:
                 return cls._list_files(
                     path,
                     vault_path,
-                    include_all=False,
                     recursive=False,
                     max_results=get_file_ops_safe_list_max_results(),
                 )
@@ -690,7 +684,6 @@ Full documentation:
         cls,
         path: str,
         vault_path: str,
-        include_all: bool,
         recursive: bool,
         max_results: int,
     ) -> ToolReturn:
@@ -723,15 +716,12 @@ Full documentation:
             relative_path = match[len(vault_path) + 1:] if match != vault_path else ""
 
             parts = relative_path.split(os.sep) if relative_path else []
-            if not include_all and any(part.startswith('.') for part in parts if part):
+            if any(part.startswith('.') for part in parts if part):
                 continue
 
             if os.path.isdir(match):
                 if relative_path:
                     directories.append(relative_path)
-                continue
-
-            if not include_all and not relative_path.endswith(".md"):
                 continue
 
             if relative_path:
@@ -849,7 +839,6 @@ Full documentation:
     def _list_virtual_mount(
         cls,
         path: str,
-        include_all: bool,
         recursive: bool,
         max_results: int,
     ) -> ToolReturn:
@@ -888,15 +877,12 @@ Full documentation:
             relative_path = match[len(docs_root) + 1:] if match != docs_root else ""
 
             parts = relative_path.split(os.sep) if relative_path else []
-            if not include_all and any(part.startswith('.') for part in parts if part):
+            if any(part.startswith('.') for part in parts if part):
                 continue
 
             if os.path.isdir(match):
                 if relative_path:
                     directories.append(relative_path)
-                continue
-
-            if not include_all and not relative_path.endswith(".md"):
                 continue
 
             if relative_path:
