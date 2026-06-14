@@ -146,3 +146,15 @@ class ChatToolCallLimitExceededError(APIException):
             message=message,
             details=details,
         )
+
+
+class ChatModelRequestLimitExceededError(APIException):
+    """Raised when chat exceeds the configured model-request limit."""
+
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            status_code=400,
+            error_type="ChatModelRequestLimitExceeded",
+            message=message,
+            details=details,
+        )

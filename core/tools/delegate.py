@@ -37,6 +37,7 @@ from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
 from core.settings import (
     get_default_model_thinking,
+    get_delegate_model_requests_limit,
     get_delegate_timeout_seconds,
     get_delegate_tool_calls_limit,
 )
@@ -461,9 +462,11 @@ def _parse_options(options: dict[str, Any]) -> tuple[object, int, float]:
 
 
 def _delegate_usage_limits(max_tool_calls: int) -> UsageLimits | None:
-    if max_tool_calls <= 0:
-        return None
-    return UsageLimits(tool_calls_limit=max_tool_calls)
+    model_requests_limit = get_delegate_model_requests_limit()
+    return UsageLimits(
+        request_limit=model_requests_limit if model_requests_limit > 0 else None,
+        tool_calls_limit=max_tool_calls if max_tool_calls > 0 else None,
+    )
 
 
 def _delegate_wait_timeout(timeout_seconds: float) -> float | None:

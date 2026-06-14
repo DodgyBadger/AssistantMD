@@ -33,9 +33,17 @@ settings:
     value: 0
     description: "Maximum tool calls allowed in one chat response. 0 disables the limit. Set a low value to force tighter tool use or encourage code_execution for batch work."
     restart_required: false
+  chat_model_requests_limit:
+    value: 150
+    description: "Maximum model requests allowed in one chat response. 0 disables the limit. This is a circuit breaker for runaway long-running tasks, separate from tool-call limits."
+    restart_required: false
   delegate_tool_calls_limit:
     value: 32
     description: "Maximum tool calls allowed inside one delegate child-agent run. 0 disables the limit. Increase for broad delegated searches, or lower it to force tighter scoped delegation."
+    restart_required: false
+  delegate_model_requests_limit:
+    value: 75
+    description: "Maximum model requests allowed inside one delegate child-agent run. 0 disables the limit. Keep child runs bounded and split broad work into smaller delegates."
     restart_required: false
   delegate_timeout_seconds:
     value: 120

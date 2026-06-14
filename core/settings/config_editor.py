@@ -9,9 +9,12 @@ sections (tools, core providers).
 import json
 from typing import Optional
 
+import yaml
+
 from core.settings.store import (
     ModelConfig,
     ProviderConfig,
+    SETTINGS_TEMPLATE,
     SettingsEntry,
     load_settings,
     save_settings,
@@ -29,7 +32,10 @@ def _persist_changes(settings_file) -> None:
 
 def list_general_settings() -> dict[str, SettingsEntry]:
     """Return general settings entries."""
-    return load_settings().settings
+    settings_file = load_settings()
+    merged = dict(_template_general_settings())
+    merged.update(settings_file.settings)
+    return merged
 
 
 def update_general_setting(name: str, raw_value: str) -> SettingsEntry:
@@ -37,6 +43,8 @@ def update_general_setting(name: str, raw_value: str) -> SettingsEntry:
     settings_file = load_settings()
     entry = settings_file.settings.get(name)
 
+    if entry is None:
+        entry = _template_general_settings().get(name)
     if entry is None:
         raise SettingsError(f"Setting '{name}' does not exist.")
 
@@ -49,6 +57,23 @@ def update_general_setting(name: str, raw_value: str) -> SettingsEntry:
 
     _persist_changes(settings_file)
     return settings_file.settings[name]
+
+
+def _template_general_settings() -> dict[str, SettingsEntry]:
+    try:
+        raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        return {}
+    settings = raw.get("settings")
+    if not isinstance(settings, dict):
+        return {}
+    result: dict[str, SettingsEntry] = {}
+    for key, value in settings.items():
+        try:
+            result[str(key)] = SettingsEntry.model_validate(value)
+        except Exception:
+            continue
+    return result
 
 
 def _coerce_setting_value(raw_value: str, current_value):

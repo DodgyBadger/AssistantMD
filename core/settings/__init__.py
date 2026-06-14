@@ -460,6 +460,19 @@ def get_chat_tool_calls_limit() -> int:
     return parsed if parsed > 0 else 0
 
 
+def get_chat_model_requests_limit() -> int:
+    """Return the max model requests per chat response; 0 disables the limit."""
+    entry = get_general_settings().get("chat_model_requests_limit")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        return _get_template_setting_positive_int("chat_model_requests_limit", 150)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _get_template_setting_positive_int("chat_model_requests_limit", 150)
+    return parsed if parsed > 0 else 0
+
+
 def get_delegate_tool_calls_limit() -> int:
     """Return the max tool calls per delegate child run; 0 disables the limit."""
     entry = get_general_settings().get("delegate_tool_calls_limit")
@@ -474,6 +487,19 @@ def get_delegate_tool_calls_limit() -> int:
         from core.constants import DELEGATE_DEFAULT_MAX_TOOL_CALLS
 
         return DELEGATE_DEFAULT_MAX_TOOL_CALLS
+    return parsed if parsed > 0 else 0
+
+
+def get_delegate_model_requests_limit() -> int:
+    """Return the max model requests per delegate child run; 0 disables the limit."""
+    entry = get_general_settings().get("delegate_model_requests_limit")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        return _get_template_setting_positive_int("delegate_model_requests_limit", 75)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _get_template_setting_positive_int("delegate_model_requests_limit", 75)
     return parsed if parsed > 0 else 0
 
 

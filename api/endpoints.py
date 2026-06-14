@@ -15,6 +15,7 @@ from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
+    ChatModelRequestLimitError,
     ChatToolCallLimitError,
     UploadedImageAttachment,
     execute_chat_prompt,
@@ -81,6 +82,7 @@ from .exceptions import (
     APIException,
     ChatCapabilityMismatchError,
     ChatContextTemplateFailureError,
+    ChatModelRequestLimitExceededError,
     ChatSessionVaultMismatchError,
     ChatToolCallLimitExceededError,
 )
@@ -367,6 +369,20 @@ async def _execute_chat_request(
             },
         )
         raise ChatToolCallLimitExceededError(str(exc), details=exc.details) from exc
+    except ChatModelRequestLimitError as exc:
+        logger.warning(
+            "Chat request exceeded model-request limit",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
+        raise ChatModelRequestLimitExceededError(str(exc), details=exc.details) from exc
     except Exception as exc:
         logger.error(
             "Chat request failed before response",

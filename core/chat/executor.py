@@ -47,6 +47,7 @@ from core.llm.capabilities.chat_context import build_context_template_error_deta
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
 from core.llm.capabilities.factory import build_chat_capabilities
 from core.settings import (
+    get_chat_model_requests_limit,
     get_chat_tool_calls_limit,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
@@ -101,6 +102,14 @@ class ChatContextTemplateError(ValueError):
 
 class ChatToolCallLimitError(ValueError):
     """Raised when a chat run exceeds the configured tool-call limit."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class ChatModelRequestLimitError(ValueError):
+    """Raised when a chat run exceeds the configured model-request limit."""
 
     def __init__(self, message: str, *, details: dict[str, Any] | None = None):
         super().__init__(message)
@@ -287,9 +296,11 @@ def _with_failure_recovery_context(
 
 def _chat_usage_limits() -> UsageLimits | None:
     tool_calls_limit = get_chat_tool_calls_limit()
-    if tool_calls_limit <= 0:
-        return None
-    return UsageLimits(tool_calls_limit=tool_calls_limit)
+    model_requests_limit = get_chat_model_requests_limit()
+    return UsageLimits(
+        request_limit=model_requests_limit if model_requests_limit > 0 else None,
+        tool_calls_limit=tool_calls_limit if tool_calls_limit > 0 else None,
+    )
 
 
 def _build_tool_call_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitError:
@@ -308,6 +319,40 @@ def _build_tool_call_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitEr
             "error": str(exc),
         },
     )
+
+
+def _build_model_request_limit_error(exc: UsageLimitExceeded) -> ChatModelRequestLimitError:
+    limit = get_chat_model_requests_limit()
+    limit_label = f" of {limit}" if limit > 0 else ""
+    return ChatModelRequestLimitError(
+        (
+            f"Chat stopped because it reached the configured model-request limit"
+            f"{limit_label} for this run. "
+            "The session is intact. Ask the agent to continue in a new message, "
+            "or increase chat_model_requests_limit for larger autonomous runs."
+        ),
+        details={
+            "setting": "chat_model_requests_limit",
+            "limit_kind": "request_limit",
+            "limit": limit,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        },
+    )
+
+
+def _build_chat_usage_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitError | ChatModelRequestLimitError:
+    if "request_limit" in str(exc):
+        return _build_model_request_limit_error(exc)
+    return _build_tool_call_limit_error(exc)
+
+
+def _usage_limit_label(error: ChatToolCallLimitError | ChatModelRequestLimitError) -> str:
+    return "model-request limit" if isinstance(error, ChatModelRequestLimitError) else "tool-call limit"
+
+
+def _usage_limit_display_label(error: ChatToolCallLimitError | ChatModelRequestLimitError) -> str:
+    return "Model-request limit" if isinstance(error, ChatModelRequestLimitError) else "Tool-call limit"
 
 
 def _chat_event_for_message(message: str) -> str | None:
@@ -990,10 +1035,10 @@ async def execute_chat_prompt(
         )
         raise
     except UsageLimitExceeded as exc:
-        limit_error = _build_tool_call_limit_error(exc)
+        limit_error = _build_chat_usage_limit_error(exc)
         failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
         _log_chat_failure(
-            "Chat tool-call limit exceeded",
+            f"Chat {_usage_limit_label(limit_error)} exceeded",
             vault_name=vault_name,
             session_id=session_id,
             model=model,
@@ -1340,9 +1385,9 @@ async def _stream_prepared_chat_prompt(
             yield f"data: {json.dumps(error_chunk)}\n\n"
             return
         except UsageLimitExceeded as exc:
-            limit_error = _build_tool_call_limit_error(exc)
+            limit_error = _build_chat_usage_limit_error(exc)
             _log_chat_failure(
-                "Streaming chat tool-call limit exceeded",
+                f"Streaming chat {_usage_limit_label(limit_error)} exceeded",
                 vault_name=vault_name,
                 session_id=session_id,
                 model=prepared.model,
@@ -1368,7 +1413,7 @@ async def _stream_prepared_chat_prompt(
             error_chunk = {
                 "event": "error",
                 "choices": [{
-                    "delta": {"content": f"\n\nTool-call limit reached: {str(limit_error)}"},
+                    "delta": {"content": f"\n\n{_usage_limit_display_label(limit_error)} reached: {str(limit_error)}"},
                     "index": 0,
                     "finish_reason": "error",
                 }],
