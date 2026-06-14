@@ -189,7 +189,7 @@ Full documentation:
             )
 
         # Read all lines
-        with open(full_path, 'r', encoding='utf-8') as file:
+        with open(full_path, 'r', encoding='utf-8', newline='') as file:
             lines = file.readlines()
 
         # Validate line number
@@ -208,7 +208,8 @@ Full documentation:
             )
 
         # Get current line (remove newline for comparison)
-        current_line = lines[line_number - 1].rstrip('\n')
+        original_line = lines[line_number - 1]
+        current_line = original_line.rstrip('\r\n')
 
         # Validate old_content matches
         if current_line != old_content:
@@ -228,13 +229,14 @@ Full documentation:
             )
 
         # Replace the line (handle multi-line new_content)
+        line_ending = "\r\n" if original_line.endswith("\r\n") else "\n"
         if '\n' in new_content:
             # Multi-line replacement
             new_lines = new_content.split('\n')
-            lines[line_number - 1:line_number] = [line + '\n' for line in new_lines]
+            lines[line_number - 1:line_number] = [line + line_ending for line in new_lines]
         else:
             # Single line replacement
-            lines[line_number - 1] = new_content + '\n'
+            lines[line_number - 1] = new_content + line_ending
 
         mutation = replace_vault_file_content(
             vault_path=vault_path,

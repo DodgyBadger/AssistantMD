@@ -16,6 +16,7 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
         vault = self.create_vault("FileOpsExtensionlessTextMutationsVault")
         self.create_file(vault, "notes/edit-target.md", "first\nreplace me\nlast\n")
         self.create_file(vault, "notes/no-extension", "alpha\n")
+        self.create_file(vault, "notes/crlf-target.md", "first\r\nreplace me\r\nlast\r\n")
 
         await self.start_system()
 
@@ -45,6 +46,23 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
             (vault / "notes" / "edit-target.md").read_text(encoding="utf-8"),
             "first\nchanged\nlast\n",
             "edit_line should mutate the markdown file selected by extensionless resolution",
+        )
+        crlf_edit = FileOpsUnsafe._edit_line(
+            "notes/crlf-target.md",
+            2,
+            "replace me",
+            "changed",
+            str(vault),
+        )
+        self.soft_assert_equal(
+            crlf_edit.metadata.get("status"),
+            "completed",
+            "edit_line should compare CRLF lines without requiring a trailing carriage return",
+        )
+        self.soft_assert_equal(
+            (vault / "notes" / "crlf-target.md").read_bytes(),
+            b"first\r\nchanged\r\nlast\r\n",
+            "edit_line should preserve CRLF line endings when replacing a line",
         )
 
         replaced = FileOpsUnsafe._replace_text(

@@ -7,6 +7,7 @@ Provides secure file management capabilities within vault boundaries.
 import os
 import glob
 import subprocess
+from bisect import insort
 from pathlib import Path
 from typing import Any
 
@@ -714,30 +715,14 @@ Full documentation:
                 path = os.path.join(path, "**/*" if recursive else "*")
 
         full_pattern = os.path.join(vault_path, path)
-        matches = glob.glob(full_pattern, recursive=recursive or "**" in path)
+        files, directories, file_count, directory_count = cls._collect_limited_matches(
+            pattern=full_pattern,
+            recursive=recursive or "**" in path,
+            root_path=vault_path,
+            max_results=max_results,
+        )
 
-        files = []
-        directories = []
-
-        for match in matches:
-            if not match.startswith(vault_path + os.sep) and match != vault_path:
-                continue
-
-            relative_path = match[len(vault_path) + 1:] if match != vault_path else ""
-
-            parts = relative_path.split(os.sep) if relative_path else []
-            if any(part.startswith('.') for part in parts if part):
-                continue
-
-            if os.path.isdir(match):
-                if relative_path:
-                    directories.append(relative_path)
-                continue
-
-            if relative_path:
-                files.append(relative_path)
-
-        if not files and not directories:
+        if file_count == 0 and directory_count == 0:
             empty_candidates = cls._empty_directory_candidates(
                 vault_path=vault_path,
                 directories=[],
@@ -761,16 +746,7 @@ Full documentation:
                 },
             )
 
-        truncated = False
-        if max_results > 0 and len(files) + len(directories) > max_results:
-            truncated = True
-            remaining = max_results
-            directories = sorted(directories)[:remaining]
-            remaining -= len(directories)
-            files = sorted(files)[:max(0, remaining)]
-        else:
-            directories = sorted(directories)
-            files = sorted(files)
+        truncated = max_results > 0 and file_count + directory_count > max_results
         empty_candidates = cls._empty_directory_candidates(
             vault_path=vault_path,
             directories=directories,
@@ -807,6 +783,75 @@ Full documentation:
     def _relative_vault_path(vault_path: str, full_path: str) -> str:
         relative = os.path.relpath(full_path, vault_path)
         return "" if relative == "." else relative.replace(os.sep, "/")
+
+    @classmethod
+    def _collect_limited_matches(
+        cls,
+        *,
+        pattern: str,
+        recursive: bool,
+        root_path: str,
+        max_results: int,
+    ) -> tuple[list[str], list[str], int, int]:
+        """Collect listed paths while bounding retained candidates to the display cap."""
+        root_display = os.path.abspath(root_path)
+        root_abs = os.path.realpath(root_path)
+        selected_files: list[str] = []
+        selected_directories: list[str] = []
+        total_files = 0
+        total_directories = 0
+
+        for match in glob.iglob(pattern, recursive=recursive):
+            match_abs = os.path.abspath(match)
+            if not match_abs.startswith(root_display + os.sep) and match_abs != root_display:
+                continue
+
+            relative = os.path.relpath(match_abs, root_display)
+            relative_path = "" if relative == "." else relative.replace(os.sep, "/")
+            parts = relative_path.split(os.sep) if relative_path else []
+            if any(part.startswith('.') for part in parts if part):
+                continue
+
+            try:
+                resolved = os.path.realpath(match)
+            except OSError:
+                continue
+            if not resolved.startswith(root_abs + os.sep) and resolved != root_abs:
+                continue
+
+            if os.path.isdir(match):
+                if relative_path:
+                    total_directories += 1
+                    cls._keep_sorted_candidate(
+                        selected_directories,
+                        relative_path,
+                        max_results,
+                    )
+                continue
+
+            if relative_path:
+                total_files += 1
+                cls._keep_sorted_candidate(selected_files, relative_path, max_results)
+
+        if max_results > 0 and total_files + total_directories > max_results:
+            directories = selected_directories[:max_results]
+            file_slots = max(0, max_results - min(total_directories, max_results))
+            files = selected_files[:file_slots]
+            return files, directories, total_files, total_directories
+
+        return selected_files, selected_directories, total_files, total_directories
+
+    @staticmethod
+    def _keep_sorted_candidate(candidates: list[str], value: str, max_results: int) -> None:
+        if max_results <= 0:
+            insort(candidates, value)
+            return
+        if len(candidates) < max_results:
+            insort(candidates, value)
+            return
+        if value < candidates[-1]:
+            insort(candidates, value)
+            candidates.pop()
 
     @classmethod
     def _empty_directory_candidates(
@@ -875,30 +920,14 @@ Full documentation:
                 rel = os.path.join(rel, "**/*" if recursive else "*")
 
         full_pattern = os.path.join(docs_root, rel)
-        matches = glob.glob(full_pattern, recursive=recursive or "**" in rel)
+        files, directories, file_count, directory_count = cls._collect_limited_matches(
+            pattern=full_pattern,
+            recursive=recursive or "**" in rel,
+            root_path=docs_root,
+            max_results=max_results,
+        )
 
-        files = []
-        directories = []
-
-        for match in matches:
-            if not match.startswith(docs_root + os.sep) and match != docs_root:
-                continue
-
-            relative_path = match[len(docs_root) + 1:] if match != docs_root else ""
-
-            parts = relative_path.split(os.sep) if relative_path else []
-            if any(part.startswith('.') for part in parts if part):
-                continue
-
-            if os.path.isdir(match):
-                if relative_path:
-                    directories.append(relative_path)
-                continue
-
-            if relative_path:
-                files.append(relative_path)
-
-        if not files and not directories:
+        if file_count == 0 and directory_count == 0:
             return cls._result(
                 message=f"No files or directories found for path '{path}'",
                 operation="list",
@@ -917,16 +946,7 @@ Full documentation:
                 },
             )
 
-        truncated = False
-        if max_results > 0 and len(files) + len(directories) > max_results:
-            truncated = True
-            remaining = max_results
-            directories = sorted(directories)[:remaining]
-            remaining -= len(directories)
-            files = sorted(files)[:max(0, remaining)]
-        else:
-            directories = sorted(directories)
-            files = sorted(files)
+        truncated = max_results > 0 and file_count + directory_count > max_results
 
         result_parts = []
         if directories:

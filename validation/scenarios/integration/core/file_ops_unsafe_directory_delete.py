@@ -51,6 +51,28 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
             not in set(discovery_metadata.get("empty_directory_candidates") or []),
             "Directory with only hidden files should not be reported as an empty cleanup candidate",
         )
+        truncated_discovery = FileOpsSafe._list_files(
+            "cleanup",
+            str(vault),
+            recursive=True,
+            max_results=2,
+        )
+        truncated_metadata = truncated_discovery.metadata
+        self.soft_assert_equal(
+            truncated_metadata.get("truncated"),
+            True,
+            "Recursive list should report truncation when capped",
+        )
+        self.soft_assert_equal(
+            truncated_metadata.get("directories"),
+            ["cleanup/empty-a", "cleanup/empty-a/empty-b"],
+            "Truncated list should preserve sorted directory-first selection",
+        )
+        self.soft_assert_equal(
+            truncated_metadata.get("files"),
+            [],
+            "Directory-first truncation should omit files when directories fill the cap",
+        )
 
         first = FileOpsUnsafe._delete_path("cleanup", "cleanup", str(vault))
         first_metadata = first.metadata
