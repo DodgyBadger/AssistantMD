@@ -28,7 +28,7 @@ import core.authoring.engine as _engine
 from core.runtime.paths import get_data_root, get_system_root
 from core.scheduling.parser import ScheduleParsingError, parse_schedule_syntax
 from core.scheduling.triggers import create_schedule_trigger
-from core.utils.frontmatter import parse_simple_frontmatter
+from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
 from core.utils.hash import hash_file_content
 from core.utils.markdown import parse_markdown_sections
 from core.logger import UnifiedLogger
@@ -539,7 +539,13 @@ def seed_system_templates(
                 result["skipped"].append(str(target_path))
                 continue
             try:
-                shutil.copyfile(seed_path, target_path)
+                content = seed_path.read_text(encoding="utf-8")
+                if subfolder == "workflows" and target_exists and overwrite:
+                    content = _preserve_enabled_frontmatter(
+                        source_content=content,
+                        existing_content=target_path.read_text(encoding="utf-8"),
+                    )
+                target_path.write_text(content, encoding="utf-8")
                 result["updated" if target_exists else "created"].append(str(target_path))
                 logger.info(f"Seeded template to {target_path}")
             except Exception as exc:  # pragma: no cover - defensive
@@ -548,6 +554,19 @@ def seed_system_templates(
                 result["errors"].append(f"{target_path}: {exc}")
 
     return result
+
+
+def _preserve_enabled_frontmatter(*, source_content: str, existing_content: str) -> str:
+    """Carry a local workflow enabled flag forward when refreshing a seed template."""
+    existing_frontmatter, _existing_body = parse_simple_frontmatter(existing_content, require_frontmatter=False)
+    enabled = existing_frontmatter.get("enabled")
+    if not isinstance(enabled, bool):
+        return source_content
+    return upsert_frontmatter_key(
+        source_content,
+        key="enabled",
+        value="true" if enabled else "false",
+    )
 
 
 def _seed_vault_skills(vault_path: str) -> None:

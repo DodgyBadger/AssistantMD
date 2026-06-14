@@ -25,9 +25,28 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
         target = system_root / "Authoring" / "default.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("STALE GENERATED DEFAULT", encoding="utf-8")
+        workflow_target = system_root / "Authoring" / "nightly-session-summarization.md"
+        workflow_target.write_text(
+            "\n".join(
+                [
+                    "---",
+                    "run_type: workflow",
+                    'schedule: "cron: 0 2 * * *"',
+                    "enabled: true",
+                    "description: stale enabled workflow",
+                    "---",
+                    "",
+                    "STALE WORKFLOW BODY",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
 
         seed = Path("core/authoring/seed_templates/context/default.md")
         expected = seed.read_text(encoding="utf-8")
+        workflow_seed = Path("core/authoring/seed_templates/workflows/nightly-session-summarization.md")
+        expected_workflow = workflow_seed.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1)
 
         await self.start_system()
 
@@ -93,6 +112,10 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             "STALE GENERATED DEFAULT",
             "Startup should preserve existing system authoring files",
         )
+        self.soft_assert(
+            "STALE WORKFLOW BODY" in workflow_target.read_text(encoding="utf-8"),
+            "Startup should preserve existing system workflow templates",
+        )
 
         response = self.call_api("/api/system/authoring/seed-refresh", method="POST")
         self.soft_assert_equal(
@@ -105,10 +128,19 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             target.as_posix() in payload.get("updated", []),
             "Manual refresh should report the stale default template as updated",
         )
+        self.soft_assert(
+            workflow_target.as_posix() in payload.get("updated", []),
+            "Manual refresh should report the stale system workflow template as updated",
+        )
         self.soft_assert_equal(
             target.read_text(encoding="utf-8"),
             expected,
             "Manual refresh should update packaged system authoring seed files",
+        )
+        self.soft_assert_equal(
+            workflow_target.read_text(encoding="utf-8"),
+            expected_workflow,
+            "Manual refresh should update system workflow content while preserving enabled state",
         )
 
         await self.stop_system()
