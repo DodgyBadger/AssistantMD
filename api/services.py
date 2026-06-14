@@ -55,6 +55,7 @@ from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.goals import GoalOpsStore
 from core.memory.session_summary import SessionSummaryStore
 from core.system_migrations import (
     get_system_migration_status as get_registered_system_migration_status,
@@ -116,6 +117,7 @@ from .models import (
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeResponse,
+    GoalCleanupResponse,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
@@ -584,6 +586,46 @@ def purge_expired_cache() -> CachePurgeResponse:
         message=f"Purged {purged_count} expired cache artifact(s).",
         purged_count=purged_count,
     )
+
+
+def cleanup_goals(
+    vault_name: str,
+    *,
+    status: str,
+    older_than_days: int | None,
+) -> GoalCleanupResponse:
+    """Delete old completed or cancelled goals for a vault."""
+    status_key = (status or "completed").strip().lower()
+    status_map = {
+        "completed": ("completed",),
+        "cancelled": ("cancelled",),
+        "completed_or_cancelled": ("completed", "cancelled"),
+    }
+    statuses = status_map.get(status_key)
+    if statuses is None:
+        raise ValueError("status must be completed, cancelled, or completed_or_cancelled")
+
+    deleted = GoalOpsStore().purge_goals(
+        vault_name=vault_name,
+        statuses=statuses,
+        older_than_days=older_than_days,
+    )
+    logger.info(
+        "Manual goal cleanup completed",
+        data={
+            "vault_name": vault_name,
+            "status": status_key,
+            "older_than_days": older_than_days,
+            "deleted": deleted,
+        },
+    )
+    if deleted == 0:
+        message = "No goals matched."
+    elif deleted == 1:
+        message = "Deleted 1 goal."
+    else:
+        message = f"Deleted {deleted} goals."
+    return GoalCleanupResponse(success=True, deleted=deleted, message=message)
 
 
 def get_system_database_migration_status() -> SystemMigrationStatusResponse:
@@ -2210,6 +2252,18 @@ def repair_settings_from_template() -> SystemSettingsResponse:
                 active_section[key] = value
         merged[section] = active_section
 
+    # Existing settings entries may need newly introduced metadata fields
+    # from the template. Preserve active values and only fill absent metadata.
+    active_settings = merged.get("settings", {})
+    template_settings = template_sections.get("settings", {})
+    if isinstance(active_settings, dict) and isinstance(template_settings, dict):
+        for key, template_setting in template_settings.items():
+            active_setting = active_settings.get(key)
+            if isinstance(active_setting, dict) and isinstance(template_setting, dict):
+                for metadata_key in ("description", "category", "restart_required"):
+                    if metadata_key in template_setting:
+                        active_setting.setdefault(metadata_key, template_setting[metadata_key])
+
     # Existing core provider entries may need newly introduced non-secret fields
     # from the template. Preserve all active values and only fill absent keys.
     active_providers = merged.get("providers", {})
@@ -2298,6 +2352,7 @@ def _build_setting_info(key: str, entry) -> SettingInfo:
         key=key,
         value=_format_setting_value(getattr(entry, "value", None)),
         description=getattr(entry, "description", None),
+        category=getattr(entry, "category", None),
         restart_required=bool(getattr(entry, "restart_required", False)),
     )
 

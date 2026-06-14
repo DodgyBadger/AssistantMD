@@ -40,6 +40,8 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
         settings_raw = yaml.safe_load(settings_response.json()["content"])
         settings_raw["providers"]["openrouter"].pop("provider", None)
         settings_raw["settings"].pop("openrouter_ignored_providers", None)
+        settings_raw["settings"]["default_model"].pop("category", None)
+        settings_raw["settings"]["default_model"]["value"] = "haiku"
         update_settings_response = self.call_api(
             "/api/system/settings",
             method="PUT",
@@ -49,6 +51,13 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             update_settings_response.status_code,
             200,
             "Settings update should allow existing OpenRouter provider without routing block",
+        )
+        status_response = self.call_api("/api/status")
+        self.soft_assert_equal(status_response.status_code, 200, "Status should load after metadata removal")
+        status_issues = status_response.json().get("configuration_status", {}).get("issues", [])
+        self.soft_assert(
+            any(issue.get("name") == "settings:missing_metadata" for issue in status_issues),
+            "Status should warn when existing settings are missing template metadata",
         )
 
         repair_response = self.call_api("/api/system/settings/repair", method="POST")
@@ -67,6 +76,16 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             repaired_settings["settings"]["openrouter_ignored_providers"].get("value"),
             ["azure"],
             "Settings repair should restore OpenRouter ignored-provider defaults",
+        )
+        self.soft_assert_equal(
+            repaired_settings["settings"]["default_model"].get("category"),
+            "Models",
+            "Settings repair should restore missing setting metadata",
+        )
+        self.soft_assert_equal(
+            repaired_settings["settings"]["default_model"].get("value"),
+            "haiku",
+            "Settings repair should preserve existing setting values while restoring metadata",
         )
 
         self.soft_assert_equal(

@@ -73,6 +73,8 @@ from .models import (
     ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeRequest,
     ChatSessionsPurgeResponse,
+    GoalCleanupRequest,
+    GoalCleanupResponse,
     ChatSessionTitleRequest,
     ChatSessionWorkspaceRequest,
     ChatWorkspaceInfo,
@@ -107,6 +109,7 @@ from .services import (
     compact_chat_session_history,
     get_chat_history_compaction_status,
     purge_chat_sessions,
+    cleanup_goals,
     set_chat_session_title,
     set_chat_session_workspace,
     list_vault_directories,
@@ -711,6 +714,19 @@ async def purge_expired_cache_endpoint():
     """Manually delete expired cache artifacts."""
     try:
         return purge_expired_cache()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/goals/cleanup", response_model=GoalCleanupResponse)
+async def cleanup_goals_endpoint(request: GoalCleanupRequest):
+    """Manually delete old completed or cancelled goals for a vault."""
+    try:
+        return cleanup_goals(
+            request.vault_name,
+            status=request.status,
+            older_than_days=request.older_than_days,
+        )
     except Exception as e:
         return create_error_response(e)
 

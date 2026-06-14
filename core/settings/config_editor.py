@@ -52,6 +52,7 @@ def update_general_setting(name: str, raw_value: str) -> SettingsEntry:
     settings_file.settings[name] = SettingsEntry(
         value=coerced_value,
         description=entry.description,
+        category=entry.category,
         restart_required=entry.restart_required,
     )
 

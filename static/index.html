@@ -420,6 +420,9 @@
                         <p class="text-sm text-txt-secondary">
                             Update non-secret runtime settings. Changes apply immediately unless otherwise specified. Values are stored as plain text; use JSON for lists or objects.
                         </p>
+                        <div>
+                            <input id="settings-filter" type="search" placeholder="Filter settings…" class="w-full md:max-w-md px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent text-sm bg-app-card text-txt-primary transition-colors" />
+                        </div>
                         <div id="settings-feedback" class="text-sm text-txt-secondary"></div>
                         <div id="settings-list" class="flex flex-col gap-3">
                             <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
@@ -623,6 +626,34 @@
                                     <button id="purge-sessions-btn" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Purge Sessions"></button>
                                 </div>
                                 <div id="purge-sessions-feedback" class="text-sm text-txt-secondary"></div>
+                            </div>
+                        </div>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div class="space-y-1">
+                                <div class="text-sm font-medium text-txt-primary">Clean Up Goals</div>
+                                <div class="text-xs text-txt-secondary">
+                                    Remove old completed or cancelled goals and their checkpoints from the selected vault.
+                                </div>
+                            </div>
+                            <div class="flex flex-col md:items-end gap-2">
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <select id="cleanup-goals-vault" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="">Select vault…</option>
+                                    </select>
+                                    <select id="cleanup-goals-status" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="completed" selected>Completed goals</option>
+                                        <option value="cancelled">Cancelled goals</option>
+                                        <option value="completed_or_cancelled">Completed or cancelled</option>
+                                    </select>
+                                    <select id="cleanup-goals-age" class="px-2 py-1.5 text-sm bg-app-card border border-border-primary rounded-md text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                        <option value="7">Older than 7 days</option>
+                                        <option value="30" selected>Older than 30 days</option>
+                                        <option value="90">Older than 90 days</option>
+                                        <option value="">All matching goals</option>
+                                    </select>
+                                    <button id="cleanup-goals-btn" type="button" class="ui-icon-button is-primary" data-icon="shredder" data-icon-label="Clean Up Goals"></button>
+                                </div>
+                                <div id="cleanup-goals-feedback" class="text-sm text-txt-secondary"></div>
                             </div>
                         </div>
                     </div>

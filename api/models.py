@@ -547,6 +547,25 @@ class ChatSessionsPurgeResponse(BaseModel):
     message: str = Field(..., description="Human-readable summary")
 
 
+class GoalCleanupRequest(BaseModel):
+    """Request to remove old completed or cancelled goals for a vault."""
+
+    vault_name: str = Field(..., description="Vault to clean goals from")
+    status: str = Field(
+        "completed",
+        description='Goal status filter: "completed", "cancelled", or "completed_or_cancelled"',
+    )
+    older_than_days: Optional[int] = Field(None, description="Delete goals older than this many days; null deletes all matches")
+
+
+class GoalCleanupResponse(BaseModel):
+    """Result of a goal cleanup operation."""
+
+    success: bool = Field(True, description="Whether cleanup completed successfully")
+    deleted: int = Field(..., description="Number of goals deleted")
+    message: str = Field(..., description="Human-readable summary")
+
+
 class ChatSessionExportResponse(BaseModel):
     """Result of exporting one chat session transcript."""
 
@@ -724,6 +743,7 @@ class SettingInfo(BaseModel):
     key: str = Field(..., description="Setting name")
     value: str = Field(..., description="Current value rendered as string")
     description: Optional[str] = Field(None, description="Human-readable description")
+    category: Optional[str] = Field(None, description="Settings UI grouping label")
     restart_required: bool = Field(False, description="True when edits recommend a restart")
 
 

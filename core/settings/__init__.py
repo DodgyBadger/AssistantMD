@@ -235,6 +235,7 @@ def validate_settings(
             "tools": set(tools.keys()),
         },
     )
+    _add_missing_settings_metadata_issues(status, get_general_settings() or {})
 
     def _is_user_editable(entry: Any, default: bool) -> bool:
         """Best-effort user_editable check for typed/dict entries."""
@@ -341,6 +342,39 @@ def _add_missing_template_issues(
                 message=f"Settings missing from template: {', '.join(sorted(missing))}",
                 severity="warning",
             )
+
+
+def _add_missing_settings_metadata_issues(
+    status: ConfigurationStatus,
+    active_settings: Dict[str, Any],
+) -> None:
+    """Warn when existing settings are missing metadata present in the template."""
+    try:
+        template_raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except (FileNotFoundError, yaml.YAMLError):
+        return
+    template_settings = template_raw.get("settings")
+    if not isinstance(template_settings, dict):
+        return
+
+    missing: list[str] = []
+    for key, template_entry in template_settings.items():
+        if not isinstance(template_entry, dict) or key not in active_settings:
+            continue
+        active_entry = active_settings.get(key)
+        for metadata_key in ("description", "category", "restart_required"):
+            if metadata_key not in template_entry:
+                continue
+            active_value = getattr(active_entry, metadata_key, None)
+            if active_value is None:
+                missing.append(f"{key}.{metadata_key}")
+
+    if missing:
+        status.add_issue(
+            name="settings:missing_metadata",
+            message=f"Settings metadata missing from template: {', '.join(sorted(missing))}",
+            severity="warning",
+        )
 
 
 def get_default_api_timeout() -> float:

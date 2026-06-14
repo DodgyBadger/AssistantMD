@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +16,7 @@ from core.vault_state.service import VaultStateService
 
 GOAL_STATUSES = {"active", "paused", "completed", "cancelled", "blocked"}
 GOAL_SOURCE_TYPES = {"chat", "workflow", "context"}
+PURGEABLE_GOAL_STATUSES = {"completed", "cancelled"}
 
 
 class _UnsetValue:
@@ -370,6 +371,44 @@ class GoalOpsStore:
             step_id=_optional_text(step_id),
         )
         return [_mutation_group_to_dict(group) for group in groups]
+
+    def purge_goals(
+        self,
+        *,
+        vault_name: str,
+        statuses: list[str] | tuple[str, ...],
+        older_than_days: int | None = None,
+    ) -> int:
+        """Delete purgeable goals for one vault and return the deleted count."""
+        clean_vault = _required_text(vault_name, "vault_name")
+        clean_statuses = tuple(
+            _validate_status(str(status), PURGEABLE_GOAL_STATUSES, "purge goal status")
+            for status in statuses
+        )
+        if not clean_statuses:
+            raise ValueError("At least one purge goal status is required")
+
+        clauses = ["vault_name = ?"]
+        params: list[Any] = [clean_vault]
+        placeholders = ", ".join("?" for _ in clean_statuses)
+        clauses.append(f"status IN ({placeholders})")
+        params.extend(clean_statuses)
+
+        if older_than_days is not None:
+            if older_than_days < 0:
+                raise ValueError("older_than_days must be zero or greater")
+            cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=older_than_days)
+            clauses.append("updated_at < ?")
+            params.append(cutoff.isoformat())
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            cursor = conn.execute(
+                f"DELETE FROM goals WHERE {' AND '.join(clauses)}",
+                params,
+            )
+            conn.commit()
+            return max(cursor.rowcount, 0)
 
     def _connect(self) -> sqlite3.Connection:
         conn = connect_sqlite_from_system_db(DB_NAME, self.system_root)

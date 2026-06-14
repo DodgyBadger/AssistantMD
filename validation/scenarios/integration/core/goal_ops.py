@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -255,6 +256,8 @@ class GoalOpsScenario(BaseScenario):
         goal_target = next(target for target in migration_status.targets if target.db_name == "goal_ops")
         self.soft_assert_equal(goal_target.pending_versions, (), "goal_ops migration should be applied at startup")
 
+        self._validate_goal_cleanup_endpoint(vault.name)
+
         self.teardown_scenario()
         self.assert_no_failures()
 
@@ -282,3 +285,102 @@ class GoalOpsScenario(BaseScenario):
         finally:
             conn.close()
         return row is not None
+
+    def _validate_goal_cleanup_endpoint(self, vault_name: str) -> None:
+        store = GoalOpsStore()
+        old_completed = store.create_goal(
+            vault_name=vault_name,
+            title="Old completed cleanup target",
+            objective="Should be removed by goal cleanup.",
+        )
+        store.update_goal(goal_id=old_completed["goal_id"], status="completed", reason="Finished.")
+        store.checkpoint(goal_id=old_completed["goal_id"], summary="Cleanup cascade marker.")
+
+        old_cancelled = store.create_goal(
+            vault_name=vault_name,
+            title="Old cancelled cleanup target",
+            objective="Should be removed by goal cleanup.",
+        )
+        store.update_goal(goal_id=old_cancelled["goal_id"], status="cancelled", reason="No longer needed.")
+
+        old_active = store.create_goal(
+            vault_name=vault_name,
+            title="Old active retained goal",
+            objective="Should not be removed by cleanup.",
+        )
+        recent_completed = store.create_goal(
+            vault_name=vault_name,
+            title="Recent completed retained goal",
+            objective="Should not be removed by age-filtered cleanup.",
+        )
+        store.update_goal(goal_id=recent_completed["goal_id"], status="completed", reason="Finished recently.")
+
+        old_timestamp = (datetime.now(UTC).replace(microsecond=0) - timedelta(days=45)).isoformat()
+        self._set_goal_updated_at(
+            [old_completed["goal_id"], old_cancelled["goal_id"], old_active["goal_id"]],
+            old_timestamp,
+        )
+
+        cleanup_response = self.call_api(
+            "/api/system/goals/cleanup",
+            method="POST",
+            data={
+                "vault_name": vault_name,
+                "status": "completed_or_cancelled",
+                "older_than_days": 30,
+            },
+        )
+        self.soft_assert_equal(cleanup_response.status_code, 200, "Goal cleanup endpoint should succeed")
+        cleanup_payload = cleanup_response.json()
+        self.soft_assert_equal(cleanup_payload.get("deleted"), 2, "Cleanup should delete old completed/cancelled goals")
+
+        remaining_ids = {
+            goal["goal_id"]
+            for goal in store.list_goals(vault_name=vault_name, status="active", limit=100)
+        }
+        self.soft_assert(old_active["goal_id"] in remaining_ids, "Cleanup should retain active goals")
+        completed_ids = {
+            goal["goal_id"]
+            for goal in store.list_goals(vault_name=vault_name, status="completed", limit=100)
+        }
+        self.soft_assert(recent_completed["goal_id"] in completed_ids, "Cleanup should retain recent completed goals")
+        self.soft_assert(not self._goal_exists(old_completed["goal_id"]), "Cleanup should delete old completed goals")
+        self.soft_assert(not self._goal_exists(old_cancelled["goal_id"]), "Cleanup should delete old cancelled goals")
+        self.soft_assert(
+            not self._goal_has_activity_rows(old_completed["goal_id"]),
+            "Goal cleanup should cascade checkpoints and events",
+        )
+
+    def _set_goal_updated_at(self, goal_ids: list[str], timestamp: str) -> None:
+        db_path = self._get_system_controller()._system_root / "goal_ops.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executemany(
+                "UPDATE goals SET updated_at = ? WHERE goal_id = ?",
+                [(timestamp, goal_id) for goal_id in goal_ids],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _goal_exists(self, goal_id: str) -> bool:
+        db_path = self._get_system_controller()._system_root / "goal_ops.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute("SELECT 1 FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+
+    def _goal_has_activity_rows(self, goal_id: str) -> bool:
+        db_path = self._get_system_controller()._system_root / "goal_ops.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            event_row = conn.execute("SELECT 1 FROM goal_events WHERE goal_id = ? LIMIT 1", (goal_id,)).fetchone()
+            checkpoint_row = conn.execute(
+                "SELECT 1 FROM goal_checkpoints WHERE goal_id = ? LIMIT 1",
+                (goal_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return event_row is not None or checkpoint_row is not None

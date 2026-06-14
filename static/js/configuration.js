@@ -19,6 +19,7 @@
         isLoadingSecrets: false,
         isSavingSecret: false,
         isPurgingCache: false,
+        isCleaningGoals: false,
         isCleaningVaultState: false,
         isRefreshingSystemAuthoring: false,
         isLoadingSystemJobs: false,
@@ -54,7 +55,8 @@
         providerEdit: null,
         providerDraft: null,
         secretEdit: null,
-        secretDraft: null
+        secretDraft: null,
+        settingsFilter: ''
     };
 
     const SECRET_METADATA = {
@@ -95,6 +97,7 @@
         activityLogCount: null,
 
         settingsFeedback: null,
+        settingsFilter: null,
         settingsList: null,
 
         modelFeedback: null,
@@ -125,6 +128,11 @@
         purgeSessionsAge: null,
         purgeSessionsBtn: null,
         purgeSessionsFeedback: null,
+        cleanupGoalsVault: null,
+        cleanupGoalsStatus: null,
+        cleanupGoalsAge: null,
+        cleanupGoalsBtn: null,
+        cleanupGoalsFeedback: null,
 
         importVaultSelect: null,
         importPdfModeSelect: null,
@@ -187,6 +195,7 @@
         elements.activityLogCount = document.getElementById('activity-log-count');
 
         elements.settingsFeedback = document.getElementById('settings-feedback');
+        elements.settingsFilter = document.getElementById('settings-filter');
         elements.settingsList = document.getElementById('settings-list');
 
         elements.modelFeedback = document.getElementById('model-feedback');
@@ -217,6 +226,11 @@
         elements.purgeSessionsAge = document.getElementById('purge-sessions-age');
         elements.purgeSessionsBtn = document.getElementById('purge-sessions-btn');
         elements.purgeSessionsFeedback = document.getElementById('purge-sessions-feedback');
+        elements.cleanupGoalsVault = document.getElementById('cleanup-goals-vault');
+        elements.cleanupGoalsStatus = document.getElementById('cleanup-goals-status');
+        elements.cleanupGoalsAge = document.getElementById('cleanup-goals-age');
+        elements.cleanupGoalsBtn = document.getElementById('cleanup-goals-btn');
+        elements.cleanupGoalsFeedback = document.getElementById('cleanup-goals-feedback');
 
         elements.importVaultSelect = document.getElementById('import-vault-select');
         elements.importPdfModeSelect = document.getElementById('import-pdf-mode');
@@ -243,6 +257,7 @@
 
         elements.settingsList?.addEventListener('click', handleSettingsTableClick);
         elements.settingsList?.addEventListener('input', handleSettingsInputChange);
+        elements.settingsFilter?.addEventListener('input', handleSettingsFilterInput);
 
         elements.modelAddBtn?.addEventListener('click', startNewModel);
         elements.modelList?.addEventListener('click', handleModelTableClick);
@@ -263,6 +278,7 @@
         elements.refreshSystemMigrationsBtn?.addEventListener('click', loadSystemMigrations);
         elements.runSystemMigrationsBtn?.addEventListener('click', handleRunSystemMigrations);
         elements.purgeSessionsBtn?.addEventListener('click', handlePurgeSessions);
+        elements.cleanupGoalsBtn?.addEventListener('click', handleCleanupGoals);
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
@@ -354,10 +370,15 @@
     function renderSettings(emptyOnError = false) {
         if (!elements.settingsList) return;
 
-        if (!state.settings.length) {
+        const query = normalizeSearchText(state.settingsFilter);
+        const filteredSettings = state.settings.filter((setting) => settingMatchesFilter(setting, query));
+
+        if (!state.settings.length || !filteredSettings.length) {
             const message = emptyOnError
                 ? 'Unable to load settings.'
-                : 'No configurable settings found.';
+                : state.settings.length
+                    ? 'No settings match the current filter.'
+                    : 'No configurable settings found.';
             elements.settingsList.innerHTML = `
                 <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">
                     ${escapeHtml(message)}
@@ -366,18 +387,57 @@
             return;
         }
 
-        const sortedSettings = [...state.settings].sort((a, b) =>
+        const sortedSettings = [...filteredSettings].sort((a, b) =>
             String(a?.key ?? '').localeCompare(String(b?.key ?? ''), undefined, { sensitivity: 'base' })
         );
 
-        const cards = sortedSettings.map((setting) => {
-            if (state.settingEditKey === setting.key) {
-                return renderSettingEditCard(setting);
-            }
-            return renderSettingViewCard(setting);
-        }).join('');
+        const grouped = groupSettingsByCategory(sortedSettings);
+        const cards = grouped.map(([category, settings]) => `
+            <section class="space-y-2">
+                <div class="text-xs font-semibold uppercase text-txt-secondary">${escapeHtml(category)}</div>
+                <div class="flex flex-col gap-3">
+                    ${settings.map((setting) => {
+                        if (state.settingEditKey === setting.key) {
+                            return renderSettingEditCard(setting);
+                        }
+                        return renderSettingViewCard(setting);
+                    }).join('')}
+                </div>
+            </section>
+        `).join('');
 
         elements.settingsList.innerHTML = cards;
+    }
+
+    function normalizeSearchText(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function settingMatchesFilter(setting, query) {
+        if (!query) return true;
+        const haystack = [
+            setting.key,
+            setting.value,
+            setting.description,
+            setting.category
+        ].map((value) => String(value || '').toLowerCase()).join(' ');
+        return haystack.includes(query);
+    }
+
+    function groupSettingsByCategory(settings) {
+        const groups = new Map();
+        settings.forEach((setting) => {
+            const category = setting.category || 'Other';
+            if (!groups.has(category)) {
+                groups.set(category, []);
+            }
+            groups.get(category).push(setting);
+        });
+        return Array.from(groups.entries()).sort((a, b) => {
+            if (a[0] === 'Other') return 1;
+            if (b[0] === 'Other') return -1;
+            return a[0].localeCompare(b[0], undefined, { sensitivity: 'base' });
+        });
     }
 
     function renderSettingViewCard(setting) {
@@ -452,6 +512,11 @@
         if (event.target.dataset.field === 'setting-value') {
             state.settingDraftValue = event.target.value;
         }
+    }
+
+    function handleSettingsFilterInput(event) {
+        state.settingsFilter = event.target.value || '';
+        renderSettings();
     }
 
     function startSettingEdit(settingKey) {
@@ -1919,8 +1984,7 @@ async function saveModelRow(rowKey) {
         return result;
     }
 
-    async function loadPurgeSessionsVaults() {
-        const select = elements.purgeSessionsVault;
+    async function loadVaultOptions(select) {
         if (!select) return;
 
         const cachedVaults = window.App && window.App.metadata && Array.isArray(window.App.metadata.vaults)
@@ -1944,6 +2008,14 @@ async function saveModelRow(rowKey) {
             opt.textContent = vault;
             select.appendChild(opt);
         });
+    }
+
+    async function loadPurgeSessionsVaults() {
+        await loadVaultOptions(elements.purgeSessionsVault);
+    }
+
+    async function loadCleanupGoalsVaults() {
+        await loadVaultOptions(elements.cleanupGoalsVault);
     }
 
     async function handlePurgeSessions() {
@@ -1984,6 +2056,57 @@ async function saveModelRow(rowKey) {
         } catch (error) {
             setStatus(elements.purgeSessionsFeedback, `Failed to purge sessions: ${error.message}`, 'error');
         } finally {
+            btn.disabled = false;
+            setIconButtonLabel(btn, originalLabel);
+        }
+    }
+
+    async function handleCleanupGoals() {
+        const btn = elements.cleanupGoalsBtn;
+        if (!btn || btn.disabled || state.isCleaningGoals) return;
+
+        const vaultName = elements.cleanupGoalsVault?.value;
+        if (!vaultName) {
+            setStatus(elements.cleanupGoalsFeedback, 'Select a vault first.', 'warning');
+            return;
+        }
+
+        const statusValue = elements.cleanupGoalsStatus?.value || 'completed';
+        const ageValue = elements.cleanupGoalsAge?.value;
+        const olderThanDays = ageValue ? parseInt(ageValue, 10) : null;
+        const statusLabel = elements.cleanupGoalsStatus?.selectedOptions?.[0]?.textContent || 'matching goals';
+        const ageLabel = ageValue ? `older than ${ageValue} days` : 'of any age';
+
+        if (!confirm(`Delete ${statusLabel.toLowerCase()} ${ageLabel} in vault "${vaultName}"? This cannot be undone.`)) return;
+
+        state.isCleaningGoals = true;
+        btn.disabled = true;
+        const originalLabel = btn.dataset.iconLabel || btn.title || 'Clean Up Goals';
+        setIconButtonLabel(btn, 'Cleaning goals...');
+        setStatus(elements.cleanupGoalsFeedback, 'Cleaning up goals…', 'info');
+
+        try {
+            const response = await fetch('api/system/goals/cleanup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vault_name: vaultName,
+                    status: statusValue,
+                    older_than_days: olderThanDays,
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            setStatus(elements.cleanupGoalsFeedback, result.message, 'success');
+        } catch (error) {
+            setStatus(elements.cleanupGoalsFeedback, `Failed to clean up goals: ${error.message}`, 'error');
+        } finally {
+            state.isCleaningGoals = false;
             btn.disabled = false;
             setIconButtonLabel(btn, originalLabel);
         }
@@ -2395,6 +2518,7 @@ async function saveModelRow(rowKey) {
         await loadSystemMigrations();
         await loadImportVaults();
         await loadPurgeSessionsVaults();
+        await loadCleanupGoalsVaults();
         state.hasLoadedOnce = true;
     }
 

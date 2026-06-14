@@ -7,14 +7,17 @@ settings:
   default_model:
     value: sonnet
     description: "Default model alias used in the chat UI and as fallback when workflow and context templates omit an explicit model."
+    category: "Models"
     restart_required: false
   default_model_thinking:
     value: default
     description: "Default thinking policy for model calls. Use default, on, off, minimal, low, medium, high, or xhigh."
+    category: "Models"
     restart_required: false
   default_context_script:
     value: "default.md"
     description: "Default context script name for chat sessions (vault scripts override system scripts by name)."
+    category: "Chat"
     restart_required: false
   default_chat_tools:
     value:
@@ -28,83 +31,103 @@ settings:
       - session_ops
       - goal_ops
     description: "List of tool names enabled by default in the chat UI."
+    category: "Chat"
     restart_required: false
   chat_tool_calls_limit:
     value: 0
     description: "Maximum tool calls allowed in one chat response. 0 disables the limit. Set a low value to force tighter tool use or encourage code_execution for batch work."
+    category: "Chat"
     restart_required: false
   chat_model_requests_limit:
     value: 150
     description: "Maximum model requests allowed in one chat response. 0 disables the limit. This is a circuit breaker for runaway long-running tasks, separate from tool-call limits."
+    category: "Chat"
     restart_required: false
   delegate_tool_calls_limit:
     value: 32
     description: "Maximum tool calls allowed inside one delegate child-agent run. 0 disables the limit. Increase for broad delegated searches, or lower it to force tighter scoped delegation."
+    category: "Delegation"
     restart_required: false
   delegate_model_requests_limit:
     value: 75
     description: "Maximum model requests allowed inside one delegate child-agent run. 0 disables the limit. Keep child runs bounded and split broad work into smaller delegates."
+    category: "Delegation"
     restart_required: false
   delegate_timeout_seconds:
     value: 120
     description: "Maximum seconds allowed for one delegate child-agent run. 0 disables the delegate timeout. Increase for broad delegated searches or slower models."
+    category: "Delegation"
     restart_required: false
   default_api_timeout:
     value: 120
     description: "Default timeout in seconds for external API calls."
+    category: "Browser and API"
     restart_required: false
   openrouter_ignored_providers:
     value:
       - azure
     description: "OpenRouter provider slugs to skip for model calls. Default avoids known Azure routing compatibility issues with tool-using chats; set [] if your OpenRouter account intentionally routes through Azure."
+    category: "Models"
     restart_required: false
   workflow_task_timeout_seconds:
     value: 0
     description: "Maximum seconds for one workflow execution task. 0 disables the workflow task timeout."
+    category: "Workflows"
     restart_required: false
   max_concurrent_workflows:
     value: 0
     description: "Maximum number of workflows allowed to run at the same time across all vaults. 0 disables the global workflow concurrency limit."
+    category: "Workflows"
     restart_required: false
   browser_navigation_timeout_seconds:
     value: 20
     description: "Navigation timeout in seconds for the browser extraction tool."
+    category: "Browser and API"
     restart_required: false
   browser_selector_timeout_seconds:
     value: 4
     description: "Selector wait timeout in seconds for the browser extraction tool."
+    category: "Browser and API"
     restart_required: false
   max_output_tokens:
     value: 0
     description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
+    category: "Models"
     restart_required: false
   auto_cache_max_tokens:
     value: 50000
     description: "When chat tool output exceeds this estimated token count, store it in cache and return a compact preview plus cache ref instead of inlining the full payload. 0 = disabled. Caution: very low values will increase tool churn and token usage."
+    category: "Chat"
     restart_required: false
   compaction_type:
     value: auto
     description: "Chat history compaction policy: auto, suggested, or none. Auto is recommended for long-running tasks; suggested or none may reduce reliability as context grows. To compact less often, increase compaction_token_threshold first."
+    category: "Chat"
     restart_required: false
   compaction_keep_recent:
     value: 8
     description: "Target number of recent raw chat messages to preserve verbatim when compacting history."
+    category: "Chat"
     restart_required: false
   compaction_token_threshold:
     value: 80000
     description: "Estimated chat-history token threshold for suggested or automatic compaction. Increase this first if automatic compaction happens too often."
+    category: "Chat"
     restart_required: false
   file_search_timeout_seconds:
     value: 10
     description: "Timeout in seconds for file_ops_safe search operations."
+    category: "Files"
     restart_required: false
   file_ops_safe_list_max_results:
     value: 200
     description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
+    category: "Files"
     restart_required: false
   vault_state_enabled:
     value: true
     description: "Enable vault-state manifest refresh and change-feed maintenance."
+    category: "Vault State"
     restart_required: false
   vault_state_excluded_patterns:
     value:
@@ -113,93 +136,115 @@ settings:
       - "**/__pycache__/"
       - "AssistantMD/Chat_Sessions/"
     description: "Gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds."
+    category: "Vault State"
     restart_required: false
   vault_scan_interval_seconds:
     value: 0
     description: "Interval in seconds for scheduled vault-state refresh. 0 disables scheduled refresh."
+    category: "Vault State"
     restart_required: false
   task_rollback_enabled:
     value: true
     description: "Enable task-scoped mutation snapshots for supported rollback operations."
+    category: "Vault State"
     restart_required: false
   task_mutation_retention_days:
     value: 365
     description: "Days to retain task mutation audit rows before cleanup."
+    category: "Vault State"
     restart_required: false
   task_snapshot_retention_days:
     value: 30
     description: "Days to retain task snapshot metadata and files before cleanup."
+    category: "Vault State"
     restart_required: false
   chunking_max_images_per_prompt:
     value: 20
     description: "Maximum number of images that may be attached from chunked markdown inputs in a single prompt. 0 = disabled."
+    category: "Chunking"
     restart_required: false
   chunking_max_image_mb_per_image:
     value: 5
     description: "Maximum size in MB for a single image attachment from chunked markdown inputs. 0 = disabled."
+    category: "Chunking"
     restart_required: false
   chunking_max_image_mb_total:
     value: 100
     description: "Maximum total MB allowed for all chunked image attachments in a single prompt. 0 = disabled."
+    category: "Chunking"
     restart_required: false
   chunking_allow_remote_images:
     value: false
     description: "Allow remote image URLs in markdown chunking (currently ref-only behavior; no download/attach)."
+    category: "Chunking"
     restart_required: false
   debug:
     value: false
     description: "Enable verbose API error responses and diagnostic detail logging. Restart required."
+    category: "System"
     restart_required: true
   logfire:
     value: false
     description: "Enable Logfire telemetry when LOGFIRE_TOKEN is set."
+    category: "System"
     restart_required: false
   ingestion_pdf_default_strategies:
     value:
       - pdf_text
       - pdf_ocr
     description: "Available strategies and priority for PDF ingestion. JSON array. Remove value to disable or reorder as needed. E.g. [\"pdf_ocr\"] will force all imports through OCR."
+    category: "Import"
     restart_required: false
   ingestion_ocr_model:
     value: "mistral-ocr-latest"
     description: "Model used for ingestion OCR extraction."
+    category: "Import"
     restart_required: false
   ingestion_ocr_endpoint:
     value: "https://api.mistral.ai/v1/ocr"
     description: "HTTP endpoint for ingestion OCR extraction."
+    category: "Import"
     restart_required: false
   ingestion_ocr_capture_images:
     value: false
     description: "When true, request OCR image payloads and persist them as assets during ingestion."
+    category: "Import"
     restart_required: false
   ingestion_image_default_strategies:
     value:
       - image_ocr
     description: "Available strategies and priority for image ingestion. JSON array. Remove value to disable or reorder as needed."
+    category: "Import"
     restart_required: false
   ingestion_output_path_pattern:
     value: "Imported/"
     description: "Vault-relative path where imports are written."
+    category: "Import"
     restart_required: false
   ingestion_url_fetch_backend:
     value: "curl"
     description: "URL ingestion backend. Currently only curl is supported. DO NOT CHANGE."
+    category: "Import"
     restart_required: false
   ingestion_url_connect_timeout_seconds:
     value: 10
     description: "Connection timeout in seconds for URL ingestion HTTP requests. Increase if you get timeout errors on large URL imports."
+    category: "Import"
     restart_required: false
   ingestion_url_read_timeout_seconds:
     value: 20
     description: "Read timeout in seconds for URL ingestion HTTP requests. Increase if you get timeout errors on large URL imports."
+    category: "Import"
     restart_required: false
   ingestion_worker_interval_seconds:
     value: 120
     description: "How often the ingestion worker runs (seconds)."
+    category: "Import"
     restart_required: true
   ingestion_worker_batch_size:
     value: 5
     description: "Number of ingestion jobs to process per worker run."
+    category: "Import"
     restart_required: true
 
 models:
