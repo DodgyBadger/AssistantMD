@@ -102,6 +102,8 @@ Avoid broad recursive lists or searches unless the scope is already known.
 
 ## Notes
 
+- writes and appends are markdown-only
+- `move` can move any existing vault file, including attachments and other non-markdown files
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
 - `frontmatter` returns all keys by default; pass `keys` to filter

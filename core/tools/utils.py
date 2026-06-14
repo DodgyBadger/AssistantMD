@@ -60,12 +60,13 @@ def resolve_virtual_docs_path(path: str) -> str:
     return resolved
 
 
-def validate_and_resolve_path(path: str, vault_path: str) -> str:
+def validate_and_resolve_path(path: str, vault_path: str, *, markdown_only: bool = True) -> str:
     """Validate path and resolve to full path within vault boundaries.
 
     Args:
         path: Relative file path to validate
         vault_path: Root vault directory path
+        markdown_only: Require .md extension when the path includes a file extension
 
     Returns:
         Absolute resolved path within vault
@@ -84,7 +85,7 @@ def validate_and_resolve_path(path: str, vault_path: str) -> str:
         raise ValueError("Absolute paths not allowed")
 
     # Markdown extension enforcement
-    if '.' in os.path.basename(path):
+    if markdown_only and '.' in os.path.basename(path):
         if not path.endswith('.md'):
             raise ValueError("Only .md files are allowed. Please use '.md' extension for all files.")
 

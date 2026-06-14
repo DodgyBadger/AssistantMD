@@ -49,6 +49,8 @@ In scripted Monty flows, direct calls return an object with `return_value`, `met
 
 - this tool does not support read, list, or search
 - use `file_ops_safe` first to inspect and verify the target
+- `delete` and `move_overwrite` can operate on any existing vault file, including attachments and other non-markdown files
+- text mutation operations are markdown-only
 - delete and truncate require explicit path confirmation
 - destructive changes have no undo
 - in scripted Monty flows, use `result.metadata["status"]` for branching

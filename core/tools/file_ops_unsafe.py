@@ -250,7 +250,7 @@ Full documentation:
                 error_type="confirmation_failed",
             )
 
-        full_path = validate_and_resolve_path(path, vault_path)
+        full_path = validate_and_resolve_path(path, vault_path, markdown_only=False)
 
         if not os.path.exists(full_path):
             return cls._result(
@@ -370,8 +370,8 @@ Full documentation:
     @classmethod
     def _move_overwrite(cls, path: str, destination: str, vault_path: str) -> ToolReturn:
         """Move file, allowing destination overwrite."""
-        src_path = validate_and_resolve_path(path, vault_path)
-        dest_path = validate_and_resolve_path(destination, vault_path)
+        src_path = validate_and_resolve_path(path, vault_path, markdown_only=False)
+        dest_path = validate_and_resolve_path(destination, vault_path, markdown_only=False)
 
         if not os.path.exists(src_path):
             return cls._result(

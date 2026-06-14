@@ -645,7 +645,6 @@ Full documentation:
                 path=path,
                 destination=destination,
                 overwrite=False,
-                markdown_only=True,
             )
         except VaultMutationRejected as exc:
             if exc.code == "source_not_found":
