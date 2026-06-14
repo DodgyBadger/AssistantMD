@@ -479,12 +479,33 @@ def _is_compaction_summary_message(message: ModelMessage) -> bool:
 def _render_message_text(message: ModelMessage) -> str:
     rendered: list[str] = []
     for part in getattr(message, "parts", ()) or ():
-        content = getattr(part, "content", None)
-        if isinstance(content, str):
-            rendered.append(content)
-            continue
         if isinstance(part, ToolCallPart):
             rendered.append(f"[tool call] {getattr(part, 'tool_name', 'tool')}")
         elif isinstance(part, ToolReturnPart):
-            rendered.append(f"[tool result] {getattr(part, 'tool_name', 'tool')}: {content}")
+            rendered.append(_render_tool_return_for_compaction(part))
+        else:
+            content = getattr(part, "content", None)
+            if isinstance(content, str):
+                rendered.append(content)
     return "\n".join(rendered).strip()
+
+
+def _render_tool_return_for_compaction(part: ToolReturnPart) -> str:
+    tool_name = getattr(part, "tool_name", "tool")
+    outcome = str(getattr(part, "outcome", "success") or "success").strip().lower()
+    content = getattr(part, "content", None)
+    if outcome in {"failed", "denied"}:
+        return f"[tool result omitted] {tool_name}: outcome={outcome}"
+    if _is_empty_tool_return_content(content):
+        return f"[tool result omitted] {tool_name}: empty result"
+    return f"[tool result] {tool_name}: {content}"
+
+
+def _is_empty_tool_return_content(content: Any) -> bool:
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, (list, tuple, dict, set)):
+        return len(content) == 0
+    return False

@@ -77,6 +77,49 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         assert len(recent_messages) == 3, "Recent slice shifts backward to preserve tool pair"
 
+        shaped_prompt = compaction._build_summary_prompt(
+            older_messages=[
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="empty_probe",
+                            content="",
+                            tool_call_id="empty-1",
+                        )
+                    ]
+                ),
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="failed_probe",
+                            content="long failure details should not enter compaction prompt",
+                            tool_call_id="failed-1",
+                            outcome="failed",
+                        )
+                    ]
+                ),
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="large_success_probe",
+                            content="large successful result " * 100,
+                            tool_call_id="success-1",
+                        )
+                    ]
+                ),
+            ],
+            focus=None,
+        )
+        assert "[tool result omitted] empty_probe: empty result" in shaped_prompt, (
+            "Empty tool results should be omitted from compaction prompt input"
+        )
+        assert "long failure details should not enter compaction prompt" not in shaped_prompt, (
+            "Explicit failed tool-result content should be omitted from compaction prompt input"
+        )
+        assert shaped_prompt.count("large successful result") == 100, (
+            "Successful retained tool results should not be truncated by first-slice shaping"
+        )
+
         original_keep_recent = compaction.get_compaction_keep_recent
         original_threshold = compaction.get_compaction_token_threshold
         compaction.get_compaction_keep_recent = lambda: 2
