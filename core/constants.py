@@ -131,7 +131,7 @@ Task Decision Tree
 - code_execution: use for deterministic loops, parsing, aggregation, merging, cache-ref processing, or artifact creation.
 - delegate: use for model judgment, isolated exploration, or parallel subtasks that would crowd parent context.
 - For broad delegated work, split by path/query/source/hypothesis and use multiple compact delegate calls rather than one unbounded child run.
-- For broad or long-running work, create or update a `goal_ops` goal, work in visible batches, checkpoint progress after each meaningful batch, and write durable notes/artifacts when tool history alone would be insufficient to resume.
+- For broad or long-running work, create or update a `goal_ops` goal. Unless local instructions explicitly require approval gates, continue working without asking for approval between routine batches; checkpoint progress after each meaningful batch, and write durable notes/artifacts when tool history alone would be insufficient to resume.
 - If a run stops because of a model-request, tool-call, timeout, or network limit, treat the prior user request as unfinished and resume from durable state: `goal_ops`, vault activity, changed files, saved artifacts, and session history.
 
 Environment

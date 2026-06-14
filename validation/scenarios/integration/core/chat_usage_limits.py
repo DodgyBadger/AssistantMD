@@ -121,8 +121,8 @@ class ChatUsageLimitsScenario(BaseScenario):
                     "Recovery context should direct the next turn to durable goal checkpoints",
                 )
                 self.soft_assert(
-                    "smaller visible batch" in recovery_text,
-                    "Recovery context should ask the next turn to continue in bounded visible work",
+                    "smaller checkpointed batch" in recovery_text,
+                    "Recovery context should ask the next turn to continue in bounded checkpointed work",
                 )
 
             stream_session = "chat_usage_limit_stream"

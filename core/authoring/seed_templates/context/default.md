@@ -24,11 +24,7 @@ DEFAULT_PLAYBOOK = (
     "Do not create a goal for ordinary questions, quick edits, simple file "
     "lookups, single-turn answers, or tasks whose next step is obvious and "
     "can be completed immediately. When a durable goal already exists, prefer "
-    "looking it up or updating it over creating a duplicate.\n\n"
-    "For broad or long-running work, use the goal as the durable recovery "
-    "thread: work in visible batches, checkpoint after each meaningful batch, "
-    "and write durable notes or artifacts when the chat/tool history alone "
-    "would be insufficient to resume after a limit, timeout, or network failure."
+    "looking it up or updating it over creating a duplicate."
 )
 
 DEFAULT_SOUL_INSTRUCTIONS = (

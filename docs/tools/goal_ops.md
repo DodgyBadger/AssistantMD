@@ -12,6 +12,14 @@ reliably in the current chat alone. Do not create goals for ordinary questions,
 quick edits, simple lookups, single-turn answers, or tasks that can be completed
 immediately.
 
+The main purpose is durable recovery for long-running work. For broad tasks,
+unless local instructions explicitly require approval gates, keep working
+through routine batches without stopping for user authorization between each
+batch. Checkpoint after meaningful batches so the next turn can resume after
+compaction, request limits, timeouts, network failures, or user interruption.
+Ask the user only when direction, scope, or an irreversible action actually
+needs their decision.
+
 Metadata fields are freeform compact JSON objects owned by the caller. Use them
 for small, stable hints such as workflow names, local tags, ids, or source-path
 references. Do not embed large notes, reports, extracted evidence, or drafts in
@@ -93,6 +101,10 @@ Update progress:
 ```
 
 Record a checkpoint:
+
+Use checkpoints as recovery cards: summarize what changed, where durable work
+was written, what remains, and the next concrete actions. Keep detailed evidence
+or drafts in normal markdown files and reference paths here.
 
 ```json
 {

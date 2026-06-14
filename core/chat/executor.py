@@ -277,7 +277,7 @@ def _failure_recovery_message(marker: dict[str, Any]) -> ModelRequest | None:
     text += (
         " For broad or long-running work, resume from durable state rather than assuming partial "
         "failed-run tool history was persisted: inspect goal_ops goals/checkpoints, vault activity, "
-        "changed files, saved artifacts, and session history; then continue in a smaller visible batch."
+        "changed files, saved artifacts, and session history; then continue in a smaller checkpointed batch."
     )
     return ModelRequest(parts=[SystemPromptPart(content=text)])
 
