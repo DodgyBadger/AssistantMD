@@ -141,12 +141,6 @@ Full documentation:
                 "Import stdlib modules explicitly inside the snippet, for example "
                 "`import json`, or use simpler string/Python structures when possible."
             )
-        if "hasattr" in lowered or "getattr" in lowered:
-            return (
-                "Monty does not expose every CPython builtin. Avoid `hasattr(...)` and "
-                "`getattr(...)`; use known result attributes such as `result.return_value`, "
-                "`result.metadata`, and `result.items`, or branch with ordinary dictionaries."
-            )
         if "unable to find 'parse_markdown' in external functions dict" in lowered:
             return (
                 "Use the current `code_execution` surface and helper docs at "

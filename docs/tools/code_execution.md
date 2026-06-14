@@ -43,7 +43,7 @@ AssistantMD examples and validation scenarios stay within this subset:
 - Do not depend on arbitrary standard-library modules; stick to modules used in AssistantMD examples unless you have compiled the script successfully in this environment.
 - Do not import third-party packages; use AssistantMD helpers for file access, model calls, history, and tool calls.
 - Do not depend on state from previous script executions; pass state through files, caches, or explicit helper results.
-- Do not assume every CPython builtin exists. In particular, avoid `hasattr(...)` and `getattr(...)`; Monty does not provide them in this runtime. Use known helper result attributes directly, such as `result.return_value`, `result.metadata`, and `result.items`.
+- Do not assume every CPython builtin exists. Prefer known helper result attributes directly, such as `result.return_value`, `result.metadata`, and `result.items`. Current Monty supports `getattr(...)` and `hasattr(...)` for helper result objects when dynamic checks are useful.
 - For bulk or long-running work, split discovery from mutation. Use one script to gather explicit candidates with read-only operations, then a separate script to mutate a bounded list of exact targets. Do not combine recursive discovery and mutation in one script.
 - For bulk vault reorganizations, prefer staged migration. Build or populate the new structure first, then produce a cleanup report for old source paths. Do not delete old source trees after a copy-style reorganization unless the user explicitly asks for destructive cleanup.
 - If a Python construct matters to your script and is not shown in AssistantMD examples, compile the script before relying on it.

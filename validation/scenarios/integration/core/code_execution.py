@@ -64,11 +64,11 @@ class CodeExecutionScenario(BaseScenario):
                             'doc.return_value'
                         )
                     }
-                if case_name == "unsupported_builtin_hint":
+                if case_name == "dynamic_attribute_helpers":
                     return {
                         "code": (
                             'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
-                            'hasattr(doc, "return_value")'
+                            'hasattr(doc, "return_value") and getattr(doc, "return_value") == "BLOCKED_CONTENT"'
                         )
                     }
                 if case_name == "streaming_detail":
@@ -252,23 +252,23 @@ class CodeExecutionScenario(BaseScenario):
                 "Vault file read should return the file content",
             )
 
-            current_case["name"] = "unsupported_builtin_hint"
-            unsupported_builtin = self.call_api(
+            current_case["name"] = "dynamic_attribute_helpers"
+            dynamic_attribute_helpers = self.call_api(
                 "/api/chat/execute",
                 method="POST",
                 data={
                     "vault_name": vault.name,
-                    "prompt": "Exercise unsupported Monty builtin hint.",
-                    "session_id": "code_execution_unsupported_builtin_hint",
+                    "prompt": "Exercise dynamic Monty attribute helpers.",
+                    "session_id": "code_execution_dynamic_attribute_helpers",
                     "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
                 },
             )
-            assert unsupported_builtin.status_code == 200, "Unsupported builtin run should return a handled error"
-            unsupported_builtin_text = unsupported_builtin.json()["response"]
+            assert dynamic_attribute_helpers.status_code == 200, "Dynamic attribute helper run should complete"
+            dynamic_attribute_helpers_text = dynamic_attribute_helpers.json()["response"]
             self.soft_assert(
-                "Avoid `hasattr(...)`" in unsupported_builtin_text,
-                "Unsupported builtin error should include a corrective code_execution hint",
+                "true" in dynamic_attribute_helpers_text.lower(),
+                "code_execution should support hasattr/getattr on helper result objects",
             )
 
             current_case["name"] = "streaming_detail"
