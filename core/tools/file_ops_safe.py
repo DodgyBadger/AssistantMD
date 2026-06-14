@@ -696,6 +696,7 @@ Full documentation:
     ) -> ToolReturn:
         """List files and directories matching a path or glob."""
         path = path.strip()
+        scope_relative_path: str | None = None
         if not path or path == ".":
             path = "*"
 
@@ -706,6 +707,7 @@ Full documentation:
         if not is_glob:
             abs_path = os.path.join(vault_path, path)
             if os.path.isdir(abs_path):
+                scope_relative_path = cls._relative_vault_path(vault_path, abs_path)
                 path = os.path.join(path, "**/*" if recursive else "*")
 
         full_pattern = os.path.join(vault_path, path)
@@ -736,6 +738,12 @@ Full documentation:
                 files.append(relative_path)
 
         if not files and not directories:
+            empty_candidates = cls._empty_directory_candidates(
+                vault_path=vault_path,
+                directories=[],
+                scope_relative_path=scope_relative_path,
+                include_scope_when_empty=True,
+            )
             return cls._result(
                 message=f"No files or directories found for path '{path}'",
                 operation="list",
@@ -747,6 +755,8 @@ Full documentation:
                     "file_count": 0,
                     "directories": [],
                     "files": [],
+                    "empty_directory_candidates": empty_candidates,
+                    "empty_directory_candidate_count": len(empty_candidates),
                     "truncated": False,
                 },
             )
@@ -761,6 +771,12 @@ Full documentation:
         else:
             directories = sorted(directories)
             files = sorted(files)
+        empty_candidates = cls._empty_directory_candidates(
+            vault_path=vault_path,
+            directories=directories,
+            scope_relative_path=scope_relative_path,
+            include_scope_when_empty=False,
+        )
 
         result_parts = []
         if directories:
@@ -781,9 +797,53 @@ Full documentation:
                 "file_count": len(files),
                 "directories": directories,
                 "files": files,
+                "empty_directory_candidates": empty_candidates,
+                "empty_directory_candidate_count": len(empty_candidates),
                 "truncated": truncated,
             },
         )
+
+    @staticmethod
+    def _relative_vault_path(vault_path: str, full_path: str) -> str:
+        relative = os.path.relpath(full_path, vault_path)
+        return "" if relative == "." else relative.replace(os.sep, "/")
+
+    @classmethod
+    def _empty_directory_candidates(
+        cls,
+        *,
+        vault_path: str,
+        directories: list[str],
+        scope_relative_path: str | None,
+        include_scope_when_empty: bool,
+    ) -> list[str]:
+        """Return top-level listed directory branches that contain no files."""
+        candidate_paths: list[str] = []
+        if include_scope_when_empty and scope_relative_path:
+            candidate_paths.append(scope_relative_path)
+        candidate_paths.extend(directories)
+
+        empty_paths = [
+            candidate
+            for candidate in candidate_paths
+            if candidate and cls._directory_tree_has_no_files(vault_path, candidate)
+        ]
+        selected: list[str] = []
+        for candidate in sorted(empty_paths, key=lambda item: (item.count("/"), item)):
+            if any(candidate == parent or candidate.startswith(f"{parent}/") for parent in selected):
+                continue
+            selected.append(candidate)
+        return sorted(selected)
+
+    @staticmethod
+    def _directory_tree_has_no_files(vault_path: str, relative_path: str) -> bool:
+        full_path = Path(vault_path) / relative_path
+        if not full_path.is_dir():
+            return False
+        for _root, _dirs, files in os.walk(full_path):
+            if files:
+                return False
+        return True
 
     @classmethod
     def _list_virtual_mount(
@@ -854,6 +914,8 @@ Full documentation:
                     "file_count": 0,
                     "directories": [],
                     "files": [],
+                    "empty_directory_candidates": [],
+                    "empty_directory_candidate_count": 0,
                     "truncated": False,
                     "virtual_mount": mount_key,
                 },
@@ -889,6 +951,8 @@ Full documentation:
                 "file_count": len(files),
                 "directories": [f"{mount_key}/{d}" for d in directories],
                 "files": [f"{mount_key}/{f}" for f in files],
+                "empty_directory_candidates": [],
+                "empty_directory_candidate_count": 0,
                 "truncated": truncated,
                 "virtual_mount": mount_key,
             },

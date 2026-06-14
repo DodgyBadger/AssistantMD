@@ -82,7 +82,7 @@ In scripted Monty flows, direct calls return an object with `return_value`, `met
 - `path`
 - `exists` when applicable
 - operation-specific fields:
-  - `file_count`, `directory_count`, `files`, `directories` for `list`
+  - `file_count`, `directory_count`, `files`, `directories`, `empty_directory_candidates`, and `empty_directory_candidate_count` for `list`
   - `match_count`, `matches` for `search`
   - `content_chars`, `media_mode` for `read`
   - `file_count`, `items` (list of `{path, frontmatter}`) for `frontmatter`

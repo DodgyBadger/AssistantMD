@@ -1545,6 +1545,8 @@ details summary::-webkit-details-marker {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    min-width: 0;
+    max-width: 100%;
 }
 .tool-status-label {
     font-size: 0.7rem;
@@ -1557,6 +1559,8 @@ details summary::-webkit-details-marker {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0;
+    max-width: 100%;
 }
 .tool-status-sublabel {
     font-size: 0.68rem;
@@ -1564,18 +1568,43 @@ details summary::-webkit-details-marker {
     color: rgb(var(--text-secondary));
 }
 .tool-status-block {
+    position: relative;
     margin: 0;
-    padding: 0.55rem 0.65rem;
+    padding: 0.55rem 0.65rem 2.35rem;
     background: rgb(var(--accent-primary) / 0.08);
     border-radius: 0.5rem;
     font-size: 0.8rem;
+    line-height: 1.45;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 16rem;
+    max-height: min(24rem, 55vh);
+    width: 100%;
     max-width: 100%;
     overflow: auto;
+    box-sizing: border-box;
     color: rgb(var(--text-primary));
+}
+.tool-status-block-code {
+    white-space: pre;
+    word-break: normal;
+    overflow: auto;
+}
+.tool-status-block .copy-button {
+    position: sticky;
+    left: 100%;
+    bottom: 0;
+    margin-top: 0.75rem;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--text-primary));
+    border: 1px solid rgb(var(--border-primary));
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 12px;
+}
+.tool-status-block .copy-button:hover {
+    background: rgb(var(--accent-primary) / 0.2);
+    border-color: rgb(var(--accent-primary));
 }
 .tool-status-placeholder {
     font-size: 0.8rem;

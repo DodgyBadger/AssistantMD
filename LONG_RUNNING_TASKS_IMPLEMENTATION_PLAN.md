@@ -489,6 +489,36 @@ Exit criteria:
 - Repeated compaction preserves the active thread across multiple rounds.
 - Long-running mode does not silently lose plan state, evidence, blockers, or user check-in requirements.
 
+### Phase 2B: Code-Execution-First Long-Running Task Pattern
+
+Goal: use AssistantMD's existing Monty-backed `code_execution` pathway as the default "code mode" for goal-oriented, multi-tool, tool-heavy knowledge work before considering a deeper Pydantic AI Harness `CodeMode` migration.
+
+Research conclusion:
+
+- Upstream Pydantic AI Harness `CodeMode` validates the same pattern AssistantMD already has: one sandboxed code call can run deterministic loops, filtering, aggregation, and multiple tool calls without forcing one model round trip per tool operation.
+- Upstream `CodeMode` is not a drop-in replacement for AssistantMD's current runtime. It wraps Pydantic AI tools through a `run_code` capability, while AssistantMD's runner also powers authored workflows and context scripts and injects host-owned helpers such as `retrieve_history`, `assemble_context`, `read_cache`, `pending_files`, `parse_markdown`, `finish`, and `date`.
+- The near-term strategy is to borrow the CodeMode operating pattern while preserving the single AssistantMD authoring surface for chat `code_execution`, workflows, and context scripts.
+
+Phase 1 deliverables for this pattern:
+
+- Tune system/tool instructions so chat agents prefer inline `code_execution` scripts for broad or goal-oriented work that needs repeated file operations, cache inspection, markdown parsing, aggregation, or many related tool calls.
+- Clarify the default loop: create/update a `goal_ops` checkpoint, run one bounded `code_execution` batch, summarize/checkpoint results, then continue with the next batch unless local instructions require a user approval gate.
+- Keep `delegate` positioned for isolated model judgment or parallel research, not as the default escape hatch for deterministic long-running work.
+- Add or update deterministic validation for instruction/tool-doc visibility where feasible; use live/experimental scenarios only for qualitative model-adherence checks.
+
+Phase 2 observability follow-up:
+
+- Consider UI/API improvements only after the instruction-tuning pass proves useful in chat testing.
+- Current visibility is acceptable for the first slice: `code_execution` already appears as a chat tool call, the modal exposes the full script arguments, and file mutations/task activity preserve domain-level effects.
+- Optional later upgrades may expose inner script activity more explicitly by aggregating `authoring_direct_tool_*` events, vault mutation groups, cache refs, and goal checkpoints under the outer `code_execution` call.
+- Do not make observability upgrades a prerequisite for adopting the code-execution-first behavior.
+
+Exit criteria:
+
+- For a long-running vault reorganization or research task, the agent naturally chooses `goal_ops` plus bounded `code_execution` batches instead of dozens of direct tool calls or unnecessary delegation.
+- Checkpoints are frequent enough that a request/tool/model/context limit can be recovered from durable state.
+- The existing shared Monty runtime remains the canonical AssistantMD pathway for chat code execution, workflows, and context scripts.
+
 ### Phase 3: Minimal `goal_ops` Ledger
 
 Goal: add a small composable primitive for workspace-scoped goal state after the underlying operations report reliable state and failures.
@@ -639,4 +669,4 @@ Maintain existing scenarios for workflow async/cancellation, chat cancellation, 
 
 ## Next Phase
 
-Feature Development can now start the minimal `goal_ops` ledger if we keep it narrow: SQLite-backed goal runs, steps, events, artifacts, checkpoints, and a small `goal_ops` helper/tool that records state without deciding how to pursue work. Remaining resilience follow-ups should stay visible but separate: broader structured failure returns in remaining tools, queue/stall warnings, and restart reconciliation.
+Feature Development should proceed with Phase 2B instruction tuning first: make the current `code_execution` tool the recommended code-mode pathway for goal-oriented, multi-tool batches, paired with `goal_ops` checkpoints before and after each meaningful script execution. Observability upgrades should remain a follow-up unless chat testing shows the current tool-call modal, task activity, and vault mutation records are insufficient.

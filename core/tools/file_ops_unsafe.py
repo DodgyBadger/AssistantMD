@@ -15,6 +15,7 @@ from pydantic_ai.tools import Tool
 from core.logger import UnifiedLogger
 from core.vault_state.file_mutations import (
     VaultMutationRejected,
+    delete_empty_vault_directory_tree,
     delete_vault_file,
     move_vault_file,
     replace_vault_file_content,
@@ -76,7 +77,7 @@ class FileOpsUnsafe(BaseTool):
                 if operation == "edit_line":
                     return cls._edit_line(path, line_number, old_content, new_content, vault_path)
                 elif operation == "delete":
-                    return cls._delete_file(path, confirm_path, vault_path)
+                    return cls._delete_path(path, confirm_path, vault_path)
                 elif operation == "replace_text":
                     return cls._replace_text(path, old_content, new_content, count, vault_path)
                 elif operation == "move_overwrite":
@@ -109,7 +110,7 @@ class FileOpsUnsafe(BaseTool):
             file_ops_unsafe,
             name="file_ops_unsafe",
             description=(
-                "Modify, overwrite, truncate, move-overwrite, or delete vault files when destructive changes are explicitly needed. "
+                "Modify, overwrite, truncate, move-overwrite, or delete vault files and empty directories when destructive changes are explicitly needed. "
                 "Always confirm with the user before performing a destructive operation with this tool. "
             ),
         )
@@ -239,8 +240,8 @@ Full documentation:
         )
 
     @classmethod
-    def _delete_file(cls, path: str, confirm_path: str, vault_path: str) -> ToolReturn:
-        """Delete a file with path confirmation."""
+    def _delete_path(cls, path: str, confirm_path: str, vault_path: str) -> ToolReturn:
+        """Delete a file or clean up empty directories with path confirmation."""
         if path != confirm_path:
             return cls._result(
                 message=f"Path confirmation failed - path '{path}' does not match confirm_path '{confirm_path}'",
@@ -263,14 +264,7 @@ Full documentation:
             )
 
         if os.path.isdir(full_path):
-            return cls._result(
-                message=f"Cannot delete '{path}' - this is a directory, not a file",
-                operation="delete",
-                path=path,
-                status="invalid_target",
-                exists=True,
-                error_type="is_directory",
-            )
+            return cls._delete_empty_directory_tree(path, vault_path)
 
         try:
             mutation = delete_vault_file(
@@ -296,8 +290,68 @@ Full documentation:
             status="completed",
             exists=False,
             metadata={
+                "target_type": "file",
                 "task_id": mutation.task_id,
                 "vault_id": mutation.vault_id,
+            },
+        )
+
+    @classmethod
+    def _delete_empty_directory_tree(cls, path: str, vault_path: str) -> ToolReturn:
+        """Best-effort cleanup of empty directories under the confirmed path."""
+        try:
+            cleanup = delete_empty_vault_directory_tree(
+                vault_path=vault_path,
+                path=path,
+            )
+        except VaultMutationRejected as exc:
+            if exc.code not in {"directory_not_found", "invalid_target", "not_directory"}:
+                raise
+            return cls._result(
+                message=str(exc),
+                operation="delete",
+                path=path,
+                status="invalid_target" if exc.code != "directory_not_found" else "not_found",
+                exists=exc.code != "directory_not_found",
+                error_type=exc.code,
+            )
+
+        skipped = list(cleanup.skipped_paths)
+        removed = list(cleanup.removed_paths)
+        if skipped:
+            message = (
+                f"Removed {len(removed)} empty director"
+                f"{'y' if len(removed) == 1 else 'ies'} under '{path}'. "
+                f"Skipped {len(skipped)} non-empty director"
+                f"{'y' if len(skipped) == 1 else 'ies'}: "
+                + ", ".join(skipped)
+            )
+            status = "partial"
+        elif removed:
+            message = (
+                f"⚠️ Removed {len(removed)} empty director"
+                f"{'y' if len(removed) == 1 else 'ies'} under '{path}'"
+            )
+            status = "completed"
+        else:
+            message = f"No empty directories were removed under '{path}'"
+            status = "partial"
+
+        return cls._result(
+            message=message,
+            operation="delete",
+            path=path,
+            status=status,
+            exists=cleanup.after_exists,
+            metadata={
+                "target_type": "directory",
+                "removed_directories": removed,
+                "skipped_non_empty_directories": skipped,
+                "removed_count": len(removed),
+                "skipped_count": len(skipped),
+                "task_id": cleanup.task_id,
+                "vault_id": cleanup.vault_id,
+                "event_sequence": cleanup.event_sequence,
             },
         )
 

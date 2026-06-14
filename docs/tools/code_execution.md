@@ -43,6 +43,9 @@ AssistantMD examples and validation scenarios stay within this subset:
 - Do not depend on arbitrary standard-library modules; stick to modules used in AssistantMD examples unless you have compiled the script successfully in this environment.
 - Do not import third-party packages; use AssistantMD helpers for file access, model calls, history, and tool calls.
 - Do not depend on state from previous script executions; pass state through files, caches, or explicit helper results.
+- Do not assume every CPython builtin exists. In particular, avoid `hasattr(...)` and `getattr(...)`; Monty does not provide them in this runtime. Use known helper result attributes directly, such as `result.return_value`, `result.metadata`, and `result.items`.
+- For bulk or long-running work, split discovery from mutation. Use one script to gather explicit candidates with read-only operations, then a separate script to mutate a bounded list of exact targets. Do not combine recursive discovery and mutation in one script.
+- For bulk vault reorganizations, prefer staged migration. Build or populate the new structure first, then produce a cleanup report for old source paths. Do not delete old source trees after a copy-style reorganization unless the user explicitly asks for destructive cleanup.
 - If a Python construct matters to your script and is not shown in AssistantMD examples, compile the script before relying on it.
 
 When you find yourself reaching for something outside this list, simplify the approach rather than adding imports or boilerplate.
@@ -100,6 +103,8 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - direct tool results expose `return_value`, `metadata`, `content`, and `items`
 - use `result.return_value` for the canonical tool result; `content` is reserved for Pydantic AI side-loaded content
 - every bound direct tool includes `result.metadata["tool_name"]`; prefer branching on `result.metadata["status"]` when the tool reports structured status
+- do not parse the human-readable `return_value` from list/search tools when a structured field exists; use `result.items`, `result.metadata`, or a more specific tool operation
+- mutating scripts should receive an explicit bounded target list from the caller; they should not recursively discover their own target set
 
 ### `assemble_context`
 
@@ -217,6 +222,66 @@ target = next(
 """,
 )
 ```
+
+### Split Discovery From Mutation
+
+For broad vault changes, use `code_execution` as small deterministic batches. First discover
+candidates with read-only calls and return an explicit list. Then run a separate mutating
+script over that exact list. This makes the work reviewable, resumable, and less likely to
+turn into an unbounded crawler.
+
+For reorganizations, treat cleanup of old source trees as a separate destructive step.
+After a copy-style migration, report old source folders, file counts, and likely duplicates;
+do not delete those source trees unless the user explicitly asks for destructive cleanup.
+
+Discovery example:
+
+```python
+code_execution(
+    code="""
+listed = await file_ops_safe(operation="list", path="Archive", recursive=True)
+
+candidates = listed.metadata.get("empty_directory_candidates", [])
+
+{
+    "candidate_count": len(candidates),
+    "candidates": candidates,
+}
+""",
+)
+```
+
+Mutation example:
+
+```python
+code_execution(
+    code="""
+targets = [
+    "Archive/old-empty-folder",
+    "Projects/completed",
+]
+results = []
+
+for path in targets:
+    result = await file_ops_unsafe(
+        operation="delete",
+        path=path,
+        confirm_path=path,
+    )
+    results.append({
+        "path": path,
+        "status": result.metadata.get("status"),
+        "removed": result.metadata.get("removed_directories", []),
+        "skipped_non_empty": result.metadata.get("skipped_non_empty_directories", []),
+    })
+
+results
+""",
+)
+```
+
+The mutating script should not rediscover targets recursively. If the candidate list is too
+large, process a small slice, checkpoint progress, then run another bounded batch.
 
 ### Process a batch of pending vault files
 

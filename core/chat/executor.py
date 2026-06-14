@@ -566,6 +566,26 @@ def _normalize_tool_args(args: Any) -> Optional[str]:
         return _truncate_preview(str(args))
 
 
+def _normalize_tool_detail(value: Any) -> Any:
+    """
+    Convert streamed tool details into JSON-safe data without preview truncation.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        try:
+            return json.loads(stripped)
+        except (TypeError, ValueError):
+            return stripped
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False))
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _normalize_tool_result(result: Any) -> Optional[str]:
     """
     Convert tool results into a readable preview string.
@@ -1226,6 +1246,8 @@ async def _stream_prepared_chat_prompt(
                         "tool_name": tool_name,
                         "arguments": _normalize_tool_args(tool_args),
                     }
+                    if tool_name == "code_execution":
+                        metadata_chunk["arguments_detail"] = _normalize_tool_detail(tool_args)
                     logger.set_sinks(["validation"]).info(
                         "Streaming tool call started",
                         data={
@@ -1261,6 +1283,8 @@ async def _stream_prepared_chat_prompt(
                         "tool_name": tool_name,
                         "result": _normalize_tool_result(result_content),
                     }
+                    if tool_name == "code_execution":
+                        metadata_chunk["result_detail"] = _normalize_tool_detail(result_content)
                     result_text = tool_result_as_text(result_content)
                     logger.set_sinks(["validation"]).info(
                         "Streaming tool call finished",

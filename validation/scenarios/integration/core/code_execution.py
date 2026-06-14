@@ -64,6 +64,20 @@ class CodeExecutionScenario(BaseScenario):
                             'doc.return_value'
                         )
                     }
+                if case_name == "unsupported_builtin_hint":
+                    return {
+                        "code": (
+                            'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
+                            'hasattr(doc, "return_value")'
+                        )
+                    }
+                if case_name == "streaming_detail":
+                    return {
+                        "code": (
+                            'padding = "' + ("a" * 260) + '"\n'
+                            '"STREAM_RESULT_' + ("b" * 300) + '"'
+                        )
+                    }
                 if case_name == "allow_write":
                     return {
                         "code": (
@@ -236,6 +250,49 @@ class CodeExecutionScenario(BaseScenario):
             self.soft_assert(
                 "BLOCKED_CONTENT" in allow_file_read_text,
                 "Vault file read should return the file content",
+            )
+
+            current_case["name"] = "unsupported_builtin_hint"
+            unsupported_builtin = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Exercise unsupported Monty builtin hint.",
+                    "session_id": "code_execution_unsupported_builtin_hint",
+                    "tools": ["code_execution", "file_ops_safe"],
+                    "model": "test",
+                },
+            )
+            assert unsupported_builtin.status_code == 200, "Unsupported builtin run should return a handled error"
+            unsupported_builtin_text = unsupported_builtin.json()["response"]
+            self.soft_assert(
+                "Avoid `hasattr(...)`" in unsupported_builtin_text,
+                "Unsupported builtin error should include a corrective code_execution hint",
+            )
+
+            current_case["name"] = "streaming_detail"
+            streaming_detail = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Stream code_execution detail payloads.",
+                    "session_id": "code_execution_streaming_detail",
+                    "tools": ["code_execution", "file_ops_safe"],
+                    "model": "test",
+                    "stream": True,
+                },
+            )
+            assert streaming_detail.status_code == 200, "Streaming detail run should succeed"
+            streaming_text = streaming_detail.text
+            self.soft_assert(
+                '"arguments_detail"' in streaming_text and ("a" * 260) in streaming_text,
+                "Streaming code_execution events should include untruncated argument detail",
+            )
+            self.soft_assert(
+                '"result_detail"' in streaming_text and ("b" * 300) in streaming_text,
+                "Streaming code_execution events should include untruncated result detail",
             )
 
             current_case["name"] = "allow_write"

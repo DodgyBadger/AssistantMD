@@ -333,7 +333,8 @@
                     ensureToolCallsSection(context);
                     entry = createToolStatusEntry(context, event.tool_call_id, {
                         tool_name: event.tool_name,
-                        arguments: event.args || null
+                        arguments: event.args || null,
+                        arguments_detail: event.args || null
                     });
                 }
 
@@ -343,6 +344,7 @@
 
                 if (event.args) {
                     entry.args = event.args;
+                    entry.detailArgs = event.args;
                 }
 
                 if (event.event_type !== 'call') {
@@ -357,6 +359,7 @@
                         resultPayload.metadata = event.result_metadata;
                     }
                     entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
+                    entry.detailResult = entry.result;
                 }
 
                 updateToolDetail(entry);
@@ -733,6 +736,9 @@
                 entry.container.classList.add('tool-status-complete');
                 if (payload.result !== undefined && payload.result !== null) {
                     entry.result = payload.result;
+                    entry.detailResult = payload.result_detail !== undefined && payload.result_detail !== null
+                        ? payload.result_detail
+                        : payload.result;
                 }
                 entry.events.push(payload);
                 updateToolDetail(entry);
@@ -745,6 +751,9 @@
             } else if (payload.event === 'tool_call_started') {
                 if (payload.arguments) {
                     entry.args = payload.arguments;
+                    entry.detailArgs = payload.arguments_detail !== undefined && payload.arguments_detail !== null
+                        ? payload.arguments_detail
+                        : payload.arguments;
                 }
                 entry.events.push(payload);
                 updateToolDetail(entry);
@@ -779,7 +788,11 @@
                 toolId,
                 toolName: payload.tool_name || 'Tool call',
                 args: payload.arguments || null,
+                detailArgs: payload.arguments_detail !== undefined && payload.arguments_detail !== null
+                    ? payload.arguments_detail
+                    : payload.arguments || null,
                 result: null,
+                detailResult: null,
                 archived: Boolean(context.archivedToolEvents),
                 events: []
             };
@@ -1021,11 +1034,17 @@
                     ? 'Archived by compaction; the tool event is persisted but no longer part of active chat context.'
                     : 'Retained in active chat context.'
             });
-            if (!isEmptyToolValue(entry.args)) {
-                sections.push({ label: 'Args', value: entry.args });
+            const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
+                ? entry.detailArgs
+                : entry.args;
+            const resultForDetail = entry.detailResult !== undefined && entry.detailResult !== null
+                ? entry.detailResult
+                : entry.result;
+            if (!isEmptyToolValue(argsForDetail)) {
+                sections.push({ label: 'Args', value: argsForDetail, kind: 'args' });
             }
-            if (!isEmptyToolValue(entry.result)) {
-                sections.push({ label: 'Result', value: entry.result, kind: 'result' });
+            if (!isEmptyToolValue(resultForDetail)) {
+                sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
             }
             if (entry.events.length > 0) {
                 sections.push({ label: 'Events', value: entry.events });
@@ -1091,13 +1110,36 @@
             heading.textContent = label;
             section.appendChild(heading);
 
-            if (options.kind === 'result') {
+            if (options.kind === 'args') {
+                renderToolArgsValue(section, value);
+            } else if (options.kind === 'result') {
                 renderToolResultValue(section, value);
             } else {
                 section.appendChild(createToolDetailBlock(formatToolDetail(value)));
             }
 
             return section;
+        }
+
+        function renderToolArgsValue(section, value) {
+            const normalized = normalizeToolDisplayValue(value);
+            if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+                section.appendChild(createToolDetailBlock(formatToolDetail(normalized)));
+                return;
+            }
+
+            const handled = new Set();
+            if (typeof normalized.code === 'string' && normalized.code.trim()) {
+                section.appendChild(createToolDetailSubsection('code', normalized.code, { kind: 'code' }));
+                handled.add('code');
+            }
+
+            const remaining = Object.fromEntries(
+                Object.entries(normalized).filter(([key, item]) => !handled.has(key) && !isEmptyToolValue(item))
+            );
+            if (Object.keys(remaining).length > 0) {
+                section.appendChild(createToolDetailSubsection('other args', remaining, { kind: 'json' }));
+            }
         }
 
         function renderToolResultValue(section, value) {
@@ -1129,7 +1171,7 @@
             }
         }
 
-        function createToolDetailSubsection(label, value) {
+        function createToolDetailSubsection(label, value, options = {}) {
             const wrapper = document.createElement('div');
             wrapper.className = 'tool-status-subsection';
 
@@ -1138,14 +1180,21 @@
             subheading.textContent = label;
 
             wrapper.appendChild(subheading);
-            wrapper.appendChild(createToolDetailBlock(formatToolDetail(value)));
+            const formattedValue = options.kind === 'code' && typeof value === 'string'
+                ? value
+                : formatToolDetail(value);
+            wrapper.appendChild(createToolDetailBlock(formattedValue, options));
             return wrapper;
         }
 
-        function createToolDetailBlock(value) {
+        function createToolDetailBlock(value, options = {}) {
             const block = document.createElement('pre');
-            block.className = 'tool-status-block';
+            block.className = options.kind === 'code'
+                ? 'tool-status-block tool-status-block-code'
+                : 'tool-status-block';
             block.textContent = value;
+            const copyButton = createCopyButton(() => utils.getCopyableText(block), 'code-copy-button');
+            block.appendChild(copyButton);
             return block;
         }
 
