@@ -205,6 +205,16 @@
                     return;
                 }
 
+                if (isCompactionSummaryMessage(message)) {
+                    pendingToolCallIds.clear();
+                    renderPersistedAssistantMessage(message.content || '', archivedToolEvents, {
+                        sequenceIndex: forkSequenceIndex,
+                        archivedToolEvents: true
+                    });
+                    archivedToolEvents = [];
+                    return;
+                }
+
                 if (message.role === 'assistant') {
                     const assistantToolEvents = toolEventsForIds(toolEventsById, pendingToolCallIds);
                     pendingToolCallIds.clear();
@@ -215,15 +225,6 @@
                 }
 
                 pendingToolCallIds.clear();
-                if (isCompactionSummaryMessage(message) && archivedToolEvents.length > 0) {
-                    renderPersistedAssistantMessage(message.content || '', archivedToolEvents, {
-                        sequenceIndex: forkSequenceIndex,
-                        archivedToolEvents: true
-                    });
-                    archivedToolEvents = [];
-                    return;
-                }
-
                 addMessage('user', message.content || '', {
                     sequenceIndex: forkSequenceIndex
                 });

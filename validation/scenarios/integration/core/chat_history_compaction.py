@@ -230,6 +230,9 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert fork_detail.status_code == 200, "Forked compacted session detail loads"
         fork_messages = fork_detail.json()["messages"]
         assert len(fork_messages) == 4, "Forked session starts from the compacted visible history"
+        assert fork_messages[0]["role"] == "system", (
+            "Forked session preserves the compaction card as a system-maintained message"
+        )
         assert "AssistantMD compacted chat history" in fork_messages[0]["content"], (
             "Forked session keeps the compaction card as its starting context"
         )
