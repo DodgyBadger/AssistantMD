@@ -850,7 +850,8 @@ def fork_chat_session(
             },
         )
 
-    highest_sequence = _chat_store.get_highest_message_sequence_index(source_session_id, vault_name)
+    source_messages = _chat_store.get_stored_messages(source_session_id, vault_name)
+    highest_sequence = max((message.sequence_index for message in source_messages), default=-1)
     if highest_sequence < 0:
         raise APIException(
             status_code=400,
@@ -864,7 +865,7 @@ def fork_chat_session(
             error_type="ChatSessionForkPointInvalid",
             message=(
                 f"Fork point {through_sequence_index} is beyond the latest "
-                f"message sequence {highest_sequence}."
+                f"effective message sequence {highest_sequence}."
             ),
             details={
                 "session_id": source_session_id,
@@ -1143,6 +1144,7 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
         messages=[
             ChatSessionMessageInfo(
                 sequence_index=message.sequence_index,
+                fork_sequence_index=message.fork_sequence_index,
                 role=message.role,
                 content=message.content_text,
                 message_type=message.message_type,

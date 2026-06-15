@@ -466,6 +466,10 @@ class ChatSessionMessageInfo(BaseModel):
     """Persisted normalized chat message for session rehydration."""
 
     sequence_index: int = Field(..., description="Stable sequence index within the session")
+    fork_sequence_index: Optional[int] = Field(
+        None,
+        description="Effective inclusive message sequence to use when forking from this rendered message",
+    )
     role: str = Field(..., description="Normalized role for rendering")
     content: str = Field(..., description="Normalized rendered message content")
     message_type: str = Field(..., description="Provider-native message class name")

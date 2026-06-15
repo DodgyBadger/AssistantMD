@@ -209,6 +209,33 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert "probe result" in detail_messages[2]["content"], (
             "Tool result remains paired with the call"
         )
+        assert [message["fork_sequence_index"] for message in detail_messages] == [0, 1, 2, 3], (
+            "Compacted replacement messages expose effective fork points"
+        )
+        fork_response = self.call_api(
+            f"/api/chat/sessions/{session_id}/fork",
+            method="POST",
+            data={
+                "vault_name": vault.name,
+                "through_sequence_index": detail_messages[-1]["fork_sequence_index"],
+            },
+        )
+        assert fork_response.status_code == 200, "Forking from compacted retained messages succeeds"
+        fork_payload = fork_response.json()
+        assert fork_payload["copied_message_count"] == 4, (
+            "Forking from compacted replacement history copies only the visible effective prefix"
+        )
+        fork_session_id = fork_payload["session"]["session_id"]
+        fork_detail = self.call_api(f"/api/chat/sessions/{fork_session_id}?vault_name={vault.name}")
+        assert fork_detail.status_code == 200, "Forked compacted session detail loads"
+        fork_messages = fork_detail.json()["messages"]
+        assert len(fork_messages) == 4, "Forked session starts from the compacted visible history"
+        assert "AssistantMD compacted chat history" in fork_messages[0]["content"], (
+            "Forked session keeps the compaction card as its starting context"
+        )
+        assert fork_messages[-1]["content"] == "Probe result handled.", (
+            "Forked session includes the retained assistant message without restoring archival history"
+        )
         metadata = store.get_session_metadata(session_id, vault.name)
         assert "last_compaction" in metadata, "Compaction audit metadata is recorded"
         assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v1", (
@@ -288,6 +315,15 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         assert replay_messages[-1].content_text == "Post-compaction follow-up.", (
             "Post-checkpoint raw message appears after checkpoint replacement"
+        )
+        post_detail = self.call_api(f"/api/chat/sessions/{session_id}?vault_name={vault.name}")
+        assert post_detail.status_code == 200, "Session detail endpoint succeeds after post-checkpoint append"
+        post_detail_messages = post_detail.json()["messages"]
+        assert post_detail_messages[-1]["content"] == "Post-compaction follow-up.", (
+            "Session detail exposes post-checkpoint raw messages"
+        )
+        assert post_detail_messages[-1]["fork_sequence_index"] == 6, (
+            "Post-checkpoint raw messages keep their own raw fork point"
         )
 
         broker_history = ChatHistoryService(chat_store=store).get_conversation_history(

@@ -196,6 +196,9 @@
             }
 
             messages.forEach((message) => {
+                const forkSequenceIndex = Number.isInteger(message.fork_sequence_index)
+                    ? message.fork_sequence_index
+                    : message.sequence_index;
                 if (message.is_tool_message) {
                     collectToolIds(message.tool_call_ids, pendingToolCallIds);
                     collectToolIds(message.tool_return_ids, pendingToolCallIds);
@@ -206,7 +209,7 @@
                     const assistantToolEvents = toolEventsForIds(toolEventsById, pendingToolCallIds);
                     pendingToolCallIds.clear();
                     renderPersistedAssistantMessage(message.content || '', assistantToolEvents, {
-                        sequenceIndex: message.sequence_index
+                        sequenceIndex: forkSequenceIndex
                     });
                     return;
                 }
@@ -214,7 +217,7 @@
                 pendingToolCallIds.clear();
                 if (isCompactionSummaryMessage(message) && archivedToolEvents.length > 0) {
                     renderPersistedAssistantMessage(message.content || '', archivedToolEvents, {
-                        sequenceIndex: message.sequence_index,
+                        sequenceIndex: forkSequenceIndex,
                         archivedToolEvents: true
                     });
                     archivedToolEvents = [];
@@ -222,7 +225,7 @@
                 }
 
                 addMessage('user', message.content || '', {
-                    sequenceIndex: message.sequence_index
+                    sequenceIndex: forkSequenceIndex
                 });
             });
 
