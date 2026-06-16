@@ -91,7 +91,7 @@ jobs:
       - name: Install validation system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ripgrep
+          sudo apt-get install -y curl ripgrep
 
       - name: Set up Python
         uses: actions/setup-python@v5
