@@ -1,6 +1,11 @@
 # Release Notes
 
 
+## 2026-06-16 - v0.6.7
+
+- Fix: chat history compaction now uses the retained recent turns as supersession context, so compaction cards are less likely to preserve stale current objectives or next steps.
+
+
 ## 2026-06-16 - v0.6.6
 
 ### Long-running sessions

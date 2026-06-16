@@ -61,9 +61,11 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         prompt = compaction._build_summary_prompt(
             older_messages=older_messages,
+            recent_messages=recent_messages,
             focus="Keep decisions and tool outcomes.",
         )
-        assert '"prompt_contract_version": "recovery-card-v1"' in prompt, (
+        prompt_payload = json.loads(prompt)
+        assert prompt_payload["prompt_contract_version"] == "recovery-card-v3", (
             "Compaction prompt declares the summary contract version"
         )
         assert "context checkpoint compaction" in prompt, (
@@ -72,8 +74,19 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert "Open tasks, unresolved questions, blockers, risks" in prompt, (
             "Compaction prompt asks for recovery-card continuation details"
         )
-        assert "probe result" not in prompt, (
-            "Compaction prompt should not include recent turns that will be preserved verbatim"
+        assert "operational requests, not task objectives" in prompt, (
+            "Compaction prompt should not treat session hygiene as the current objective"
+        )
+        older_prompt_text = json.dumps(prompt_payload["older_history"], ensure_ascii=False)
+        recent_prompt_text = json.dumps(
+            prompt_payload["retained_recent_history"],
+            ensure_ascii=False,
+        )
+        assert "probe result" not in older_prompt_text, (
+            "Compaction prompt should not treat recent turns as history to compress"
+        )
+        assert "probe result" in recent_prompt_text, (
+            "Compaction prompt should provide retained recent turns for supersession checks"
         )
         assert len(recent_messages) == 3, "Recent slice shifts backward to preserve tool pair"
 
@@ -249,7 +262,7 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         metadata = store.get_session_metadata(session_id, vault.name)
         assert "last_compaction" in metadata, "Compaction audit metadata is recorded"
-        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v1", (
+        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v3", (
             "Session metadata records the compaction prompt contract"
         )
         assert metadata["last_compaction"]["trigger"] == "manual", (
@@ -268,7 +281,7 @@ class ChatHistoryCompactionScenario(BaseScenario):
             "Checkpoint records the raw message high-water mark"
         )
         checkpoint_metadata = json.loads(checkpoint.metadata_json or "{}")
-        assert checkpoint_metadata["prompt_contract_version"] == "recovery-card-v1", (
+        assert checkpoint_metadata["prompt_contract_version"] == "recovery-card-v3", (
             "Checkpoint metadata records the prompt contract version"
         )
         assert checkpoint_metadata["trigger"] == "manual", (

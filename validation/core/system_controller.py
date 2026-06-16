@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+import yaml
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -21,6 +22,7 @@ from core.runtime.config import RuntimeConfig
 from core.runtime.bootstrap import bootstrap_runtime
 from core.runtime.state import clear_runtime_context
 from core.runtime.paths import set_bootstrap_roots
+from core.settings.store import SETTINGS_TEMPLATE, refresh_settings_cache
 from core.authoring.template_discovery import discover_vaults
 from api.endpoints import router as api_router, register_exception_handlers
 import core.authoring.runtime.host as authoring_host_module
@@ -54,6 +56,7 @@ class SystemController:
 
         # Make bootstrap roots available before runtime is started
         set_bootstrap_roots(Path(self.test_data_root), self._system_root)
+        self._seed_validation_settings()
 
         # Use the real secrets file by default; allow override via env.
         target_secrets = (
@@ -86,6 +89,34 @@ class SystemController:
         # FastAPI app + test client mirroring production router
         self._api_app = self._create_api_app()
         self._api_client = TestClient(self._api_app)
+
+    def _seed_validation_settings(self) -> None:
+        """Seed validation settings with deterministic embedding configuration."""
+        settings_path = self._system_root / "settings.yaml"
+        if settings_path.exists():
+            return
+
+        raw_settings = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+        raw_settings.setdefault("models", {})
+        raw_settings.setdefault("providers", {})
+        raw_settings["models"]["embeddings"] = {
+            "provider": "test",
+            "model_string": "test-embedding",
+            "capabilities": ["embedding"],
+            "dimensions": 1536,
+            "description": "Validation embedding model for deterministic vector search",
+            "user_editable": True,
+        }
+        raw_settings["providers"]["test"] = {
+            "api_key": None,
+            "base_url": None,
+            "user_editable": False,
+        }
+        settings_path.write_text(
+            yaml.safe_dump(raw_settings, sort_keys=False, allow_unicode=False),
+            encoding="utf-8",
+        )
+        refresh_settings_cache()
 
     def _create_api_app(self) -> FastAPI:
         """Construct FastAPI app matching production router for validation."""
