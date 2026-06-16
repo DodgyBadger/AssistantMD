@@ -183,6 +183,8 @@ artifact of the conversation.
 Write one concise, structured recovery-card summary. Include only sections that
 are supported by the source history and useful for continuing work:
 - Current objective and the user's intended outcome.
+- Session throughline: recurring themes, user concerns, major pivots, and why
+  the current objective matters in relation to prior work.
 - Current progress, completed work, and key decisions.
 - Important constraints, user preferences, and operating assumptions.
 - Durable goal tracking references, including exact `goal_id` values when
@@ -192,11 +194,13 @@ are supported by the source history and useful for continuing work:
 - Open tasks, unresolved questions, blockers, risks, failed attempts, and clear
   next steps.
 
-Prioritize state needed to resume the task over a chronological transcript.
-Keep tool results only when their outcomes matter for future work. Do not invent
-details. Do not make secrets or API keys more explicit than they appeared in the
-source history. Summarize only the provided older source history; recent turns
-are preserved verbatim outside the summary and should not be restated.
+Prioritize state needed to resume the task while preserving enough causal
+context to understand how the session arrived at the current state. Do not write
+a chronological transcript. Keep tool results only when their outcomes matter
+for future work. Do not invent details. Do not make secrets or API keys more
+explicit than they appeared in the source history. Summarize only the provided
+older source history; recent turns are preserved verbatim outside the summary
+and should not be restated.
 
 Do not include compaction and related session hygiene requests in the summary.
 """.strip()
