@@ -88,6 +88,11 @@ jobs:
           sudo mkdir -p /app/system /app/data
           sudo chown -R "$USER":"$USER" /app/system /app/data
 
+      - name: Install validation system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
