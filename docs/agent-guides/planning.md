@@ -12,6 +12,9 @@
 - Identify which workflow phase should come next after planning.
 - Name the validation target early:
   scenario to extend, artifact to assert, or smoke test to run.
+- When the planned work touches an existing subsystem, check
+  `docs/adr/` with `ls` or `rg` for relevant architecture decisions that
+  explain why the current shape exists.
 - Note any contract-sensitive areas:
   directives, API payloads, validation events, routing, settings, persistence.
 - Pull in references only as needed:

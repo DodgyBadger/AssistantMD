@@ -11,6 +11,13 @@
   never commit real API keys, populated `system/secrets.yaml`, or unintended changes under persistent runtime state.
 - Make sure docs match the final behavior:
   update user-facing docs, examples, and `docs/architecture/` when feature behavior, subsystem responsibilities, or execution flow changed.
+- Recommend a new ADR when the final implementation establishes or changes a
+  durable architecture decision:
+  cross-subsystem boundaries, persistence ownership, user-data ownership,
+  execution policy, security posture, or model/tool/runtime contracts.
+  Do not create ADRs for temporary implementation choices or decisions that are
+  still likely to change; call out the recommendation in the handoff when the
+  maintainer should decide.
 - Draft the next `RELEASE_NOTES.md` entry for the change.
   Keep the entry user-oriented:
   describe what changed for users, operators, or template authors, not internal architecture churn unless it changes how they use or upgrade the system.
@@ -25,6 +32,8 @@
 ## Common Mistakes
 - Leaving behind session-only helpers or debug instrumentation.
 - Updating implementation without updating docs or examples.
+- Treating every plan change as an ADR candidate; ADRs should capture durable
+  decisions that survived the work.
 - Accidentally committing secrets or local runtime-state artifacts.
 - Writing release notes from memory instead of the implementation plan and issue history.
 - Forgetting to mention unrun full validation or unresolved risks.

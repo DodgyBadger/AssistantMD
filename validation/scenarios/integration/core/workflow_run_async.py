@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.tools.workflow_run import WorkflowRun
+from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
 
@@ -44,6 +47,39 @@ class WorkflowRunAsyncScenario(BaseScenario):
         status_data = self._parse_kv_response(status_out)
         self.soft_assert_equal(status_data.get("success"), "True", "workflow_run status should succeed")
         self.soft_assert_equal(status_data.get("task_id"), task_id, "workflow_run status should report the same task")
+        self.soft_assert_equal(
+            status_data.get("heartbeat_status"),
+            "workflow_running",
+            "workflow_run status should expose the latest workflow heartbeat",
+        )
+        self.soft_assert(
+            status_data.get("heartbeat_age_seconds") != "",
+            "workflow_run status should expose heartbeat age",
+        )
+        self.soft_assert_equal(
+            status_data.get("heartbeat_stale"),
+            "False",
+            "freshly running workflow should not be marked stale",
+        )
+        self.assert_event_contains(
+            name="execution_task_heartbeat",
+            expected={
+                "task_id": task_id,
+                "heartbeat_status": "workflow_running",
+            },
+        )
+        stale_status_out = WorkflowRun._format_task_status(
+            replace(
+                await get_runtime_context().task_coordinator.get_task(task_id),
+                last_heartbeat_at=datetime.now(UTC) - timedelta(seconds=120),
+            )
+        )
+        stale_status_data = self._parse_kv_response(stale_status_out)
+        self.soft_assert_equal(
+            stale_status_data.get("heartbeat_stale"),
+            "True",
+            "workflow_run status should mark old heartbeat data stale",
+        )
 
         checkpoint = self.event_checkpoint()
         cancel_out = await tool.function(operation="cancel", task_id=task_id)

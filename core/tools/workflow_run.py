@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import traceback
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -27,6 +28,23 @@ from .base import BaseTool
 
 
 logger = UnifiedLogger(tag="workflow-run-tool")
+WORKFLOW_HEARTBEAT_STALE_SECONDS = 60
+
+
+def _heartbeat_age_seconds(task) -> float | None:
+    heartbeat_at = getattr(task, "last_heartbeat_at", None)
+    if heartbeat_at is None:
+        raw = task.metadata.get("last_heartbeat_at") if isinstance(task.metadata, dict) else None
+        if isinstance(raw, str) and raw.strip():
+            try:
+                heartbeat_at = datetime.fromisoformat(raw)
+            except ValueError:
+                return None
+    if heartbeat_at is None:
+        return None
+    if heartbeat_at.tzinfo is None:
+        heartbeat_at = heartbeat_at.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - heartbeat_at.astimezone(UTC)).total_seconds())
 
 
 class WorkflowRun(BaseTool):
@@ -352,6 +370,12 @@ Full documentation:
 
     @staticmethod
     def _format_task_status(task) -> str:
+        heartbeat_age = _heartbeat_age_seconds(task)
+        heartbeat_stale = (
+            task.status not in TERMINAL_STATUS_VALUES
+            and heartbeat_age is not None
+            and heartbeat_age > WORKFLOW_HEARTBEAT_STALE_SECONDS
+        )
         lines = [
             "success: True",
             "operation: status",
@@ -359,7 +383,13 @@ Full documentation:
             f"status: {task.status}",
             f"cancel_requested: {task.cancel_requested}",
             f"global_id: {task.metadata.get('workflow_id', task.label)}",
+            f"heartbeat_status: {task.heartbeat_status or task.metadata.get('heartbeat_status', '')}",
+            f"heartbeat_age_seconds: {'' if heartbeat_age is None else f'{heartbeat_age:.1f}'}",
+            f"heartbeat_stale: {heartbeat_stale}",
         ]
+        queue_reason = task.metadata.get("workflow_queue_reason")
+        if queue_reason:
+            lines.append(f"queue_reason: {queue_reason}")
         if task.terminal_reason:
             lines.append(f"reason: {task.terminal_reason}")
         workflow_result = dict(task.metadata.get("workflow_result") or {})
@@ -369,7 +399,13 @@ Full documentation:
                 if workflow_result.get(key) is not None:
                     lines.append(f"- {key}: {workflow_result.get(key)}")
         if task.status not in TERMINAL_STATUS_VALUES:
-            lines.append("message: Workflow is still running. Poll later before using its result.")
+            if heartbeat_stale:
+                lines.append(
+                    "message: Workflow is still running but has not emitted a recent heartbeat. "
+                    "Poll again or consider cancellation if it remains stale."
+                )
+            else:
+                lines.append("message: Workflow is still running. Poll later before using its result.")
         return "\n".join(lines)
 
     @staticmethod

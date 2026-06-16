@@ -9,11 +9,11 @@ import asyncio
 import json
 import traceback
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import List, Optional, AsyncIterator, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, TextPart, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, TextPart, UserPromptPart
 from pydantic_ai import (
     BinaryContent,
     PartStartEvent, PartDeltaEvent, AgentRunResultEvent,
@@ -47,6 +47,7 @@ from core.llm.capabilities.chat_context import build_context_template_error_deta
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
 from core.llm.capabilities.factory import build_chat_capabilities
 from core.settings import (
+    get_chat_model_requests_limit,
     get_chat_tool_calls_limit,
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_mb_per_image,
@@ -61,6 +62,7 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
+from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
 
 
@@ -71,6 +73,7 @@ PromptInput = str | Sequence[UserContent]
 
 
 _CHAT_STORE = ChatStore()
+_LATEST_TURN_FAILURE_METADATA_KEY = "latest_turn_failure"
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,14 @@ class ChatContextTemplateError(ValueError):
 
 class ChatToolCallLimitError(ValueError):
     """Raised when a chat run exceeds the configured tool-call limit."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class ChatModelRequestLimitError(ValueError):
+    """Raised when a chat run exceeds the configured model-request limit."""
 
     def __init__(self, message: str, *, details: dict[str, Any] | None = None):
         super().__init__(message)
@@ -156,11 +167,145 @@ def _serialize_exception(exc: Exception) -> dict[str, Any]:
     }
 
 
+def _build_failure_recovery_marker(
+    *,
+    exc: Exception,
+    phase: str,
+    streaming: bool,
+    model: str | None,
+    tools: Sequence[str] | None,
+    sequence_index: int,
+) -> dict[str, Any]:
+    """Build session metadata that lets the next turn recover from a failed run."""
+    classification = classify_exception(exc, phase=phase)
+    metadata = classification.to_metadata()
+    return {
+        "status": "failed",
+        "phase": phase,
+        "streaming": streaming,
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "failure_kind": classification.failure_kind,
+        "retryable": classification.retryable,
+        "http_status": classification.http_status,
+        "retry_after": classification.retry_after,
+        "model": model,
+        "tools": list(tools or []),
+        "accepted_user_sequence_index": sequence_index,
+        "recorded_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "suggested_action": (
+            "Treat the previous user request as accepted but unfinished. "
+            f"{metadata['suggested_action']}"
+        ),
+    }
+
+
+def _record_latest_turn_failure(
+    *,
+    session_id: str,
+    vault_name: str,
+    exc: Exception,
+    phase: str,
+    streaming: bool,
+    model: str | None,
+    tools: Sequence[str] | None,
+) -> None:
+    """Persist an internal failure marker for a user turn with no assistant outcome."""
+    marker = _build_failure_recovery_marker(
+        exc=exc,
+        phase=phase,
+        streaming=streaming,
+        model=model,
+        tools=tools,
+        sequence_index=_CHAT_STORE.get_highest_message_sequence_index(session_id, vault_name),
+    )
+    _CHAT_STORE.update_session_metadata(
+        session_id=session_id,
+        vault_name=vault_name,
+        metadata_update={_LATEST_TURN_FAILURE_METADATA_KEY: marker},
+        advance_history_revision=True,
+    )
+    logger.warning(
+        "chat_turn_failure_marker_recorded",
+        data={
+            "event": "chat_turn_failure_marker_recorded",
+            "vault_name": vault_name,
+            "session_id": session_id,
+            **marker,
+        },
+    )
+
+
+def _clear_latest_turn_failure(*, session_id: str, vault_name: str) -> None:
+    """Clear any internal failure marker after a successful assistant outcome."""
+    metadata = _CHAT_STORE.get_session_metadata(session_id, vault_name)
+    if _LATEST_TURN_FAILURE_METADATA_KEY not in metadata:
+        return
+    _CHAT_STORE.update_session_metadata(
+        session_id=session_id,
+        vault_name=vault_name,
+        remove_keys=(_LATEST_TURN_FAILURE_METADATA_KEY,),
+        advance_history_revision=True,
+    )
+
+
+def _failure_recovery_message(marker: dict[str, Any]) -> ModelRequest | None:
+    """Render a metadata failure marker as ephemeral model context."""
+    if marker.get("status") != "failed":
+        return None
+    phase = str(marker.get("phase") or "unknown")
+    error_type = str(marker.get("error_type") or "Error")
+    error = str(marker.get("error") or "").strip()
+    sequence_index = marker.get("accepted_user_sequence_index")
+    text = (
+        "Internal recovery note: the previous user request was accepted into chat history "
+        "but the assistant response failed before it was persisted. "
+        f"Failure phase: {phase}. Error type: {error_type}."
+    )
+    failure_kind = str(marker.get("failure_kind") or "").strip()
+    if failure_kind:
+        text += f" Failure kind: {failure_kind}."
+    if "retryable" in marker:
+        text += f" Retryable: {bool(marker.get('retryable'))}."
+    if error:
+        text += f" Error: {error}."
+    if sequence_index is not None:
+        text += f" Accepted user message sequence index: {sequence_index}."
+    suggested_action = str(marker.get("suggested_action") or "").strip()
+    if suggested_action:
+        text += f" Suggested action: {suggested_action}"
+    text += (
+        " For broad or long-running work, resume from durable state rather than assuming partial "
+        "failed-run tool history was persisted: inspect goal_ops goals/checkpoints, vault activity, "
+        "changed files, saved artifacts, and session history; then continue in a smaller checkpointed batch."
+    )
+    return ModelRequest(parts=[SystemPromptPart(content=text)])
+
+
+def _with_failure_recovery_context(
+    messages: list[ModelMessage] | None,
+    *,
+    session_id: str,
+    vault_name: str,
+) -> list[ModelMessage] | None:
+    """Append ephemeral recovery context for an unfinished prior turn."""
+    metadata = _CHAT_STORE.get_session_metadata(session_id, vault_name)
+    marker = metadata.get(_LATEST_TURN_FAILURE_METADATA_KEY)
+    if not isinstance(marker, dict):
+        return messages
+    recovery_message = _failure_recovery_message(marker)
+    if recovery_message is None:
+        return messages
+    return [*(messages or []), recovery_message]
+
+
 def _chat_usage_limits() -> UsageLimits | None:
     tool_calls_limit = get_chat_tool_calls_limit()
-    if tool_calls_limit <= 0:
-        return None
-    return UsageLimits(tool_calls_limit=tool_calls_limit)
+    model_requests_limit = get_chat_model_requests_limit()
+    return UsageLimits(
+        request_limit=model_requests_limit if model_requests_limit > 0 else None,
+        tool_calls_limit=tool_calls_limit if tool_calls_limit > 0 else None,
+    )
 
 
 def _build_tool_call_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitError:
@@ -179,6 +324,42 @@ def _build_tool_call_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitEr
             "error": str(exc),
         },
     )
+
+
+def _build_model_request_limit_error(exc: UsageLimitExceeded) -> ChatModelRequestLimitError:
+    limit = get_chat_model_requests_limit()
+    limit_label = f" of {limit}" if limit > 0 else ""
+    return ChatModelRequestLimitError(
+        (
+            f"Chat stopped because it reached the configured model-request limit"
+            f"{limit_label} for this run. "
+            "The session is intact. Ask the agent to continue in a new message; it should resume "
+            "from durable state such as goal_ops checkpoints, vault activity, changed files, saved "
+            "artifacts, and session history. Increase chat_model_requests_limit only when the larger "
+            "scope is intentional."
+        ),
+        details={
+            "setting": "chat_model_requests_limit",
+            "limit_kind": "request_limit",
+            "limit": limit,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        },
+    )
+
+
+def _build_chat_usage_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitError | ChatModelRequestLimitError:
+    if "request_limit" in str(exc):
+        return _build_model_request_limit_error(exc)
+    return _build_tool_call_limit_error(exc)
+
+
+def _usage_limit_label(error: ChatToolCallLimitError | ChatModelRequestLimitError) -> str:
+    return "model-request limit" if isinstance(error, ChatModelRequestLimitError) else "tool-call limit"
+
+
+def _usage_limit_display_label(error: ChatToolCallLimitError | ChatModelRequestLimitError) -> str:
+    return "Model-request limit" if isinstance(error, ChatModelRequestLimitError) else "Tool-call limit"
 
 
 def _chat_event_for_message(message: str) -> str | None:
@@ -288,6 +469,8 @@ def _log_chat_failure(
 ) -> None:
     """Emit structured failure logs for chat session execution."""
     payload = _serialize_exception(exc)
+    classification = classify_exception(exc, phase=phase)
+    payload.update(classification.to_metadata())
     if extra:
         payload.update(extra)
     rss_bytes = _get_process_rss_bytes()
@@ -381,6 +564,26 @@ def _normalize_tool_args(args: Any) -> Optional[str]:
         return _truncate_preview(serialized)
     except (TypeError, ValueError):
         return _truncate_preview(str(args))
+
+
+def _normalize_tool_detail(value: Any) -> Any:
+    """
+    Convert streamed tool details into JSON-safe data without preview truncation.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        try:
+            return json.loads(stripped)
+        except (TypeError, ValueError):
+            return stripped
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _normalize_tool_result(result: Any) -> Optional[str]:
@@ -634,7 +837,11 @@ async def _prepare_chat_execution(
         if inst:
             agent.instructions(lambda _ctx, text=inst: text)
 
-    message_history = _CHAT_STORE.get_history(session_id, vault_name)
+    message_history = _with_failure_recovery_context(
+        _CHAT_STORE.get_history(session_id, vault_name),
+        session_id=session_id,
+        vault_name=vault_name,
+    )
     user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
         prompt_text=prompt,
         image_paths=image_paths,
@@ -718,6 +925,7 @@ async def execute_chat_prompt(
     phase = "preflight"
     attached_image_count = 0
     prepared = None
+    accepted_user_persisted = False
     initial_workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
     _log_chat_lifecycle(
         "Chat execution started",
@@ -781,6 +989,7 @@ async def execute_chat_prompt(
         ):
             async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
                 _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
+                accepted_user_persisted = True
             session_buffer_store = get_session_buffer_store(session_id)
             run_deps = ChatRunDeps(
                 context_manager_now=_resolve_context_manager_now(),
@@ -805,6 +1014,7 @@ async def execute_chat_prompt(
                     vault_name,
                     _messages_after_accepted_user_request(result.new_messages()),
                 )
+                _clear_latest_turn_failure(session_id=session_id, vault_name=vault_name)
         await _try_auto_compact_after_turn(
             session_id=session_id,
             vault_name=vault_name,
@@ -852,10 +1062,10 @@ async def execute_chat_prompt(
         )
         raise
     except UsageLimitExceeded as exc:
-        limit_error = _build_tool_call_limit_error(exc)
+        limit_error = _build_chat_usage_limit_error(exc)
         failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
         _log_chat_failure(
-            "Chat tool-call limit exceeded",
+            f"Chat {_usage_limit_label(limit_error)} exceeded",
             vault_name=vault_name,
             session_id=session_id,
             model=model,
@@ -869,6 +1079,16 @@ async def execute_chat_prompt(
             extra=limit_error.details,
             exc=exc,
         )
+        if accepted_user_persisted:
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc,
+                phase=phase,
+                streaming=False,
+                model=model,
+                tools=tools,
+            )
         raise limit_error from exc
     except Exception as exc:
         failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
@@ -886,6 +1106,16 @@ async def execute_chat_prompt(
             workspace_path=failure_workspace_path,
             exc=exc,
         )
+        if accepted_user_persisted:
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc,
+                phase=phase,
+                streaming=False,
+                model=model,
+                tools=tools,
+            )
         if isinstance(exc, ContextTemplateExecutionError):
             details = build_context_template_error_details(
                 vault_name=vault_name,
@@ -1016,6 +1246,8 @@ async def _stream_prepared_chat_prompt(
                         "tool_name": tool_name,
                         "arguments": _normalize_tool_args(tool_args),
                     }
+                    if tool_name == "code_execution":
+                        metadata_chunk["arguments_detail"] = _normalize_tool_detail(tool_args)
                     logger.set_sinks(["validation"]).info(
                         "Streaming tool call started",
                         data={
@@ -1051,6 +1283,8 @@ async def _stream_prepared_chat_prompt(
                         "tool_name": tool_name,
                         "result": _normalize_tool_result(result_content),
                     }
+                    if tool_name == "code_execution":
+                        metadata_chunk["result_detail"] = _normalize_tool_detail(result_content)
                     result_text = tool_result_as_text(result_content)
                     logger.set_sinks(["validation"]).info(
                         "Streaming tool call finished",
@@ -1110,6 +1344,15 @@ async def _stream_prepared_chat_prompt(
             return
         except ChatCapabilityError as exc:
             logger.warning("Streaming capability mismatch", data=exc.details)
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+            )
             error_chunk = {
                 "event": "error",
                 "choices": [{
@@ -1130,6 +1373,15 @@ async def _stream_prepared_chat_prompt(
                 template_pointer=exc.template_pointer,
             )
             logger.warning("Streaming context template execution failure", data=details | {"error": str(exc)})
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+            )
             error_chunk = {
                 "event": "error",
                 "choices": [{
@@ -1143,6 +1395,15 @@ async def _stream_prepared_chat_prompt(
             return
         except ChatContextTemplateError as exc:
             logger.warning("Streaming context template failure", data=exc.details)
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+            )
             error_chunk = {
                 "event": "error",
                 "choices": [{
@@ -1155,9 +1416,9 @@ async def _stream_prepared_chat_prompt(
             yield f"data: {json.dumps(error_chunk)}\n\n"
             return
         except UsageLimitExceeded as exc:
-            limit_error = _build_tool_call_limit_error(exc)
+            limit_error = _build_chat_usage_limit_error(exc)
             _log_chat_failure(
-                "Streaming chat tool-call limit exceeded",
+                f"Streaming chat {_usage_limit_label(limit_error)} exceeded",
                 vault_name=vault_name,
                 session_id=session_id,
                 model=prepared.model,
@@ -1171,10 +1432,19 @@ async def _stream_prepared_chat_prompt(
                 extra={**_summarize_tool_activity(tool_activity), **limit_error.details},
                 exc=exc,
             )
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+            )
             error_chunk = {
                 "event": "error",
                 "choices": [{
-                    "delta": {"content": f"\n\nTool-call limit reached: {str(limit_error)}"},
+                    "delta": {"content": f"\n\n{_usage_limit_display_label(limit_error)} reached: {str(limit_error)}"},
                     "index": 0,
                     "finish_reason": "error",
                 }],
@@ -1183,6 +1453,7 @@ async def _stream_prepared_chat_prompt(
             yield f"data: {json.dumps(error_chunk)}\n\n"
             return
         except Exception as e:
+            classification = classify_exception(e, phase="agent_stream")
             _log_chat_failure(
                 "Streaming chat execution failed",
                 vault_name=vault_name,
@@ -1198,6 +1469,15 @@ async def _stream_prepared_chat_prompt(
                 extra=_summarize_tool_activity(tool_activity),
                 exc=e,
             )
+            _record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=e,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+            )
             error_chunk = {
                 "event": "error",
                 "choices": [{
@@ -1205,6 +1485,7 @@ async def _stream_prepared_chat_prompt(
                     "index": 0,
                     "finish_reason": "error",
                 }],
+                "details": classification.to_metadata(),
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
             raise
@@ -1216,6 +1497,7 @@ async def _stream_prepared_chat_prompt(
                     vault_name,
                     _messages_after_accepted_user_request(final_result.new_messages()),
                 )
+                _clear_latest_turn_failure(session_id=session_id, vault_name=vault_name)
             _log_chat_lifecycle(
                 "Streaming chat execution completed",
                 vault_name=vault_name,

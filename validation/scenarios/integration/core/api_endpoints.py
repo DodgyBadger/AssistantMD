@@ -32,6 +32,13 @@ class ApiEndpointsScenario(BaseScenario):
             "AssistantMD/Authoring/skipped_probe.md",
             SKIPPED_PROBE_WORKFLOW,
         )
+        system_workflow_path = (
+            self._get_system_controller()._system_root
+            / "Authoring"
+            / "api-system-probe.md"
+        )
+        system_workflow_path.parent.mkdir(parents=True, exist_ok=True)
+        system_workflow_path.write_text(API_SYSTEM_PROBE_WORKFLOW, encoding="utf-8")
 
         # Health prior to runtime bootstrap should indicate startup state
         pre_health = self.call_api("/api/health")
@@ -247,6 +254,49 @@ class ApiEndpointsScenario(BaseScenario):
         assert skipped_task.get("status") == "skipped", "Skipped workflow task should be skipped"
         assert skipped_task.get("terminal_reason") == "status-probe-skipped", (
             "Skipped workflow task should retain finish reason"
+        )
+
+        system_checkpoint = self.event_checkpoint()
+        system_execute = self.call_api(
+            "/api/workflows/execute",
+            method="POST",
+            data={
+                "global_id": "system/api-system-probe",
+                "vault_name": vault.name,
+            },
+        )
+        assert system_execute.status_code == 200, "Disabled system workflow manual execution starts"
+        system_payload = system_execute.json()
+        system_task_id = system_payload.get("task", {}).get("task_id")
+        assert system_task_id, "System workflow start returns a task id"
+        system_task = await self._wait_for_execution_task(system_task_id)
+        self.soft_assert_equal(
+            system_task.get("status"),
+            "completed",
+            "System workflow task should complete through the governor",
+        )
+        self.soft_assert_equal(
+            system_task.get("label"),
+            f"{vault.name}/system/api-system-probe",
+            "System workflow API execution should normalize to a vault-scoped workflow id",
+        )
+        self.soft_assert_equal(
+            system_task.get("metadata", {}).get("workflow_id"),
+            f"{vault.name}/system/api-system-probe",
+            "System workflow task metadata should use the governor-scoped workflow id",
+        )
+        self.assert_event_contains(
+            self.events_since(system_checkpoint),
+            name="workflow_task_started",
+            expected={
+                "workflow_id": f"{vault.name}/system/api-system-probe",
+                "task_id": system_task_id,
+            },
+        )
+        self.soft_assert_equal(
+            system_task.get("metadata", {}).get("workflow_result", {}).get("status"),
+            "completed",
+            "System workflow task metadata should include the terminal workflow result",
         )
 
         missing_active_chat_task = self.call_api(
@@ -507,5 +557,19 @@ description: Validation skipped workflow
 
 ```python
 await finish(status="skipped", reason="status-probe-skipped")
+```
+"""
+
+
+API_SYSTEM_PROBE_WORKFLOW = """---
+run_type: workflow
+enabled: false
+description: API system workflow routing probe
+---
+
+## Run
+
+```python
+await finish(status="completed", reason="api-system-probe")
 ```
 """

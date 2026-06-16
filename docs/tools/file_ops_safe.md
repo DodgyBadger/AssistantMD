@@ -21,7 +21,6 @@ Read, write, append, list, search, inspect frontmatter, and move files safely wi
 - `path`: file, directory, or glob pattern (used by all operations)
 - `content`: text to write or append
 - `destination`: destination path for move
-- `include_all`: include non-markdown and hidden files in listings
 - `recursive`: recurse through subdirectories for listings
 - `search_term`: text pattern to search for (search only)
 - `keys`: comma-separated frontmatter keys to extract (frontmatter only)
@@ -82,7 +81,7 @@ In scripted Monty flows, direct calls return an object with `return_value`, `met
 - `path`
 - `exists` when applicable
 - operation-specific fields:
-  - `file_count`, `directory_count`, `files`, `directories` for `list`
+  - `file_count`, `directory_count`, `files`, `directories`, `empty_directory_candidates`, and `empty_directory_candidate_count` for `list`
   - `match_count`, `matches` for `search`
   - `content_chars`, `media_mode` for `read`
   - `file_count`, `items` (list of `{path, frontmatter}`) for `frontmatter`
@@ -102,6 +101,12 @@ Avoid broad recursive lists or searches unless the scope is already known.
 
 ## Notes
 
+- writes and appends are markdown-only
+- `move` can move any existing vault file, including attachments and other non-markdown files
+- `list` includes all normal non-hidden vault files regardless of extension
+- `search` scans normal non-hidden text files; ripgrep skips binary content by default
+- `frontmatter` inspects markdown files only
+- `head` reads the first lines of text files; binary files return an unsupported result
 - writes are safe: no overwrite, no destructive delete, no truncation
 - virtual mounts are readable but protected from write operations
 - `frontmatter` returns all keys by default; pass `keys` to filter

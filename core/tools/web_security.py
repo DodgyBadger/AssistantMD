@@ -39,6 +39,9 @@ def wrap_web_tool_result(tool_name: str, result: Any) -> Any:
         return result
 
     if isinstance(result, ToolReturn):
+        metadata = result.metadata if isinstance(result.metadata, dict) else {}
+        if metadata.get("status") == "failed":
+            return result
         if result.content is not None:
             return result
         wrapped = _wrap_if_web_content(result.return_value)

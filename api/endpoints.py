@@ -15,6 +15,7 @@ from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
+    ChatModelRequestLimitError,
     ChatToolCallLimitError,
     UploadedImageAttachment,
     execute_chat_prompt,
@@ -72,6 +73,8 @@ from .models import (
     ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeRequest,
     ChatSessionsPurgeResponse,
+    GoalCleanupRequest,
+    GoalCleanupResponse,
     ChatSessionTitleRequest,
     ChatSessionWorkspaceRequest,
     ChatWorkspaceInfo,
@@ -81,6 +84,7 @@ from .exceptions import (
     APIException,
     ChatCapabilityMismatchError,
     ChatContextTemplateFailureError,
+    ChatModelRequestLimitExceededError,
     ChatSessionVaultMismatchError,
     ChatToolCallLimitExceededError,
 )
@@ -105,6 +109,7 @@ from .services import (
     compact_chat_session_history,
     get_chat_history_compaction_status,
     purge_chat_sessions,
+    cleanup_goals,
     set_chat_session_title,
     set_chat_session_workspace,
     list_vault_directories,
@@ -367,6 +372,20 @@ async def _execute_chat_request(
             },
         )
         raise ChatToolCallLimitExceededError(str(exc), details=exc.details) from exc
+    except ChatModelRequestLimitError as exc:
+        logger.warning(
+            "Chat request exceeded model-request limit",
+            data={
+                "vault_name": chat_request.vault_name,
+                "session_id": session_id,
+                "streaming": chat_request.stream,
+                "model": chat_request.model,
+                "tools": list(chat_request.tools),
+                "prompt_length": len(chat_request.prompt),
+                **exc.details,
+            },
+        )
+        raise ChatModelRequestLimitExceededError(str(exc), details=exc.details) from exc
     except Exception as exc:
         logger.error(
             "Chat request failed before response",
@@ -695,6 +714,19 @@ async def purge_expired_cache_endpoint():
     """Manually delete expired cache artifacts."""
     try:
         return purge_expired_cache()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/goals/cleanup", response_model=GoalCleanupResponse)
+async def cleanup_goals_endpoint(request: GoalCleanupRequest):
+    """Manually delete old completed or cancelled goals for a vault."""
+    try:
+        return cleanup_goals(
+            request.vault_name,
+            status=request.status,
+            older_than_days=request.older_than_days,
+        )
     except Exception as e:
         return create_error_response(e)
 

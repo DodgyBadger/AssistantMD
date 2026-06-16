@@ -3,8 +3,6 @@ Service layer for API operations.
 Handles business logic for status reporting, vault management, etc.
 """
 
-import asyncio
-import contextvars
 import json
 import hashlib
 import mimetypes
@@ -13,13 +11,11 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from time import perf_counter
 from typing import List, Optional, Dict, Any
 
 import yaml
 from sqlalchemy import func, select
 
-from core.authoring.service import run_authoring_template
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
@@ -59,6 +55,7 @@ from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.goals import GoalOpsStore
 from core.memory.session_summary import SessionSummaryStore
 from core.system_migrations import (
     get_system_migration_status as get_registered_system_migration_status,
@@ -111,6 +108,7 @@ from .models import (
     ChatSessionForkResponse,
     ChatWorkspaceInfo,
     ChatSessionDetailResponse,
+    ChatSessionFailureInfo,
     ChatSessionMessageInfo,
     ChatSessionToolEventInfo,
     VaultDirectoryInfo,
@@ -119,6 +117,7 @@ from .models import (
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeResponse,
+    GoalCleanupResponse,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
@@ -534,6 +533,8 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
         task_source=group.task_source,
         task_scope=group.task_scope,
         task_label=group.task_label,
+        goal_id=group.goal_id,
+        step_id=group.step_id,
         vault_id=group.vault_id,
         vault_name=group.vault_name,
         mutation_count=group.mutation_count,
@@ -548,6 +549,8 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
                 task_source=mutation.task_source,
                 task_scope=mutation.task_scope,
                 task_label=mutation.task_label,
+                goal_id=mutation.goal_id,
+                step_id=mutation.step_id,
                 path=mutation.path,
                 related_path=mutation.related_path,
                 operation=mutation.operation,
@@ -583,6 +586,46 @@ def purge_expired_cache() -> CachePurgeResponse:
         message=f"Purged {purged_count} expired cache artifact(s).",
         purged_count=purged_count,
     )
+
+
+def cleanup_goals(
+    vault_name: str,
+    *,
+    status: str,
+    older_than_days: int | None,
+) -> GoalCleanupResponse:
+    """Delete old completed or cancelled goals for a vault."""
+    status_key = (status or "completed").strip().lower()
+    status_map = {
+        "completed": ("completed",),
+        "cancelled": ("cancelled",),
+        "completed_or_cancelled": ("completed", "cancelled"),
+    }
+    statuses = status_map.get(status_key)
+    if statuses is None:
+        raise ValueError("status must be completed, cancelled, or completed_or_cancelled")
+
+    deleted = GoalOpsStore().purge_goals(
+        vault_name=vault_name,
+        statuses=statuses,
+        older_than_days=older_than_days,
+    )
+    logger.info(
+        "Manual goal cleanup completed",
+        data={
+            "vault_name": vault_name,
+            "status": status_key,
+            "older_than_days": older_than_days,
+            "deleted": deleted,
+        },
+    )
+    if deleted == 0:
+        message = "No goals matched."
+    elif deleted == 1:
+        message = "Deleted 1 goal."
+    else:
+        message = f"Deleted {deleted} goals."
+    return GoalCleanupResponse(success=True, deleted=deleted, message=message)
 
 
 def get_system_database_migration_status() -> SystemMigrationStatusResponse:
@@ -807,7 +850,8 @@ def fork_chat_session(
             },
         )
 
-    highest_sequence = _chat_store.get_highest_message_sequence_index(source_session_id, vault_name)
+    source_messages = _chat_store.get_stored_messages(source_session_id, vault_name)
+    highest_sequence = max((message.sequence_index for message in source_messages), default=-1)
     if highest_sequence < 0:
         raise APIException(
             status_code=400,
@@ -821,7 +865,7 @@ def fork_chat_session(
             error_type="ChatSessionForkPointInvalid",
             message=(
                 f"Fork point {through_sequence_index} is beyond the latest "
-                f"message sequence {highest_sequence}."
+                f"effective message sequence {highest_sequence}."
             ),
             details={
                 "session_id": source_session_id,
@@ -1090,13 +1134,17 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
     """Return persisted chat messages for one session."""
     messages = _chat_store.get_stored_messages(session_id, vault_name)
     tool_events = _chat_store.get_tool_events(session_id, vault_name, committed_only=True)
+    metadata = _chat_store.get_session_metadata(session_id, vault_name)
+    latest_failure = _chat_session_failure_info(metadata.get("latest_turn_failure"))
     return ChatSessionDetailResponse(
         session_id=session_id,
         vault_name=vault_name,
         workspace=_chat_workspace_info(_chat_store.get_session_workspace_path(session_id, vault_name)),
+        latest_failure=latest_failure,
         messages=[
             ChatSessionMessageInfo(
                 sequence_index=message.sequence_index,
+                fork_sequence_index=message.fork_sequence_index,
                 role=message.role,
                 content=message.content_text,
                 message_type=message.message_type,
@@ -1125,6 +1173,34 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
             for event in tool_events
         ],
     )
+
+
+def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("status") != "failed":
+        return None
+    try:
+        return ChatSessionFailureInfo(
+            status=str(value.get("status") or "failed"),
+            phase=str(value.get("phase") or "unknown"),
+            streaming=bool(value.get("streaming")),
+            error_type=str(value.get("error_type") or "Error"),
+            error=str(value.get("error") or ""),
+            failure_kind=str(value.get("failure_kind") or ""),
+            retryable=bool(value.get("retryable", False)),
+            http_status=(
+                None if value.get("http_status") is None else int(value.get("http_status"))
+            ),
+            retry_after=None if value.get("retry_after") is None else str(value.get("retry_after")),
+            model=None if value.get("model") is None else str(value.get("model")),
+            tools=[str(item) for item in value.get("tools") or ()],
+            accepted_user_sequence_index=int(value.get("accepted_user_sequence_index")),
+            recorded_at=str(value.get("recorded_at") or ""),
+            suggested_action=str(value.get("suggested_action") or ""),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def set_chat_session_title(vault_name: str, session_id: str, title: str | None) -> None:
@@ -2178,6 +2254,18 @@ def repair_settings_from_template() -> SystemSettingsResponse:
                 active_section[key] = value
         merged[section] = active_section
 
+    # Existing settings entries may need newly introduced metadata fields
+    # from the template. Preserve active values and only fill absent metadata.
+    active_settings = merged.get("settings", {})
+    template_settings = template_sections.get("settings", {})
+    if isinstance(active_settings, dict) and isinstance(template_settings, dict):
+        for key, template_setting in template_settings.items():
+            active_setting = active_settings.get(key)
+            if isinstance(active_setting, dict) and isinstance(template_setting, dict):
+                for metadata_key in ("description", "category", "restart_required"):
+                    if metadata_key in template_setting:
+                        active_setting.setdefault(metadata_key, template_setting[metadata_key])
+
     # Existing core provider entries may need newly introduced non-secret fields
     # from the template. Preserve all active values and only fill absent keys.
     active_providers = merged.get("providers", {})
@@ -2266,6 +2354,7 @@ def _build_setting_info(key: str, entry) -> SettingInfo:
         key=key,
         value=_format_setting_value(getattr(entry, "value", None)),
         description=getattr(entry, "description", None),
+        category=getattr(entry, "category", None),
         restart_required=bool(getattr(entry, "restart_required", False)),
     )
 
@@ -2642,27 +2731,15 @@ async def execute_workflow_manually(
             },
         )
 
-        if global_id.startswith("system/"):
-            task = await _start_system_workflow_template(
-                global_id=global_id,
-                vault_name=vault_name,
-                expect_failure=expect_failure,
-            )
-            logger.info(
-                "System workflow template execution started",
-                data={
-                    "global_id": global_id,
-                    "vault_name": vault_name or "",
-                    "task_id": task.task_id,
-                    "status": task.status,
-                },
-            )
-            return _workflow_started_response(global_id=global_id, task=task)
+        executable_global_id = _normalize_manual_workflow_global_id(
+            global_id=global_id,
+            vault_name=vault_name,
+        )
 
         try:
             runtime = get_runtime_context()
             task = await runtime.workflow_governor.start_workflow(
-                global_id=global_id,
+                global_id=executable_global_id,
                 source=ExecutionTaskSource.API,
                 expect_failure=expect_failure,
                 background_tasks=runtime.background_tasks,
@@ -2676,6 +2753,7 @@ async def execute_workflow_manually(
             "Workflow execution started",
             data={
                 "global_id": global_id,
+                "executable_global_id": executable_global_id,
                 "task_id": task.task_id,
                 "status": task.status,
             },
@@ -2704,64 +2782,25 @@ def _workflow_started_response(
     }
 
 
-async def _start_system_workflow_template(
+def _normalize_manual_workflow_global_id(
     *,
     global_id: str,
     vault_name: str | None,
-    expect_failure: bool,
-) -> object:
-    """Start one system workflow template against an explicit vault scope."""
-    if not vault_name:
-        raise ValueError("vault_name is required to run a system workflow template.")
-    runtime = get_runtime_context()
-    task = await runtime.task_coordinator.create_queued_task(
-        kind=ExecutionTaskKind.WORKFLOW,
-        scope=workflow_vault_scope(vault_name),
-        source=ExecutionTaskSource.API,
-        label=global_id,
-        metadata={
-            "workflow_id": global_id,
-            "vault": vault_name,
-            "system_template": global_id.split("/", 1)[1] if "/" in global_id else global_id,
-        },
-    )
-
-    async def _run() -> None:
-        try:
-            await _execute_system_workflow_template(
-                global_id=global_id,
-                vault_name=vault_name,
-                expect_failure=expect_failure,
-                task_id=task.task_id,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001
-            return
-
-    def _spawn() -> None:
-        background_task = asyncio.create_task(_run(), context=contextvars.Context())
-        runtime.background_tasks.add(background_task)
-        background_task.add_done_callback(runtime.background_tasks.discard)
-
-    asyncio.get_running_loop().call_soon(_spawn, context=contextvars.Context())
-    return task
-
-
-async def _execute_system_workflow_template(
-    *,
-    global_id: str,
-    vault_name: str | None,
-    expect_failure: bool,
-    task_id: str | None = None,
-) -> Dict[str, Any]:
-    """Execute one system workflow template against an explicit vault scope."""
-    if not vault_name:
-        raise ValueError("vault_name is required to run a system workflow template.")
+) -> str:
+    """Resolve public manual workflow IDs to governor-executable workflow IDs."""
     if "/" not in global_id:
-        raise ValueError(f"Invalid global_id format. Expected 'system/name', got: {global_id}")
+        raise ValueError(
+            f"Invalid global_id format. Expected 'vault/name' or 'system/name', got: {global_id}"
+        )
 
-    _system_prefix, template_name = global_id.split("/", 1)
+    normalized_id = str(global_id or "").strip()
+    if not normalized_id.startswith("system/"):
+        return normalized_id
+
+    if not vault_name:
+        raise ValueError("vault_name is required to run a system workflow template.")
+
+    template_name = normalized_id.split("/", 1)[1]
     if not template_name or template_name.startswith("/") or ".." in template_name:
         raise ValueError("Invalid system workflow template name.")
 
@@ -2770,75 +2809,14 @@ async def _execute_system_workflow_template(
     if not vault_path.exists() or not vault_path.is_dir():
         raise ValueError(f"Vault not found: {vault_name}")
 
-    template = next(
-        (
-            record
-            for record in list_system_workflow_templates(runtime.config.system_root)
-            if (record.name[:-3] if record.name.endswith(".md") else record.name) == template_name
-        ),
-        None,
+    template_exists = any(
+        (record.name[:-3] if record.name.endswith(".md") else record.name) == template_name
+        for record in list_system_workflow_templates(runtime.config.system_root)
     )
-    if template is None or not template.path:
-        raise ValueError(f"System workflow template not found: {global_id}")
+    if not template_exists:
+        raise ValueError(f"System workflow template not found: {normalized_id}")
 
-    scoped_workflow_id = f"{vault_name}/system/{template_name}"
-    started = perf_counter()
-    task_context = (
-        runtime.task_coordinator.track_existing_task(task_id)
-        if task_id
-        else runtime.task_coordinator.track_current_task(
-            kind=ExecutionTaskKind.WORKFLOW,
-            scope=workflow_vault_scope(vault_name),
-            source=ExecutionTaskSource.API,
-            label=global_id,
-            metadata={
-                "workflow_id": global_id,
-                "scoped_workflow_id": scoped_workflow_id,
-                "vault": vault_name,
-                "system_template": template_name,
-            },
-        )
-    )
-    async with task_context as task:
-        await runtime.task_coordinator.mark_started(task.task_id)
-        await runtime.task_coordinator.update_metadata(
-            task.task_id,
-            {"scoped_workflow_id": scoped_workflow_id},
-        )
-        execution_result = await run_authoring_template(
-            workflow_id=scoped_workflow_id,
-            file_path=str(template.path),
-            expect_failure=expect_failure,
-        )
-        elapsed = perf_counter() - started
-        terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
-        terminal_reason = str(getattr(execution_result, "reason", "") or "")
-        result = {
-            "success": True,
-            "global_id": global_id,
-            "status": terminal_status,
-            "execution_time_seconds": elapsed,
-            "output_files": [],
-            "reason": terminal_reason or None,
-            "details": [f"task_id: {task.task_id}", f"vault_scope: {vault_name}"],
-            "message": (
-                f"System workflow template '{global_id}' executed for vault "
-                f"'{vault_name}' with status '{terminal_status}'."
-            ),
-        }
-        await runtime.task_coordinator.update_metadata(
-            task.task_id,
-            {"workflow_result": result},
-        )
-        if terminal_status == "skipped":
-            await runtime.task_coordinator.mark_skipped(task.task_id, reason=terminal_reason or None)
-        elif terminal_status == "failed":
-            await runtime.task_coordinator.mark_failed(task.task_id, reason=terminal_reason or None)
-        elif terminal_status == "cancelled":
-            await runtime.task_coordinator.mark_cancelled(task.task_id, reason=terminal_reason or None)
-        elif terminal_status == "timed_out":
-            await runtime.task_coordinator.mark_timed_out(task.task_id, reason=terminal_reason or None)
-        return result
+    return f"{vault_name}/system/{template_name}"
 
 
 async def get_metadata() -> MetadataResponse:

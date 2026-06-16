@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -18,11 +19,11 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+
 from core.database import connect_sqlite_from_system_db
 from core.logger import UnifiedLogger
 
 from .schema import DB_NAME, ensure_chat_sessions_schema
-
 
 logger = UnifiedLogger(tag="chat-store")
 
@@ -36,6 +37,7 @@ class StoredChatMessage:
     """One stored provider-native chat message."""
 
     sequence_index: int
+    fork_sequence_index: int | None
     direction: str
     message_type: str
     role: str
@@ -277,7 +279,7 @@ class ChatStore:
         title: str | None,
         metadata_update: dict[str, Any] | None = None,
     ) -> int:
-        """Create a new session from one source session's raw message prefix."""
+        """Create a new session from one source session's effective message prefix."""
         conn = self._connect()
         try:
             conn.execute("PRAGMA foreign_keys = ON")
@@ -300,20 +302,17 @@ class ChatStore:
                         source_metadata = parsed_metadata
                 except Exception:
                     source_metadata = {}
+            source_metadata = _fork_session_metadata(source_metadata)
             if metadata_update:
                 source_metadata.update(metadata_update)
 
-            source_rows = conn.execute(
-                """
-                SELECT sequence_index, direction, message_type, role, content_text, message_json
-                FROM chat_messages
-                WHERE session_id = ? AND vault_name = ?
-                ORDER BY sequence_index ASC
-                """,
-                (source_session_id, vault_name),
-            ).fetchall()
-            rows = _fork_prefix_rows(source_rows, through_sequence_index)
-            if not rows:
+            source_messages = self._fetch_effective_messages_from_conn(
+                conn,
+                session_id=source_session_id,
+                vault_name=vault_name,
+            )
+            messages = _fork_prefix_messages(source_messages, through_sequence_index)
+            if not messages:
                 raise ValueError(
                     f"No chat messages found through sequence {through_sequence_index}"
                 )
@@ -336,8 +335,7 @@ class ChatStore:
             )
 
             copied_tool_call_ids: set[str] = set()
-            for new_sequence_index, row in enumerate(rows):
-                _sequence_index, direction, message_type, role, content_text, message_json = row
+            for new_sequence_index, message in enumerate(messages):
                 conn.execute(
                     """
                     INSERT INTO chat_messages (
@@ -355,14 +353,14 @@ class ChatStore:
                         new_session_id,
                         vault_name,
                         new_sequence_index,
-                        direction,
-                        message_type,
-                        role,
-                        content_text,
-                        message_json,
+                        message.direction,
+                        message.message_type,
+                        message.role,
+                        message.content_text,
+                        message.message_json,
                     ),
                 )
-                copied_tool_call_ids.update(_tool_call_ids_from_json(str(message_json)))
+                copied_tool_call_ids.update(message.tool_call_ids)
 
             if copied_tool_call_ids:
                 event_rows = conn.execute(
@@ -421,7 +419,7 @@ class ChatStore:
                 advance_history_revision=True,
             )
             conn.commit()
-            return len(rows)
+            return len(messages)
         finally:
             conn.close()
 
@@ -820,6 +818,47 @@ class ChatStore:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def update_session_metadata(
+        self,
+        *,
+        session_id: str,
+        vault_name: str,
+        metadata_update: dict[str, Any] | None = None,
+        remove_keys: tuple[str, ...] = (),
+        advance_history_revision: bool = False,
+    ) -> None:
+        """Merge or remove session metadata keys."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            metadata = self._session_metadata(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
+            for key in remove_keys:
+                metadata.pop(key, None)
+            if metadata_update:
+                metadata.update(metadata_update)
+            if advance_history_revision:
+                metadata["history_revision"] = _metadata_history_revision(metadata) + 1
+            conn.execute(
+                """
+                UPDATE chat_sessions
+                SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
+                WHERE session_id = ? AND vault_name = ?
+                """,
+                (
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    session_id,
+                    vault_name,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def set_session_workspace(
         self,
         *,
@@ -1097,6 +1136,7 @@ class ChatStore:
             stored_messages.append(
                 StoredChatMessage(
                     sequence_index=sequence_index,
+                    fork_sequence_index=sequence_index,
                     direction=direction,
                     message_type=type(message).__name__,
                     role=role,
@@ -1135,6 +1175,7 @@ class ChatStore:
             messages.append(
                 StoredChatMessage(
                     sequence_index=int(sequence_index),
+                    fork_sequence_index=int(sequence_index),
                     direction=str(direction),
                     message_type=str(message_type),
                     role=str(role),
@@ -1324,6 +1365,14 @@ def _metadata_history_revision(metadata: dict[str, Any]) -> int:
     return max(revision, 0)
 
 
+def _fork_session_metadata(source_metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return source session metadata that is safe to carry into a fork."""
+    metadata = dict(source_metadata)
+    for key in ("history_revision", "last_compaction", "latest_turn_failure"):
+        metadata.pop(key, None)
+    return metadata
+
+
 def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
     if isinstance(msg, ModelRequest):
         role = "user"
@@ -1337,7 +1386,7 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
         has_system_part = False
         rendered_parts: list[str] = []
         for part in parts:
-            if isinstance(part, (UserPromptPart, TextPart)):
+            if isinstance(part, UserPromptPart | TextPart):
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
@@ -1346,7 +1395,7 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
-            elif isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+            elif isinstance(part, ToolReturnPart | BuiltinToolReturnPart):
                 tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
@@ -1366,17 +1415,18 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
     return role, ""
 
 
-def _fork_prefix_rows(rows: list[Any], through_sequence_index: int) -> list[Any]:
-    copied: list[Any] = []
+def _fork_prefix_messages(
+    messages: list[StoredChatMessage],
+    through_sequence_index: int,
+) -> list[StoredChatMessage]:
+    copied: list[StoredChatMessage] = []
     pending_tool_call_ids: set[str] = set()
-    for row in rows:
-        sequence_index = int(row[0])
-        if sequence_index > through_sequence_index and not pending_tool_call_ids:
+    for message in messages:
+        if message.sequence_index > through_sequence_index and not pending_tool_call_ids:
             break
-        copied.append(row)
-        message_json = str(row[5])
-        pending_tool_call_ids.update(_tool_call_ids_from_json(message_json))
-        pending_tool_call_ids.difference_update(_tool_return_ids_from_json(message_json))
+        copied.append(message)
+        pending_tool_call_ids.update(message.tool_call_ids)
+        pending_tool_call_ids.difference_update(message.tool_return_ids)
     return copied
 
 
@@ -1404,14 +1454,6 @@ def _ordered_tool_call_ids_from_message(message: ModelMessage) -> tuple[str, ...
     return tuple(ordered_ids)
 
 
-def _tool_return_ids_from_json(message_json: str) -> set[str]:
-    try:
-        message = _MODEL_MESSAGE_ADAPTER.validate_json(message_json)
-    except Exception:
-        return set()
-    return _tool_return_ids_from_message(message)
-
-
 def _tool_return_ids_from_message(message: ModelMessage) -> set[str]:
     return set(_ordered_tool_return_ids_from_message(message))
 
@@ -1420,7 +1462,7 @@ def _ordered_tool_return_ids_from_message(message: ModelMessage) -> tuple[str, .
     ids: set[str] = set()
     ordered_ids: list[str] = []
     for part in getattr(message, "parts", ()) or ():
-        if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+        if isinstance(part, ToolReturnPart | BuiltinToolReturnPart):
             tool_call_id = getattr(part, "tool_call_id", None)
             if tool_call_id and str(tool_call_id) not in ids:
                 ids.add(str(tool_call_id))

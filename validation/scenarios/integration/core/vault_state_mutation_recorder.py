@@ -25,6 +25,10 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         vault = self.create_vault("VaultStateMutationVault")
         self.create_file(vault, "notes/preexisting-append.md", "Original line\n")
         self.create_file(vault, "notes/preexisting-delete.md", "Delete original\n")
+        self.create_file(vault, "assets/delete-target.pdf", "Delete attachment\n")
+        self.create_file(vault, "assets/move-source.pdf", "Move attachment\n")
+        self.create_file(vault, "assets/overwrite-source.pdf", "Overwrite attachment source\n")
+        self.create_file(vault, "assets/overwrite-destination.pdf", "Overwrite attachment destination\n")
         self.create_file(vault, "AssistantMD/Authoring/write_probe.md", WRITE_PROBE_WORKFLOW)
 
         await self.start_system()
@@ -82,6 +86,11 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             ("move", "notes/move-destination.md"),
             ("move", "notes/overwrite-source.md"),
             ("move", "notes/overwrite-destination.md"),
+            ("delete", "assets/delete-target.pdf"),
+            ("move", "assets/move-source.pdf"),
+            ("move", "assets/move-destination.pdf"),
+            ("move", "assets/overwrite-source.pdf"),
+            ("move", "assets/overwrite-destination.pdf"),
         }
         self.soft_assert_equal(
             expected_operations - operations_by_path,
@@ -117,11 +126,22 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         if delete_row is not None:
             self.soft_assert_equal(delete_row["after_exists"], 0, "Delete should record missing after state")
             self.soft_assert(delete_row["snapshot_ref"], "Delete should retain pre-mutation snapshot ref")
+        attachment_delete_row = next((item for item in rows if item["path"] == "assets/delete-target.pdf"), None)
+        if attachment_delete_row is not None:
+            self.soft_assert_equal(
+                attachment_delete_row["after_exists"],
+                0,
+                "Delete should support non-markdown vault files",
+            )
         expected_move_related_paths = {
             "notes/move-source.md": "notes/move-destination.md",
             "notes/move-destination.md": "notes/move-source.md",
             "notes/overwrite-source.md": "notes/overwrite-destination.md",
             "notes/overwrite-destination.md": "notes/overwrite-source.md",
+            "assets/move-source.pdf": "assets/move-destination.pdf",
+            "assets/move-destination.pdf": "assets/move-source.pdf",
+            "assets/overwrite-source.pdf": "assets/overwrite-destination.pdf",
+            "assets/overwrite-destination.pdf": "assets/overwrite-source.pdf",
         }
         for path, related_path in expected_move_related_paths.items():
             move_row = next((item for item in rows if item["operation"] == "move" and item["path"] == path), None)
@@ -139,6 +159,27 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         self.soft_assert(
             all(related_path is None for related_path in non_move_related_paths),
             "Non-move mutations should not carry related paths",
+        )
+        self.soft_assert(
+            not (vault / "assets" / "delete-target.pdf").exists(),
+            "Non-markdown delete should remove the source file",
+        )
+        self.soft_assert(
+            not (vault / "assets" / "move-source.pdf").exists(),
+            "Non-markdown safe move should remove the source file",
+        )
+        self.soft_assert(
+            (vault / "assets" / "move-destination.pdf").exists(),
+            "Non-markdown safe move should create the destination file",
+        )
+        self.soft_assert(
+            not (vault / "assets" / "overwrite-source.pdf").exists(),
+            "Non-markdown move overwrite should remove the source file",
+        )
+        self.soft_assert_equal(
+            (vault / "assets" / "overwrite-destination.pdf").read_text(encoding="utf-8"),
+            "Overwrite attachment source\n",
+            "Non-markdown move overwrite should replace destination content",
         )
 
         response = self.call_api(
@@ -482,6 +523,21 @@ await file_ops_unsafe(
     operation="move_overwrite",
     path="notes/overwrite-source.md",
     destination="notes/overwrite-destination.md",
+)
+await file_ops_unsafe(
+    operation="delete",
+    path="assets/delete-target.pdf",
+    confirm_path="assets/delete-target.pdf",
+)
+await file_ops_safe(
+    operation="move",
+    path="assets/move-source.pdf",
+    destination="assets/move-destination.pdf",
+)
+await file_ops_unsafe(
+    operation="move_overwrite",
+    path="assets/overwrite-source.pdf",
+    destination="assets/overwrite-destination.pdf",
 )
 await finish(status="completed", reason="write-probe-done")
 ```

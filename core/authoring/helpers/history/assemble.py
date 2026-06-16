@@ -12,6 +12,7 @@ from core.authoring.contracts import (
     ContextMessage,
     HistoryMessage,
     ToolExchange,
+    ToolExchangeBatch,
 )
 from core.authoring.helpers.common import build_capability
 from core.authoring.helpers.runtime_common import (
@@ -67,7 +68,7 @@ async def execute(
 
 
 def _normalize_history_context_item(value: Any, *, default_role: str | None = None) -> Any:
-    if isinstance(value, (ContextMessage, HistoryMessage, ToolExchange)):
+    if isinstance(value, (ContextMessage, HistoryMessage, ToolExchange, ToolExchangeBatch)):
         return value
     return normalize_context_message(value, default_role=default_role)
 
@@ -136,7 +137,10 @@ def _contract() -> dict[str, object]:
         },
         "examples": [
             {
-                "code": "history = await retrieve_history(scope='session')\nfinal = await assemble_context(history=history.items)",
+                "code": (
+                    "history = await retrieve_history(scope='session')\n"
+                    "final = await assemble_context(history=history.items)"
+                ),
                 "description": "Preserve recent chat history as structured downstream context.",
             },
             {

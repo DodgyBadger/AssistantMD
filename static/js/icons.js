@@ -167,6 +167,11 @@
                 <path d="M7 21v-7h10v7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
             </svg>
         `.trim(),
+        WRENCH_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.12 2.12 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+        `.trim(),
         PLAY_ICON_SVG: `
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M6 4.5v15l13-7.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -233,6 +238,7 @@
         stop: icons.STOP_ICON_SVG,
         system: icons.SYSTEM_ICON_SVG,
         trash: icons.TRASH_ICON_SVG,
+        wrench: icons.WRENCH_ICON_SVG,
         x: icons.X_ICON_SVG,
     };
 

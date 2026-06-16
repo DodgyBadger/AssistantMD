@@ -8,6 +8,14 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
+# Monty-supported builtins missing from ty's default sandbox scope
+# ---------------------------------------------------------------------------
+
+def getattr(obj: Any, name: str, default: Any = ...) -> Any: ...
+def hasattr(obj: Any, name: str) -> bool: ...
+
+
+# ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
 
@@ -58,6 +66,15 @@ class ToolExchange:
     response_message: dict[str, Any]
     call_arguments: dict[str, Any] | None
     result_text: str | None
+    metadata: dict[str, Any]
+    text: str
+    def to_text(self) -> str: ...
+    def __str__(self) -> str: ...
+
+class ToolExchangeBatch:
+    request_message: dict[str, Any]
+    response_message: dict[str, Any]
+    exchanges: tuple[ToolExchange, ...]
     metadata: dict[str, Any]
     text: str
     def to_text(self) -> str: ...
@@ -129,6 +146,8 @@ class FinishResult:
     status: str
     reason: str
 
+ContextInput = ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch | dict[str, Any] | str
+
 
 # ---------------------------------------------------------------------------
 # Reserved input variables
@@ -182,8 +201,8 @@ async def retrieve_sessions(
 
 async def assemble_context(
     *,
-    history: list[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str] | tuple[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str, ...] | None = None,
-    context_messages: list[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str] | tuple[ContextMessage | HistoryMessage | ToolExchange | dict[str, Any] | str, ...] | None = None,
+    history: list[ContextInput] | tuple[ContextInput, ...] | None = None,
+    context_messages: list[ContextInput] | tuple[ContextInput, ...] | None = None,
     instructions: str | None = None,
 ) -> AssembleContextResult: ...
 

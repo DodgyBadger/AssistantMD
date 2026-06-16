@@ -235,6 +235,7 @@ def validate_settings(
             "tools": set(tools.keys()),
         },
     )
+    _add_missing_settings_metadata_issues(status, get_general_settings() or {})
 
     def _is_user_editable(entry: Any, default: bool) -> bool:
         """Best-effort user_editable check for typed/dict entries."""
@@ -341,6 +342,39 @@ def _add_missing_template_issues(
                 message=f"Settings missing from template: {', '.join(sorted(missing))}",
                 severity="warning",
             )
+
+
+def _add_missing_settings_metadata_issues(
+    status: ConfigurationStatus,
+    active_settings: Dict[str, Any],
+) -> None:
+    """Warn when existing settings are missing metadata present in the template."""
+    try:
+        template_raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+    except (FileNotFoundError, yaml.YAMLError):
+        return
+    template_settings = template_raw.get("settings")
+    if not isinstance(template_settings, dict):
+        return
+
+    missing: list[str] = []
+    for key, template_entry in template_settings.items():
+        if not isinstance(template_entry, dict) or key not in active_settings:
+            continue
+        active_entry = active_settings.get(key)
+        for metadata_key in ("description", "category", "restart_required"):
+            if metadata_key not in template_entry:
+                continue
+            active_value = getattr(active_entry, metadata_key, None)
+            if active_value is None:
+                missing.append(f"{key}.{metadata_key}")
+
+    if missing:
+        status.add_issue(
+            name="settings:missing_metadata",
+            message=f"Settings metadata missing from template: {', '.join(sorted(missing))}",
+            severity="warning",
+        )
 
 
 def get_default_api_timeout() -> float:
@@ -460,6 +494,19 @@ def get_chat_tool_calls_limit() -> int:
     return parsed if parsed > 0 else 0
 
 
+def get_chat_model_requests_limit() -> int:
+    """Return the max model requests per chat response; 0 disables the limit."""
+    entry = get_general_settings().get("chat_model_requests_limit")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        return _get_template_setting_positive_int("chat_model_requests_limit", 150)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _get_template_setting_positive_int("chat_model_requests_limit", 150)
+    return parsed if parsed > 0 else 0
+
+
 def get_delegate_tool_calls_limit() -> int:
     """Return the max tool calls per delegate child run; 0 disables the limit."""
     entry = get_general_settings().get("delegate_tool_calls_limit")
@@ -474,6 +521,19 @@ def get_delegate_tool_calls_limit() -> int:
         from core.constants import DELEGATE_DEFAULT_MAX_TOOL_CALLS
 
         return DELEGATE_DEFAULT_MAX_TOOL_CALLS
+    return parsed if parsed > 0 else 0
+
+
+def get_delegate_model_requests_limit() -> int:
+    """Return the max model requests per delegate child run; 0 disables the limit."""
+    entry = get_general_settings().get("delegate_model_requests_limit")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        return _get_template_setting_positive_int("delegate_model_requests_limit", 75)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _get_template_setting_positive_int("delegate_model_requests_limit", 75)
     return parsed if parsed > 0 else 0
 
 
@@ -498,8 +558,8 @@ def get_compaction_type() -> str:
     """Return the configured chat-history compaction policy."""
     entry = get_general_settings().get("compaction_type")
     value = getattr(entry, "value", None) if entry is not None else None
-    normalized = str(value or "suggested").strip().lower()
-    return normalized if normalized in {"none", "suggested", "auto"} else "suggested"
+    normalized = str(value or "auto").strip().lower()
+    return normalized if normalized in {"none", "suggested", "auto"} else "auto"
 
 
 def get_compaction_keep_recent() -> int:

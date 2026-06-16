@@ -66,6 +66,8 @@ class TaskFileMutation(Base):
     task_source = Column(String, nullable=True)
     task_scope = Column(String, nullable=True)
     task_label = Column(String, nullable=True)
+    goal_id = Column(String, nullable=True)
+    step_id = Column(String, nullable=True)
     vault_id = Column(String, nullable=False)
     vault_name = Column(String, nullable=False)
     path = Column(String, nullable=False)

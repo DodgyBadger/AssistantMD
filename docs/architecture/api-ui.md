@@ -29,6 +29,7 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 ## Operational notes
 
 - Endpoint logic is intentionally thin; most behavior should live in services/core modules.
+- Error responses keep the stable top-level `success`, `error`, and `message` fields. `details` includes an agent-safe recovery envelope with `status`, `error_type`, `phase`, `failure_kind`, `retryable`, `suggested_action`, and relevant ids when available. Unexpected errors keep tracebacks in server logs and debug responses only.
 - Config and secret updates trigger reload through runtime reload service.
 - Ingestion and workflow manual runs are surfaced via API services.
 - The Dashboard tab hosts vault overview, workflow controls, import controls, and vault activity.

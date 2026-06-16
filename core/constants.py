@@ -128,12 +128,14 @@ FLIGHT CARD (MUST)
 
 Task Decision Tree
 - Direct tools: use for deterministic retrieval, searches, or simple writes when one or a few focused calls can answer.
-- code_execution: use for deterministic loops, parsing, aggregation, merging, cache-ref processing, or artifact creation.
+- code_execution: prefer inline scripts for goal-oriented, multi-tool batches that need deterministic loops, file processing, parsing, aggregation, merging, cache-ref processing, or artifact creation. Keep each script bounded to one meaningful batch, return a compact result, and checkpoint progress before/after significant executions.
 - delegate: use for model judgment, isolated exploration, or parallel subtasks that would crowd parent context.
 - For broad delegated work, split by path/query/source/hypothesis and use multiple compact delegate calls rather than one unbounded child run.
+- For broad or long-running work, create or update a `goal_ops` goal. Unless local instructions explicitly require approval gates, continue working without asking for approval between routine batches; use `code_execution` for deterministic batch mechanics, checkpoint progress after each meaningful batch, and write durable notes/artifacts when tool history alone would be insufficient to resume.
+- If a run stops because of a model-request, tool-call, timeout, or network limit, treat the prior user request as unfinished and resume from durable state: `goal_ops`, vault activity, changed files, saved artifacts, and session history.
 
 Environment
-- The chat UI supports markdown and latex. Use markdown for structure. For math, use strict delimiters only: \\(...\\) for inline math, and $$...$$ or \\[...\\] for display math. Do not use single-dollar inline math.
+- The chat UI supports markdown and latex. Use markdown for structure and link when referencing other files. For math, use strict delimiters only: \\(...\\) for inline math, and $$...$$ or \\[...\\] for display math. Do not use single-dollar inline math.
 - The vault is the working directory; all relative paths resolve from its root.
 - Path resolution: if a path has no extension, try .md; if not found, try as a folder; then inspect the directory.
 """
@@ -163,9 +165,12 @@ CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
     "without script management (for example by switching to the default script). "
 )
 
+CHAT_HISTORY_COMPACTION_PROMPT_VERSION = "recovery-card-v1"
+
 CHAT_HISTORY_COMPACTION_INSTRUCTION = """
-Summarize the older portion of a chat session so future turns can continue with
-substantially less context.
+You are performing an AssistantMD context checkpoint compaction. Create a
+handoff summary for a future assistant turn that will continue the same
+knowledge-work session with substantially less context.
 
 The source history may already contain an earlier AssistantMD compaction summary.
 When it does, treat that summary as compressed prior session state. Merge it with
@@ -175,17 +180,34 @@ outcomes from the prior summary. Remove duplication, resolve obvious
 supersession from newer turns, and do not describe the prior summary as an
 artifact of the conversation.
 
-Preserve durable facts, explicit user preferences, architecture decisions,
-open tasks, unresolved questions, important file paths, commands, validation
-results, and any constraints the assistant must still follow. Keep tool results
-only when their outcomes matter for future work. Do not invent details. Do not
-make secrets or API keys more explicit than they appeared in the source history.
-Summarize only the provided older source history; recent turns are preserved
-verbatim outside the summary and should not be restated.
+The prompt payload may include `user_focus`. Treat it as additional emphasis for
+what to preserve, not as permission to discard recovery-critical state such as
+exact goal ids, active objectives, unresolved blockers, durable user preferences,
+important decisions, artifact paths, or validation evidence.
 
-Write one system-maintained session-history summary. It should be concise,
-structured, and directly useful to the next assistant turn. Do not include
-compaction and related session hygiene requests in the summary.
+Write one concise, structured recovery-card summary. Include only sections that
+are supported by the source history and useful for continuing work:
+- Current objective and the user's intended outcome.
+- Session throughline: recurring themes, user concerns, major pivots, and why
+  the current objective matters in relation to prior work.
+- Current progress, completed work, and key decisions.
+- Important constraints, user preferences, and operating assumptions.
+- Durable goal tracking references, including exact `goal_id` values when
+  present.
+- Vault/workspace files, external references, commands, tool outcomes, or
+  validation results that still matter.
+- Open tasks, unresolved questions, blockers, risks, failed attempts, and clear
+  next steps.
+
+Prioritize state needed to resume the task while preserving enough causal
+context to understand how the session arrived at the current state. Do not write
+a chronological transcript. Keep tool results only when their outcomes matter
+for future work. Do not invent details. Do not make secrets or API keys more
+explicit than they appeared in the source history. Summarize only the provided
+older source history; recent turns are preserved verbatim outside the summary
+and should not be restated.
+
+Do not include compaction and related session hygiene requests in the summary.
 """.strip()
 
 
@@ -200,7 +222,11 @@ The transcript may include an AssistantMD compaction summary. Treat that block a
 compressed prior conversation state, not as a normal assistant response and not
 as the subject of the session. Merge its still-relevant substance with later
 transcript messages. Prefer newer transcript details when they supersede the
-compaction summary.
+compaction summary. When a compaction summary is present, treat it as the
+primary source of durable session substance from before the checkpoint. The
+retained raw messages after that checkpoint provide recency and supersession,
+but they should not crowd out the objective, decisions, progress, blockers,
+artifacts, or next steps preserved in the compaction summary.
 
 Task:
 Identify what happened in the session and what the user was trying to
@@ -225,6 +251,9 @@ Rules:
 - Focus on the session's durable substance, not this extraction task.
 - Do not make `summary` a restatement of `user_intent`; `summary` should say
   what happened, while `user_intent` should say why the user wanted it.
+- If the session contains durable goal tracking references, preserve exact
+  `goal_id` values in `summary` when they are relevant for future lookup or
+  continuation.
 - Keep both fields concise but specific enough to support later retrieval.
 - `user_intent` should read like a compact phrase a future user might type,
   with enough connective wording to show what the user was trying to do.

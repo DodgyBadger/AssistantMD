@@ -5,10 +5,18 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from dataclasses import replace
+from typing import Any
 
-from core.authoring.workflow_execution import WorkflowExecutionResult, execute_workflow_by_id
+from core.authoring.workflow_execution import (
+    WorkflowExecutionResult,
+    execute_workflow_by_id,
+)
 from core.logger import UnifiedLogger
-from core.settings import get_max_concurrent_workflows, get_workflow_task_timeout_seconds
+from core.settings import (
+    get_max_concurrent_workflows,
+    get_workflow_task_timeout_seconds,
+)
+from core.tools.failures import FailureClassification, classify_exception
 
 from .execution_tasks import (
     ExecutionTaskKind,
@@ -18,7 +26,6 @@ from .execution_tasks import (
     TaskCoordinator,
     workflow_vault_scope,
 )
-
 
 WorkflowSource = ExecutionTaskSource
 
@@ -31,9 +38,11 @@ class WorkflowGovernor:
         *,
         task_coordinator: TaskCoordinator,
         logger: UnifiedLogger | None = None,
+        background_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._task_coordinator = task_coordinator
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
+        self._background_loop = background_loop
         self._lane_guard = asyncio.Lock()
         self._lane_locks: dict[str, asyncio.Lock] = {}
         self._global_limit_guard = asyncio.Lock()
@@ -73,6 +82,13 @@ class WorkflowGovernor:
         async with task_context as task:
             lane_lock = await self._get_lane_lock(vault_name)
             if lane_lock.locked():
+                await self._task_coordinator.heartbeat(
+                    task.task_id,
+                    status="queued_for_vault",
+                    metadata={
+                        "workflow_queue_reason": f"workflow_vault_active:{vault_name}",
+                    },
+                )
                 self._log_queue_event(
                     "workflow_task_queued_for_vault",
                     global_id=global_id,
@@ -91,6 +107,13 @@ class WorkflowGovernor:
                 global_semaphore = await self._get_global_semaphore()
                 if global_semaphore is not None:
                     if global_semaphore.locked():
+                        await self._task_coordinator.heartbeat(
+                            active_task_id,
+                            status="queued_for_global_capacity",
+                            metadata={
+                                "workflow_queue_reason": "workflow_global_capacity_active",
+                            },
+                        )
                         self._log_queue_event(
                             "workflow_task_queued_for_global_capacity",
                             global_id=global_id,
@@ -104,6 +127,17 @@ class WorkflowGovernor:
                     global_permit_acquired = True
 
                 await self._task_coordinator.mark_started(active_task_id)
+                await self._task_coordinator.heartbeat(
+                    active_task_id,
+                    status="workflow_running",
+                    metadata={
+                        "workflow_queue_reason": None,
+                        "workflow_id": global_id,
+                        "workflow_name": workflow_name,
+                        "vault": vault_name,
+                        "step_name": step_name,
+                    },
+                )
                 active_task_id = task.task_id
                 self._log_workflow_event(
                     "workflow_task_started",
@@ -137,6 +171,17 @@ class WorkflowGovernor:
                         )
                 except TimeoutError:
                     reason = f"workflow_task_timeout:{timeout:g}s"
+                    timeout_classification = FailureClassification(
+                        error_type="TimeoutError",
+                        failure_kind="workflow_timeout",
+                        retryable=False,
+                        phase="workflow_execution",
+                        message=reason,
+                        suggested_action=(
+                            "Do not retry the same broad workflow unchanged. Narrow the workflow scope, "
+                            "split the batch, or increase the workflow timeout if the scope is intentional."
+                        ),
+                    )
                     timeout_result = WorkflowExecutionResult(
                         success=False,
                         global_id=global_id,
@@ -149,7 +194,21 @@ class WorkflowGovernor:
                     )
                     await self._task_coordinator.update_metadata(
                         active_task_id,
-                        {"workflow_result": timeout_result.to_dict()},
+                        {
+                            "workflow_result": timeout_result.to_dict(),
+                            "workflow_failure": _build_workflow_failure_metadata(
+                                global_id=global_id,
+                                vault_name=vault_name,
+                                workflow_name=workflow_name,
+                                step_name=step_name,
+                                source=source_value,
+                                status="timed_out",
+                                reason=reason,
+                                classification=timeout_classification,
+                                output_files=[],
+                                message=timeout_result.message,
+                            ),
+                        },
                     )
                     await self._task_coordinator.mark_timed_out(active_task_id, reason=reason)
                     self._log_workflow_event(
@@ -167,6 +226,8 @@ class WorkflowGovernor:
                         execution_time_seconds=timeout,
                         output_files=[],
                         message=timeout_result.message,
+                        failure_kind=timeout_classification.failure_kind,
+                        retryable=timeout_classification.retryable,
                     )
                     return timeout_result
 
@@ -191,6 +252,34 @@ class WorkflowGovernor:
                     output_files=result.output_files,
                     message=result.message,
                 )
+                if str(result.status or "").strip().lower() == ExecutionTaskStatus.FAILED.value:
+                    await self._task_coordinator.update_metadata(
+                        active_task_id,
+                        {
+                            "workflow_failure": _build_workflow_failure_metadata(
+                                global_id=global_id,
+                                vault_name=vault_name,
+                                workflow_name=workflow_name,
+                                step_name=step_name,
+                                source=source_value,
+                                status=result.status,
+                                reason=result.reason,
+                                classification=FailureClassification(
+                                    error_type="WorkflowFailed",
+                                    failure_kind="workflow_reported_failure",
+                                    retryable=False,
+                                    phase="workflow_execution",
+                                    message=result.reason or result.message,
+                                    suggested_action=(
+                                        "Inspect the workflow result reason and any output artifacts, then resume "
+                                        "only the unfinished items or adjust the workflow before rerunning."
+                                    ),
+                                ),
+                                output_files=result.output_files,
+                                message=result.message,
+                            ),
+                        },
+                    )
                 await self._mark_task_terminal_from_result(active_task_id, result)
                 return result
             except asyncio.CancelledError:
@@ -210,6 +299,23 @@ class WorkflowGovernor:
                 raise
             except Exception as exc:
                 reason = f"{type(exc).__name__}: {exc}"
+                classification = classify_exception(exc, phase="workflow_execution")
+                failure_metadata = _build_workflow_failure_metadata(
+                    global_id=global_id,
+                    vault_name=vault_name,
+                    workflow_name=workflow_name,
+                    step_name=step_name,
+                    source=source_value,
+                    status="failed",
+                    reason=reason,
+                    classification=classification,
+                    output_files=[],
+                    message=str(exc),
+                )
+                await self._task_coordinator.update_metadata(
+                    active_task_id,
+                    {"workflow_failure": failure_metadata},
+                )
                 self._log_workflow_event(
                     "workflow_task_failed",
                     global_id=global_id,
@@ -222,6 +328,8 @@ class WorkflowGovernor:
                     step_name=step_name,
                     expect_failure=expect_failure,
                     include_load_errors=include_load_errors,
+                    failure_kind=classification.failure_kind,
+                    retryable=classification.retryable,
                 )
                 raise
             finally:
@@ -274,8 +382,17 @@ class WorkflowGovernor:
                 background_tasks.add(background_task)
                 background_task.add_done_callback(background_tasks.discard)
 
-        asyncio.get_running_loop().call_soon(_spawn, context=contextvars.Context())
+        self._schedule_background_spawn(_spawn)
         return task
+
+    def _schedule_background_spawn(self, callback) -> None:
+        """Schedule a background workflow on the runtime loop when available."""
+        current_loop = asyncio.get_running_loop()
+        target_loop = self._background_loop
+        if target_loop is not None and target_loop.is_running() and target_loop is not current_loop:
+            target_loop.call_soon_threadsafe(callback, context=contextvars.Context())
+            return
+        current_loop.call_soon(callback, context=contextvars.Context())
 
     async def _get_lane_lock(self, vault_name: str) -> asyncio.Lock:
         async with self._lane_guard:
@@ -336,6 +453,8 @@ class WorkflowGovernor:
         execution_time_seconds: float | None = None,
         output_files: list[str] | None = None,
         message: str | None = None,
+        failure_kind: str | None = None,
+        retryable: bool | None = None,
     ) -> None:
         self._logger.add_sink("validation").info(
             event,
@@ -354,6 +473,8 @@ class WorkflowGovernor:
                 "execution_time_seconds": execution_time_seconds,
                 "output_files": list(output_files) if output_files is not None else None,
                 "message": message,
+                "failure_kind": failure_kind,
+                "retryable": retryable,
             },
         )
 
@@ -385,3 +506,40 @@ class WorkflowGovernor:
             raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
         vault_name, workflow_name = global_id.split("/", 1)
         return vault_name, workflow_name
+
+
+def _build_workflow_failure_metadata(
+    *,
+    global_id: str,
+    vault_name: str,
+    workflow_name: str,
+    step_name: str | None,
+    source: str,
+    status: str,
+    reason: str | None,
+    classification: FailureClassification,
+    output_files: list[str],
+    message: str | None,
+) -> dict[str, Any]:
+    """Build stable task metadata that helps agents recover from workflow failures."""
+    metadata = classification.to_metadata()
+    metadata.update(
+        {
+            "workflow_id": global_id,
+            "workflow_name": workflow_name,
+            "vault": vault_name,
+            "source": source,
+            "status": status,
+            "phase": classification.phase,
+            "reason": reason,
+            "message": message or classification.message,
+            "step_name": step_name,
+            "output_files": list(output_files),
+            "recovery_summary": {
+                "completed_signal": "unknown",
+                "remaining_signal": "unknown",
+                "next_action": classification.suggested_action,
+            },
+        }
+    )
+    return metadata

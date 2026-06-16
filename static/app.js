@@ -1665,7 +1665,7 @@ function updateStatus(message) {
 
     warnings.forEach((issue) => {
         noticeLines.push(issue.message);
-        if (issue.name && /^(settings|models|providers|tools):(missing|extra)$/.test(issue.name)) {
+        if (issue.name && /^(settings|models|providers|tools):(missing|extra|missing_metadata)$/.test(issue.name)) {
             repairNeeded = true;
         }
     });
@@ -1687,11 +1687,13 @@ function updateStatus(message) {
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
-        let messageHtml = noticeLines.map(line => `<div>• ${line}</div>`).join('');
+        const noticeHtml = noticeLines.map(line => `<div>• ${line}</div>`).join('');
+        let messageHtml = noticeHtml;
         if (repairNeeded) {
-            messageHtml += `
-                <div class="mt-2">
-                    <button id="repair-settings-btn" type="button" class="ui-icon-button is-primary" data-icon="clean" data-icon-label="Repair settings from template"></button>
+            messageHtml = `
+                <div class="flex flex-wrap items-start gap-2">
+                    <button id="repair-settings-btn" type="button" class="ui-icon-button is-primary shrink-0" data-icon="wrench" data-icon-label="Repair settings from template"></button>
+                    <div class="flex-1 min-w-0 space-y-1">${noticeHtml}</div>
                 </div>
             `;
         }
@@ -1705,7 +1707,7 @@ function updateStatus(message) {
         if (repairBtn) {
             repairBtn.addEventListener('click', async () => {
                 const confirmed = window.confirm(
-                    'Repair settings from template?\n\nThis will add missing keys from settings.template.yaml, prune unknown settings, and remove unknown non-user-editable tools/models/providers. Existing values for matching keys will be preserved.\nA backup will be written to system/settings.bak. Reload the page after repair to see changes.'
+                    'Repair settings from template?\n\nThis will add missing keys and metadata from settings.template.yaml, prune unknown settings, and remove unknown non-user-editable tools/models/providers. Existing values for matching keys will be preserved.\nA backup will be written to system/settings.bak. Reload the page after repair to see changes.'
                 );
                 if (!confirmed) return;
 

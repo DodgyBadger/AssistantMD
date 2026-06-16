@@ -64,6 +64,20 @@ class CodeExecutionScenario(BaseScenario):
                             'doc.return_value'
                         )
                     }
+                if case_name == "dynamic_attribute_helpers":
+                    return {
+                        "code": (
+                            'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
+                            'hasattr(doc, "return_value") and getattr(doc, "return_value") == "BLOCKED_CONTENT"'
+                        )
+                    }
+                if case_name == "streaming_detail":
+                    return {
+                        "code": (
+                            'padding = "' + ("a" * 260) + '"\n'
+                            '"STREAM_RESULT_' + ("b" * 300) + '"'
+                        )
+                    }
                 if case_name == "allow_write":
                     return {
                         "code": (
@@ -236,6 +250,49 @@ class CodeExecutionScenario(BaseScenario):
             self.soft_assert(
                 "BLOCKED_CONTENT" in allow_file_read_text,
                 "Vault file read should return the file content",
+            )
+
+            current_case["name"] = "dynamic_attribute_helpers"
+            dynamic_attribute_helpers = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Exercise dynamic Monty attribute helpers.",
+                    "session_id": "code_execution_dynamic_attribute_helpers",
+                    "tools": ["code_execution", "file_ops_safe"],
+                    "model": "test",
+                },
+            )
+            assert dynamic_attribute_helpers.status_code == 200, "Dynamic attribute helper run should complete"
+            dynamic_attribute_helpers_text = dynamic_attribute_helpers.json()["response"]
+            self.soft_assert(
+                "true" in dynamic_attribute_helpers_text.lower(),
+                "code_execution should support hasattr/getattr on helper result objects",
+            )
+
+            current_case["name"] = "streaming_detail"
+            streaming_detail = self.call_api(
+                "/api/chat/execute",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Stream code_execution detail payloads.",
+                    "session_id": "code_execution_streaming_detail",
+                    "tools": ["code_execution", "file_ops_safe"],
+                    "model": "test",
+                    "stream": True,
+                },
+            )
+            assert streaming_detail.status_code == 200, "Streaming detail run should succeed"
+            streaming_text = streaming_detail.text
+            self.soft_assert(
+                '"arguments_detail"' in streaming_text and ("a" * 260) in streaming_text,
+                "Streaming code_execution events should include untruncated argument detail",
+            )
+            self.soft_assert(
+                '"result_detail"' in streaming_text and ("b" * 300) in streaming_text,
+                "Streaming code_execution events should include untruncated result detail",
             )
 
             current_case["name"] = "allow_write"

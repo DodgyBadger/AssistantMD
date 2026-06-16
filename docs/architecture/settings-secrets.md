@@ -38,9 +38,9 @@ Runtime-relevant general settings include:
 - `task_rollback_enabled`: enable automatic rollback for failed, cancelled, or timed-out task file mutations.
 - `task_mutation_retention_days`: days to retain task mutation audit rows before cleanup; defaults to 365 days.
 - `task_snapshot_retention_days`: days to retain task snapshot metadata and files before cleanup; defaults to 30 days.
-- `compaction_type`: chat history compaction policy (`none`, `suggested`, or `auto`).
+- `compaction_type`: chat history compaction policy (`auto`, `suggested`, or `none`). `auto` is the default and is recommended for long-running tasks; if compaction happens too often, tune `compaction_token_threshold` before switching to `suggested` or `none`.
 - `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.
-- `compaction_token_threshold`: estimated-token threshold for suggesting or automatically running compaction.
+- `compaction_token_threshold`: estimated-token threshold for suggesting or automatically running compaction. Increase this first if automatic compaction happens too often.
 
 ## Secrets Store
 

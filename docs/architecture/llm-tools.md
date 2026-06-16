@@ -10,7 +10,7 @@ This subsystem builds agents, resolves model aliases, binds settings-backed tool
 - `core/authoring/shared/tool_binding.py`
 - `core/tools/`
 
-Configured built-in tools include vault file access (`file_ops_safe`, `file_ops_unsafe`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), session lookup and summarization (`session_ops`), and web search/extraction (`web_search_*`, `tavily_extract`, `tavily_crawl`, `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
+Configured built-in tools include vault file access (`file_ops_safe`, `file_ops_unsafe`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), goal tracking (`goal_ops`), session lookup and summarization (`session_ops`), and web search/extraction (`web_search_*`, `tavily_extract`, `tavily_crawl`, `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
 
 ## Responsibilities
 
@@ -49,16 +49,22 @@ agent behavior toward Pydantic AI's composable capability model.
 - Tool registry source is settings (`tools` section in settings store).
 - `resolve_tool_binding(...)` imports configured modules and finds `BaseTool` subclasses.
 - Chat, delegate child agents, and authored direct-tool calls attach tools through `core/llm/capabilities/assistant_tools.py`.
+- Pydantic AI model providers are constructed with retry-enabled HTTP clients using `pydantic_ai.retries.AsyncTenacityTransport` and `wait_retry_after(...)`. The transport retries provider rate limits, provider 5xx responses, and network request errors with bounded attempts; permanent 4xx responses are left for provider/model error handling. Tool execution is not automatically retried by infrastructure; tool failures should return structured, model-visible failure metadata so the model can decide the next action.
 - Tool result caching is handled by chat capabilities rather than tool-call routing parameters.
 - Oversized chat tool output is stored through the authoring cache layer, not the legacy in-memory buffer store.
 - `BufferStore` remains available on `RunContext.deps` for tool compatibility; the deprecated typed output-routing modules that wrote variable-style buffers have been removed.
 
 ## Delegate and Code Execution
 
-`delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors.
+`delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors. Bounded failures also include structured classification metadata such as failure kind, retryability, and suggested action.
 
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 
-`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI.
+`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API, system-template, and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI, including heartbeat/progress metadata when available.
 
 `chat_history_compact` checks or compacts the active chat session after explicit user approval. Compaction records a replay checkpoint so default future history starts with a summary plus recent raw messages, and records a process-local history-compaction task.
+
+`goal_ops` records lightweight durable goal state for longer work. It stores
+status, source provenance, compact plan snapshots, checkpoints, and related
+activity derived from existing vault mutation records. It does not execute work
+or create a separate artifact pathway.

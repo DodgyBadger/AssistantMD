@@ -54,6 +54,11 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.memory",
         description="Session summary records, fields, and artifacts.",
     ),
+    "goal_ops": SystemDatabaseDefinition(
+        name="goal_ops",
+        owner="core.goals",
+        description="Durable goal_ops goals, steps, events, and checkpoints.",
+    ),
     "ingestion_jobs": SystemDatabaseDefinition(
         name="ingestion_jobs",
         owner="core.ingestion.jobs",

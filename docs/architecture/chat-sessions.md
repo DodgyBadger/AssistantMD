@@ -97,6 +97,6 @@ Compaction can be invoked by:
 
 - API: `/api/chat/sessions/{session_id}/compact`
 - chat tool: `chat_history_compact`
-- automatic post-turn compaction when configured with `compaction_type: auto` and the estimated token threshold is reached
+- automatic post-turn compaction when configured with `compaction_type: auto` and the estimated token threshold is reached; `auto` is the default for new settings files
 
 Compaction emits stable lifecycle events: `chat_compaction_started`, `chat_compaction_plan_selected`, `chat_compaction_completed`, and `chat_compaction_failed`.

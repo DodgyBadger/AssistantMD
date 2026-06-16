@@ -95,5 +95,6 @@ Expired artifacts are purged on a schedule via `purge_expired_cache_artifacts`.
 - Runtime bootstrap creates the authoring registry and wires it to the scheduler.
 - Scheduler sync (`setup_scheduler_jobs`) loads workflow definitions and reconciles APScheduler jobs.
 - Workflow execution flows through `RuntimeContext.workflow_governor`, which registers process-local workflow tasks, serializes runs by vault, and returns `WorkflowExecutionResult` to internal callers.
-- Manual API runs start a background workflow task and return the task snapshot immediately. The `workflow_run` tool keeps the blocking `run` operation for direct execution and exposes `start`, `status`, and `cancel` for task-based asynchronous workflow control. Scheduled jobs await the shared workflow execution path directly.
+- Manual API runs start a background workflow task through the same governor and return the task snapshot immediately. Manual system-template runs are normalized to a vault-scoped virtual workflow id before they enter the governor; disabled system templates can be run manually, but `enabled: false` still excludes them from scheduling.
+- The `workflow_run` tool keeps the blocking `run` operation for direct execution and exposes `start`, `status`, and `cancel` for task-based asynchronous workflow control. Scheduled jobs await the shared workflow execution path directly.
 - Chat sessions invoke the context manager, which runs the matching context template (or the default) to assemble the agent's starting context.

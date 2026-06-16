@@ -1,5 +1,6 @@
 """Integration scenario for chat history compaction primitives and API."""
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -62,10 +63,62 @@ class ChatHistoryCompactionScenario(BaseScenario):
             older_messages=older_messages,
             focus="Keep decisions and tool outcomes.",
         )
+        assert '"prompt_contract_version": "recovery-card-v1"' in prompt, (
+            "Compaction prompt declares the summary contract version"
+        )
+        assert "context checkpoint compaction" in prompt, (
+            "Compaction prompt frames the summary as resumable task state"
+        )
+        assert "Open tasks, unresolved questions, blockers, risks" in prompt, (
+            "Compaction prompt asks for recovery-card continuation details"
+        )
         assert "probe result" not in prompt, (
             "Compaction prompt should not include recent turns that will be preserved verbatim"
         )
         assert len(recent_messages) == 3, "Recent slice shifts backward to preserve tool pair"
+
+        shaped_prompt = compaction._build_summary_prompt(
+            older_messages=[
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="empty_probe",
+                            content="",
+                            tool_call_id="empty-1",
+                        )
+                    ]
+                ),
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="failed_probe",
+                            content="long failure details should not enter compaction prompt",
+                            tool_call_id="failed-1",
+                            outcome="failed",
+                        )
+                    ]
+                ),
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="large_success_probe",
+                            content="large successful result " * 100,
+                            tool_call_id="success-1",
+                        )
+                    ]
+                ),
+            ],
+            focus=None,
+        )
+        assert "[tool result omitted] empty_probe: empty result" in shaped_prompt, (
+            "Empty tool results should be omitted from compaction prompt input"
+        )
+        assert "long failure details should not enter compaction prompt" not in shaped_prompt, (
+            "Explicit failed tool-result content should be omitted from compaction prompt input"
+        )
+        assert shaped_prompt.count("large successful result") == 100, (
+            "Successful retained tool results should not be truncated by first-slice shaping"
+        )
 
         original_keep_recent = compaction.get_compaction_keep_recent
         original_threshold = compaction.get_compaction_token_threshold
@@ -156,13 +209,73 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert "probe result" in detail_messages[2]["content"], (
             "Tool result remains paired with the call"
         )
+        assert [message["fork_sequence_index"] for message in detail_messages] == [0, 1, 2, 3], (
+            "Compacted replacement messages expose effective fork points"
+        )
+        fork_response = self.call_api(
+            f"/api/chat/sessions/{session_id}/fork",
+            method="POST",
+            data={
+                "vault_name": vault.name,
+                "through_sequence_index": detail_messages[-1]["fork_sequence_index"],
+            },
+        )
+        assert fork_response.status_code == 200, "Forking from compacted retained messages succeeds"
+        fork_payload = fork_response.json()
+        assert fork_payload["copied_message_count"] == 4, (
+            "Forking from compacted replacement history copies only the visible effective prefix"
+        )
+        fork_session_id = fork_payload["session"]["session_id"]
+        fork_detail = self.call_api(f"/api/chat/sessions/{fork_session_id}?vault_name={vault.name}")
+        assert fork_detail.status_code == 200, "Forked compacted session detail loads"
+        fork_messages = fork_detail.json()["messages"]
+        assert len(fork_messages) == 4, "Forked session starts from the compacted visible history"
+        assert fork_messages[0]["role"] == "system", (
+            "Forked session preserves the compaction card as a system-maintained message"
+        )
+        assert "AssistantMD compacted chat history" in fork_messages[0]["content"], (
+            "Forked session keeps the compaction card as its starting context"
+        )
+        assert fork_messages[-1]["content"] == "Probe result handled.", (
+            "Forked session includes the retained assistant message without restoring archival history"
+        )
+        fork_metadata = store.get_session_metadata(fork_session_id, vault.name)
+        assert "fork" in fork_metadata, "Forked session records fork provenance"
+        assert "last_compaction" not in fork_metadata, (
+            "Forked compacted session should not inherit source checkpoint metadata"
+        )
+        assert fork_metadata["history_revision"] == 1, (
+            "Forked compacted session starts a fresh history revision from copied effective history"
+        )
         metadata = store.get_session_metadata(session_id, vault.name)
         assert "last_compaction" in metadata, "Compaction audit metadata is recorded"
+        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v1", (
+            "Session metadata records the compaction prompt contract"
+        )
+        assert metadata["last_compaction"]["trigger"] == "manual", (
+            "API compaction is recorded as a manual trigger"
+        )
+        assert metadata["last_compaction"]["reason"] == "api_requested", (
+            "API compaction records the manual reason"
+        )
+        assert metadata["last_compaction"]["compaction_keep_recent"] == 2, (
+            "Session metadata records effective compaction settings"
+        )
 
         checkpoint = store.get_latest_compaction_checkpoint(session_id, vault.name)
         assert checkpoint is not None, "Compaction records a replay checkpoint"
         assert checkpoint.last_message_sequence_index == 5, (
             "Checkpoint records the raw message high-water mark"
+        )
+        checkpoint_metadata = json.loads(checkpoint.metadata_json or "{}")
+        assert checkpoint_metadata["prompt_contract_version"] == "recovery-card-v1", (
+            "Checkpoint metadata records the prompt contract version"
+        )
+        assert checkpoint_metadata["trigger"] == "manual", (
+            "Checkpoint metadata records manual/API compaction trigger"
+        )
+        assert checkpoint_metadata["reason"] == "api_requested", (
+            "Checkpoint metadata records why compaction ran"
         )
 
         migration_conn = sqlite3.connect(runtime.config.system_root / "chat_sessions.db")
@@ -214,6 +327,15 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert replay_messages[-1].content_text == "Post-compaction follow-up.", (
             "Post-checkpoint raw message appears after checkpoint replacement"
         )
+        post_detail = self.call_api(f"/api/chat/sessions/{session_id}?vault_name={vault.name}")
+        assert post_detail.status_code == 200, "Session detail endpoint succeeds after post-checkpoint append"
+        post_detail_messages = post_detail.json()["messages"]
+        assert post_detail_messages[-1]["content"] == "Post-compaction follow-up.", (
+            "Session detail exposes post-checkpoint raw messages"
+        )
+        assert post_detail_messages[-1]["fork_sequence_index"] == 6, (
+            "Post-checkpoint raw messages keep their own raw fork point"
+        )
 
         broker_history = ChatHistoryService(chat_store=store).get_conversation_history(
             context=ChatHistoryContext(session_id=session_id, vault_name=vault.name),
@@ -242,6 +364,9 @@ class ChatHistoryCompactionScenario(BaseScenario):
             if agent.output_type is session_ops._SessionSummaryIntent:
                 assert "AssistantMD compacted chat history" in prompt, (
                     "Session summarization prompt should include effective checkpoint summary"
+                )
+                assert "primary source of durable session substance" in prompt, (
+                    "Session summarization prompt should prioritize the compaction card"
                 )
                 assert "Post-compaction follow-up." in prompt, (
                     "Session summarization prompt should include post-checkpoint raw turns"

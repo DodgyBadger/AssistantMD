@@ -25,9 +25,28 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
         target = system_root / "Authoring" / "default.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("STALE GENERATED DEFAULT", encoding="utf-8")
+        workflow_target = system_root / "Authoring" / "nightly-session-summarization.md"
+        workflow_target.write_text(
+            "\n".join(
+                [
+                    "---",
+                    "run_type: workflow",
+                    'schedule: "cron: 0 2 * * *"',
+                    "enabled: true",
+                    "description: stale enabled workflow",
+                    "---",
+                    "",
+                    "STALE WORKFLOW BODY",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
 
         seed = Path("core/authoring/seed_templates/context/default.md")
         expected = seed.read_text(encoding="utf-8")
+        workflow_seed = Path("core/authoring/seed_templates/workflows/nightly-session-summarization.md")
+        expected_workflow = workflow_seed.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1)
 
         await self.start_system()
 
@@ -40,6 +59,8 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
         settings_raw = yaml.safe_load(settings_response.json()["content"])
         settings_raw["providers"]["openrouter"].pop("provider", None)
         settings_raw["settings"].pop("openrouter_ignored_providers", None)
+        settings_raw["settings"]["default_model"].pop("category", None)
+        settings_raw["settings"]["default_model"]["value"] = "haiku"
         update_settings_response = self.call_api(
             "/api/system/settings",
             method="PUT",
@@ -49,6 +70,13 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             update_settings_response.status_code,
             200,
             "Settings update should allow existing OpenRouter provider without routing block",
+        )
+        status_response = self.call_api("/api/status")
+        self.soft_assert_equal(status_response.status_code, 200, "Status should load after metadata removal")
+        status_issues = status_response.json().get("configuration_status", {}).get("issues", [])
+        self.soft_assert(
+            any(issue.get("name") == "settings:missing_metadata" for issue in status_issues),
+            "Status should warn when existing settings are missing template metadata",
         )
 
         repair_response = self.call_api("/api/system/settings/repair", method="POST")
@@ -68,11 +96,25 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             ["azure"],
             "Settings repair should restore OpenRouter ignored-provider defaults",
         )
+        self.soft_assert_equal(
+            repaired_settings["settings"]["default_model"].get("category"),
+            "Models",
+            "Settings repair should restore missing setting metadata",
+        )
+        self.soft_assert_equal(
+            repaired_settings["settings"]["default_model"].get("value"),
+            "haiku",
+            "Settings repair should preserve existing setting values while restoring metadata",
+        )
 
         self.soft_assert_equal(
             target.read_text(encoding="utf-8"),
             "STALE GENERATED DEFAULT",
             "Startup should preserve existing system authoring files",
+        )
+        self.soft_assert(
+            "STALE WORKFLOW BODY" in workflow_target.read_text(encoding="utf-8"),
+            "Startup should preserve existing system workflow templates",
         )
 
         response = self.call_api("/api/system/authoring/seed-refresh", method="POST")
@@ -86,10 +128,19 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             target.as_posix() in payload.get("updated", []),
             "Manual refresh should report the stale default template as updated",
         )
+        self.soft_assert(
+            workflow_target.as_posix() in payload.get("updated", []),
+            "Manual refresh should report the stale system workflow template as updated",
+        )
         self.soft_assert_equal(
             target.read_text(encoding="utf-8"),
             expected,
             "Manual refresh should update packaged system authoring seed files",
+        )
+        self.soft_assert_equal(
+            workflow_target.read_text(encoding="utf-8"),
+            expected_workflow,
+            "Manual refresh should update system workflow content while preserving enabled state",
         )
 
         await self.stop_system()

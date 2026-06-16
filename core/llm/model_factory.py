@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import (
@@ -20,7 +21,9 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.mistral import MistralProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.grok import GrokProvider
+from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from pydantic_ai.settings import ModelSettings
+from tenacity import retry_if_exception, stop_after_attempt
 
 from core.llm.thinking import ThinkingValue
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
@@ -32,6 +35,12 @@ from core.settings import (
 )
 from core.settings.secrets_store import get_secret_value
 from core.utils.value_parser import DirectiveValueParser
+from core.logger import UnifiedLogger
+
+
+logger = UnifiedLogger(tag="model-factory")
+_MODEL_HTTP_RETRY_ATTEMPTS = 3
+_MODEL_HTTP_RETRY_MAX_WAIT_SECONDS = 30.0
 
 
 def _resolve_config_value(raw_value: str | None) -> str | None:
@@ -83,6 +92,70 @@ def _apply_openrouter_settings(
         settings_kwargs["openrouter_provider"] = provider_settings
 
 
+def _is_retryable_model_http_exception(exc: BaseException) -> bool:
+    """Return whether Pydantic AI model HTTP transport should retry the exception."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return status_code == 429 or 500 <= status_code <= 599
+    return isinstance(exc, httpx.RequestError)
+
+
+def _raise_retryable_model_status(response: httpx.Response) -> None:
+    """Raise only retryable HTTP statuses inside the transport retry layer."""
+    if response.status_code == 429 or 500 <= response.status_code <= 599:
+        response.raise_for_status()
+
+
+def _log_model_retry_before_sleep(retry_state) -> None:
+    """Emit one lifecycle event before Pydantic AI retry transport sleeps."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.add_sink("validation").warning(
+        "model_http_retry_scheduled",
+        data={
+            "event": "model_http_retry_scheduled",
+            "attempt": retry_state.attempt_number,
+            "next_action": "retry",
+            "delay_seconds": (
+                None
+                if retry_state.next_action is None
+                else retry_state.next_action.sleep
+            ),
+            "error_type": None if exc is None else type(exc).__name__,
+            "http_status": (
+                exc.response.status_code
+                if isinstance(exc, httpx.HTTPStatusError)
+                else None
+            ),
+        },
+    )
+
+
+def _build_retrying_model_http_client() -> httpx.AsyncClient:
+    """Build the Pydantic AI provider HTTP client with bounded retry transport."""
+    retry_config = RetryConfig(
+        retry=retry_if_exception(_is_retryable_model_http_exception),
+        wait=wait_retry_after(max_wait=_MODEL_HTTP_RETRY_MAX_WAIT_SECONDS),
+        stop=stop_after_attempt(_MODEL_HTTP_RETRY_ATTEMPTS),
+        before_sleep=_log_model_retry_before_sleep,
+        reraise=True,
+    )
+    transport = AsyncTenacityTransport(
+        retry_config,
+        validate_response=_raise_retryable_model_status,
+    )
+    return httpx.AsyncClient(
+        transport=transport,
+        timeout=float(get_default_api_timeout()),
+    )
+
+
+def _mark_provider_owns_http_client(provider: object, http_client: httpx.AsyncClient) -> object:
+    """Mark a custom retry client as provider-owned for Pydantic AI lifecycle hooks."""
+    setattr(provider, "_own_http_client", http_client)
+    setattr(provider, "_http_client_factory", _build_retrying_model_http_client)
+    return provider
+
+
 def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> ModelExecutionSpec | object:
     """Build a Pydantic AI model instance from a user-friendly alias string.
 
@@ -120,18 +193,26 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
     if provider == "google":
         settings_kwargs = _base_settings_kwargs(thinking)
         api_key = get_secret_value("GOOGLE_API_KEY")
+        http_client = _build_retrying_model_http_client()
         return GoogleModel(
             model_string,
-            provider=GoogleProvider(api_key=api_key),
+            provider=_mark_provider_owns_http_client(
+                GoogleProvider(api_key=api_key, http_client=http_client),
+                http_client,
+            ),
             settings=GoogleModelSettings(**settings_kwargs),
         )
 
     elif provider == "anthropic":
         settings_kwargs = _base_settings_kwargs(thinking)
         api_key = get_secret_value("ANTHROPIC_API_KEY")
+        http_client = _build_retrying_model_http_client()
         return AnthropicModel(
             model_string,
-            provider=AnthropicProvider(api_key=api_key),
+            provider=_mark_provider_owns_http_client(
+                AnthropicProvider(api_key=api_key, http_client=http_client),
+                http_client,
+            ),
             settings=AnthropicModelSettings(**settings_kwargs),
         )
 
@@ -140,27 +221,39 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
         provider_config = get_provider_config(provider)
         api_key = _resolve_config_value(provider_config.get("api_key"))
         base_url = _resolve_config_value(provider_config.get("base_url"))
+        http_client = _build_retrying_model_http_client()
         return OpenAIResponsesModel(
             model_string,
-            provider=OpenAIProvider(api_key=api_key, base_url=base_url),
+            provider=_mark_provider_owns_http_client(
+                OpenAIProvider(api_key=api_key, base_url=base_url, http_client=http_client),
+                http_client,
+            ),
             settings=OpenAIResponsesModelSettings(**settings_kwargs),
         )
 
     elif provider == "grok":
         settings_kwargs = _base_settings_kwargs(thinking)
         api_key = get_secret_value("GROK_API_KEY")
+        http_client = _build_retrying_model_http_client()
         return OpenAIModel(
             model_string,
-            provider=GrokProvider(api_key=api_key),
+            provider=_mark_provider_owns_http_client(
+                GrokProvider(api_key=api_key, http_client=http_client),
+                http_client,
+            ),
             settings=OpenAIResponsesModelSettings(**settings_kwargs),
         )
 
     elif provider == "mistral":
         settings_kwargs = _base_settings_kwargs(thinking)
         api_key = get_secret_value("MISTRAL_API_KEY")
+        http_client = _build_retrying_model_http_client()
         return MistralModel(
             model_string,
-            provider=MistralProvider(api_key=api_key),
+            provider=_mark_provider_owns_http_client(
+                MistralProvider(api_key=api_key, http_client=http_client),
+                http_client,
+            ),
             settings=ModelSettings(**settings_kwargs),
         )
 
@@ -169,9 +262,13 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
         provider_config = get_provider_config(provider)
         api_key = _resolve_config_value(provider_config.get("api_key"))
         _apply_openrouter_settings(settings_kwargs, provider_config)
+        http_client = _build_retrying_model_http_client()
         return OpenRouterModel(
             model_string,
-            provider=OpenRouterProvider(api_key=api_key),
+            provider=_mark_provider_owns_http_client(
+                OpenRouterProvider(api_key=api_key, http_client=http_client),
+                http_client,
+            ),
             settings=OpenRouterModelSettings(**settings_kwargs),
         )
 
@@ -192,8 +289,12 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
         settings_kwargs = _base_settings_kwargs(thinking)
 
         api_key = _resolve_config_value(provider_config.get("api_key"))
+        http_client = _build_retrying_model_http_client()
         return OpenAIModel(
             model_string,
-            provider=OpenAIProvider(api_key=api_key, base_url=base_url),
+            provider=_mark_provider_owns_http_client(
+                OpenAIProvider(api_key=api_key, base_url=base_url, http_client=http_client),
+                http_client,
+            ),
             settings=ModelSettings(**settings_kwargs),
         )

@@ -68,6 +68,8 @@ class VaultTaskMutationItem:
     task_source: str | None
     task_scope: str | None
     task_label: str | None
+    goal_id: str | None
+    step_id: str | None
     path: str
     related_path: str | None
     operation: str
@@ -99,6 +101,8 @@ class VaultTaskMutationGroup:
     task_source: str | None
     task_scope: str | None
     task_label: str | None
+    goal_id: str | None
+    step_id: str | None
     vault_id: str
     vault_name: str
     mutation_count: int
@@ -376,6 +380,8 @@ class VaultStateService:
         task_id: str | None = None,
         include_expired: bool = False,
         operation: str | None = None,
+        goal_id: str | None = None,
+        step_id: str | None = None,
     ) -> list[VaultTaskMutationGroup]:
         """Return recent user-facing activity groups for one vault."""
         now = datetime.now(UTC)
@@ -386,6 +392,10 @@ class VaultStateService:
                 stmt = stmt.where(TaskFileMutation.task_id == task_id)
             if operation:
                 stmt = stmt.where(TaskFileMutation.operation == operation)
+            if goal_id:
+                stmt = stmt.where(TaskFileMutation.goal_id == goal_id)
+            if step_id:
+                stmt = stmt.where(TaskFileMutation.step_id == step_id)
             if not include_expired:
                 stmt = stmt.where(
                     or_(
@@ -427,6 +437,8 @@ class VaultStateService:
                     task_source=first.task_source,
                     task_scope=first.task_scope,
                     task_label=first.task_label,
+                    goal_id=first.goal_id,
+                    step_id=first.step_id,
                     vault_id=first.vault_id,
                     vault_name=first.vault_name,
                     mutation_count=len(activity_rows),
@@ -441,6 +453,8 @@ class VaultStateService:
                             task_source=row.task_source,
                             task_scope=row.task_scope,
                             task_label=row.task_label,
+                            goal_id=row.goal_id,
+                            step_id=row.step_id,
                             path=row.path,
                             related_path=row.related_path,
                             operation=row.operation,
@@ -495,6 +509,8 @@ class VaultStateService:
                 task_source=row.task_source,
                 task_scope=row.task_scope,
                 task_label=row.task_label,
+                goal_id=row.goal_id,
+                step_id=row.step_id,
                 path=row.path,
                 related_path=row.related_path,
                 operation=row.operation,
@@ -661,6 +677,8 @@ class VaultStateService:
             "task_source": "VARCHAR",
             "task_scope": "VARCHAR",
             "task_label": "VARCHAR",
+            "goal_id": "VARCHAR",
+            "step_id": "VARCHAR",
             "related_path": "VARCHAR",
             "event_sequence": "INTEGER",
             "before_snapshot_id": "INTEGER",

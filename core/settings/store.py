@@ -27,6 +27,7 @@ class SettingsEntry(BaseModel):
 
     value: Any
     description: str | None = None
+    category: str | None = None
     restart_required: bool = False
 
 

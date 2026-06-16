@@ -33,9 +33,38 @@ class VaultStateRollbackScenario(BaseScenario):
             expected={
                 "workflow_id": f"{vault.name}/failing_probe",
                 "status": "failed",
+                "failure_kind": "unknown",
+                "retryable": False,
             },
         )
         task_id = failed_event["data"]["task_id"]
+        task_detail = self.call_api(f"/api/tasks/{task_id}")
+        assert task_detail.status_code == 200, "Failed workflow task detail should be available"
+        workflow_failure = task_detail.json().get("metadata", {}).get("workflow_failure")
+        self.soft_assert(
+            isinstance(workflow_failure, dict),
+            "Failed workflow task should expose structured recovery metadata",
+        )
+        if isinstance(workflow_failure, dict):
+            self.soft_assert_equal(
+                workflow_failure.get("failure_kind"),
+                "unknown",
+                "Unexpected workflow exceptions should preserve fail-fast unknown classification",
+            )
+            self.soft_assert_equal(
+                workflow_failure.get("retryable"),
+                False,
+                "Unexpected workflow exceptions should not be marked retryable",
+            )
+            self.soft_assert_equal(
+                workflow_failure.get("workflow_id"),
+                f"{vault.name}/failing_probe",
+                "Workflow failure metadata should identify the failed workflow",
+            )
+            self.soft_assert(
+                isinstance(workflow_failure.get("recovery_summary"), dict),
+                "Workflow failure metadata should include a compact recovery summary",
+            )
         self.assert_event_contains(
             events,
             name="task_rollback_started",

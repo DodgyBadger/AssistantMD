@@ -190,6 +190,8 @@ class VaultTaskMutationInfo(BaseModel):
     task_source: Optional[str] = Field(None, description="Task source such as api or scheduler")
     task_scope: Optional[str] = Field(None, description="Task scope")
     task_label: Optional[str] = Field(None, description="User-readable task label")
+    goal_id: Optional[str] = Field(None, description="Optional goal_ops goal id associated with the mutation")
+    step_id: Optional[str] = Field(None, description="Optional goal_ops step id associated with the mutation")
     path: str = Field(..., description="Vault-relative mutated path")
     related_path: Optional[str] = Field(None, description="Related vault-relative path for paired mutations")
     operation: str = Field(..., description="Mutation operation")
@@ -220,6 +222,8 @@ class VaultTaskMutationGroupInfo(BaseModel):
     task_source: Optional[str] = Field(None, description="Task source such as api or scheduler")
     task_scope: Optional[str] = Field(None, description="Task scope")
     task_label: Optional[str] = Field(None, description="User-readable task label")
+    goal_id: Optional[str] = Field(None, description="Optional goal_ops goal id associated with the activity")
+    step_id: Optional[str] = Field(None, description="Optional goal_ops step id associated with the activity")
     vault_id: str = Field(..., description="Stable vault id")
     vault_name: str = Field(..., description="Vault name at mutation time")
     mutation_count: int = Field(..., description="Number of returned mutations for the task")
@@ -462,6 +466,10 @@ class ChatSessionMessageInfo(BaseModel):
     """Persisted normalized chat message for session rehydration."""
 
     sequence_index: int = Field(..., description="Stable sequence index within the session")
+    fork_sequence_index: Optional[int] = Field(
+        None,
+        description="Effective inclusive message sequence to use when forking from this rendered message",
+    )
     role: str = Field(..., description="Normalized role for rendering")
     content: str = Field(..., description="Normalized rendered message content")
     message_type: str = Field(..., description="Provider-native message class name")
@@ -484,12 +492,32 @@ class ChatSessionToolEventInfo(BaseModel):
     artifact_ref: Optional[str] = Field(None, description="Cache/artifact reference when present")
 
 
+class ChatSessionFailureInfo(BaseModel):
+    """Internal recovery marker for an accepted chat turn that did not complete."""
+
+    status: str = Field(..., description="Failure marker status")
+    phase: str = Field(..., description="Execution phase where the turn failed")
+    streaming: bool = Field(..., description="Whether the failed turn was streaming")
+    error_type: str = Field(..., description="Stable exception type")
+    error: str = Field("", description="Concise failure message")
+    failure_kind: str = Field("", description="Stable failure category")
+    retryable: bool = Field(False, description="Whether retrying the same request may succeed")
+    http_status: Optional[int] = Field(None, description="Provider HTTP status when available")
+    retry_after: Optional[str] = Field(None, description="Provider retry-after hint when available")
+    model: Optional[str] = Field(None, description="Model selected for the failed turn")
+    tools: List[str] = Field(default_factory=list, description="Tools selected for the failed turn")
+    accepted_user_sequence_index: int = Field(..., description="Accepted user message sequence index")
+    recorded_at: str = Field(..., description="Marker timestamp")
+    suggested_action: str = Field("", description="Agent-safe recovery guidance")
+
+
 class ChatSessionDetailResponse(BaseModel):
     """Persisted chat session payload for client-side rehydration."""
 
     session_id: str = Field(..., description="Session identifier")
     vault_name: str = Field(..., description="Owning vault name")
     workspace: Optional[ChatWorkspaceInfo] = Field(None, description="Workspace associated with this session")
+    latest_failure: Optional[ChatSessionFailureInfo] = Field(None, description="Latest unfinished-turn marker")
     messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
     tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")
 
@@ -520,6 +548,25 @@ class ChatSessionsPurgeResponse(BaseModel):
     """Result of a chat session purge operation."""
 
     deleted: int = Field(..., description="Number of sessions deleted")
+    message: str = Field(..., description="Human-readable summary")
+
+
+class GoalCleanupRequest(BaseModel):
+    """Request to remove old completed or cancelled goals for a vault."""
+
+    vault_name: str = Field(..., description="Vault to clean goals from")
+    status: str = Field(
+        "completed",
+        description='Goal status filter: "completed", "cancelled", or "completed_or_cancelled"',
+    )
+    older_than_days: Optional[int] = Field(None, description="Delete goals older than this many days; null deletes all matches")
+
+
+class GoalCleanupResponse(BaseModel):
+    """Result of a goal cleanup operation."""
+
+    success: bool = Field(True, description="Whether cleanup completed successfully")
+    deleted: int = Field(..., description="Number of goals deleted")
     message: str = Field(..., description="Human-readable summary")
 
 
@@ -700,6 +747,7 @@ class SettingInfo(BaseModel):
     key: str = Field(..., description="Setting name")
     value: str = Field(..., description="Current value rendered as string")
     description: Optional[str] = Field(None, description="Human-readable description")
+    category: Optional[str] = Field(None, description="Settings UI grouping label")
     restart_required: bool = Field(False, description="True when edits recommend a restart")
 
 

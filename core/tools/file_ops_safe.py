@@ -7,6 +7,7 @@ Provides secure file management capabilities within vault boundaries.
 import os
 import glob
 import subprocess
+from bisect import insort
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,6 @@ class FileOpsSafe(BaseTool):
             path: str = "",
             content: str = "",
             destination: str = "",
-            include_all: bool = False,
             recursive: bool = False,
             search_term: str = "",
             keys: str = "",
@@ -75,7 +75,6 @@ class FileOpsSafe(BaseTool):
             :param path: File, directory, or glob pattern
             :param content: Content for write/append
             :param destination: Destination path for move
-            :param include_all: Include non-markdown/hidden files in listings
             :param recursive: Recurse through subdirectories for listings
             :param search_term: Text pattern to search for (search operation)
             :param keys: Comma-separated frontmatter keys to extract (frontmatter operation)
@@ -112,14 +111,12 @@ class FileOpsSafe(BaseTool):
                     if get_virtual_mount_key(path):
                         return cls._list_virtual_mount(
                             path,
-                            include_all=include_all,
                             recursive=recursive,
                             max_results=get_file_ops_safe_list_max_results(),
                         )
                     return cls._list_files(
                         path,
                         vault_path,
-                        include_all=include_all,
                         recursive=recursive,
                         max_results=get_file_ops_safe_list_max_results(),
                     )
@@ -147,6 +144,16 @@ class FileOpsSafe(BaseTool):
                         error_type="unknown_operation",
                     )
 
+            except VaultMutationRejected as e:
+                return cls._result(
+                    message=str(e),
+                    operation=operation,
+                    path=path,
+                    destination=destination,
+                    search_term=search_term,
+                    status="error",
+                    error_type=e.code,
+                )
             except Exception as e:
                 return cls._result(
                     message=f"Error performing '{operation}' operation: {str(e)}",
@@ -245,7 +252,6 @@ Full documentation:
                 return cls._list_files(
                     path,
                     vault_path,
-                    include_all=False,
                     recursive=False,
                     max_results=get_file_ops_safe_list_max_results(),
                 )
@@ -257,7 +263,6 @@ Full documentation:
                 return cls._list_files(
                     path,
                     vault_path,
-                    include_all=False,
                     recursive=False,
                     max_results=get_file_ops_safe_list_max_results(),
                 )
@@ -645,7 +650,6 @@ Full documentation:
                 path=path,
                 destination=destination,
                 overwrite=False,
-                markdown_only=True,
             )
         except VaultMutationRejected as exc:
             if exc.code == "source_not_found":
@@ -691,12 +695,12 @@ Full documentation:
         cls,
         path: str,
         vault_path: str,
-        include_all: bool,
         recursive: bool,
         max_results: int,
     ) -> ToolReturn:
         """List files and directories matching a path or glob."""
         path = path.strip()
+        scope_relative_path: str | None = None
         if not path or path == ".":
             path = "*"
 
@@ -707,36 +711,24 @@ Full documentation:
         if not is_glob:
             abs_path = os.path.join(vault_path, path)
             if os.path.isdir(abs_path):
+                scope_relative_path = cls._relative_vault_path(vault_path, abs_path)
                 path = os.path.join(path, "**/*" if recursive else "*")
 
         full_pattern = os.path.join(vault_path, path)
-        matches = glob.glob(full_pattern, recursive=recursive or "**" in path)
+        files, directories, file_count, directory_count = cls._collect_limited_matches(
+            pattern=full_pattern,
+            recursive=recursive or "**" in path,
+            root_path=vault_path,
+            max_results=max_results,
+        )
 
-        files = []
-        directories = []
-
-        for match in matches:
-            if not match.startswith(vault_path + os.sep) and match != vault_path:
-                continue
-
-            relative_path = match[len(vault_path) + 1:] if match != vault_path else ""
-
-            parts = relative_path.split(os.sep) if relative_path else []
-            if not include_all and any(part.startswith('.') for part in parts if part):
-                continue
-
-            if os.path.isdir(match):
-                if relative_path:
-                    directories.append(relative_path)
-                continue
-
-            if not include_all and not relative_path.endswith(".md"):
-                continue
-
-            if relative_path:
-                files.append(relative_path)
-
-        if not files and not directories:
+        if file_count == 0 and directory_count == 0:
+            empty_candidates = cls._empty_directory_candidates(
+                vault_path=vault_path,
+                directories=[],
+                scope_relative_path=scope_relative_path,
+                include_scope_when_empty=True,
+            )
             return cls._result(
                 message=f"No files or directories found for path '{path}'",
                 operation="list",
@@ -748,20 +740,19 @@ Full documentation:
                     "file_count": 0,
                     "directories": [],
                     "files": [],
+                    "empty_directory_candidates": empty_candidates,
+                    "empty_directory_candidate_count": len(empty_candidates),
                     "truncated": False,
                 },
             )
 
-        truncated = False
-        if max_results > 0 and len(files) + len(directories) > max_results:
-            truncated = True
-            remaining = max_results
-            directories = sorted(directories)[:remaining]
-            remaining -= len(directories)
-            files = sorted(files)[:max(0, remaining)]
-        else:
-            directories = sorted(directories)
-            files = sorted(files)
+        truncated = max_results > 0 and file_count + directory_count > max_results
+        empty_candidates = cls._empty_directory_candidates(
+            vault_path=vault_path,
+            directories=directories,
+            scope_relative_path=scope_relative_path,
+            include_scope_when_empty=False,
+        )
 
         result_parts = []
         if directories:
@@ -782,15 +773,127 @@ Full documentation:
                 "file_count": len(files),
                 "directories": directories,
                 "files": files,
+                "empty_directory_candidates": empty_candidates,
+                "empty_directory_candidate_count": len(empty_candidates),
                 "truncated": truncated,
             },
         )
+
+    @staticmethod
+    def _relative_vault_path(vault_path: str, full_path: str) -> str:
+        relative = os.path.relpath(full_path, vault_path)
+        return "" if relative == "." else relative.replace(os.sep, "/")
+
+    @classmethod
+    def _collect_limited_matches(
+        cls,
+        *,
+        pattern: str,
+        recursive: bool,
+        root_path: str,
+        max_results: int,
+    ) -> tuple[list[str], list[str], int, int]:
+        """Collect listed paths while bounding retained candidates to the display cap."""
+        root_display = os.path.abspath(root_path)
+        root_abs = os.path.realpath(root_path)
+        selected_files: list[str] = []
+        selected_directories: list[str] = []
+        total_files = 0
+        total_directories = 0
+
+        for match in glob.iglob(pattern, recursive=recursive):
+            match_abs = os.path.abspath(match)
+            if not match_abs.startswith(root_display + os.sep) and match_abs != root_display:
+                continue
+
+            relative = os.path.relpath(match_abs, root_display)
+            relative_path = "" if relative == "." else relative.replace(os.sep, "/")
+            parts = relative_path.split(os.sep) if relative_path else []
+            if any(part.startswith('.') for part in parts if part):
+                continue
+
+            try:
+                resolved = os.path.realpath(match)
+            except OSError:
+                continue
+            if not resolved.startswith(root_abs + os.sep) and resolved != root_abs:
+                continue
+
+            if os.path.isdir(match):
+                if relative_path:
+                    total_directories += 1
+                    cls._keep_sorted_candidate(
+                        selected_directories,
+                        relative_path,
+                        max_results,
+                    )
+                continue
+
+            if relative_path:
+                total_files += 1
+                cls._keep_sorted_candidate(selected_files, relative_path, max_results)
+
+        if max_results > 0 and total_files + total_directories > max_results:
+            directories = selected_directories[:max_results]
+            file_slots = max(0, max_results - min(total_directories, max_results))
+            files = selected_files[:file_slots]
+            return files, directories, total_files, total_directories
+
+        return selected_files, selected_directories, total_files, total_directories
+
+    @staticmethod
+    def _keep_sorted_candidate(candidates: list[str], value: str, max_results: int) -> None:
+        if max_results <= 0:
+            insort(candidates, value)
+            return
+        if len(candidates) < max_results:
+            insort(candidates, value)
+            return
+        if value < candidates[-1]:
+            insort(candidates, value)
+            candidates.pop()
+
+    @classmethod
+    def _empty_directory_candidates(
+        cls,
+        *,
+        vault_path: str,
+        directories: list[str],
+        scope_relative_path: str | None,
+        include_scope_when_empty: bool,
+    ) -> list[str]:
+        """Return top-level listed directory branches that contain no files."""
+        candidate_paths: list[str] = []
+        if include_scope_when_empty and scope_relative_path:
+            candidate_paths.append(scope_relative_path)
+        candidate_paths.extend(directories)
+
+        empty_paths = [
+            candidate
+            for candidate in candidate_paths
+            if candidate and cls._directory_tree_has_no_files(vault_path, candidate)
+        ]
+        selected: list[str] = []
+        for candidate in sorted(empty_paths, key=lambda item: (item.count("/"), item)):
+            if any(candidate == parent or candidate.startswith(f"{parent}/") for parent in selected):
+                continue
+            selected.append(candidate)
+        return sorted(selected)
+
+    @staticmethod
+    def _directory_tree_has_no_files(vault_path: str, relative_path: str) -> bool:
+        full_path = Path(vault_path) / relative_path
+        if not full_path.is_dir():
+            return False
+        for _root, _dirs, files in os.walk(full_path):
+            if files:
+                return False
+        return True
 
     @classmethod
     def _list_virtual_mount(
         cls,
         path: str,
-        include_all: bool,
         recursive: bool,
         max_results: int,
     ) -> ToolReturn:
@@ -817,33 +920,14 @@ Full documentation:
                 rel = os.path.join(rel, "**/*" if recursive else "*")
 
         full_pattern = os.path.join(docs_root, rel)
-        matches = glob.glob(full_pattern, recursive=recursive or "**" in rel)
+        files, directories, file_count, directory_count = cls._collect_limited_matches(
+            pattern=full_pattern,
+            recursive=recursive or "**" in rel,
+            root_path=docs_root,
+            max_results=max_results,
+        )
 
-        files = []
-        directories = []
-
-        for match in matches:
-            if not match.startswith(docs_root + os.sep) and match != docs_root:
-                continue
-
-            relative_path = match[len(docs_root) + 1:] if match != docs_root else ""
-
-            parts = relative_path.split(os.sep) if relative_path else []
-            if not include_all and any(part.startswith('.') for part in parts if part):
-                continue
-
-            if os.path.isdir(match):
-                if relative_path:
-                    directories.append(relative_path)
-                continue
-
-            if not include_all and not relative_path.endswith(".md"):
-                continue
-
-            if relative_path:
-                files.append(relative_path)
-
-        if not files and not directories:
+        if file_count == 0 and directory_count == 0:
             return cls._result(
                 message=f"No files or directories found for path '{path}'",
                 operation="list",
@@ -855,21 +939,14 @@ Full documentation:
                     "file_count": 0,
                     "directories": [],
                     "files": [],
+                    "empty_directory_candidates": [],
+                    "empty_directory_candidate_count": 0,
                     "truncated": False,
                     "virtual_mount": mount_key,
                 },
             )
 
-        truncated = False
-        if max_results > 0 and len(files) + len(directories) > max_results:
-            truncated = True
-            remaining = max_results
-            directories = sorted(directories)[:remaining]
-            remaining -= len(directories)
-            files = sorted(files)[:max(0, remaining)]
-        else:
-            directories = sorted(directories)
-            files = sorted(files)
+        truncated = max_results > 0 and file_count + directory_count > max_results
 
         result_parts = []
         if directories:
@@ -890,6 +967,8 @@ Full documentation:
                 "file_count": len(files),
                 "directories": [f"{mount_key}/{d}" for d in directories],
                 "files": [f"{mount_key}/{f}" for f in files],
+                "empty_directory_candidates": [],
+                "empty_directory_candidate_count": 0,
                 "truncated": truncated,
                 "virtual_mount": mount_key,
             },
@@ -921,7 +1000,7 @@ Full documentation:
 
     @classmethod
     def _search_files(cls, path: str, search_term: str, vault_path: str) -> ToolReturn:
-        """Search for text within markdown files using ripgrep."""
+        """Search for text files using ripgrep."""
         search_term = search_term.strip()
         if not search_term:
             return cls._result(
@@ -945,8 +1024,7 @@ Full documentation:
             '--ignore-case',
         ]
 
-        glob_pattern = "*.md"
-        search_root = vault_abs
+        search_roots = [vault_abs]
         result_base_root = vault_abs
         result_prefix = ""
 
@@ -985,8 +1063,7 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_mount",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 elif os.path.isfile(abs_scope):
                     if (
                         not abs_scope.startswith(root_abs + os.sep)
@@ -1000,11 +1077,9 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_mount",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 else:
-                    search_root = root_abs
-                    glob_pattern = rel
+                    search_roots = cls._resolve_search_glob_roots(root_abs, rel)
                 result_base_root = root_abs
                 result_prefix = mount_key
             else:
@@ -1022,8 +1097,7 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_vault",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 elif os.path.isfile(abs_scope):
                     if (
                         not abs_scope.startswith(vault_abs + os.sep)
@@ -1037,14 +1111,22 @@ Full documentation:
                             status="invalid_target",
                             error_type="path_escapes_vault",
                         )
-                    search_root = abs_scope
-                    glob_pattern = "*.md"
+                    search_roots = [abs_scope]
                 else:
-                    glob_pattern = path
+                    search_roots = cls._resolve_search_glob_roots(vault_abs, path)
 
-        rg_cmd.extend(['--glob', glob_pattern])
+        if not search_roots:
+            return cls._result(
+                message=f"No matches found for '{search_term}' in text files",
+                operation="search",
+                path=path,
+                search_term=search_term,
+                status="completed",
+                exists=True,
+                metadata={"match_count": 0, "matches": []},
+            )
         rg_cmd.append(search_term)
-        rg_cmd.append(search_root)
+        rg_cmd.extend(search_roots)
 
         try:
             result = subprocess.run(
@@ -1091,7 +1173,7 @@ Full documentation:
                 )
             elif result.returncode == 1:
                 return cls._result(
-                    message=f"No matches found for '{search_term}' in markdown files",
+                    message=f"No matches found for '{search_term}' in text files",
                     operation="search",
                     path=path,
                     search_term=search_term,
@@ -1136,6 +1218,26 @@ Full documentation:
                 status="error",
                 error_type=type(e).__name__,
             )
+
+    @classmethod
+    def _resolve_search_glob_roots(cls, root_abs: str, pattern: str) -> list[str]:
+        """Resolve an explicit vault-relative search glob into bounded, non-hidden roots."""
+        if not pattern:
+            return [root_abs]
+        matches: list[str] = []
+        full_pattern = os.path.join(root_abs, pattern)
+        for match in glob.iglob(full_pattern, recursive="**" in pattern):
+            match_abs = os.path.abspath(match)
+            resolved = os.path.realpath(match_abs)
+            if not resolved.startswith(root_abs + os.sep) and resolved != root_abs:
+                continue
+            rel = os.path.relpath(match_abs, root_abs)
+            if rel == ".":
+                continue
+            if any(part.startswith(".") for part in rel.split(os.sep) if part):
+                continue
+            matches.append(resolved)
+        return sorted(dict.fromkeys(matches))
 
     @classmethod
     def _frontmatter_files(cls, path: str, keys: str, vault_path: str) -> ToolReturn:

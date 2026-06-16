@@ -8,6 +8,7 @@ import httpx
 from pydantic_ai.tools import Tool
 from core.settings import get_default_api_timeout
 from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 from core.settings.secrets_store import get_secret_value
 from core.logger import UnifiedLogger
 
@@ -25,7 +26,7 @@ class WebSearchTavily(BaseTool):
         if not tavily_api_key:
             raise ValueError("Secret 'TAVILY_API_KEY' is required for Tavily web search.")
 
-        def web_search(*, query: str) -> str:
+        def web_search(*, query: str):
             """Web search using Tavily.
 
             :param query: Search query to look up
@@ -64,9 +65,19 @@ class WebSearchTavily(BaseTool):
                 return f"Search results for '{query}':\n\n" + "\n\n---\n\n".join(formatted_results)
 
             except httpx.HTTPError as e:
-                return f"Tavily API error: {str(e)}"
+                return tool_failure_return(
+                    tool_name="web_search_tavily",
+                    message="Tavily API request failed",
+                    classification=classify_exception(e, phase="web_search"),
+                    metadata={"query": query},
+                )
             except Exception as e:
-                return f"Tavily search error: {str(e)}"
+                return tool_failure_return(
+                    tool_name="web_search_tavily",
+                    message="Tavily search failed",
+                    classification=classify_exception(e, phase="web_search"),
+                    metadata={"query": query},
+                )
 
         return Tool(
             web_search,

@@ -20,7 +20,10 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from core.constants import CHAT_HISTORY_COMPACTION_INSTRUCTION
+from core.constants import (
+    CHAT_HISTORY_COMPACTION_INSTRUCTION,
+    CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
+)
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -34,6 +37,7 @@ from core.settings import (
     get_compaction_token_threshold,
     get_compaction_type,
 )
+from core.chat.tool_history import analyze_tool_history
 from core.tools.utils import estimate_token_count
 
 from .chat_store import ChatStore
@@ -146,6 +150,18 @@ async def compact_chat_history(
     try:
         async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
             messages = chat_store.get_history(session_id, vault_name) or []
+            integrity = analyze_tool_history(messages)
+            if not integrity.ok:
+                logger.warning(
+                    "chat_compaction_tool_integrity_issue",
+                    data={
+                        "event": "chat_compaction_tool_integrity_issue",
+                        "session_id": session_id,
+                        "vault_name": vault_name,
+                        "source": source_value,
+                        **integrity.to_dict(),
+                    },
+                )
             if not messages:
                 raise ValueError("Cannot compact an empty chat session.")
 
@@ -158,6 +174,7 @@ async def compact_chat_history(
                 raise ValueError("Chat session does not have older history to compact.")
 
             estimated_before = estimate_history_tokens(messages)
+            trigger, reason = _compaction_trigger_and_reason(source)
             logger.info(
                 "chat_compaction_plan_selected",
                 data={
@@ -165,6 +182,9 @@ async def compact_chat_history(
                     "session_id": session_id,
                     "vault_name": vault_name,
                     "source": source_value,
+                    "trigger": trigger,
+                    "reason": reason,
+                    "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
                     "history_mode": "effective",
                     "messages_before": len(messages),
                     "older_messages": len(older_messages),
@@ -172,6 +192,10 @@ async def compact_chat_history(
                     "configured_keep_recent": keep_recent,
                     "estimated_tokens_before": estimated_before,
                     "transcript_export": "manual_only",
+                    "tool_history_integrity_status": integrity.status,
+                    "tool_history_issue_count": len(integrity.issues),
+                    "multi_call_batch_count": integrity.multi_call_batch_count,
+                    "multi_return_batch_count": integrity.multi_return_batch_count,
                 },
             )
 
@@ -196,6 +220,12 @@ async def compact_chat_history(
                     "compaction_id": compaction_id,
                     "compacted_at": compacted_at,
                     "source": source_value,
+                    "trigger": trigger,
+                    "reason": reason,
+                    "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
+                    "compaction_type": get_compaction_type(),
+                    "compaction_token_threshold": get_compaction_token_threshold(),
+                    "compaction_keep_recent": keep_recent,
                     "messages_before": len(messages),
                     "messages_after": len(replacement),
                     "estimated_tokens_before": estimated_before,
@@ -239,6 +269,9 @@ async def compact_chat_history(
                 data={
                     "event": "chat_compaction_completed",
                     **result.as_tool_dict(),
+                    "trigger": trigger,
+                    "reason": reason,
+                    "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
                     "history_mode": "effective",
                     "raw_messages_preserved": True,
                     "checkpoint_id": compaction_id,
@@ -290,6 +323,17 @@ def build_compaction_summary_message(summary: str) -> ModelRequest:
     """Build the system-maintained summary message stored after compaction."""
     content = f"{_SUMMARY_MARKER}\n\n{summary.strip()}"
     return ModelRequest(parts=[SystemPromptPart(content=content)])
+
+
+def _compaction_trigger_and_reason(source: ExecutionTaskSource) -> tuple[str, str]:
+    """Return stable audit labels for why compaction ran."""
+    if source == ExecutionTaskSource.SYSTEM:
+        return "auto", "token_threshold"
+    if source == ExecutionTaskSource.TOOL:
+        return "manual", "agent_tool_requested"
+    if source == ExecutionTaskSource.API:
+        return "manual", "api_requested"
+    return "manual", f"{source.value}_requested"
 
 
 async def maybe_auto_compact_after_turn(
@@ -402,6 +446,7 @@ def _build_summary_prompt(
 ) -> str:
     focus_text = (focus or "").strip()
     payload = {
+        "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
         "base_instruction": CHAT_HISTORY_COMPACTION_INSTRUCTION,
         "user_focus": focus_text or None,
         "older_history": [_message_to_compaction_source(message) for message in older_messages],
@@ -434,12 +479,33 @@ def _is_compaction_summary_message(message: ModelMessage) -> bool:
 def _render_message_text(message: ModelMessage) -> str:
     rendered: list[str] = []
     for part in getattr(message, "parts", ()) or ():
-        content = getattr(part, "content", None)
-        if isinstance(content, str):
-            rendered.append(content)
-            continue
         if isinstance(part, ToolCallPart):
             rendered.append(f"[tool call] {getattr(part, 'tool_name', 'tool')}")
         elif isinstance(part, ToolReturnPart):
-            rendered.append(f"[tool result] {getattr(part, 'tool_name', 'tool')}: {content}")
+            rendered.append(_render_tool_return_for_compaction(part))
+        else:
+            content = getattr(part, "content", None)
+            if isinstance(content, str):
+                rendered.append(content)
     return "\n".join(rendered).strip()
+
+
+def _render_tool_return_for_compaction(part: ToolReturnPart) -> str:
+    tool_name = getattr(part, "tool_name", "tool")
+    outcome = str(getattr(part, "outcome", "success") or "success").strip().lower()
+    content = getattr(part, "content", None)
+    if outcome in {"failed", "denied"}:
+        return f"[tool result omitted] {tool_name}: outcome={outcome}"
+    if _is_empty_tool_return_content(content):
+        return f"[tool result omitted] {tool_name}: empty result"
+    return f"[tool result] {tool_name}: {content}"
+
+
+def _is_empty_tool_return_content(content: Any) -> bool:
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, (list, tuple, dict, set)):
+        return len(content) == 0
+    return False

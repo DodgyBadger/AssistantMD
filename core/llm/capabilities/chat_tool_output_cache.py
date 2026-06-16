@@ -301,7 +301,7 @@ def _build_large_vault_read_notice(
     token_count: int,
     token_limit: int,
 ) -> str:
-    target = str(args.get("target") or "").strip() or "<unknown>"
+    target = str(args.get("target") or args.get("path") or "").strip() or "<unknown>"
     return (
         f"Tool '{tool_name}' produced a large vault-backed file read for '{target}' "
         f"({token_count} estimated tokens > {token_limit}). The content was not inlined or cached. "
