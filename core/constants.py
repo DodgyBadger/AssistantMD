@@ -180,6 +180,11 @@ outcomes from the prior summary. Remove duplication, resolve obvious
 supersession from newer turns, and do not describe the prior summary as an
 artifact of the conversation.
 
+The prompt payload may include `user_focus`. Treat it as additional emphasis for
+what to preserve, not as permission to discard recovery-critical state such as
+exact goal ids, active objectives, unresolved blockers, durable user preferences,
+important decisions, artifact paths, or validation evidence.
+
 Write one concise, structured recovery-card summary. Include only sections that
 are supported by the source history and useful for continuing work:
 - Current objective and the user's intended outcome.
