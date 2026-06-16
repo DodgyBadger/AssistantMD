@@ -1481,7 +1481,12 @@ async def _stream_prepared_chat_prompt(
             error_chunk = {
                 "event": "error",
                 "choices": [{
-                    "delta": {"content": "\n\n❌ Error: An unexpected error occurred"},
+                    "delta": {
+                        "content": (
+                            "\n\nThe chat run failed because of an API error. "
+                            "See the activity log in the System tab for details."
+                        )
+                    },
                     "index": 0,
                     "finish_reason": "error",
                 }],

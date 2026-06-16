@@ -364,6 +364,27 @@ function addChatErrorMessage(errorText) {
     chatRendering.addErrorMessage(errorText);
 }
 
+const CHAT_RUN_ERROR_FALLBACK = 'The chat run failed because of an API error. See the activity log in the System tab for details.';
+
+function chatRunErrorMessage(error) {
+    const message = String(error?.message || '').trim();
+    if (/^HTTP \d+$/.test(message) || message === 'Failed to fetch') {
+        return CHAT_RUN_ERROR_FALLBACK;
+    }
+    return message || CHAT_RUN_ERROR_FALLBACK;
+}
+
+function appendAssistantRunError(context, message = CHAT_RUN_ERROR_FALLBACK) {
+    if (!context) return;
+    const visibleMessage = String(message || CHAT_RUN_ERROR_FALLBACK).trim() || CHAT_RUN_ERROR_FALLBACK;
+    if (!context.fullText.includes(visibleMessage)) {
+        context.fullText += context.fullText ? `\n\n${visibleMessage}` : visibleMessage;
+        renderAssistantMarkdown(context);
+    }
+    context.errorMessages.push(visibleMessage);
+    setAssistantStatus(context, 'Something went wrong', 'error');
+}
+
 
 function formatAttachmentSize(sizeBytes) {
     if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return '0 B';
@@ -1373,6 +1394,8 @@ async function sendMessage() {
     state.activeChatAbortController = abortController;
 
     const loadingMessage = addLoadingMessage();
+    let assistantMessage = null;
+    let assistantMessageFinalized = false;
 
     try {
         let response;
@@ -1456,13 +1479,14 @@ async function sendMessage() {
             return;
         }
 
-        const assistantMessage = createAssistantStreamingMessage();
+        assistantMessage = createAssistantStreamingMessage();
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let messageCount = 0;
         let finished = false;
+        let failed = false;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -1495,13 +1519,9 @@ async function sendMessage() {
                     setAssistantStatus(assistantMessage, 'Stopped', 'done');
                 } else if (eventType === 'error') {
                     finished = true;
+                    failed = true;
                     const errorDelta = payload.choices?.[0]?.delta?.content;
-                    if (errorDelta) {
-                        assistantMessage.fullText += `\n\n${errorDelta}`;
-                        renderAssistantMarkdown(assistantMessage);
-                    }
-                    assistantMessage.errorMessages.push(errorDelta || 'Unknown streaming error.');
-                    setAssistantStatus(assistantMessage, 'Something went wrong', 'error');
+                    appendAssistantRunError(assistantMessage, errorDelta || CHAT_RUN_ERROR_FALLBACK);
                 }
             }
         }
@@ -1524,6 +1544,11 @@ async function sendMessage() {
                     state.isCancellingChat = false;
                     syncChatControlLocks();
                     setAssistantStatus(assistantMessage, 'Stopped', 'done');
+                } else if (eventType === 'error') {
+                    finished = true;
+                    failed = true;
+                    const errorDelta = payload.choices?.[0]?.delta?.content;
+                    appendAssistantRunError(assistantMessage, errorDelta || CHAT_RUN_ERROR_FALLBACK);
                 }
             }
         }
@@ -1532,8 +1557,9 @@ async function sendMessage() {
             sessionId: state.sessionId || 'unknown',
             messageCount: Math.max(messageCount, assistantMessage.fullText ? 1 : 0),
             toolCount: assistantMessage.toolStatusMap.size,
-            status: finished ? 'done' : 'incomplete'
+            status: failed ? 'error' : (finished ? 'done' : 'incomplete')
         });
+        assistantMessageFinalized = true;
         if (vault) {
             await fetchSessions(vault, state.sessionId || '');
             if (state.sessionId) {
@@ -1546,8 +1572,16 @@ async function sendMessage() {
         removeLoadingMessage(loadingMessage);
         if (state.isCancellingChat || error.name === 'AbortError') {
             addMessage('assistant', 'Response stopped.');
+        } else if (assistantMessage && !assistantMessageFinalized) {
+            appendAssistantRunError(assistantMessage, CHAT_RUN_ERROR_FALLBACK);
+            finalizeAssistantMessage(assistantMessage, {
+                sessionId: state.sessionId || 'unknown',
+                messageCount: assistantMessage.fullText ? 1 : 0,
+                toolCount: assistantMessage.toolStatusMap.size,
+                status: 'error'
+            });
         } else {
-            addChatErrorMessage(error.message);
+            addChatErrorMessage(chatRunErrorMessage(error));
         }
     } finally {
         state.isLoading = false;
