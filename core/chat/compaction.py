@@ -429,9 +429,9 @@ async def _generate_compaction_summary(
 ) -> str:
     from core.llm.agents import create_agent
 
-    del recent_messages
     prompt = _build_summary_prompt(
         older_messages=older_messages,
+        recent_messages=recent_messages,
         focus=focus,
     )
     agent = await create_agent()
@@ -442,6 +442,7 @@ async def _generate_compaction_summary(
 def _build_summary_prompt(
     *,
     older_messages: list[ModelMessage],
+    recent_messages: list[ModelMessage] | None = None,
     focus: str | None,
 ) -> str:
     focus_text = (focus or "").strip()
@@ -450,6 +451,10 @@ def _build_summary_prompt(
         "base_instruction": CHAT_HISTORY_COMPACTION_INSTRUCTION,
         "user_focus": focus_text or None,
         "older_history": [_message_to_compaction_source(message) for message in older_messages],
+        "retained_recent_history": [
+            _message_to_compaction_source(message)
+            for message in (recent_messages or [])
+        ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 

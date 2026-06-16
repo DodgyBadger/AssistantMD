@@ -165,7 +165,7 @@ CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
     "without script management (for example by switching to the default script). "
 )
 
-CHAT_HISTORY_COMPACTION_PROMPT_VERSION = "recovery-card-v1"
+CHAT_HISTORY_COMPACTION_PROMPT_VERSION = "recovery-card-v2"
 
 CHAT_HISTORY_COMPACTION_INSTRUCTION = """
 You are performing an AssistantMD context checkpoint compaction. Create a
@@ -184,6 +184,14 @@ The prompt payload may include `user_focus`. Treat it as additional emphasis for
 what to preserve, not as permission to discard recovery-critical state such as
 exact goal ids, active objectives, unresolved blockers, durable user preferences,
 important decisions, artifact paths, or validation evidence.
+
+The prompt payload includes `older_history`, which is the only history being
+compressed into the card. It may also include `retained_recent_history`, which
+will remain verbatim after the card in future context. Use retained recent
+history only to resolve supersession, avoid stale current-objective or next-step
+claims, and avoid restating details that will remain available verbatim. When
+older history and retained recent history disagree, prefer the retained recent
+history for current objective, progress, blockers, and immediate next actions.
 
 Write one concise, structured recovery-card summary. Include only sections that
 are supported by the source history and useful for continuing work:
