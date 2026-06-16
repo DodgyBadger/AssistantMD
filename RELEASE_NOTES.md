@@ -1,6 +1,38 @@
 # Release Notes
 
 
+## 2026-06-16 - v0.6.6
+
+### Long-running sessions
+
+AssistantMD is more resilient when an agent is working through a long-running, complex goal.
+
+- Added lightweight goal tracking tool (`goal_ops`) so agents can record status, success criteria, notes, checkpoints, and activity without relying only on chat memory.
+- Chat history compaction now defaults to automatic and creates recovery-oriented checkpoints, so long sessions can keep moving without manually managing the context window.
+- Tool-heavy history is preserved more safely across compaction, including multi-tool batches and paired tool call/results.
+- If a chat turn fails after the user message has already been accepted, AssistantMD records recovery context for the next turn instead of silently losing the thread.
+- Model request limits are configurable, and model, delegate, workflow, API, and web-tool failures now return clearer recovery information.
+
+### UI improvements
+
+The chat UI is easier to use during long, tool-heavy sessions.
+
+- UI improvements for dense chat sessions, such as compact tool-call lists and better sidebar formatting for scripts, arguments, and results.
+- Archived tool activity from compacted history remains visible from the compaction card without taking over the main chat view.
+- Forking a compacted chat now starts from the visible compacted conversation, not the full pre-compaction archive, so the fork stays practical to continue.
+
+### Misc
+
+- File tools handle attachments and other non-markdown files more consistently.
+- Fix: directory deletion can clean up empty directory trees, reports non-empty directories more usefully, and large directory listings are bounded to avoid runaway output.
+- Fix: refreshing packaged system workflows now preserves the user's enabled or disabled state.
+- Fix: system workflows route through the same governor as other workflow runs.
+- Workflow runs now report heartbeat/status information.
+- Code execution guidance and Monty-facing docs/type stubs were updated so common script patterns are easier for agents to get right.
+- Added a goal cleanup utility under System / Misc.
+- Node dependencies received security updates.
+
+
 ## 2026-06-07 - v0.6.5
 
 - Fork a chat session from any assistant message to branch an existing conversation while preserving the original session.

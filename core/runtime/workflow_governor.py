@@ -7,9 +7,15 @@ import contextvars
 from dataclasses import replace
 from typing import Any
 
-from core.authoring.workflow_execution import WorkflowExecutionResult, execute_workflow_by_id
+from core.authoring.workflow_execution import (
+    WorkflowExecutionResult,
+    execute_workflow_by_id,
+)
 from core.logger import UnifiedLogger
-from core.settings import get_max_concurrent_workflows, get_workflow_task_timeout_seconds
+from core.settings import (
+    get_max_concurrent_workflows,
+    get_workflow_task_timeout_seconds,
+)
 from core.tools.failures import FailureClassification, classify_exception
 
 from .execution_tasks import (
@@ -20,7 +26,6 @@ from .execution_tasks import (
     TaskCoordinator,
     workflow_vault_scope,
 )
-
 
 WorkflowSource = ExecutionTaskSource
 

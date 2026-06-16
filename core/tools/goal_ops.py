@@ -17,7 +17,6 @@ from core.tools.failures import FailureClassification, tool_failure_return
 
 from .base import BaseTool
 
-
 logger = UnifiedLogger(tag="goal-ops-tool")
 
 
@@ -70,6 +69,7 @@ class GoalOps(BaseTool):
                     data=payload,
                     ctx=ctx,
                 )
+                cls._log_success(operation=op, vault_name=vault_name, result=result)
                 return json.dumps(
                     {"status": "ok", "operation": op, "result": result},
                     ensure_ascii=False,
@@ -213,6 +213,48 @@ Full documentation:
             "operation must be one of: create_goal, update_goal, get_goal, list_goals, "
             "checkpoint, list_activity"
         )
+
+    @staticmethod
+    def _log_success(*, operation: str, vault_name: str, result: Any) -> None:
+        if operation not in {"create_goal", "update_goal", "checkpoint"}:
+            return
+        if not isinstance(result, dict):
+            return
+
+        goal_id = _optional_filter_text(result.get("goal_id"))
+        if not goal_id:
+            return
+
+        event_by_operation = {
+            "create_goal": "goal_ops_goal_created",
+            "update_goal": "goal_ops_goal_updated",
+            "checkpoint": "goal_ops_checkpoint_created",
+        }
+        data = {
+            "event": event_by_operation[operation],
+            "status": "completed",
+            "tool": "goal_ops",
+            "operation": operation,
+            "vault_name": vault_name,
+            "goal_id": goal_id,
+        }
+        goal_status = _optional_filter_text(result.get("status"))
+        if goal_status:
+            data["goal_status"] = goal_status
+        checkpoint_id = _optional_filter_text(result.get("checkpoint_id"))
+        if checkpoint_id:
+            data["checkpoint_id"] = checkpoint_id
+        source_type = _optional_filter_text(result.get("source_type"))
+        if source_type:
+            data["source_type"] = source_type
+        source_id = _optional_filter_text(result.get("source_id"))
+        if source_id:
+            data["source_id"] = source_id
+        source_task_id = _optional_filter_text(result.get("source_task_id"))
+        if source_task_id:
+            data["source_task_id"] = source_task_id
+
+        logger.add_sink("validation").info(data["event"], data=data)
 
     @staticmethod
     def _resolve_vault_name(ctx: RunContext, vault_path: str | None) -> str:

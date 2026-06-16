@@ -239,6 +239,14 @@ class ChatHistoryCompactionScenario(BaseScenario):
         assert fork_messages[-1]["content"] == "Probe result handled.", (
             "Forked session includes the retained assistant message without restoring archival history"
         )
+        fork_metadata = store.get_session_metadata(fork_session_id, vault.name)
+        assert "fork" in fork_metadata, "Forked session records fork provenance"
+        assert "last_compaction" not in fork_metadata, (
+            "Forked compacted session should not inherit source checkpoint metadata"
+        )
+        assert fork_metadata["history_revision"] == 1, (
+            "Forked compacted session starts a fresh history revision from copied effective history"
+        )
         metadata = store.get_session_metadata(session_id, vault.name)
         assert "last_compaction" in metadata, "Compaction audit metadata is recorded"
         assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v1", (

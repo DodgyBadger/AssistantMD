@@ -42,6 +42,7 @@ class GoalOpsScenario(BaseScenario):
             {"text": "Draft briefing", "status": "pending"},
             {"text": "List open questions", "status": "pending"},
         ]
+        goal_ops_activity_checkpoint = self.event_checkpoint()
         create_payload = await tool.function(
             ctx,
             operation="create_goal",
@@ -114,6 +115,37 @@ class GoalOpsScenario(BaseScenario):
             checkpoint["next_actions"],
             ["Pull source quotes", "Finish risk table"],
             "Checkpoint should preserve next actions structurally",
+        )
+        goal_ops_activity_events = self.events_since(goal_ops_activity_checkpoint)
+        self.assert_event_contains(
+            goal_ops_activity_events,
+            name="goal_ops_goal_created",
+            expected={
+                "vault_name": vault.name,
+                "operation": "create_goal",
+                "goal_id": goal_id,
+                "source_type": "chat",
+                "source_id": "goal_ops_chat_session",
+            },
+        )
+        self.assert_event_contains(
+            goal_ops_activity_events,
+            name="goal_ops_goal_updated",
+            expected={
+                "vault_name": vault.name,
+                "operation": "update_goal",
+                "goal_id": goal_id,
+            },
+        )
+        self.assert_event_contains(
+            goal_ops_activity_events,
+            name="goal_ops_checkpoint_created",
+            expected={
+                "vault_name": vault.name,
+                "operation": "checkpoint",
+                "goal_id": goal_id,
+                "checkpoint_id": checkpoint["checkpoint_id"],
+            },
         )
 
         latest_payload = await tool.function(ctx, operation="get_goal", goal_id=goal_id)

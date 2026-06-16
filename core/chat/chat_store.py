@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -18,11 +19,11 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+
 from core.database import connect_sqlite_from_system_db
 from core.logger import UnifiedLogger
 
 from .schema import DB_NAME, ensure_chat_sessions_schema
-
 
 logger = UnifiedLogger(tag="chat-store")
 
@@ -301,6 +302,7 @@ class ChatStore:
                         source_metadata = parsed_metadata
                 except Exception:
                     source_metadata = {}
+            source_metadata = _fork_session_metadata(source_metadata)
             if metadata_update:
                 source_metadata.update(metadata_update)
 
@@ -1363,6 +1365,14 @@ def _metadata_history_revision(metadata: dict[str, Any]) -> int:
     return max(revision, 0)
 
 
+def _fork_session_metadata(source_metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return source session metadata that is safe to carry into a fork."""
+    metadata = dict(source_metadata)
+    for key in ("history_revision", "last_compaction", "latest_turn_failure"):
+        metadata.pop(key, None)
+    return metadata
+
+
 def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
     if isinstance(msg, ModelRequest):
         role = "user"
@@ -1376,7 +1386,7 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
         has_system_part = False
         rendered_parts: list[str] = []
         for part in parts:
-            if isinstance(part, (UserPromptPart, TextPart)):
+            if isinstance(part, UserPromptPart | TextPart):
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
@@ -1385,7 +1395,7 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
-            elif isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+            elif isinstance(part, ToolReturnPart | BuiltinToolReturnPart):
                 tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
@@ -1452,7 +1462,7 @@ def _ordered_tool_return_ids_from_message(message: ModelMessage) -> tuple[str, .
     ids: set[str] = set()
     ordered_ids: list[str] = []
     for part in getattr(message, "parts", ()) or ():
-        if isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+        if isinstance(part, ToolReturnPart | BuiltinToolReturnPart):
             tool_call_id = getattr(part, "tool_call_id", None)
             if tool_call_id and str(tool_call_id) not in ids:
                 ids.add(str(tool_call_id))

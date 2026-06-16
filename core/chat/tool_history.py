@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
-
 
 _MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
 

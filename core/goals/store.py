@@ -13,7 +13,6 @@ from core.database import connect_sqlite_from_system_db
 from core.goals.schema import DB_NAME, ensure_goal_ops_schema
 from core.vault_state.service import VaultStateService
 
-
 GOAL_STATUSES = {"active", "paused", "completed", "cancelled", "blocked"}
 GOAL_SOURCE_TYPES = {"chat", "workflow", "context"}
 PURGEABLE_GOAL_STATUSES = {"completed", "cancelled"}
@@ -554,8 +553,8 @@ def _optional_text(value: Any) -> str | None:
 
 def _clean_string_list(value: Any) -> tuple[str, ...]:
     if value is None:
-        return tuple()
-    if not isinstance(value, (list, tuple)):
+        return ()
+    if not isinstance(value, list | tuple):
         raise ValueError("expected a list of strings")
     cleaned = []
     for item in value:
