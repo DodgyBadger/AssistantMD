@@ -165,7 +165,7 @@ CONTEXT_TEMPLATE_ERROR_HANDOFF_INSTRUCTION = (
     "without script management (for example by switching to the default script). "
 )
 
-CHAT_HISTORY_COMPACTION_PROMPT_VERSION = "recovery-card-v2"
+CHAT_HISTORY_COMPACTION_PROMPT_VERSION = "recovery-card-v3"
 
 CHAT_HISTORY_COMPACTION_INSTRUCTION = """
 You are performing an AssistantMD context checkpoint compaction. Create a
@@ -192,6 +192,10 @@ history only to resolve supersession, avoid stale current-objective or next-step
 claims, and avoid restating details that will remain available verbatim. When
 older history and retained recent history disagree, prefer the retained recent
 history for current objective, progress, blockers, and immediate next actions.
+Compaction, summarization, context-window, export, fork, retry, and other
+session-hygiene requests are operational requests, not task objectives. Do not
+treat them as superseding the user's substantive goal, even when they appear in
+retained recent history. Use them only to understand why compaction happened.
 
 Write one concise, structured recovery-card summary. Include only sections that
 are supported by the source history and useful for continuing work:
@@ -215,7 +219,8 @@ explicit than they appeared in the source history. Summarize only the provided
 older source history; recent turns are preserved verbatim outside the summary
 and should not be restated.
 
-Do not include compaction and related session hygiene requests in the summary.
+Do not include compaction or related session-hygiene requests as objectives,
+progress, decisions, or next steps in the recovery card.
 """.strip()
 
 

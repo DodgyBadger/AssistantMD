@@ -179,7 +179,7 @@ class RepeatedChatHistoryCompactionScenario(BaseScenario):
         assert metadata["last_compaction"]["compaction_id"] == third.compaction_id, (
             "Session metadata should point at the newest compaction checkpoint"
         )
-        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v2", (
+        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v3", (
             "Newest compaction metadata should retain the recovery-card contract"
         )
 
