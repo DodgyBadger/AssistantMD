@@ -42,4 +42,3 @@ coupling vault state to one feature.
 - Current contract: `docs/architecture/vault-state.md`
 - Recovered sources: PR #42 `vault_state.md`,
   `ingestion_vault_activity_plan.md`, PR #43 `memory-implementation-plan.md`
-

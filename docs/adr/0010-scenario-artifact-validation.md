@@ -40,4 +40,3 @@ functions.
   `docs/agent-guides/testing-and-validation.md`
 - Recovered sources: PR #22 `validation_logger_artifacts_plan.md`, PR #40
   `live-suite-triage-plan.md`, PR #38 `validation_suite_refactor_plan.md`
-

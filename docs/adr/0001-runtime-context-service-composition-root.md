@@ -43,4 +43,3 @@ context have been established.
 - Recovered sources: PR #41
   `EXECUTION_TASK_COORDINATOR_IMPLEMENTATION_PLAN.md`, PR #42
   `vault_state.md`, PR #20 `runtime-hardening-plan.md`
-

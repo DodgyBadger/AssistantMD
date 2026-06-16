@@ -46,4 +46,3 @@ database.
   `docs/architecture/vault-state.md`
 - Recovered sources: PR #40 `database_layer_consolidation_plan.md`,
   `chat_session_sqlite_store_plan.md`, PR #42 `vault_state.md`
-

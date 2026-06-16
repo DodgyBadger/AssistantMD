@@ -45,4 +45,3 @@ sources.
   `docs/architecture/authoring-engine.md`
 - Recovered sources: PR #41 `EXECUTION_TASK_COORDINATOR_PLAN.md`,
   `EXECUTION_TASK_COORDINATOR_IMPLEMENTATION_PLAN.md`
-

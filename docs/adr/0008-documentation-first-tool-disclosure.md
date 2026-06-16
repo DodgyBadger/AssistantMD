@@ -39,4 +39,3 @@ needs detail. This also makes tool preference guidance reviewable in normal docs
   `docs/tools/code_execution.md`, `docs/tools/delegate.md`
 - Recovered sources: PR #40 `tool_documentation_disclosure_spec.md`,
   `workflow_python_sdk_parity_checklist.md`
-

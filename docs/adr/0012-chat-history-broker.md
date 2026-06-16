@@ -45,4 +45,3 @@ that needs prior conversation context.
 - Recovered sources: PR #43
   `session-compaction-checkpoint-implementation-plan.md`,
   `memory-implementation-plan.md`, PR #41 `CHAT_HISTORY_COMPACTION_SPEC.md`
-

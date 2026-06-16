@@ -43,4 +43,3 @@ execution rules across scheduler, API, and tool paths.
 - Recovered sources: PR #41
   `EXECUTION_TASK_COORDINATOR_IMPLEMENTATION_PLAN.md`,
   `EXECUTION_TASK_COORDINATOR_PLAN.md`, `CHAT_HISTORY_COMPACTION_SPEC.md`
-

@@ -41,4 +41,3 @@ refined without changing the canonical message record.
 - Recovered sources: PR #40 `chat_session_sqlite_store_plan.md`, PR #41
   `CHAT_HISTORY_COMPACTION_SPEC.md`, PR #43
   `session-compaction-checkpoint-implementation-plan.md`
-

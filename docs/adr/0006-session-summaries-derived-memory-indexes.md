@@ -42,4 +42,3 @@ auditable.
   `docs/tools/session_ops.md`
 - Recovered sources: PR #43 `memory-implementation-plan.md`,
   `memory-sketch.md`, `memory-prd.md`, `memory-experiment-lessons.md`
-

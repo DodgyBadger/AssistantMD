@@ -42,4 +42,3 @@ repository or product docs.
 - Recovered sources: PR #40 `authoring_architecture_plan.md`,
   `DELEGATE_TOOL_IMPLEMENTATION_PLAN.md`,
   `pydantic-ai-capabilities-refactor-plan.md`
-

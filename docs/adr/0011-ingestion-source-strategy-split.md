@@ -44,4 +44,3 @@ secret-gated strategies can coexist.
 - Current contract: `docs/architecture/ingestion-pipeline.md`
 - Recovered sources: PR #20 `importer-plan.md`, PR #38
   `image-support-spec.md`, PR #42 `ingestion_vault_activity_plan.md`
-

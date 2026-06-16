@@ -31,6 +31,7 @@ The chat UI is easier to use during long, tool-heavy sessions.
 - Code execution guidance and Monty-facing docs/type stubs were updated so common script patterns are easier for agents to get right.
 - Added a goal cleanup utility under System / Misc.
 - Node dependencies received security updates.
+- Started an ADR library under docs and backfilled from the repo commit history.
 
 
 ## 2026-06-07 - v0.6.5

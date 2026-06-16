@@ -43,4 +43,3 @@ users and agents.
   `docs/architecture/ingestion-pipeline.md`
 - Recovered sources: PR #38 `image-support-spec.md`,
   `image-support-roadmap.md`, PR #40 `HISTORY_PROCESSOR_BRIEFING.md`
-

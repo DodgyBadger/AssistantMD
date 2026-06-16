@@ -44,4 +44,3 @@ summarization of oversized payloads.
   `docs/architecture/llm-tools.md`, `docs/tools/code_execution.md`
 - Recovered sources: PR #40 `cache_subsystem_implementation_plan.md`,
   `MONTY_TOOL_RESULT_CONTRACT_PLAN.md`, `chat_session_sqlite_store_plan.md`
-

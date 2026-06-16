@@ -45,4 +45,3 @@ systems.
 - Recovered sources: PR #40 `authoring_architecture_plan.md`,
   `dsl_removal_refactor_plan.md`, `workflow_python_sdk_plan.md`,
   `workflow_python_sdk_sketch.md`
-

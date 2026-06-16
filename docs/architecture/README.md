@@ -43,6 +43,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
 | [Chat Sessions](chat-sessions.md) | SQLite session store and markdown transcript rendering | `core/chat/` |
 | [Session Summaries](session-summaries.md) | Derived chat-session summary storage, indexing, and retrieval | `core/memory/`, `core/chat/history_service.py` |
+| [Goals](goals.md) | Lightweight durable goal state, checkpoints, source provenance, and goal-related activity | `core/goals/`, `core/tools/goal_ops.py` |
 | [LLM + Tools](llm-tools.md) | Agent creation, settings-backed tool binding, capability composition, model resolution | `core/llm/`, `core/tools/` |
 | [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_ops_safe.py` |
 | [Settings + Secrets](settings-secrets.md) | Typed config store and YAML-backed secrets store | `core/settings/` |
