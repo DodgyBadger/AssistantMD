@@ -4,7 +4,6 @@
 ## 2026-06-16 - v0.6.7
 
 - Fix: chat history compaction now uses the retained recent turns as supersession context, so compaction cards are less likely to preserve stale current objectives or next steps.
-- Fix: chat API failures now show a visible recovery message in the chat UI with a pointer to the System activity log.
 
 
 ## 2026-06-16 - v0.6.6

@@ -76,9 +76,6 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             assert any('"event": "error"' in chunk for chunk in chunks), (
                 "Streaming failure should emit an SSE error chunk before raising"
             )
-            assert any("See the activity log in the System tab" in chunk for chunk in chunks), (
-                "Streaming failure should emit a user-visible recovery hint"
-            )
 
             transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_stream_failure_session.md"
             assert not transcript.exists(), "Failed streaming chat execution should not write a transcript by default"
