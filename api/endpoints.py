@@ -12,7 +12,7 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.chat.task_execution import start_chat_stream_task, stream_chat_task_sse
+from core.chat.task_execution import start_queued_chat_stream_task, stream_chat_task_sse
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
@@ -456,7 +456,7 @@ async def _start_chat_task_request(
             "workspace_path": chat_request.workspace_path,
         },
     )
-    started = await start_chat_stream_task(
+    started = await start_queued_chat_stream_task(
         vault_name=chat_request.vault_name,
         vault_path=vault_path,
         prompt=chat_request.prompt,

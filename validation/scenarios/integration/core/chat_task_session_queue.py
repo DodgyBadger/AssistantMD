@@ -1,0 +1,191 @@
+"""Validate per-session queuing for task-owned chat execution."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
+from pydantic_ai import AgentRunResultEvent, PartStartEvent
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+from core.chat import executor as chat_executor
+from core.chat.executor import PreparedChatExecution
+from core.chat.task_execution import start_queued_chat_stream_task, stream_chat_task_sse
+from core.runtime.state import get_runtime_context
+from validation.core.base_scenario import BaseScenario
+
+
+class _FakeStreamResult:
+    def __init__(self, prompt: str, response: str) -> None:
+        self._prompt = prompt
+        self._response = response
+
+    def new_messages(self):
+        return [
+            ModelRequest(parts=[UserPromptPart(content=self._prompt)]),
+            ModelResponse(parts=[TextPart(self._response)]),
+        ]
+
+
+class _BlockingStreamAgent:
+    def __init__(self, release: asyncio.Event) -> None:
+        self._release = release
+
+    async def run_stream_events(self, *args, **kwargs):
+        yield PartStartEvent(index=0, part=TextPart("first delta"))
+        await self._release.wait()
+        yield AgentRunResultEvent(
+            result=_FakeStreamResult(
+                prompt="first prompt",
+                response="first final response",
+            )
+        )
+
+
+class _CompletingStreamAgent:
+    async def run_stream_events(self, *args, **kwargs):
+        yield PartStartEvent(index=0, part=TextPart("second delta"))
+        yield AgentRunResultEvent(
+            result=_FakeStreamResult(
+                prompt="second prompt",
+                response="second final response",
+            )
+        )
+
+
+class ChatTaskSessionQueueScenario(BaseScenario):
+    """Validate that task-owned chat runs serialize per session."""
+
+    async def test_scenario(self):
+        vault = self.create_vault("ChatTaskSessionQueueVault")
+        await self.start_system()
+
+        release_first = asyncio.Event()
+        prepare_history_counts: dict[str, int] = {}
+        original_prepare = chat_executor._prepare_chat_execution
+
+        async def fake_prepare_chat_execution(
+            *,
+            vault_name,
+            vault_path,
+            prompt,
+            image_paths,
+            image_uploads,
+            session_id,
+            tools,
+            model,
+            thinking=None,
+            context_template=None,
+        ):
+            del vault_path, image_paths, image_uploads, thinking
+            history = chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            prepare_history_counts[prompt] = len(history)
+            agent = (
+                _BlockingStreamAgent(release_first)
+                if prompt == "first prompt"
+                else _CompletingStreamAgent()
+            )
+            return PreparedChatExecution(
+                agent=agent,
+                message_history=list(history),
+                prompt_for_history=prompt,
+                user_prompt=prompt,
+                attached_image_count=0,
+                model=model,
+                tools=list(tools),
+                context_template=context_template,
+            )
+
+        chat_executor._prepare_chat_execution = fake_prepare_chat_execution
+        try:
+            first = await start_queued_chat_stream_task(
+                vault_name=vault.name,
+                vault_path=str(vault),
+                prompt="first prompt",
+                image_paths=[],
+                image_uploads=[],
+                session_id="queued-chat-session",
+                tools=[],
+                model="test",
+            )
+            first_running = await self._wait_for_task_status(first.task.task_id, "running")
+            self.soft_assert_equal(
+                first_running.status if first_running else None,
+                "running",
+                "First queued chat task should start running",
+            )
+
+            second = await start_queued_chat_stream_task(
+                vault_name=vault.name,
+                vault_path=str(vault),
+                prompt="second prompt",
+                image_paths=[],
+                image_uploads=[],
+                session_id="queued-chat-session",
+                tools=[],
+                model="test",
+            )
+            second_queued = await self._wait_for_task_status(second.task.task_id, "queued")
+            self.soft_assert_equal(
+                second_queued.status if second_queued else None,
+                "queued",
+                "Second chat task should remain queued while first is running",
+            )
+            self.soft_assert(
+                "second prompt" not in prepare_history_counts,
+                "Queued chat task should not prepare before earlier task completes",
+            )
+
+            release_first.set()
+            first_terminal = await self._wait_for_task_terminal(first.task.task_id)
+            second_terminal = await self._wait_for_task_terminal(second.task.task_id)
+        finally:
+            chat_executor._prepare_chat_execution = original_prepare
+
+        self.soft_assert_equal(
+            first_terminal.status if first_terminal else None,
+            "completed",
+            "First queued chat task should complete",
+        )
+        self.soft_assert_equal(
+            second_terminal.status if second_terminal else None,
+            "completed",
+            "Second queued chat task should complete after first",
+        )
+        self.soft_assert(
+            prepare_history_counts.get("second prompt", 0) >= 2,
+            "Second queued chat task should prepare after first history is persisted",
+        )
+
+        second_events = ""
+        async for chunk in stream_chat_task_sse(task_id=second.task.task_id):
+            second_events += chunk
+        self.soft_assert(
+            "second delta" in second_events and '"event": "done"' in second_events,
+            "Second queued task should publish replayable stream events",
+        )
+
+        await self.stop_system()
+        self.teardown_scenario()
+        self.assert_no_failures()
+
+    async def _wait_for_task_status(self, task_id: str, status: str):
+        runtime = get_runtime_context()
+        for _ in range(100):
+            task = await runtime.task_coordinator.get_task(task_id)
+            if task is not None and task.status == status:
+                return task
+            await asyncio.sleep(0.02)
+        return None
+
+    async def _wait_for_task_terminal(self, task_id: str):
+        runtime = get_runtime_context()
+        for _ in range(100):
+            task = await runtime.task_coordinator.get_task(task_id)
+            if task is not None and task.is_terminal:
+                return task
+            await asyncio.sleep(0.02)
+        return None

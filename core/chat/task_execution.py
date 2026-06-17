@@ -135,6 +135,200 @@ async def start_chat_stream_task(
     )
 
 
+async def start_queued_chat_stream_task(
+    *,
+    vault_name: str,
+    vault_path: str,
+    prompt: str,
+    image_paths: list[str] | None,
+    image_uploads: list[chat_executor.UploadedImageAttachment] | None,
+    session_id: str,
+    tools: list[str],
+    model: str,
+    thinking: chat_executor.ThinkingValue | None = None,
+    context_template: str | None = None,
+    event_buffer: ChatTaskEventBuffer | None = None,
+) -> ChatStreamTaskStart:
+    """Start a streaming chat task that waits behind earlier tasks in its session."""
+    runtime = get_runtime_context()
+    buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
+    task = await runtime.task_coordinator.create_queued_task(
+        kind=ExecutionTaskKind.CHAT,
+        scope=chat_session_scope(session_id),
+        source=ExecutionTaskSource.API,
+        label=chat_task_label(session_id),
+        metadata={
+            "vault": vault_name,
+            "session_id": session_id,
+            "streaming": True,
+            "model": model,
+            "tools": list(tools),
+            "queued_by_session": True,
+        },
+    )
+
+    async def _run() -> None:
+        try:
+            await _wait_for_prior_chat_session_tasks(
+                task_id=task.task_id,
+                session_id=session_id,
+            )
+            prepared = await chat_executor._prepare_chat_execution(
+                vault_name=vault_name,
+                vault_path=vault_path,
+                prompt=prompt,
+                image_paths=image_paths,
+                image_uploads=image_uploads,
+                session_id=session_id,
+                tools=tools,
+                model=model,
+                thinking=thinking,
+                context_template=context_template,
+            )
+        except asyncio.CancelledError:
+            await _append_cancelled_if_open(buffer, task.task_id)
+            raise
+        except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
+            await _publish_deferred_preflight_failure(
+                task_id=task.task_id,
+                exc=exc,
+                vault_name=vault_name,
+                session_id=session_id,
+                prompt=prompt,
+                tools=tools,
+                model=model,
+                context_template=context_template,
+                event_buffer=buffer,
+            )
+            return
+
+        try:
+            await _run_prepared_chat_stream_task(
+                task_id=task.task_id,
+                prepared=prepared,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                event_buffer=buffer,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - task status and stream event were recorded
+            return
+
+    background_task = asyncio.create_task(_run(), context=contextvars.Context())
+    runtime.background_tasks.add(background_task)
+    background_task.add_done_callback(runtime.background_tasks.discard)
+    return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def _wait_for_prior_chat_session_tasks(*, task_id: str, session_id: str) -> None:
+    """Hold a queued chat task until older tasks in the same session finish."""
+    runtime = get_runtime_context()
+    scope = chat_session_scope(session_id)
+
+    while True:
+        own_task = await runtime.task_coordinator.get_task(task_id)
+        if own_task is None:
+            raise asyncio.CancelledError
+        if own_task.is_terminal:
+            raise asyncio.CancelledError
+
+        active_tasks = await runtime.task_coordinator.list_tasks(
+            kind=ExecutionTaskKind.CHAT,
+            scope=scope,
+            include_terminal=False,
+        )
+        older_tasks = [
+            task
+            for task in active_tasks
+            if task.task_id != task_id and task.created_at < own_task.created_at
+        ]
+        if not older_tasks:
+            await runtime.task_coordinator.update_metadata(
+                task_id,
+                {
+                    "queue_position": 0,
+                    "waiting_for_task_id": None,
+                },
+            )
+            return
+
+        await runtime.task_coordinator.heartbeat(
+            task_id,
+            status="queued",
+            metadata={
+                "queue_position": len(older_tasks),
+                "waiting_for_task_id": older_tasks[0].task_id,
+            },
+        )
+        await asyncio.sleep(0.05)
+
+
+async def _append_cancelled_if_open(
+    event_buffer: ChatTaskEventBuffer,
+    task_id: str,
+) -> None:
+    """Publish a cancellation terminal event unless the stream already closed."""
+    if await event_buffer.is_terminal(task_id):
+        return
+    try:
+        await event_buffer.append(
+            task_id,
+            "cancelled",
+            {
+                "event": "cancelled",
+                "choices": [{
+                    "delta": {},
+                    "index": 0,
+                    "finish_reason": "cancelled",
+                }],
+            },
+        )
+    except RuntimeError:
+        return
+
+
+async def _publish_deferred_preflight_failure(
+    *,
+    task_id: str,
+    exc: Exception,
+    vault_name: str,
+    session_id: str,
+    prompt: str,
+    tools: list[str],
+    model: str,
+    context_template: str | None,
+    event_buffer: ChatTaskEventBuffer,
+) -> None:
+    """Mark and publish a preflight failure from a deferred chat task."""
+    runtime = get_runtime_context()
+    workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
+    chat_executor._log_chat_failure(
+        "Queued streaming chat preflight failed",
+        vault_name=vault_name,
+        session_id=session_id,
+        model=model,
+        tools=tools,
+        streaming=True,
+        phase="preflight",
+        prompt_length=len(prompt),
+        context_template=context_template,
+        workspace_path=workspace_path,
+        exc=exc,
+    )
+    if isinstance(exc, chat_executor.ChatContextTemplateError):
+        payload = _error_event_data(f"\n\nTemplate error: {str(exc)}", exc.details)
+    else:
+        classification = classify_exception(exc, phase="preflight")
+        payload = _error_event_data(
+            "\n\nError: An unexpected error occurred",
+            classification.to_metadata(),
+        )
+    await event_buffer.append(task_id, "error", payload)
+    await runtime.task_coordinator.mark_failed(task_id, reason=f"{type(exc).__name__}: {exc}")
+
+
 async def _run_prepared_chat_stream_task(
     *,
     task_id: str,

@@ -301,6 +301,8 @@ Risk:
 
 ### Slice 6: Queue New User Messages Behind Active Run
 
+Status: implemented.
+
 Scope:
 
 - Decide the user-visible contract for submitting while a chat task is active.
@@ -314,6 +316,19 @@ Validation:
 - Assert second task remains queued.
 - Release first agent, assert second starts after first terminal and sees the
   completed history.
+
+Completed validation:
+
+- `python -m ruff check core/chat/task_execution.py api/endpoints.py validation/scenarios/integration/core/chat_task_session_queue.py`
+- `python -m compileall core/chat/task_execution.py api/endpoints.py validation/scenarios/integration/core/chat_task_session_queue.py`
+- `python validation/run_validation.py run integration/core/chat_task_session_queue`
+- `python validation/run_validation.py run integration/core/chat_task_session_queue integration/core/api_endpoints integration/core/chat_task_event_stream_api integration/core/chat_stream_background_task integration/core/chat_stream_keepalive integration/core/chat_stream_failure_logging`
+
+Cleanup completed:
+
+- Kept `/api/chat/execute` streaming on the preflighted compatibility path.
+- Routed only `POST /api/chat/tasks` through deferred preparation so queued UI
+  prompts are serialized without changing old streaming clients.
 
 Risk:
 
