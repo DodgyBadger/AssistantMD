@@ -52,6 +52,8 @@ from .models import (
     UpdateSettingsRequest,
     ModelConfigRequest,
     OpenAIOAuthCompleteRequest,
+    OpenAIOAuthDeviceCheckResponse,
+    OpenAIOAuthDeviceStartResponse,
     OpenAIOAuthStartRequest,
     OpenAIOAuthStartResponse,
     ProviderConfigRequest,
@@ -128,7 +130,9 @@ from .services import (
     upsert_configurable_model,
     delete_configurable_model,
     get_configurable_providers,
+    check_openai_oauth_device_connection,
     start_openai_oauth_connection,
+    start_openai_oauth_device_connection,
     complete_openai_oauth_callback,
     complete_openai_oauth_manual,
     disconnect_openai_oauth_connection,
@@ -683,6 +687,30 @@ async def start_openai_oauth(payload: OpenAIOAuthStartRequest):
             payload,
             default_redirect_uri=OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
         )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/providers/openai/oauth/device/start",
+    response_model=OpenAIOAuthDeviceStartResponse,
+)
+async def start_openai_oauth_device():
+    """Start an OpenAI OAuth device-code connection attempt."""
+    try:
+        return await start_openai_oauth_device_connection()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/providers/openai/oauth/device/check",
+    response_model=OpenAIOAuthDeviceCheckResponse,
+)
+async def check_openai_oauth_device():
+    """Check an OpenAI OAuth device-code connection attempt."""
+    try:
+        return await check_openai_oauth_device_connection()
     except Exception as e:
         return create_error_response(e)
 

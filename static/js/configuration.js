@@ -56,6 +56,10 @@
         providerDraft: null,
         openAiOauthPaste: '',
         openAiOauthAuthUrl: '',
+        openAiOauthDeviceVerificationUrl: '',
+        openAiOauthDeviceUserCode: '',
+        openAiOauthDeviceExpiresAt: '',
+        openAiOauthDevicePollIntervalSeconds: null,
         isOpenAiOauthBusy: false,
         secretEdit: null,
         secretDraft: null,
@@ -737,6 +741,7 @@
         const connected = oauthStatus === 'connected';
         const pending = oauthStatus === 'pending';
         const canClearOAuth = connected || pending;
+        const pendingFlow = provider.oauth_pending_flow || '';
         const disabledReason = provider.oauth_disabled_reason || '';
         const accountText = provider.oauth_account_id ? `Account ${provider.oauth_account_id}` : 'No account connected';
         const expiresText = provider.oauth_expires_at ? `Expires ${formatDateTime(provider.oauth_expires_at)}` : 'No token expiry recorded';
@@ -756,11 +761,26 @@
         const pasteValue = escapeHtml(state.openAiOauthPaste || '');
         const authUrl = state.openAiOauthAuthUrl || '';
         const authUrlValue = escapeHtml(authUrl);
+        const deviceVerificationUrl = provider.oauth_device_verification_url || state.openAiOauthDeviceVerificationUrl || '';
+        const deviceUserCode = provider.oauth_device_user_code || state.openAiOauthDeviceUserCode || '';
+        const deviceExpiresAt = provider.oauth_pending_expires_at || state.openAiOauthDeviceExpiresAt || '';
+        const devicePollInterval = provider.oauth_device_poll_interval_seconds || state.openAiOauthDevicePollIntervalSeconds;
         const authUrlPanel = authUrl
             ? `<div class="mt-3 space-y-2">
                     <div class="text-xs font-medium text-txt-secondary">OpenAI auth URL</div>
                     <textarea readonly class="w-full min-h-[76px] px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary text-xs font-mono resize-y">${authUrlValue}</textarea>
                     <a href="${authUrlValue}" target="_blank" rel="noopener" class="inline-flex text-xs text-accent hover:text-accent-hover">Open in browser</a>
+                </div>`
+            : '';
+        const devicePanel = deviceVerificationUrl || deviceUserCode
+            ? `<div class="mt-3 rounded-md border border-border-secondary bg-app-card px-3 py-3 space-y-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="text-xs font-medium text-txt-secondary">Device code</div>
+                        ${pendingFlow ? `<div class="text-xs text-txt-secondary">${escapeHtml(pendingFlow === 'device_code' ? 'Device flow pending' : 'Browser flow pending')}</div>` : ''}
+                    </div>
+                    ${deviceVerificationUrl ? `<a href="${escapeHtml(deviceVerificationUrl)}" target="_blank" rel="noopener" class="inline-flex text-xs text-accent hover:text-accent-hover">${escapeHtml(deviceVerificationUrl)}</a>` : ''}
+                    ${deviceUserCode ? `<div class="inline-flex items-center rounded-md border border-border-secondary bg-app-elevated px-3 py-2 font-mono text-sm tracking-wide text-txt-primary">${escapeHtml(deviceUserCode)}</div>` : ''}
+                    <div class="text-xs text-txt-secondary">${deviceExpiresAt ? `Expires ${escapeHtml(formatDateTime(deviceExpiresAt))}` : ''}${devicePollInterval ? ` · Check every ${escapeHtml(String(devicePollInterval))}s` : ''}</div>
                 </div>`
             : '';
 
@@ -780,6 +800,8 @@
                     </div>
                     <div class="flex flex-wrap gap-2 justify-end">
                         <button type="button" data-action="openai-oauth-start" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${disabledAttr}>${connected ? 'Reconnect' : 'Connect'}</button>
+                        <button type="button" data-action="openai-oauth-device-start" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${disabledAttr}>Device Code</button>
+                        <button type="button" data-action="openai-oauth-device-check" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${state.isOpenAiOauthBusy || !oauthEnabled || pendingFlow !== 'device_code' ? 'disabled' : ''}>Check Status</button>
                         <button type="button" data-action="openai-oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${state.isOpenAiOauthBusy || !canClearOAuth ? 'disabled' : ''}>${pending ? 'Cancel' : 'Disconnect'}</button>
                     </div>
                 </div>
@@ -788,6 +810,7 @@
                     <button type="button" data-action="openai-oauth-complete" class="shrink-0 px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed" ${disableControls || !state.openAiOauthPaste.trim() ? 'disabled' : ''}>Complete OAuth</button>
                 </div>
                 ${authUrlPanel}
+                ${devicePanel}
             </div>
         `;
     }
@@ -1593,6 +1616,10 @@ async function saveModelRow(rowKey) {
             await saveProviderRow(actionButton);
         } else if (action === 'openai-oauth-start') {
             await startOpenAiOAuth(actionButton);
+        } else if (action === 'openai-oauth-device-start') {
+            await startOpenAiOAuthDevice(actionButton);
+        } else if (action === 'openai-oauth-device-check') {
+            await checkOpenAiOAuthDevice(actionButton);
         } else if (action === 'openai-oauth-complete') {
             await completeOpenAiOAuth(actionButton);
         } else if (action === 'openai-oauth-disconnect') {
@@ -1792,6 +1819,7 @@ async function saveModelRow(rowKey) {
             const opened = window.open(result.auth_url, '_blank', 'noopener');
             state.openAiOauthPaste = '';
             state.openAiOauthAuthUrl = result.auth_url || '';
+            clearOpenAiOauthDeviceDisplay();
             await loadProviders();
             const popupText = opened
                 ? 'OpenAI OAuth URL opened. The URL is also shown in the OpenAI provider panel for manual copy/paste.'
@@ -1803,6 +1831,76 @@ async function saveModelRow(rowKey) {
             state.isOpenAiOauthBusy = false;
             renderProviders();
             setOpenAiOauthButtonIdle(button, 'Connect');
+        }
+    }
+
+    async function startOpenAiOAuthDevice(button) {
+        if (state.isOpenAiOauthBusy) return;
+
+        state.isOpenAiOauthBusy = true;
+        setOpenAiOauthButtonBusy(button, 'Starting...');
+        setStatus(elements.providerFeedback, 'Starting OpenAI OAuth device code…', 'info');
+
+        try {
+            const response = await fetch('api/system/providers/openai/oauth/device/start', {
+                method: 'POST'
+            });
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            state.openAiOauthPaste = '';
+            state.openAiOauthAuthUrl = '';
+            state.openAiOauthDeviceVerificationUrl = result.verification_url || '';
+            state.openAiOauthDeviceUserCode = result.user_code || '';
+            state.openAiOauthDeviceExpiresAt = result.expires_at || '';
+            state.openAiOauthDevicePollIntervalSeconds = result.poll_interval_seconds || null;
+            await loadProviders();
+            setStatus(elements.providerFeedback, 'Open the device URL and enter the code, then check status.', 'info');
+        } catch (error) {
+            setStatus(elements.providerFeedback, `Failed to start OpenAI OAuth device code: ${error.message}`, 'error');
+        } finally {
+            state.isOpenAiOauthBusy = false;
+            renderProviders();
+            setOpenAiOauthButtonIdle(button, 'Device Code');
+        }
+    }
+
+    async function checkOpenAiOAuthDevice(button) {
+        if (state.isOpenAiOauthBusy) return;
+
+        state.isOpenAiOauthBusy = true;
+        setOpenAiOauthButtonBusy(button, 'Checking...');
+        setStatus(elements.providerFeedback, 'Checking OpenAI OAuth device code…', 'info');
+
+        try {
+            const response = await fetch('api/system/providers/openai/oauth/device/check', {
+                method: 'POST'
+            });
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            if (result.status === 'connected') {
+                clearOpenAiOauthDeviceDisplay();
+                await loadProviders();
+                await loadModels();
+                await notifyConfigChanged();
+                setStatus(elements.providerFeedback, 'OpenAI OAuth connected.', 'success');
+            } else {
+                await loadProviders();
+                setStatus(elements.providerFeedback, 'OpenAI OAuth device code is still pending.', 'info');
+            }
+        } catch (error) {
+            setStatus(elements.providerFeedback, `Failed to check OpenAI OAuth device code: ${error.message}`, 'error');
+        } finally {
+            state.isOpenAiOauthBusy = false;
+            renderProviders();
+            setOpenAiOauthButtonIdle(button, 'Check Status');
         }
     }
 
@@ -1835,6 +1933,7 @@ async function saveModelRow(rowKey) {
             await response.json();
             state.openAiOauthPaste = '';
             state.openAiOauthAuthUrl = '';
+            clearOpenAiOauthDeviceDisplay();
             await loadProviders();
             await loadModels();
             await notifyConfigChanged();
@@ -1868,6 +1967,7 @@ async function saveModelRow(rowKey) {
             await response.json();
             state.openAiOauthPaste = '';
             state.openAiOauthAuthUrl = '';
+            clearOpenAiOauthDeviceDisplay();
             await loadProviders();
             await loadModels();
             await notifyConfigChanged();
@@ -1879,6 +1979,13 @@ async function saveModelRow(rowKey) {
             renderProviders();
             setOpenAiOauthButtonIdle(button, 'Disconnect');
         }
+    }
+
+    function clearOpenAiOauthDeviceDisplay() {
+        state.openAiOauthDeviceVerificationUrl = '';
+        state.openAiOauthDeviceUserCode = '';
+        state.openAiOauthDeviceExpiresAt = '';
+        state.openAiOauthDevicePollIntervalSeconds = null;
     }
 
     function setOpenAiOauthButtonBusy(button, label) {

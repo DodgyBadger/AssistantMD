@@ -21,6 +21,8 @@ from core.llm.openai_oauth import (
     OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
     OPENAI_OAUTH_ORIGINATOR,
     OPENAI_OAUTH_SCOPE,
+    OpenAIOAuthDeviceCodeResult,
+    OpenAIOAuthDevicePollResult,
     OpenAIOAuthTokenResult,
     StaticOpenAIOAuthTokenAdapter,
     set_openai_oauth_token_adapter,
@@ -267,6 +269,107 @@ class ApiEndpointsScenario(BaseScenario):
         assert disconnected_gpt["available"] is False, (
             "OpenAI model is unavailable after disconnect without API-key fallback"
         )
+
+        set_openai_oauth_token_adapter(
+            StaticOpenAIOAuthTokenAdapter(
+                OpenAIOAuthTokenResult(
+                    access_token="validation-device-access-token",
+                    refresh_token="validation-device-refresh-token",
+                    expires_at=token_expiry,
+                    account_id="validation-device-account",
+                ),
+                device_code_result=OpenAIOAuthDeviceCodeResult(
+                    device_auth_id="validation-device-auth",
+                    user_code="VALIDATION-DEVICE",
+                    poll_interval_seconds=2,
+                ),
+                device_poll_result=OpenAIOAuthDevicePollResult(status="pending"),
+            )
+        )
+        device_start = self.call_api(
+            "/api/system/providers/openai/oauth/device/start",
+            method="POST",
+        )
+        assert device_start.status_code == 200, (
+            "OpenAI OAuth device-code start succeeds"
+        )
+        device_start_payload = device_start.json()
+        assert device_start_payload["user_code"] == "VALIDATION-DEVICE", (
+            "Device-code start returns the user code"
+        )
+        assert device_start_payload["poll_interval_seconds"] == 2, (
+            "Device-code start returns the polling interval"
+        )
+        device_status = self.call_api("/api/system/providers/openai/oauth/status")
+        assert device_status.status_code == 200, (
+            "OpenAI OAuth status succeeds after device-code start"
+        )
+        device_status_payload = device_status.json()
+        assert device_status_payload["oauth_status"] == "pending", (
+            "OpenAI OAuth status reports pending device-code auth"
+        )
+        assert device_status_payload["oauth_pending_flow"] == "device_code", (
+            "OpenAI OAuth status exposes the pending device-code flow"
+        )
+        assert device_status_payload["oauth_device_user_code"] == "VALIDATION-DEVICE", (
+            "OpenAI OAuth status exposes the device code for the provider panel"
+        )
+        pending_device_check = self.call_api(
+            "/api/system/providers/openai/oauth/device/check",
+            method="POST",
+        )
+        assert pending_device_check.status_code == 200, (
+            "OpenAI OAuth pending device-code check succeeds"
+        )
+        pending_device_payload = pending_device_check.json()
+        assert pending_device_payload["status"] == "pending", (
+            "Pending device-code check remains pending"
+        )
+        assert pending_device_payload["provider"]["oauth_status"] == "pending", (
+            "Pending device-code check does not persist a token"
+        )
+
+        set_openai_oauth_token_adapter(
+            StaticOpenAIOAuthTokenAdapter(
+                OpenAIOAuthTokenResult(
+                    access_token="validation-device-access-token",
+                    refresh_token="validation-device-refresh-token",
+                    expires_at=token_expiry,
+                    account_id="validation-device-account",
+                ),
+                device_poll_result=OpenAIOAuthDevicePollResult(
+                    status="authorized",
+                    authorization_code="validation-device-authorization-code",
+                    code_verifier="validation-device-code-verifier",
+                ),
+            )
+        )
+        authorized_device_check = self.call_api(
+            "/api/system/providers/openai/oauth/device/check",
+            method="POST",
+        )
+        assert authorized_device_check.status_code == 200, (
+            "OpenAI OAuth authorized device-code check succeeds"
+        )
+        authorized_device_payload = authorized_device_check.json()
+        assert authorized_device_payload["status"] == "connected", (
+            "Authorized device-code check reports connected"
+        )
+        assert authorized_device_payload["provider"]["oauth_status"] == "connected", (
+            "Authorized device-code check persists OAuth token state"
+        )
+        assert (
+            authorized_device_payload["provider"]["oauth_account_id"]
+            == "validation-device-account"
+        ), "Authorized device-code check exposes sanitized account metadata"
+
+        oauth_disconnect = self.call_api(
+            "/api/system/providers/openai/oauth",
+            method="DELETE",
+        )
+        assert oauth_disconnect.status_code == 200, (
+            "OpenAI OAuth disconnect succeeds after device-code auth"
+        )
         set_openai_oauth_token_adapter(None)
 
         provider_alias = "validation-provider"
@@ -332,6 +435,10 @@ class ApiEndpointsScenario(BaseScenario):
             entry["name"] == "OPENAI_OAUTH_TOKEN_STATE"
             for entry in oauth_hidden_secrets.json()
         ), "Internal OpenAI OAuth token state is hidden from generic secrets"
+        assert not any(
+            entry["name"] == "OPENAI_OAUTH_PENDING_STATE"
+            for entry in oauth_hidden_secrets.json()
+        ), "Internal OpenAI OAuth pending state is hidden from generic secrets"
 
         secret_clear = self.call_api(
             "/api/system/secrets",

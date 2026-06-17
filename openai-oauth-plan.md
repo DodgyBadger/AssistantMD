@@ -721,10 +721,15 @@ Validation target:
 - Slice 12 implemented:
   - pending OpenAI OAuth attempts can be cancelled from the Configuration UI
     using the existing clear-state endpoint
-- Slice 13 planned:
-  - live PKCE/browser testing reached OpenAI consent but did not redirect after
-    Continue, so the next implementation path is OpenClaw's device-code
-    connection flow
+- Slice 13 implemented:
+  - OpenAI OAuth now exposes an OpenClaw-style device-code start/check flow
+    alongside the existing PKCE/browser flow
+  - pending device-code state uses the internal OAuth pending secret with a
+    flow discriminator and remains hidden from the generic Secrets list
+  - Configuration UI shows the device verification URL, user code, expiry, and
+    explicit status check action
+  - deterministic API scenario coverage now exercises device-code start,
+    pending poll, successful completion, and hidden pending-state behavior
 
 ## Local Smoke Tests During Development
 

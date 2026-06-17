@@ -391,6 +391,22 @@ class ProviderInfo(BaseModel):
         None,
         description="Pending OAuth connection expiry timestamp, when available.",
     )
+    oauth_pending_flow: Optional[str] = Field(
+        None,
+        description="Pending OAuth connection flow, when available.",
+    )
+    oauth_device_verification_url: Optional[str] = Field(
+        None,
+        description="Device-code verification URL for pending OpenAI OAuth.",
+    )
+    oauth_device_user_code: Optional[str] = Field(
+        None,
+        description="Device-code user code for pending OpenAI OAuth.",
+    )
+    oauth_device_poll_interval_seconds: Optional[int] = Field(
+        None,
+        description="Recommended device-code polling interval in seconds.",
+    )
     restart_required: bool = Field(
         False,
         description="True when recent edits require a full restart to take effect.",
@@ -715,6 +731,18 @@ class OpenAIOAuthStartResponse(BaseModel):
     expires_at: str = Field(..., description="Pending connection expiry timestamp")
 
 
+class OpenAIOAuthDeviceStartResponse(BaseModel):
+    """Bootstrap response for an OpenAI OAuth device-code connection attempt."""
+
+    verification_url: str = Field(..., description="URL where the user enters the code")
+    user_code: str = Field(..., description="Short device code to enter")
+    expires_at: str = Field(..., description="Pending connection expiry timestamp")
+    poll_interval_seconds: int = Field(
+        ...,
+        description="Recommended polling interval in seconds",
+    )
+
+
 class OpenAIOAuthCompleteRequest(BaseModel):
     """Payload for completing OpenAI OAuth manually."""
 
@@ -724,6 +752,13 @@ class OpenAIOAuthCompleteRequest(BaseModel):
     )
     code: Optional[str] = Field(None, description="Authorization code")
     state: Optional[str] = Field(None, description="OAuth state")
+
+
+class OpenAIOAuthDeviceCheckResponse(BaseModel):
+    """Response for checking an OpenAI OAuth device-code connection attempt."""
+
+    status: str = Field(..., description="Current device-code status")
+    provider: ProviderInfo = Field(..., description="Updated OpenAI provider status")
 
 
 class OperationResult(BaseModel):

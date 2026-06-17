@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import base64
 import binascii
 import hashlib
+import json
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -32,11 +32,26 @@ OPENAI_OAUTH_ISSUER_URL = "https://auth.openai.com"
 OPENAI_OAUTH_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
 OPENAI_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 OPENAI_OAUTH_PENDING_TTL_SECONDS = 600
+OPENAI_OAUTH_DEVICE_PENDING_TTL_SECONDS = 15 * 60
 OPENAI_OAUTH_REFRESH_WINDOW_SECONDS = 300
 OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 OPENAI_OAUTH_ORIGINATOR = "openclaw"
+OPENAI_OAUTH_USER_AGENT = "openclaw"
 OPENAI_OAUTH_LOOPBACK_REDIRECT_URI = "http://localhost:1455/auth/callback"
+OPENAI_OAUTH_DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
+OPENAI_OAUTH_DEVICE_VERIFICATION_URL = "https://auth.openai.com/codex/device"
+OPENAI_OAUTH_DEVICE_USER_CODE_URL = (
+    "https://auth.openai.com/api/accounts/deviceauth/usercode"
+)
+OPENAI_OAUTH_DEVICE_TOKEN_URL = (
+    "https://auth.openai.com/api/accounts/deviceauth/token"
+)
 OPENAI_OAUTH_SCOPE = "openid profile email offline_access"
+OPENAI_OAUTH_DEVICE_DEFAULT_POLL_INTERVAL_SECONDS = 5
+OPENAI_OAUTH_DEVICE_MIN_POLL_INTERVAL_SECONDS = 1
+OPENAI_OAUTH_PENDING_FLOW_PKCE = "pkce"
+OPENAI_OAUTH_PENDING_FLOW_DEVICE_CODE = "device_code"
+
 
 class OpenAIOAuthStateError(ValueError):
     """Raised when stored OpenAI OAuth state is malformed or unusable."""
@@ -67,6 +82,19 @@ class OpenAIOAuthPendingState:
 
 
 @dataclass(frozen=True)
+class OpenAIOAuthDevicePendingState:
+    """Short-lived device-code state for an in-progress OAuth connection."""
+
+    device_auth_id: str
+    user_code: str
+    verification_url: str
+    poll_interval_seconds: int
+    created_at: str
+    expires_at: str
+    last_poll_at: str | None = None
+
+
+@dataclass(frozen=True)
 class OpenAIOAuthStartResult:
     """Bootstrap data for an OAuth connection attempt."""
 
@@ -74,6 +102,16 @@ class OpenAIOAuthStartResult:
     state: str
     redirect_uri: str
     expires_at: str
+
+
+@dataclass(frozen=True)
+class OpenAIOAuthDeviceStartResult:
+    """Bootstrap data for a device-code OAuth connection attempt."""
+
+    verification_url: str
+    user_code: str
+    expires_at: str
+    poll_interval_seconds: int
 
 
 @dataclass(frozen=True)
@@ -88,6 +126,10 @@ class OpenAIOAuthStatus:
     last_refresh_at: str | None = None
     last_refresh_error: str | None = None
     pending_expires_at: str | None = None
+    pending_flow: str | None = None
+    device_verification_url: str | None = None
+    device_user_code: str | None = None
+    device_poll_interval_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +140,25 @@ class OpenAIOAuthTokenResult:
     refresh_token: str | None = None
     expires_at: str | None = None
     account_id: str | None = None
+
+
+@dataclass(frozen=True)
+class OpenAIOAuthDeviceCodeResult:
+    """Device-code request result returned by adapter implementations."""
+
+    device_auth_id: str
+    user_code: str
+    verification_url: str = OPENAI_OAUTH_DEVICE_VERIFICATION_URL
+    poll_interval_seconds: int = OPENAI_OAUTH_DEVICE_DEFAULT_POLL_INTERVAL_SECONDS
+
+
+@dataclass(frozen=True)
+class OpenAIOAuthDevicePollResult:
+    """Device-code poll result returned by adapter implementations."""
+
+    status: Literal["pending", "authorized"]
+    authorization_code: str | None = None
+    code_verifier: str | None = None
 
 
 class OpenAIOAuthTokenAdapter(Protocol):
@@ -115,12 +176,25 @@ class OpenAIOAuthTokenAdapter(Protocol):
     async def refresh_token(self, *, refresh_token: str) -> OpenAIOAuthTokenResult:
         """Refresh an OAuth access token."""
 
+    async def request_device_code(self) -> OpenAIOAuthDeviceCodeResult:
+        """Request a device code for OpenAI OAuth."""
+
+    async def poll_device_code(
+        self,
+        *,
+        device_auth_id: str,
+        user_code: str,
+    ) -> OpenAIOAuthDevicePollResult:
+        """Poll a device-code authorization attempt."""
+
 
 @dataclass(frozen=True)
 class StaticOpenAIOAuthTokenAdapter:
     """Deterministic token adapter for validation and smoke tests."""
 
     token_result: OpenAIOAuthTokenResult
+    device_code_result: OpenAIOAuthDeviceCodeResult | None = None
+    device_poll_result: OpenAIOAuthDevicePollResult | None = None
 
     async def exchange_code(
         self,
@@ -137,6 +211,32 @@ class StaticOpenAIOAuthTokenAdapter:
         """Return the configured token result."""
 
         return self.token_result
+
+    async def request_device_code(self) -> OpenAIOAuthDeviceCodeResult:
+        """Return the configured device-code result."""
+
+        if self.device_code_result is None:
+            return OpenAIOAuthDeviceCodeResult(
+                device_auth_id="validation-device-auth-id",
+                user_code="VALIDATION-CODE",
+            )
+        return self.device_code_result
+
+    async def poll_device_code(
+        self,
+        *,
+        device_auth_id: str,
+        user_code: str,
+    ) -> OpenAIOAuthDevicePollResult:
+        """Return the configured device poll result."""
+
+        if self.device_poll_result is None:
+            return OpenAIOAuthDevicePollResult(
+                status="authorized",
+                authorization_code="validation-device-authorization-code",
+                code_verifier="validation-device-code-verifier",
+            )
+        return self.device_poll_result
 
 
 @dataclass
@@ -178,27 +278,117 @@ class OpenAIOAuthHTTPTokenAdapter:
         data = await self._post_form(payload)
         return _token_result_from_response(data)
 
+    async def request_device_code(self) -> OpenAIOAuthDeviceCodeResult:
+        """Request an OpenAI OAuth device code."""
+
+        data = await self._post_json(
+            OPENAI_OAUTH_DEVICE_USER_CODE_URL,
+            {"client_id": self.client_id},
+            pending_statuses=frozenset(),
+        )
+        if data is None:
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth device-code request returned pending status."
+            )
+        device_auth_id = _required_string(
+            data,
+            "device_auth_id",
+            "OpenAI OAuth device-code response",
+        )
+        user_code = _optional_string(data, "user_code") or _optional_string(
+            data,
+            "usercode",
+        )
+        if user_code is None:
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth device-code response missing required field "
+                "'user_code'."
+            )
+        return OpenAIOAuthDeviceCodeResult(
+            device_auth_id=device_auth_id,
+            user_code=user_code,
+            verification_url=OPENAI_OAUTH_DEVICE_VERIFICATION_URL,
+            poll_interval_seconds=_response_poll_interval_seconds(data),
+        )
+
+    async def poll_device_code(
+        self,
+        *,
+        device_auth_id: str,
+        user_code: str,
+    ) -> OpenAIOAuthDevicePollResult:
+        """Poll an OpenAI OAuth device-code authorization attempt."""
+
+        data = await self._post_json(
+            OPENAI_OAUTH_DEVICE_TOKEN_URL,
+            {"device_auth_id": device_auth_id, "user_code": user_code},
+            pending_statuses=frozenset({403, 404}),
+        )
+        if data is None:
+            return OpenAIOAuthDevicePollResult(status="pending")
+        return OpenAIOAuthDevicePollResult(
+            status="authorized",
+            authorization_code=_required_string(
+                data,
+                "authorization_code",
+                "OpenAI OAuth device-code poll response",
+            ),
+            code_verifier=_required_string(
+                data,
+                "code_verifier",
+                "OpenAI OAuth device-code poll response",
+            ),
+        )
+
     async def _post_form(self, payload: dict[str, str]) -> dict[str, Any]:
-        return await self._post(
+        data = await self._post(
+            self.token_url,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             data=payload,
+        )
+        if data is None:
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth token request returned pending status."
+            )
+        return data
+
+    async def _post_json(
+        self,
+        url: str,
+        payload: dict[str, str],
+        *,
+        pending_statuses: frozenset[int],
+    ) -> dict[str, Any] | None:
+        return await self._post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json_payload=payload,
+            pending_statuses=pending_statuses,
         )
 
     async def _post(
         self,
+        url: str,
         *,
         headers: dict[str, str],
         data: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
+        json_payload: dict[str, str] | None = None,
+        pending_statuses: frozenset[int] = frozenset(),
+    ) -> dict[str, Any] | None:
         client = self.http_client
         owns_client = client is None
         if client is None:
             client = httpx.AsyncClient(timeout=self.timeout_seconds)
         try:
             response = await client.post(
-                self.token_url,
-                headers=headers,
+                url,
+                headers={
+                    **headers,
+                    "originator": OPENAI_OAUTH_ORIGINATOR,
+                    "User-Agent": OPENAI_OAUTH_USER_AGENT,
+                },
                 data=data,
+                json=json_payload,
             )
         except httpx.HTTPError as exc:
             raise OpenAIOAuthStateError(
@@ -208,6 +398,8 @@ class OpenAIOAuthHTTPTokenAdapter:
             if owns_client:
                 await client.aclose()
 
+        if response.status_code in pending_statuses:
+            return None
         if response.status_code < 200 or response.status_code >= 300:
             raise OpenAIOAuthStateError(
                 f"OpenAI OAuth token request failed with HTTP {response.status_code}."
@@ -292,6 +484,35 @@ def start_openai_oauth(
     )
 
 
+async def start_openai_oauth_device_code(
+    *,
+    adapter: OpenAIOAuthTokenAdapter | None = None,
+    now: datetime | None = None,
+) -> OpenAIOAuthDeviceStartResult:
+    """Create pending device-code state and return user-facing bootstrap data."""
+
+    reference = _normalize_datetime(now or datetime.now(UTC))
+    token_adapter = adapter or get_openai_oauth_token_adapter()
+    result = await token_adapter.request_device_code()
+    expires_at = reference + timedelta(seconds=OPENAI_OAUTH_DEVICE_PENDING_TTL_SECONDS)
+    poll_interval = _normalize_poll_interval_seconds(result.poll_interval_seconds)
+    pending = OpenAIOAuthDevicePendingState(
+        device_auth_id=result.device_auth_id,
+        user_code=result.user_code,
+        verification_url=result.verification_url,
+        poll_interval_seconds=poll_interval,
+        created_at=reference.isoformat(),
+        expires_at=expires_at.isoformat(),
+    )
+    save_openai_oauth_device_pending_state(pending)
+    return OpenAIOAuthDeviceStartResult(
+        verification_url=result.verification_url,
+        user_code=result.user_code,
+        expires_at=expires_at.isoformat(),
+        poll_interval_seconds=poll_interval,
+    )
+
+
 async def complete_openai_oauth(
     *,
     code: str,
@@ -310,6 +531,55 @@ async def complete_openai_oauth(
     )
     token_state = token_result_to_state(token_result)
     save_openai_oauth_token_state(token_state)
+    return token_state
+
+
+async def poll_openai_oauth_device_code(
+    *,
+    adapter: OpenAIOAuthTokenAdapter | None = None,
+    now: datetime | None = None,
+) -> OpenAIOAuthTokenState | None:
+    """Poll pending device-code state and persist tokens once authorized."""
+
+    reference = _normalize_datetime(now or datetime.now(UTC))
+    pending = load_openai_oauth_device_pending_state(
+        now=reference,
+        cleanup_expired=True,
+    )
+    if pending is None:
+        raise OpenAIOAuthStateError("No active OpenAI OAuth device-code attempt.")
+
+    token_adapter = adapter or get_openai_oauth_token_adapter()
+    result = await token_adapter.poll_device_code(
+        device_auth_id=pending.device_auth_id,
+        user_code=pending.user_code,
+    )
+    if result.status == "pending":
+        save_openai_oauth_device_pending_state(
+            OpenAIOAuthDevicePendingState(
+                device_auth_id=pending.device_auth_id,
+                user_code=pending.user_code,
+                verification_url=pending.verification_url,
+                poll_interval_seconds=pending.poll_interval_seconds,
+                created_at=pending.created_at,
+                expires_at=pending.expires_at,
+                last_poll_at=reference.isoformat(),
+            )
+        )
+        return None
+
+    if not result.authorization_code or not result.code_verifier:
+        raise OpenAIOAuthStateError(
+            "OpenAI OAuth device-code poll response was authorized but incomplete."
+        )
+    token_result = await token_adapter.exchange_code(
+        code=result.authorization_code,
+        code_verifier=result.code_verifier,
+        redirect_uri=OPENAI_OAUTH_DEVICE_REDIRECT_URI,
+    )
+    token_state = token_result_to_state(token_result)
+    save_openai_oauth_token_state(token_state)
+    clear_openai_oauth_pending_state()
     return token_state
 
 
@@ -446,6 +716,18 @@ def save_openai_oauth_pending_state(state: OpenAIOAuthPendingState) -> None:
     )
 
 
+def save_openai_oauth_device_pending_state(
+    state: OpenAIOAuthDevicePendingState,
+) -> None:
+    """Persist one pending OpenAI OAuth device-code connection attempt."""
+
+    _parse_datetime(state.expires_at, "expires_at")
+    set_secret_value(
+        OPENAI_OAUTH_PENDING_SECRET,
+        json.dumps(_device_pending_state_to_dict(state), separators=(",", ":")),
+    )
+
+
 def load_openai_oauth_pending_state(
     *,
     now: datetime | None = None,
@@ -456,7 +738,29 @@ def load_openai_oauth_pending_state(
     payload = get_secret_value(OPENAI_OAUTH_PENDING_SECRET)
     if not payload:
         return None
+    if _pending_flow_from_payload(payload) != OPENAI_OAUTH_PENDING_FLOW_PKCE:
+        return None
     pending = _pending_state_from_payload(payload)
+    if _is_expired(pending.expires_at, now=now):
+        if cleanup_expired:
+            clear_openai_oauth_pending_state()
+        return None
+    return pending
+
+
+def load_openai_oauth_device_pending_state(
+    *,
+    now: datetime | None = None,
+    cleanup_expired: bool = True,
+) -> OpenAIOAuthDevicePendingState | None:
+    """Load pending device-code state, deleting it when expired."""
+
+    payload = get_secret_value(OPENAI_OAUTH_PENDING_SECRET)
+    if not payload:
+        return None
+    if _pending_flow_from_payload(payload) != OPENAI_OAUTH_PENDING_FLOW_DEVICE_CODE:
+        return None
+    pending = _device_pending_state_from_payload(payload)
     if _is_expired(pending.expires_at, now=now):
         if cleanup_expired:
             clear_openai_oauth_pending_state()
@@ -498,9 +802,27 @@ def get_openai_oauth_status(now: datetime | None = None) -> OpenAIOAuthStatus:
 
     token_state = load_openai_oauth_token_state()
     pending_state = load_openai_oauth_pending_state(now=now, cleanup_expired=True)
+    device_pending_state = load_openai_oauth_device_pending_state(
+        now=now,
+        cleanup_expired=True,
+    )
 
     if token_state is not None:
         status = "refresh_failed" if token_state.last_refresh_error else "connected"
+        pending_expires_at = None
+        pending_flow = None
+        device_verification_url = None
+        device_user_code = None
+        device_poll_interval_seconds = None
+        if pending_state is not None:
+            pending_expires_at = pending_state.expires_at
+            pending_flow = OPENAI_OAUTH_PENDING_FLOW_PKCE
+        elif device_pending_state is not None:
+            pending_expires_at = device_pending_state.expires_at
+            pending_flow = OPENAI_OAUTH_PENDING_FLOW_DEVICE_CODE
+            device_verification_url = device_pending_state.verification_url
+            device_user_code = device_pending_state.user_code
+            device_poll_interval_seconds = device_pending_state.poll_interval_seconds
         return OpenAIOAuthStatus(
             connected=True,
             status=status,
@@ -509,9 +831,11 @@ def get_openai_oauth_status(now: datetime | None = None) -> OpenAIOAuthStatus:
             expires_at=token_state.expires_at,
             last_refresh_at=token_state.last_refresh_at,
             last_refresh_error=token_state.last_refresh_error,
-            pending_expires_at=(
-                pending_state.expires_at if pending_state is not None else None
-            ),
+            pending_expires_at=pending_expires_at,
+            pending_flow=pending_flow,
+            device_verification_url=device_verification_url,
+            device_user_code=device_user_code,
+            device_poll_interval_seconds=device_poll_interval_seconds,
         )
 
     if pending_state is not None:
@@ -519,6 +843,18 @@ def get_openai_oauth_status(now: datetime | None = None) -> OpenAIOAuthStatus:
             connected=False,
             status="pending",
             pending_expires_at=pending_state.expires_at,
+            pending_flow=OPENAI_OAUTH_PENDING_FLOW_PKCE,
+        )
+
+    if device_pending_state is not None:
+        return OpenAIOAuthStatus(
+            connected=False,
+            status="pending",
+            pending_expires_at=device_pending_state.expires_at,
+            pending_flow=OPENAI_OAUTH_PENDING_FLOW_DEVICE_CODE,
+            device_verification_url=device_pending_state.verification_url,
+            device_user_code=device_pending_state.user_code,
+            device_poll_interval_seconds=device_pending_state.poll_interval_seconds,
         )
 
     return OpenAIOAuthStatus(connected=False, status="disconnected")
@@ -560,6 +896,7 @@ def _token_state_to_dict(state: OpenAIOAuthTokenState) -> dict[str, Any]:
 
 def _pending_state_to_dict(state: OpenAIOAuthPendingState) -> dict[str, Any]:
     return {
+        "flow": OPENAI_OAUTH_PENDING_FLOW_PKCE,
         "state": state.state,
         "code_verifier": state.code_verifier,
         "redirect_uri": state.redirect_uri,
@@ -567,6 +904,31 @@ def _pending_state_to_dict(state: OpenAIOAuthPendingState) -> dict[str, Any]:
         "expires_at": state.expires_at,
         "return_metadata": state.return_metadata,
     }
+
+
+def _device_pending_state_to_dict(
+    state: OpenAIOAuthDevicePendingState,
+) -> dict[str, Any]:
+    return {
+        "flow": OPENAI_OAUTH_PENDING_FLOW_DEVICE_CODE,
+        "device_auth_id": state.device_auth_id,
+        "user_code": state.user_code,
+        "verification_url": state.verification_url,
+        "poll_interval_seconds": state.poll_interval_seconds,
+        "created_at": state.created_at,
+        "expires_at": state.expires_at,
+        "last_poll_at": state.last_poll_at,
+    }
+
+
+def _pending_flow_from_payload(payload: str) -> str:
+    raw = _load_json_mapping(payload, "OpenAI OAuth pending state")
+    flow = raw.get("flow")
+    if isinstance(flow, str) and flow.strip():
+        return flow.strip()
+    if "device_auth_id" in raw:
+        return OPENAI_OAUTH_PENDING_FLOW_DEVICE_CODE
+    return OPENAI_OAUTH_PENDING_FLOW_PKCE
 
 
 def _pending_state_from_payload(payload: str) -> OpenAIOAuthPendingState:
@@ -583,6 +945,41 @@ def _pending_state_from_payload(payload: str) -> OpenAIOAuthPendingState:
         created_at=_required_string(raw, "created_at", "OpenAI OAuth pending state"),
         expires_at=_required_string(raw, "expires_at", "OpenAI OAuth pending state"),
         return_metadata=return_metadata,
+    )
+
+
+def _device_pending_state_from_payload(payload: str) -> OpenAIOAuthDevicePendingState:
+    raw = _load_json_mapping(payload, "OpenAI OAuth device-code pending state")
+    return OpenAIOAuthDevicePendingState(
+        device_auth_id=_required_string(
+            raw,
+            "device_auth_id",
+            "OpenAI OAuth device-code pending state",
+        ),
+        user_code=_required_string(
+            raw,
+            "user_code",
+            "OpenAI OAuth device-code pending state",
+        ),
+        verification_url=_required_string(
+            raw,
+            "verification_url",
+            "OpenAI OAuth device-code pending state",
+        ),
+        poll_interval_seconds=_normalize_poll_interval_seconds(
+            raw.get("poll_interval_seconds")
+        ),
+        created_at=_required_string(
+            raw,
+            "created_at",
+            "OpenAI OAuth device-code pending state",
+        ),
+        expires_at=_required_string(
+            raw,
+            "expires_at",
+            "OpenAI OAuth device-code pending state",
+        ),
+        last_poll_at=_optional_string(raw, "last_poll_at"),
     )
 
 
@@ -612,6 +1009,21 @@ def _token_result_from_response(payload: dict[str, Any]) -> OpenAIOAuthTokenResu
         expires_at=expires_at,
         account_id=account_id,
     )
+
+
+def _response_poll_interval_seconds(payload: dict[str, Any]) -> int:
+    interval = payload.get("interval")
+    return _normalize_poll_interval_seconds(interval)
+
+
+def _normalize_poll_interval_seconds(value: object) -> int:
+    if isinstance(value, int | float):
+        seconds = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        seconds = int(value.strip())
+    else:
+        seconds = OPENAI_OAUTH_DEVICE_DEFAULT_POLL_INTERVAL_SECONDS
+    return max(seconds, OPENAI_OAUTH_DEVICE_MIN_POLL_INTERVAL_SECONDS)
 
 
 def _response_expires_at(

@@ -58,6 +58,8 @@ from core.llm.openai_oauth import (
     complete_openai_oauth_from_redirect,
     get_openai_oauth_status,
     is_openai_oauth_internal_secret,
+    poll_openai_oauth_device_code,
+    start_openai_oauth_device_code,
     start_openai_oauth as start_openai_oauth_attempt,
 )
 from core.runtime.paths import get_system_root
@@ -101,6 +103,8 @@ from .models import (
     ProviderInfo,
     ModelConfigRequest,
     OpenAIOAuthCompleteRequest,
+    OpenAIOAuthDeviceCheckResponse,
+    OpenAIOAuthDeviceStartResponse,
     OpenAIOAuthStartRequest,
     OpenAIOAuthStartResponse,
     ProviderConfigRequest,
@@ -2520,6 +2524,14 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
     provider_info.oauth_last_refresh_at = oauth_connection.last_refresh_at
     provider_info.oauth_last_refresh_error = oauth_connection.last_refresh_error
     provider_info.oauth_pending_expires_at = oauth_connection.pending_expires_at
+    provider_info.oauth_pending_flow = oauth_connection.pending_flow
+    provider_info.oauth_device_verification_url = (
+        oauth_connection.device_verification_url
+    )
+    provider_info.oauth_device_user_code = oauth_connection.device_user_code
+    provider_info.oauth_device_poll_interval_seconds = (
+        oauth_connection.device_poll_interval_seconds
+    )
     return provider_info
 
 
@@ -2643,6 +2655,45 @@ def start_openai_oauth_connection(
         state=result.state,
         redirect_uri=result.redirect_uri,
         expires_at=result.expires_at,
+    )
+
+
+async def start_openai_oauth_device_connection() -> OpenAIOAuthDeviceStartResponse:
+    """Start an OpenAI OAuth device-code connection attempt."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        result = await start_openai_oauth_device_code()
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info(
+        "OpenAI OAuth device-code start created",
+        data={"poll_interval_seconds": result.poll_interval_seconds},
+    )
+    return OpenAIOAuthDeviceStartResponse(
+        verification_url=result.verification_url,
+        user_code=result.user_code,
+        expires_at=result.expires_at,
+        poll_interval_seconds=result.poll_interval_seconds,
+    )
+
+
+async def check_openai_oauth_device_connection() -> OpenAIOAuthDeviceCheckResponse:
+    """Check an OpenAI OAuth device-code connection attempt."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        token_state = await poll_openai_oauth_device_code()
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+
+    status = "connected" if token_state is not None else "pending"
+    logger.info("OpenAI OAuth device-code checked", data={"status": status})
+    return OpenAIOAuthDeviceCheckResponse(
+        status=status,
+        provider=_openai_provider_info(),
     )
 
 
