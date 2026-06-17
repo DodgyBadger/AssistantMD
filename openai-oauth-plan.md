@@ -474,6 +474,25 @@ Testable artifacts:
   the caller explicitly overrides it.
 - The generated authorization URL includes the same loopback redirect URI.
 
+### Slice 11: OpenClaw Authorize Metadata
+
+Align the browser authorization request with OpenClaw's currently working
+OpenAI Codex OAuth flow after live testing reached account consent but stalled
+after Continue.
+
+Changes:
+
+- Use OpenClaw's narrower OAuth scope:
+  `openid profile email offline_access`.
+- Use `originator=openclaw` instead of Codex CLI's `codex_cli_rs`.
+- Keep the same public Codex client id, simplified-flow flag, organization
+  claim request, PKCE parameters, and loopback redirect URI.
+
+Testable artifacts:
+
+- OAuth start authorization URL contains OpenClaw-compatible scope and
+  originator values.
+
 ## Suggested Implementation Order
 
 1. Config and provider status contract.
@@ -486,6 +505,7 @@ Testable artifacts:
 8. Codex-compatible token exchange, refresh, and default runtime adapter.
 9. OpenClaw compatibility tightening for refresh shape and account identity.
 10. Registered loopback redirect URI default for OAuth start.
+11. OpenClaw-compatible authorize metadata.
 
 ## Current Progress
 
@@ -561,6 +581,9 @@ Testable artifacts:
   - OAuth start now defaults to the registered Codex loopback redirect URI
     instead of AssistantMD's API callback URL
   - API scenario coverage now asserts the loopback redirect default
+- Slice 11 implemented:
+  - OAuth authorize scope and originator now match OpenClaw's OpenAI Codex OAuth
+    flow after live testing reached consent but stalled after Continue
 
 ## Local Smoke Tests During Development
 

@@ -34,11 +34,9 @@ OPENAI_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 OPENAI_OAUTH_PENDING_TTL_SECONDS = 600
 OPENAI_OAUTH_REFRESH_WINDOW_SECONDS = 300
 OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-OPENAI_OAUTH_ORIGINATOR = "codex_cli_rs"
+OPENAI_OAUTH_ORIGINATOR = "openclaw"
 OPENAI_OAUTH_LOOPBACK_REDIRECT_URI = "http://localhost:1455/auth/callback"
-OPENAI_OAUTH_SCOPE = (
-    "openid profile email offline_access api.connectors.read api.connectors.invoke"
-)
+OPENAI_OAUTH_SCOPE = "openid profile email offline_access"
 
 class OpenAIOAuthStateError(ValueError):
     """Raised when stored OpenAI OAuth state is malformed or unusable."""
