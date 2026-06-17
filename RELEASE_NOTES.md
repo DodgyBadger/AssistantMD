@@ -1,6 +1,16 @@
 # Release Notes
 
 
+## 2026-06-17 - Unreleased
+
+### Long-running chat execution
+
+- Streaming chat now runs as a task-owned background operation, so browser refreshes or SSE subscriber disconnects do not inherently cancel the model run.
+- The chat UI starts streaming runs through task APIs, can reconnect to buffered task events, and stops responses by cancelling the active task.
+- Multiple submitted prompts for the same chat session are queued behind the active run, preserving turn order for long-running sessions.
+- Added a normalized chat surface adapter contract so future Telegram, Discord, CLI, or other chat surfaces can reuse the same task-owned execution path.
+
+
 ## 2026-06-16 - v0.6.7
 
 - Fix: chat history compaction now uses the retained recent turns as supersession context, so compaction cards are less likely to preserve stale current objectives or next steps.
