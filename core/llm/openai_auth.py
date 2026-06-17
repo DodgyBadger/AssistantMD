@@ -75,6 +75,24 @@ def resolve_openai_auth(
         return resolution
 
     if configured_auth_mode == OPENAI_AUTH_MODE_API_KEY:
+        if not fallback_available and oauth_connected:
+            resolution = OpenAIAuthResolution(
+                configured_auth_mode=configured_auth_mode,
+                effective_auth_mode=OPENAI_AUTH_MODE_OAUTH,
+                oauth_enabled=True,
+                oauth_connected=True,
+                api_key_name=api_key_name,
+                api_key_available=api_key_available,
+                base_url_available=base_url_available,
+                fallback_enabled=fallback_enabled,
+                fallback_available=fallback_available,
+                fallback_used=False,
+                available=True,
+                status="api_key_missing_oauth_connected",
+            )
+            _maybe_log_openai_auth_resolution(resolution, emit_log=emit_log)
+            return resolution
+
         resolution = _api_key_resolution(
             configured_auth_mode=configured_auth_mode,
             oauth_enabled=True,

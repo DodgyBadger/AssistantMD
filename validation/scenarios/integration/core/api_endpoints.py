@@ -362,6 +362,34 @@ class ApiEndpointsScenario(BaseScenario):
             authorized_device_payload["provider"]["oauth_account_id"]
             == "validation-device-account"
         ), "Authorized device-code check exposes sanitized account metadata"
+        api_key_mode_with_oauth = self.call_api(
+            "/api/system/providers/openai",
+            method="PUT",
+            data={
+                "auth_mode": "api_key",
+                "oauth_api_key_fallback_enabled": False,
+            },
+        )
+        assert api_key_mode_with_oauth.status_code == 200, (
+            "OpenAI provider can switch back to API-key mode while OAuth is connected"
+        )
+        api_key_mode_payload = api_key_mode_with_oauth.json()
+        assert api_key_mode_payload["configured_auth_mode"] == "api_key", (
+            "OpenAI provider records API-key mode"
+        )
+        assert api_key_mode_payload["effective_auth_mode"] == "oauth", (
+            "OpenAI provider uses connected OAuth when API-key mode has no key"
+        )
+        api_key_mode_models = self.call_api("/api/system/models")
+        assert api_key_mode_models.status_code == 200, (
+            "Model listing succeeds with API-key mode and connected OAuth"
+        )
+        api_key_mode_gpt = next(
+            model for model in api_key_mode_models.json() if model["name"] == "gpt"
+        )
+        assert api_key_mode_gpt["available"] is True, (
+            "OpenAI model remains available when OAuth is connected but API key is absent"
+        )
 
         oauth_disconnect = self.call_api(
             "/api/system/providers/openai/oauth",
