@@ -621,6 +621,71 @@ Validation target:
   device-code start, pending poll, successful completion, cancel, hidden-secret,
   and kill-switch assertions.
 
+### Slice 14: Codex Runtime Compatibility Hardening
+
+Track the live runtime compatibility surface separately from authentication.
+Device-code auth now works, but the ChatGPT/Codex backend is not identical to
+the public OpenAI Platform Responses API. The first live runtime gap was:
+
+- `gpt-5.5` rejected a normal Pydantic AI Responses request with
+  `Store must be set to false`.
+- Setting `openai_store=False` only for OAuth-backed OpenAI Responses models
+  fixed the failure.
+- A live AssistantMD test then completed a substantial tool loop, including 37
+  `file_ops_safe` calls, through the OAuth-backed Codex endpoint.
+
+Current working assumption:
+
+- For AssistantMD's normal text plus function-tool workflow, Pydantic AI's
+  existing `OpenAIResponsesModel` request/response mapping is compatible enough
+  when OAuth-backed requests explicitly set `store: false`.
+- The branch should not yet be treated as fully compatible with OpenClaw's
+  `openai-chatgpt-responses` transport. OpenClaw owns a custom Codex Responses
+  transport and applies additional request/stream compatibility behavior.
+
+Known remaining compatibility risks:
+
+- Reasoning item replay: OpenClaw disables replay of Responses item ids for
+  store-disabled ChatGPT/Codex requests. Pydantic AI may replay provider item
+  ids in histories unless settings/profile behavior prevents it.
+- Reasoning payload shape: OpenClaw includes
+  `reasoning.encrypted_content` and normalizes Codex response completion events.
+- Streaming shape: OpenClaw has custom SSE and WebSocket event handling for the
+  Codex endpoint. AssistantMD currently relies on OpenAI SDK/Pydantic AI
+  Responses streaming behavior.
+- Built-in tools: native web search, code interpreter, file search, and image
+  generation may require Codex-specific payload and response handling.
+- Image inputs: OpenClaw explicitly restores image input capability for known
+  Codex models and has separate Codex image-generation handling.
+- Server-side response storage features: `previous_response_id`, automatic
+  server-side compaction, and any stateful Responses behavior conflict with
+  `store: false` and should not be assumed to work.
+- Model catalog drift: Codex exposes model availability through
+  `https://chatgpt.com/backend-api/codex/models?client_version=1.0.0`; static
+  AssistantMD model aliases can drift from the live Codex catalog.
+- Policy/support drift: OpenAI can change endpoint behavior, allowed fields, or
+  subscription enforcement without warning.
+
+Risk mitigation:
+
+- Keep the global `openai_oauth_enabled` kill switch authoritative.
+- Keep API-key auth stable and default.
+- Keep explicit API-key fallback user-controlled to avoid surprise API charges.
+- Treat every Codex runtime compatibility change as OAuth-only unless proven
+  safe for Platform API-key requests.
+- Prefer small observed-failure fixes over a broad custom transport rewrite.
+- If failures move from simple request-field compatibility into response
+  parsing, reasoning replay, or stream protocol handling, pause and reassess
+  whether to continue the branch or build a dedicated Codex transport adapter.
+
+Testable artifacts:
+
+- OAuth-backed OpenAI model construction sets `openai_store=False`.
+- API-key-backed OpenAI model construction does not force `openai_store`.
+- Deterministic runtime-adapter coverage verifies OAuth/API-key settings split.
+- Live manual tests verify normal chat, multi-turn chat, and tool-call loops
+  against the Codex endpoint.
+
 ## Suggested Implementation Order
 
 1. Config and provider status contract.
@@ -636,6 +701,7 @@ Validation target:
 11. OpenClaw-compatible authorize metadata.
 12. Pending attempt cancellation from the Configuration UI.
 13. OpenClaw-style device-code connection flow.
+14. Codex runtime compatibility hardening and stress testing.
 
 ## Current Progress
 
@@ -730,6 +796,12 @@ Validation target:
     explicit status check action
   - deterministic API scenario coverage now exercises device-code start,
     pending poll, successful completion, and hidden pending-state behavior
+- Slice 14 started:
+  - OAuth-backed OpenAI runtime requests now set `openai_store=False` to satisfy
+    the Codex backend's explicit `store: false` requirement
+  - API-key-backed OpenAI requests leave `openai_store` unset
+  - live testing confirmed `gpt-5.5` can complete a large AssistantMD
+    function-tool loop, including 37 `file_ops_safe` calls, through OAuth
 
 ## Local Smoke Tests During Development
 
@@ -749,6 +821,61 @@ Validation target:
   provider construction.
 - Mocked OpenClaw-style device-code start, pending poll, successful completion,
   expiry, and cancel behavior.
+- OAuth-backed model construction sets `openai_store=False`; API-key-backed
+  model construction leaves it unset.
+- Request-shape inspection for OAuth-backed OpenAI Responses payloads:
+  confirm no stateful `previous_response_id`, server-side compaction, or
+  storage-dependent settings are introduced without deliberate testing.
+- Manual no-network/local construction probes for OAuth/API-key split when
+  adding runtime compatibility changes.
+
+## Runtime Stress Tests To Run
+
+Automated or deterministic tests:
+
+- Unit-level resolver/factory test: OAuth effective mode produces
+  `OpenAIResponsesModelSettings(openai_store=False)`.
+- Unit-level resolver/factory test: API-key effective mode does not set
+  `openai_store`.
+- Adapter test with captured request payload for OAuth mode, asserting
+  `store: false` and absence of known storage-dependent fields unless
+  intentionally enabled.
+- Tool-loop scenario with deterministic fake model remains unchanged for
+  non-OAuth providers.
+- API scenario continues to assert model availability for:
+  - OAuth connected with no API key
+  - OAuth disabled with token present
+  - OAuth disconnected with no fallback
+  - OAuth disconnected with explicit API-key fallback
+- Secret scan confirms no OAuth token, refresh token, device code, auth code,
+  PKCE verifier, or pasted redirect URL appears in logs/API responses.
+
+Manual live tests:
+
+- Device-code connect from a local browser while AssistantMD runs on the VPS.
+- Fresh chat with `gpt-5.5` using OAuth and no OpenAI API key configured.
+- Multi-turn chat in the same session, checking whether history replay works
+  after the first assistant response.
+- Long function-tool loop with repeated `file_ops_safe` reads/writes/searches.
+- Tool failure and retry path: force a tool error, then continue the chat.
+- Concurrent chats using the same OAuth token to check refresh and request
+  isolation.
+- Token refresh path: test after access-token expiry or by seeding a near-expiry
+  token with a valid refresh token.
+- Kill switch: set `openai_oauth_enabled=false` and verify chats immediately
+  stop using OAuth and report clear API-key-only status.
+- Explicit fallback: enable API-key fallback, disconnect OAuth, and verify the
+  warning/selection path avoids surprise charges.
+- Streaming chat, if enabled for the selected workflow, checking partial output,
+  tool-call events, and final transcript persistence.
+- Image input to a Codex model alias that claims image support.
+- Reasoning levels (`off`, low/default/high/xhigh as applicable) to check
+  whether Codex accepts the reasoning payload shape.
+- Native/built-in tools, if AssistantMD later enables them for OpenAI:
+  web search, file search, code interpreter, image generation.
+- Large context or compaction-adjacent session to ensure no server-side storage
+  assumption slips in.
+- Invalid/unsupported model alias to verify the user-facing error is clear.
 
 ## Validation Requests For Maintainers
 
@@ -761,6 +888,9 @@ Validation target:
 - Manual browser verification of the Configuration tab OpenAI provider flow.
 - Manual device-code verification from a local browser while AssistantMD runs
   on the VPS.
+- Maintainer/live-tester report for the runtime stress-test matrix above,
+  especially multi-turn history, streaming, token refresh, kill switch, and
+  large tool-loop behavior.
 
 ## Planning Exit Criteria
 
@@ -770,5 +900,7 @@ Validation target:
 - Runtime fallback to API key is explicit opt-in.
 - Remote/headless completion is first-class through manual paste and the
   planned device-code flow.
+- OAuth-backed Codex runtime behavior has an explicit compatibility test matrix
+  and clear stop/reassess criteria if request or response shaping expands.
 - Feature development can proceed in small slices with deterministic API
   artifacts and explicit decision-boundary logging.
