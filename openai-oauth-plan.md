@@ -490,12 +490,16 @@ Changes:
 - Match OpenClaw's random state and PKCE verifier shape:
   32-character hex state and 43-character base64url verifier.
 - Emit authorize query parameters in OpenClaw's order.
+- Match OpenClaw's remote UX more closely by always exposing the authorization
+  URL for manual opening in the user's local browser, instead of relying only on
+  a browser popup.
 
 Testable artifacts:
 
 - OAuth start authorization URL contains OpenClaw-compatible scope and
   originator values.
 - OAuth start state and PKCE verifier shape match OpenClaw's current flow.
+- Configuration UI always shows the authorization URL for copy/paste testing.
 
 ## Suggested Implementation Order
 
@@ -590,6 +594,8 @@ Testable artifacts:
     flow after live testing reached consent but stalled after Continue
   - OAuth state, PKCE verifier length, and authorize query parameter order now
     match OpenClaw's current implementation
+  - Configuration UI now always displays the authorization URL so remote/VPS
+    tests can open it manually like OpenClaw's remote flow
 
 ## Local Smoke Tests During Development
 

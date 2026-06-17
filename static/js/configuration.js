@@ -1777,11 +1777,11 @@ async function saveModelRow(rowKey) {
             }
 
             const result = await response.json();
-            const opened = window.open(result.auth_url, '_blank', 'noopener,noreferrer');
+            const opened = window.open(result.auth_url, '_blank', 'noopener');
             state.openAiOauthPaste = '';
             await loadProviders();
             const popupText = opened
-                ? 'Paste the final redirect URL here after authorizing OpenAI.'
+                ? `OpenAI OAuth URL opened. If the consent page hangs, copy this URL into a normal browser tab, then paste the final redirect URL here: ${result.auth_url}`
                 : `Open this URL, then paste the final redirect URL here: ${result.auth_url}`;
             setStatus(elements.providerFeedback, popupText, 'info');
         } catch (error) {
