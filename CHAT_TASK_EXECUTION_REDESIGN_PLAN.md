@@ -198,6 +198,8 @@ Risk:
 
 ### Slice 3: SSE Subscription Endpoint
 
+Status: implemented.
+
 Scope:
 
 - Add `GET /api/chat/tasks/{task_id}/events`.
@@ -212,6 +214,12 @@ Validation:
 - Open event stream, consume one keepalive, then close/cancel the subscriber.
 - Assert the task remains active.
 - Reopen with `after_sequence` and receive the terminal `done` event.
+
+Completed validation:
+
+- `python validation/run_validation.py run integration/core/chat_task_event_stream_api integration/core/chat_stream_background_task integration/core/chat_task_event_buffer`
+- `python -m ruff check api/endpoints.py validation/scenarios/integration/core/chat_task_event_stream_api.py core/chat/task_execution.py core/chat/task_events.py`
+- `python -m compileall api/endpoints.py validation/scenarios/integration/core/chat_task_event_stream_api.py core/chat/task_execution.py core/chat/task_events.py`
 
 Risk:
 
