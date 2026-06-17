@@ -381,6 +381,32 @@ Risk:
   in identity mapping, authorization, rate limiting, and platform-specific
   message constraints rather than agent execution.
 
+### Slice 8: Dashboard Status Task Watcher
+
+Status: implemented.
+
+Scope:
+
+- Move the existing dashboard running-workflows table into the always-visible
+  Dashboard status area below the rescan control.
+- Fetch all active execution tasks from `/api/tasks?include_terminal=false`.
+- Render chat, workflow, compaction, ingestion, and other non-terminal task
+  kinds in one "In-flight Tasks" table.
+- Cancel individual tasks or all active tasks through
+  `/api/tasks/{task_id}/cancel`.
+
+Validation:
+
+- `node --check static/app.js`
+- `node --check static/js/dashboard-view.js`
+- `node --check static/js/workflow-actions.js`
+- `npm run build:css`
+
+Risk:
+
+- Medium. The table is shared dashboard UI, but it uses the existing task API
+  and cancellation endpoint rather than adding another control path.
+
 ## Explicit Non-Goals
 
 - No `Agent.iter(...)` execution driver in this plan.

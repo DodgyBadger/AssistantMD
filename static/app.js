@@ -31,8 +31,8 @@ const state = {
     selectedActivityVault: '',
     dashboardVaultSort: { column: 'name', direction: 'asc' },
     dashboardWorkflowSort: { column: 'id', direction: 'asc' },
-    workflowTasks: [],
-    workflowTaskPollTimer: null,
+    executionTasks: [],
+    executionTaskPollTimer: null,
     vaultActivitySort: { column: 'last_run', direction: 'desc' },
     vaultActivityMutationSort: { column: 'time', direction: 'desc' },
     restartRequired: false,
@@ -81,6 +81,7 @@ const chatElements = {
 // DOM elements - Dashboard
 const dashElements = {
     systemStatus: document.getElementById('system-status'),
+    executionTasksStatus: document.getElementById('dashboard-execution-tasks-status'),
     workflowsStatus: document.getElementById('dashboard-workflows-status'),
     workflowSchedulerBadge: document.getElementById('dashboard-workflows-scheduler-badge'),
     vaultActivityStatus: document.getElementById('dashboard-vault-activity-status'),
@@ -168,10 +169,10 @@ const workflowActions = window.WorkflowActions.create({
         fetchMetadata,
         populateSelectors,
         fetchSystemStatus,
-        fetchWorkflowTasks,
+        fetchExecutionTasks,
         displaySystemStatus,
         isTerminalTaskStatus,
-        activeWorkflowTasks: () => dashboardView.activeWorkflowTasks(),
+        activeExecutionTasks: () => dashboardView.activeExecutionTasks(),
         selectedVault: () => chatElements.vaultSelector?.value || '',
     },
 });
@@ -183,13 +184,13 @@ dashboardView = window.DashboardView.create({
     callbacks: {
         renderVaultActivityResult: vaultActivity.renderResult,
         loadVaultActivity: vaultActivity.loadActivity,
-        fetchWorkflowTasks,
+        fetchExecutionTasks,
         isTerminalTaskStatus,
         openWorkflowFileEditor: workflowActions.openFileEditor,
         toggleWorkflowEnabled: workflowActions.toggleWorkflowEnabled,
         executeWorkflow: workflowActions.executeWorkflow,
-        stopWorkflow: workflowActions.stopWorkflow,
-        stopAllWorkflows: workflowActions.stopAllWorkflows,
+        stopExecutionTask: workflowActions.stopExecutionTask,
+        stopAllExecutionTasks: workflowActions.stopAllExecutionTasks,
     },
 });
 
@@ -1143,7 +1144,7 @@ async function fetchSystemStatus() {
             }
         }
         syncRestartFlagWithStorage();
-        await fetchWorkflowTasks({ render: false });
+        await fetchExecutionTasks({ render: false });
         displaySystemStatus();
         updateStatus();
         refreshChatEmptyState();
@@ -1159,20 +1160,20 @@ async function fetchSystemStatus() {
     }
 }
 
-async function fetchWorkflowTasks({ render = true } = {}) {
+async function fetchExecutionTasks({ render = true } = {}) {
     try {
-        const response = await fetch('api/tasks?kind=workflow&include_terminal=false', { cache: 'no-store' });
-        if (!response.ok) throw new Error('Failed to fetch workflow tasks');
+        const response = await fetch('api/tasks?include_terminal=false', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Failed to fetch execution tasks');
         const data = await response.json();
-        state.workflowTasks = data.tasks || [];
-        dashboardView.syncWorkflowTaskPolling();
+        state.executionTasks = data.tasks || [];
+        dashboardView.syncExecutionTaskPolling();
         if (render) {
             displaySystemStatus();
         }
     } catch (error) {
-        console.error('Error fetching workflow tasks:', error);
-        state.workflowTasks = [];
-        dashboardView.syncWorkflowTaskPolling();
+        console.error('Error fetching execution tasks:', error);
+        state.executionTasks = [];
+        dashboardView.syncExecutionTaskPolling();
         if (render && dashElements.executeWorkflowResult) {
             dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
         }

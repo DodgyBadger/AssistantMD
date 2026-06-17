@@ -8,6 +8,7 @@
             const status = state.systemStatus;
             if (!status) return;
             renderDashboardVaults(status);
+            renderDashboardExecutionTasks();
             renderDashboardWorkflows(status);
             renderDashboardVaultActivity(status);
         }
@@ -76,7 +77,6 @@
             if (combinedWorkflows.length === 0) {
                 elements.workflowsStatus.innerHTML = `
                     ${renderDashboardBadgeStyles()}
-                    ${renderRunningWorkflowTasks()}
                     <p class="text-sm text-txt-secondary">No workflows loaded.</p>
                 `;
                 return;
@@ -85,7 +85,6 @@
 
             elements.workflowsStatus.innerHTML = `
                 ${renderDashboardBadgeStyles()}
-                ${renderRunningWorkflowTasks()}
                 <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
                     <table class="dashboard-table">
                         <thead>
@@ -158,6 +157,14 @@
                         </tbody>
                     </table>
                 </div>
+            `;
+        }
+
+        function renderDashboardExecutionTasks() {
+            if (!elements.executionTasksStatus) return;
+            elements.executionTasksStatus.innerHTML = `
+                ${renderDashboardBadgeStyles()}
+                ${renderInFlightTasks()}
             `;
         }
 
@@ -360,39 +367,40 @@
             `;
         }
 
-        function renderRunningWorkflowTasks() {
-            const tasks = activeWorkflowTasks();
+        function renderInFlightTasks() {
+            const tasks = activeExecutionTasks();
             if (!tasks.length) {
                 return `
                     <div class="mb-3 rounded-md border border-border-primary bg-app-elevated p-3 text-sm text-txt-secondary">
-                        No workflows are currently running.
+                        No tasks are currently running.
                     </div>
                 `;
             }
 
             return `
-                <div class="mb-4 rounded-md border border-border-primary bg-app-elevated p-3">
+                <div class="rounded-md border border-border-primary bg-app-elevated p-3">
                     <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <p class="font-semibold text-txt-primary">Running Workflows</p>
-                            <p class="text-xs text-txt-secondary">${tasks.length} active workflow task${tasks.length === 1 ? '' : 's'}</p>
+                            <p class="font-semibold text-txt-primary">In-flight Tasks</p>
+                            <p class="text-xs text-txt-secondary">${tasks.length} active task${tasks.length === 1 ? '' : 's'}</p>
                         </div>
                         <button
                             type="button"
                             class="chat-stop-btn ui-icon-button"
-                            data-dashboard-workflow-stop-all="true"
-                            aria-label="Stop all workflows"
-                            title="Stop all workflows"
+                            data-dashboard-task-stop-all="true"
+                            aria-label="Stop all tasks"
+                            title="Stop all tasks"
                         >
                             ${icons.STOP_ICON_SVG}
                         </button>
                     </div>
-                    <div class="dashboard-table-wrap" role="region" aria-label="Running workflows" tabindex="0">
+                    <div class="dashboard-table-wrap" role="region" aria-label="In-flight tasks" tabindex="0">
                         <table class="dashboard-table">
                             <thead>
                                 <tr>
-                                    <th>Workflow</th>
-                                    <th>Vault</th>
+                                    <th>Task</th>
+                                    <th>Scope</th>
+                                    <th>Kind</th>
                                     <th>Status</th>
                                     <th>Started</th>
                                     <th>Source</th>
@@ -403,10 +411,11 @@
                                 ${tasks.map(task => `
                                     <tr>
                                         <td class="cell-xs">
-                                            <strong>${escapeHtml(workflowTaskName(task))}</strong>
+                                            <strong>${escapeHtml(executionTaskName(task))}</strong>
                                             <div class="cell-mono subtle">${escapeHtml(task.task_id || '')}</div>
                                         </td>
-                                        <td class="cell-xs">${escapeHtml(workflowTaskVault(task))}</td>
+                                        <td class="cell-xs">${escapeHtml(executionTaskScopeLabel(task))}</td>
+                                        <td class="cell-xs">${escapeHtml(task.kind || 'task')}</td>
                                         <td class="cell-xs">${escapeHtml(task.status || 'running')}</td>
                                         <td class="cell-xs">${formatShortDate(task.started_at || task.created_at)}</td>
                                         <td class="cell-xs">${escapeHtml(task.source || 'unknown')}</td>
@@ -414,9 +423,9 @@
                                             <button
                                                 type="button"
                                                 class="chat-stop-btn ui-icon-button is-compact"
-                                                data-dashboard-workflow-stop="${escapeHtml(task.task_id || '')}"
-                                                aria-label="Stop workflow"
-                                                title="Stop workflow"
+                                                data-dashboard-task-stop="${escapeHtml(task.task_id || '')}"
+                                                aria-label="Stop task"
+                                                title="Stop task"
                                             >
                                                 ${icons.STOP_ICON_SVG}
                                             </button>
@@ -430,29 +439,36 @@
             `;
         }
 
-        function activeWorkflowTasks() {
-            return (state.workflowTasks || []).filter(task => !callbacks.isTerminalTaskStatus(task.status));
+        function activeExecutionTasks() {
+            return (state.executionTasks || []).filter(task => !callbacks.isTerminalTaskStatus(task.status));
         }
 
-        function workflowTaskName(task) {
-            return task?.metadata?.workflow_id || task?.label || '';
+        function executionTaskName(task) {
+            return task?.metadata?.workflow_id
+                || task?.metadata?.session_id
+                || task?.metadata?.activity_label
+                || task?.label
+                || task?.task_id
+                || '';
         }
 
-        function workflowTaskVault(task) {
+        function executionTaskScopeLabel(task) {
             const scope = String(task?.scope || '');
-            const prefix = 'workflow_vault:';
-            return scope.startsWith(prefix) ? scope.slice(prefix.length) : '';
+            if (scope.startsWith('workflow_vault:')) return scope.slice('workflow_vault:'.length);
+            if (scope.startsWith('chat_session:')) return scope.slice('chat_session:'.length);
+            if (scope.startsWith('ingestion_vault:')) return scope.slice('ingestion_vault:'.length);
+            return scope || '—';
         }
 
-        function syncWorkflowTaskPolling() {
-            const hasActiveWorkflowTasks = activeWorkflowTasks().length > 0;
-            if (hasActiveWorkflowTasks && !state.workflowTaskPollTimer) {
-                state.workflowTaskPollTimer = window.setInterval(() => {
-                    callbacks.fetchWorkflowTasks({ render: true });
+        function syncExecutionTaskPolling() {
+            const hasActiveExecutionTasks = activeExecutionTasks().length > 0;
+            if (hasActiveExecutionTasks && !state.executionTaskPollTimer) {
+                state.executionTaskPollTimer = window.setInterval(() => {
+                    callbacks.fetchExecutionTasks({ render: true });
                 }, 2000);
-            } else if (!hasActiveWorkflowTasks && state.workflowTaskPollTimer) {
-                window.clearInterval(state.workflowTaskPollTimer);
-                state.workflowTaskPollTimer = null;
+            } else if (!hasActiveExecutionTasks && state.executionTaskPollTimer) {
+                window.clearInterval(state.executionTaskPollTimer);
+                state.executionTaskPollTimer = null;
             }
         }
 
@@ -491,6 +507,25 @@
                 });
             }
 
+            if (elements.executionTasksStatus) {
+                elements.executionTasksStatus.addEventListener('click', (event) => {
+                    const target = event.target;
+                    if (!(target instanceof Element)) return;
+                    const stopButton = target.closest('[data-dashboard-task-stop]');
+                    if (stopButton instanceof HTMLElement) {
+                        callbacks.stopExecutionTask(
+                            stopButton.getAttribute('data-dashboard-task-stop') || '',
+                            stopButton
+                        );
+                        return;
+                    }
+                    const stopAllButton = target.closest('[data-dashboard-task-stop-all]');
+                    if (stopAllButton instanceof HTMLElement) {
+                        callbacks.stopAllExecutionTasks(stopAllButton);
+                    }
+                });
+            }
+
             if (elements.workflowsStatus) {
                 elements.workflowsStatus.addEventListener('click', (event) => {
                     const target = event.target;
@@ -518,19 +553,6 @@
                         );
                         return;
                     }
-                    const stopButton = target.closest('[data-dashboard-workflow-stop]');
-                    if (stopButton instanceof HTMLElement) {
-                        callbacks.stopWorkflow(
-                            stopButton.getAttribute('data-dashboard-workflow-stop') || '',
-                            stopButton
-                        );
-                        return;
-                    }
-                    const stopAllButton = target.closest('[data-dashboard-workflow-stop-all]');
-                    if (stopAllButton instanceof HTMLElement) {
-                        callbacks.stopAllWorkflows(stopAllButton);
-                        return;
-                    }
                     const workflowSortButton = target.closest('[data-dashboard-workflow-sort]');
                     if (workflowSortButton instanceof HTMLElement) {
                         state.dashboardWorkflowSort = {
@@ -545,8 +567,8 @@
 
         return Object.freeze({
             displaySystemStatus,
-            activeWorkflowTasks,
-            syncWorkflowTaskPolling,
+            activeExecutionTasks,
+            syncExecutionTaskPolling,
             attachEventListeners,
         });
     }

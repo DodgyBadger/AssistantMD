@@ -6,8 +6,9 @@
 ### Long-running chat execution
 
 - Streaming chat now runs as a task-owned background operation, so browser refreshes or SSE subscriber disconnects do not inherently cancel the model run.
-- The chat UI starts streaming runs through task APIs, can reconnect to buffered task events, and stops responses by cancelling the active task.
+- The chat UI starts streaming runs through task APIs, reads buffered task events, and stops responses by cancelling the active task.
 - Multiple submitted prompts for the same chat session are queued behind the active run, preserving turn order for long-running sessions.
+- The Dashboard status area now shows active chat, workflow, compaction, ingestion, and other tasks with shared stop controls.
 - Added a normalized chat surface adapter contract so future Telegram, Discord, CLI, or other chat surfaces can reuse the same task-owned execution path.
 
 

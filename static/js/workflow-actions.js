@@ -274,13 +274,13 @@
                 if (!task.task_id) {
                     throw new Error('Workflow did not return an execution task.');
                 }
-                await callbacks.fetchWorkflowTasks({ render: true });
+                await callbacks.fetchExecutionTasks({ render: true });
                 elements.executeWorkflowResult.innerHTML = `
                     <div class="state-surface-info p-3 rounded border">
                         <p class="font-medium">Workflow started</p>
                         <p>Workflow: ${utils.escapeHtml(globalId)}</p>
                         <p class="text-sm">Task: ${utils.escapeHtml(task.task_id)}</p>
-                        <p class="text-sm">Use the Running Workflows list to monitor or stop this task.</p>
+                        <p class="text-sm">Use the In-flight Tasks list to monitor or stop this task.</p>
                     </div>
                 `;
                 monitorWorkflowTask(task.task_id);
@@ -308,7 +308,7 @@
                     if (!callbacks.isTerminalTaskStatus(task.status)) {
                         continue;
                     }
-                    await callbacks.fetchWorkflowTasks({ render: true });
+                    await callbacks.fetchExecutionTasks({ render: true });
                     renderWorkflowTaskResult(task);
                     return;
                 }
@@ -317,11 +317,11 @@
             }
         }
 
-        async function stopWorkflow(taskId, triggerButton = null) {
+        async function stopExecutionTask(taskId, triggerButton = null) {
             if (!taskId) return;
             if (triggerButton) {
                 triggerButton.disabled = true;
-                icons.setIconButtonLabel(triggerButton, 'Stopping workflow...');
+                icons.setIconButtonLabel(triggerButton, 'Stopping task...');
             }
             try {
                 const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}/cancel`, {
@@ -336,33 +336,33 @@
                     <div class="state-surface-info p-3 rounded border">
                         <p class="font-medium">Stop requested</p>
                         <p class="text-sm">Task: ${utils.escapeHtml(taskId)}</p>
-                        <p class="text-sm">Files mutated by this workflow will be rolled back when cancellation completes.</p>
+                        <p class="text-sm">Files mutated by this task will be rolled back when cancellation completes, where applicable.</p>
                     </div>
                 `;
-                await callbacks.fetchWorkflowTasks({ render: true });
+                await callbacks.fetchExecutionTasks({ render: true });
             } catch (error) {
-                console.error('Error stopping workflow:', error);
+                console.error('Error stopping task:', error);
                 elements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
                 if (triggerButton) {
                     triggerButton.disabled = false;
-                    icons.setIconButtonLabel(triggerButton, 'Stop workflow');
+                    icons.setIconButtonLabel(triggerButton, 'Stop task');
                 }
             }
         }
 
-        async function stopAllWorkflows(triggerButton = null) {
-            const tasks = callbacks.activeWorkflowTasks();
+        async function stopAllExecutionTasks(triggerButton = null) {
+            const tasks = callbacks.activeExecutionTasks();
             if (!tasks.length) {
-                elements.executeWorkflowResult.innerHTML = '<p class="text-sm text-txt-secondary">No running workflows to stop.</p>';
+                elements.executeWorkflowResult.innerHTML = '<p class="text-sm text-txt-secondary">No running tasks to stop.</p>';
                 return;
             }
-            const confirmed = window.confirm(`Stop ${tasks.length} running workflow task${tasks.length === 1 ? '' : 's'}?`);
+            const confirmed = window.confirm(`Stop ${tasks.length} running task${tasks.length === 1 ? '' : 's'}?`);
             if (!confirmed) {
                 return;
             }
             if (triggerButton) {
                 triggerButton.disabled = true;
-                icons.setIconButtonLabel(triggerButton, 'Stopping all workflows...');
+                icons.setIconButtonLabel(triggerButton, 'Stopping all tasks...');
             }
             try {
                 const results = await Promise.allSettled(
@@ -381,26 +381,26 @@
                         failures.push(`HTTP ${result.value.status}`);
                     }
                 }
-                await callbacks.fetchWorkflowTasks({ render: true });
+                await callbacks.fetchExecutionTasks({ render: true });
                 if (failures.length) {
                     elements.executeWorkflowResult.innerHTML = `
-                        <p class="state-error">Stop requested for ${tasks.length - failures.length} workflow task${tasks.length - failures.length === 1 ? '' : 's'}, but ${failures.length} failed.</p>
+                        <p class="state-error">Stop requested for ${tasks.length - failures.length} task${tasks.length - failures.length === 1 ? '' : 's'}, but ${failures.length} failed.</p>
                     `;
                     return;
                 }
                 elements.executeWorkflowResult.innerHTML = `
                     <div class="state-surface-info p-3 rounded border">
-                        <p class="font-medium">Stop requested for all running workflows</p>
-                        <p class="text-sm">${tasks.length} workflow task${tasks.length === 1 ? '' : 's'} will stop and roll back mutated files where applicable.</p>
+                        <p class="font-medium">Stop requested for all running tasks</p>
+                        <p class="text-sm">${tasks.length} task${tasks.length === 1 ? '' : 's'} will stop and roll back mutated files where applicable.</p>
                     </div>
                 `;
             } catch (error) {
-                console.error('Error stopping all workflows:', error);
+                console.error('Error stopping all tasks:', error);
                 elements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
             } finally {
                 if (triggerButton) {
                     triggerButton.disabled = false;
-                    icons.setIconButtonLabel(triggerButton, 'Stop all workflows');
+                    icons.setIconButtonLabel(triggerButton, 'Stop all tasks');
                 }
             }
         }
@@ -435,8 +435,8 @@
             toggleWorkflowEnabled,
             openFileEditor: openWorkflowFileEditor,
             executeWorkflow,
-            stopWorkflow,
-            stopAllWorkflows,
+            stopExecutionTask,
+            stopAllExecutionTasks,
         });
     }
 
