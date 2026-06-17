@@ -163,6 +163,8 @@ Risk:
 
 ### Slice 2: Background Streaming Worker
 
+Status: implemented.
+
 Scope:
 
 - Add `start_chat_stream_task(...)` service.
@@ -183,6 +185,12 @@ Validation:
 - Task detail reaches `completed`.
 - Session history includes the assistant result.
 - Existing chat cancellation scenario still passes.
+
+Completed validation:
+
+- `python validation/run_validation.py run integration/core/chat_stream_background_task integration/core/chat_task_event_buffer integration/core/chat_cancellation`
+- `python -m ruff check core/chat/task_execution.py core/chat/task_events.py validation/scenarios/integration/core/chat_stream_background_task.py validation/scenarios/integration/core/chat_task_event_buffer.py`
+- `python -m compileall core/chat/task_execution.py core/chat/task_events.py validation/scenarios/integration/core/chat_stream_background_task.py validation/scenarios/integration/core/chat_task_event_buffer.py`
 
 Risk:
 
