@@ -54,10 +54,14 @@
         modelDraft: null,
         providerEdit: null,
         providerDraft: null,
+        openAiOauthPaste: '',
+        isOpenAiOauthBusy: false,
         secretEdit: null,
         secretDraft: null,
         settingsFilter: ''
     };
+
+    const BUILT_IN_PROVIDER_NAMES = new Set(['anthropic', 'google', 'grok', 'mistral', 'openai', 'openrouter']);
 
     const SECRET_METADATA = {
         OPENAI_API_KEY: { label: 'OpenAI API Key', description: 'Required for OpenAI model aliases' },
@@ -267,6 +271,7 @@
         elements.providerAddBtn?.addEventListener('click', startNewProvider);
         elements.providerList?.addEventListener('click', handleProviderTableClick);
         elements.providerList?.addEventListener('input', handleProviderInputChange);
+        elements.providerList?.addEventListener('change', handleProviderInputChange);
 
         elements.secretAddBtn?.addEventListener('click', startNewSecret);
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
@@ -644,6 +649,8 @@
                 return;
             }
             const editable = provider.user_editable === true;
+            const isBuiltIn = isBuiltInProviderName(provider.name);
+            const isOpenAi = provider.name === 'openai';
 
             const apiKeyDisplay = provider.api_key
                 ? provider.api_key_has_value
@@ -669,16 +676,19 @@
                     </div>`
                 : `<div class="flex items-center gap-2"><span class="text-sm text-txt-secondary">No base URL configured</span></div>`;
 
-            const actions = editable
-                ? `
-                    <button data-action="edit" data-provider="${escapeHtml(provider.name)}" ${iconButton('edit', 'Edit provider', 'is-primary')}>${iconSvg('edit')}</button>
-                    <button data-action="delete" data-provider="${escapeHtml(provider.name)}" ${iconButton('trash', 'Delete provider', 'is-danger')}>${iconSvg('trash')}</button>
-                `
-                : '';
+            const actions = [
+                editable
+                    ? `<button data-action="edit" data-provider="${escapeHtml(provider.name)}" ${iconButton('edit', 'Edit provider', 'is-primary')}>${iconSvg('edit')}</button>`
+                    : '',
+                editable && !isBuiltIn
+                    ? `<button data-action="delete" data-provider="${escapeHtml(provider.name)}" ${iconButton('trash', 'Delete provider', 'is-danger')}>${iconSvg('trash')}</button>`
+                    : '',
+            ].join('');
 
-            const providerMeta = provider.user_editable === false
+            const providerMeta = isBuiltIn
                 ? '<div class="text-xs text-txt-secondary mt-0.5">Built-in provider</div>'
                 : '';
+            const openAiOAuthPanel = isOpenAi ? renderOpenAiOAuthPanel(provider) : '';
 
             cards.push(`
                 <div class="provider-card rounded-lg border border-border-primary bg-app-card px-5 py-4 shadow-sm hover:shadow transition-shadow" data-provider-row="${escapeHtml(provider.name)}" style="max-width: 1400px;">
@@ -702,6 +712,7 @@
                                 <div>${baseUrlDisplay}</div>
                             </div>
                         </div>
+                        ${openAiOAuthPanel}
                     </div>
                 </div>
             `);
@@ -715,12 +726,111 @@
         // provider options are built per-row during render; nothing to do here.
     }
 
+    function isBuiltInProviderName(name) {
+        return BUILT_IN_PROVIDER_NAMES.has(String(name || '').toLowerCase());
+    }
+
+    function renderOpenAiOAuthPanel(provider) {
+        const oauthEnabled = provider.oauth_enabled === true;
+        const oauthStatus = provider.oauth_status || 'disabled';
+        const connected = oauthStatus === 'connected';
+        const pending = oauthStatus === 'pending';
+        const disabledReason = provider.oauth_disabled_reason || '';
+        const accountText = provider.oauth_account_id ? `Account ${provider.oauth_account_id}` : 'No account connected';
+        const expiresText = provider.oauth_expires_at ? `Expires ${formatDateTime(provider.oauth_expires_at)}` : 'No token expiry recorded';
+        const refreshText = provider.oauth_last_refresh_at ? `Last refresh ${formatDateTime(provider.oauth_last_refresh_at)}` : 'No refresh recorded';
+        const fallbackText = provider.oauth_api_key_fallback_enabled
+            ? provider.oauth_api_key_fallback_available
+                ? 'API key fallback enabled and available'
+                : 'API key fallback enabled but no key is set'
+            : 'API key fallback disabled';
+        const modeText = [
+            `Configured: ${formatAuthMode(provider.configured_auth_mode)}`,
+            `Effective: ${formatAuthMode(provider.effective_auth_mode)}`,
+        ].join(' · ');
+        const statusTone = connected ? 'pill-success' : pending ? 'pill-warning' : 'pill-error';
+        const disableControls = state.isOpenAiOauthBusy || !oauthEnabled;
+        const disabledAttr = disableControls ? 'disabled' : '';
+        const pasteValue = escapeHtml(state.openAiOauthPaste || '');
+
+        return `
+            <div class="rounded-lg border border-border-secondary bg-app-elevated px-4 py-3">
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div class="space-y-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-medium text-txt-secondary">OpenAI OAuth</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${statusTone} border">${escapeHtml(formatOAuthStatus(oauthStatus))}</span>
+                        </div>
+                        <div class="text-xs text-txt-secondary">${escapeHtml(modeText)}</div>
+                        <div class="text-xs text-txt-secondary">${escapeHtml(accountText)} · ${escapeHtml(expiresText)} · ${escapeHtml(refreshText)}</div>
+                        <div class="text-xs text-txt-secondary">${escapeHtml(fallbackText)}</div>
+                        ${provider.oauth_last_refresh_error ? `<div class="text-xs state-error">${escapeHtml(provider.oauth_last_refresh_error)}</div>` : ''}
+                        ${!oauthEnabled ? `<div class="text-xs state-warning">${escapeHtml(disabledReason || 'Disabled by openai_oauth_enabled.')}</div>` : ''}
+                    </div>
+                    <div class="flex flex-wrap gap-2 justify-end">
+                        <button type="button" data-action="openai-oauth-start" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${disabledAttr}>${connected ? 'Reconnect' : 'Connect'}</button>
+                        <button type="button" data-action="openai-oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${state.isOpenAiOauthBusy || !connected ? 'disabled' : ''}>Disconnect</button>
+                    </div>
+                </div>
+                <div class="mt-3 flex flex-col gap-2 md:flex-row">
+                    <input data-openai-oauth-paste class="w-full flex-1 px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="Paste the final redirect URL or code" value="${pasteValue}" ${disabledAttr} />
+                    <button type="button" data-action="openai-oauth-complete" class="shrink-0 px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed" ${disableControls || !state.openAiOauthPaste.trim() ? 'disabled' : ''}>Complete OAuth</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function formatOAuthStatus(status) {
+        const labels = {
+            connected: 'Connected',
+            pending: 'Pending',
+            disconnected: 'Disconnected',
+            disabled: 'Disabled',
+        };
+        return labels[status] || status || 'Unknown';
+    }
+
+    function formatAuthMode(mode) {
+        return mode === 'oauth' ? 'OAuth' : 'API key';
+    }
+
+    function formatDateTime(value) {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+    }
+
     function renderProviderEditCard(draft, { isNew }) {
         const rowKey = isNew ? '__new' : (state.providerEdit?.key || draft.name || '');
         const nameReadonly = isNew ? '' : 'readonly';
         const nameHelp = isNew
             ? 'Provider names identify custom endpoints used by models.'
             : 'Provider names are identities and cannot be renamed here.';
+        const isOpenAiDraft = !isNew && draft.name === 'openai';
+        const openAiAuthControls = isOpenAiDraft
+            ? `
+                <div class="rounded-lg border border-border-secondary bg-app-elevated px-4 py-3">
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="block text-xs font-medium text-txt-primary mb-1.5">Auth Mode</label>
+                            <select data-provider-field="auth_mode" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors">
+                                <option value="api_key" ${(draft.auth_mode || 'api_key') === 'api_key' ? 'selected' : ''}>API key</option>
+                                <option value="oauth" ${draft.auth_mode === 'oauth' ? 'selected' : ''}>OAuth</option>
+                            </select>
+                            <p class="text-xs text-txt-secondary mt-1">OAuth requires openai_oauth_enabled and a connected account.</p>
+                        </div>
+                        <label class="flex items-start gap-3 rounded-md border border-border-secondary px-3 py-2">
+                            <input data-provider-field="oauth_api_key_fallback_enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-border-secondary text-accent focus:ring-accent" ${draft.oauth_api_key_fallback_enabled ? 'checked' : ''} />
+                            <span>
+                                <span class="block text-xs font-medium text-txt-primary">Allow API key fallback</span>
+                                <span class="block text-xs text-txt-secondary mt-1">Only use the API key when OAuth cannot be used.</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+            `
+            : '';
         return `
             <div class="provider-card rounded-lg border border-border-primary bg-app-card editing-highlight px-5 py-4 shadow-sm" data-provider-row="${escapeHtml(rowKey)}" data-mode="edit" style="max-width: 1400px;">
                 <div class="space-y-4">
@@ -741,6 +851,7 @@
                             <p class="text-xs text-txt-secondary mt-1">Store base URLs as secrets; enter the secret name here.</p>
                         </div>
                     </div>
+                    ${openAiAuthControls}
                     <div class="flex justify-end gap-2">
                         <button data-action="cancel-provider" ${iconButton('circleX', 'Cancel provider edit')}>${iconSvg('circleX')}</button>
                         <button data-action="save-provider" ${iconButton('save', 'Save provider', 'is-primary')}>${iconSvg('save')}</button>
@@ -1468,18 +1579,36 @@ async function saveModelRow(rowKey) {
             cancelProviderEdit();
         } else if (action === 'save-provider') {
             await saveProviderRow(actionButton);
+        } else if (action === 'openai-oauth-start') {
+            await startOpenAiOAuth(actionButton);
+        } else if (action === 'openai-oauth-complete') {
+            await completeOpenAiOAuth(actionButton);
+        } else if (action === 'openai-oauth-disconnect') {
+            await disconnectOpenAiOAuth(actionButton);
         }
     }
 
     function handleProviderInputChange(event) {
         const target = event.target;
-        if (!state.providerEdit || !(target instanceof HTMLInputElement) || !target.dataset.providerField) {
+        if (target instanceof HTMLInputElement && target.matches('[data-openai-oauth-paste]')) {
+            state.openAiOauthPaste = target.value;
+            const completeButton = elements.providerList?.querySelector('[data-action="openai-oauth-complete"]');
+            if (completeButton instanceof HTMLButtonElement) {
+                completeButton.disabled = state.isOpenAiOauthBusy || !target.value.trim();
+            }
             return;
         }
+        if (!state.providerEdit || !target.dataset.providerField) return;
+        if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) return;
+
         if (!state.providerDraft) {
             state.providerDraft = {};
         }
-        state.providerDraft[target.dataset.providerField] = target.value;
+        if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+            state.providerDraft[target.dataset.providerField] = target.checked;
+        } else {
+            state.providerDraft[target.dataset.providerField] = target.value;
+        }
     }
 
     function startNewProvider() {
@@ -1515,7 +1644,9 @@ async function saveModelRow(rowKey) {
         state.providerDraft = {
             name: provider.name,
             api_key: provider.api_key || '',
-            base_url: provider.base_url || ''
+            base_url: provider.base_url || '',
+            auth_mode: provider.configured_auth_mode || 'api_key',
+            oauth_api_key_fallback_enabled: provider.oauth_api_key_fallback_enabled === true
         };
         renderProviders();
         setStatus(elements.providerFeedback, `Editing '${provider.name}'.`, 'info');
@@ -1561,6 +1692,10 @@ async function saveModelRow(rowKey) {
                 api_key: apiKeyInput ? normalizeSecretName(apiKeyInput) : '',
                 base_url: baseUrlInput ? normalizeSecretName(baseUrlInput) : ''
             };
+            if (name === 'openai') {
+                payload.auth_mode = draft.auth_mode === 'oauth' ? 'oauth' : 'api_key';
+                payload.oauth_api_key_fallback_enabled = draft.oauth_api_key_fallback_enabled === true;
+            }
 
             const response = await fetch(`api/system/providers/${encodeURIComponent(name)}`, {
                 method: 'PUT',
@@ -1620,6 +1755,128 @@ async function saveModelRow(rowKey) {
             setStatus(elements.providerFeedback, resultMessage.text, resultMessage.restart ? 'warning' : 'success');
         } catch (error) {
             setStatus(elements.providerFeedback, `Failed to delete provider: ${error.message}`, 'error');
+        }
+    }
+
+    async function startOpenAiOAuth(button) {
+        if (state.isOpenAiOauthBusy) return;
+
+        state.isOpenAiOauthBusy = true;
+        setOpenAiOauthButtonBusy(button, 'Starting OAuth...');
+        setStatus(elements.providerFeedback, 'Starting OpenAI OAuth…', 'info');
+
+        try {
+            const response = await fetch('api/system/providers/openai/oauth/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            const opened = window.open(result.auth_url, '_blank', 'noopener,noreferrer');
+            state.openAiOauthPaste = '';
+            await loadProviders();
+            const popupText = opened
+                ? 'Paste the final redirect URL here after authorizing OpenAI.'
+                : `Open this URL, then paste the final redirect URL here: ${result.auth_url}`;
+            setStatus(elements.providerFeedback, popupText, 'info');
+        } catch (error) {
+            setStatus(elements.providerFeedback, `Failed to start OpenAI OAuth: ${error.message}`, 'error');
+        } finally {
+            state.isOpenAiOauthBusy = false;
+            renderProviders();
+            setOpenAiOauthButtonIdle(button, 'Connect');
+        }
+    }
+
+    async function completeOpenAiOAuth(button) {
+        if (state.isOpenAiOauthBusy) return;
+        const pasted = (state.openAiOauthPaste || '').trim();
+        if (!pasted) {
+            setStatus(elements.providerFeedback, 'Paste the final redirect URL or code first.', 'warning');
+            return;
+        }
+
+        state.isOpenAiOauthBusy = true;
+        setOpenAiOauthButtonBusy(button, 'Completing OAuth...');
+        setStatus(elements.providerFeedback, 'Completing OpenAI OAuth…', 'info');
+
+        try {
+            const payload = pasted.includes('://')
+                ? { redirect_url: pasted }
+                : { code: pasted };
+            const response = await fetch('api/system/providers/openai/oauth/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            await response.json();
+            state.openAiOauthPaste = '';
+            await loadProviders();
+            await loadModels();
+            await notifyConfigChanged();
+            setStatus(elements.providerFeedback, 'OpenAI OAuth connected.', 'success');
+        } catch (error) {
+            setStatus(elements.providerFeedback, `Failed to complete OpenAI OAuth: ${error.message}`, 'error');
+        } finally {
+            state.isOpenAiOauthBusy = false;
+            renderProviders();
+            setOpenAiOauthButtonIdle(button, 'Complete OAuth');
+        }
+    }
+
+    async function disconnectOpenAiOAuth(button) {
+        if (state.isOpenAiOauthBusy) return;
+        if (!window.confirm('Disconnect the OpenAI OAuth account?')) return;
+
+        state.isOpenAiOauthBusy = true;
+        setOpenAiOauthButtonBusy(button, 'Disconnecting...');
+        setStatus(elements.providerFeedback, 'Disconnecting OpenAI OAuth…', 'info');
+
+        try {
+            const response = await fetch('api/system/providers/openai/oauth', {
+                method: 'DELETE'
+            });
+            if (!response.ok) {
+                const errorData = await safeJson(response);
+                throw new Error(errorData?.message || `HTTP ${response.status}`);
+            }
+
+            await response.json();
+            state.openAiOauthPaste = '';
+            await loadProviders();
+            await loadModels();
+            await notifyConfigChanged();
+            setStatus(elements.providerFeedback, 'OpenAI OAuth disconnected.', 'success');
+        } catch (error) {
+            setStatus(elements.providerFeedback, `Failed to disconnect OpenAI OAuth: ${error.message}`, 'error');
+        } finally {
+            state.isOpenAiOauthBusy = false;
+            renderProviders();
+            setOpenAiOauthButtonIdle(button, 'Disconnect');
+        }
+    }
+
+    function setOpenAiOauthButtonBusy(button, label) {
+        if (button instanceof HTMLButtonElement) {
+            button.disabled = true;
+            button.textContent = label;
+        }
+    }
+
+    function setOpenAiOauthButtonIdle(button, label) {
+        if (button instanceof HTMLButtonElement) {
+            button.disabled = false;
+            button.textContent = label;
         }
     }
 

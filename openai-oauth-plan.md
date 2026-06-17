@@ -441,6 +441,15 @@ Testable artifacts:
   - OAuth effective mode routes through an injectable runtime adapter boundary
   - OAuth mode fails clearly when the real Codex-compatible adapter is not
     configured
+- Slice 6 implemented:
+  - OpenAI provider card now shows configured/effective auth mode, OAuth status,
+    connected-account metadata, fallback readiness, and kill-switch state
+  - Configuration UI exposes connect/reconnect, manual paste completion, and
+    disconnect actions against the OpenAI OAuth API endpoints
+  - Allowlisted OpenAI provider editing can change auth mode and explicit API-key
+    fallback opt-in
+  - Built-in providers remain visually identified and are not shown as deletable
+    even when OpenAI is allowlisted for editing
 
 ## Local Smoke Tests During Development
 
@@ -453,6 +462,7 @@ Testable artifacts:
 - Token refresh required versus no-refresh-required decisions.
 - OpenAI runtime factory output for API-key, OAuth, disabled, failed, and
   explicit-fallback branches.
+- Configuration UI syntax and diff checks for the OpenAI provider surface.
 
 ## Validation Requests For Maintainers
 
