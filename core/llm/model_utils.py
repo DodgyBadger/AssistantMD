@@ -10,7 +10,8 @@ from typing import Dict, Tuple, Any
 
 from core.logger import UnifiedLogger
 from core.llm.model_selection import resolve_model_execution_spec
-from core.settings.store import get_models_config, get_providers_config
+from core.llm.openai_oauth import resolve_openai_auth
+from core.settings.store import get_general_settings, get_models_config, get_providers_config
 from core.settings.secrets_store import get_secret_value, secret_has_value, load_secrets
 
 # Create module logger
@@ -163,6 +164,11 @@ def _has_resolved_base_url(provider_config: Dict[str, Any]) -> bool:
     return "://" in base_url
 
 
+def _openai_oauth_enabled() -> bool:
+    entry = get_general_settings().get("openai_oauth_enabled")
+    return bool(getattr(entry, "value", False))
+
+
 def get_model_capabilities(model_name: str) -> set[str]:
     """Return normalized capability set for a model alias."""
     model_key = model_name.lower().strip()
@@ -201,6 +207,19 @@ def validate_api_keys(model_name: str) -> None:
     """
     provider, _ = resolve_model(model_name)
     provider_config = get_provider_config(provider)
+    if provider == "openai":
+        resolution = resolve_openai_auth(
+            provider_config,
+            oauth_enabled=_openai_oauth_enabled(),
+            base_url_available=_has_resolved_base_url(provider_config),
+        )
+        if resolution.available:
+            return
+        raise ValueError(
+            resolution.message
+            or f"Model '{model_name}' requires usable OpenAI auth configuration."
+        )
+
     required_key = provider_config.get('api_key')
 
     # No API key required (test model, custom endpoints, etc.)

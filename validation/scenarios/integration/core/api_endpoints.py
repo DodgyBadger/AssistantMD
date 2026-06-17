@@ -213,6 +213,16 @@ class ApiEndpointsScenario(BaseScenario):
         assert oauth_complete_payload["oauth_account_id"] == "validation-account", (
             "OpenAI OAuth status exposes sanitized account metadata"
         )
+        oauth_models = self.call_api("/api/system/models")
+        assert oauth_models.status_code == 200, (
+            "Model listing succeeds after OAuth completion"
+        )
+        oauth_gpt = next(
+            model for model in oauth_models.json() if model["name"] == "gpt"
+        )
+        assert oauth_gpt["available"] is True, (
+            "OpenAI model is available while OAuth is connected"
+        )
 
         oauth_disconnect = self.call_api(
             "/api/system/providers/openai/oauth",
@@ -225,6 +235,16 @@ class ApiEndpointsScenario(BaseScenario):
         assert oauth_status.status_code == 200, "OpenAI OAuth status endpoint succeeds"
         assert oauth_status.json()["oauth_status"] == "disconnected", (
             "OpenAI OAuth status reports disconnected after disconnect"
+        )
+        disconnected_models = self.call_api("/api/system/models")
+        assert disconnected_models.status_code == 200, (
+            "Model listing succeeds after OAuth disconnect"
+        )
+        disconnected_gpt = next(
+            model for model in disconnected_models.json() if model["name"] == "gpt"
+        )
+        assert disconnected_gpt["available"] is False, (
+            "OpenAI model is unavailable after disconnect without API-key fallback"
         )
         set_openai_oauth_token_adapter(None)
 

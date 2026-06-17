@@ -426,6 +426,15 @@ Testable artifacts:
   - OpenAI OAuth start/callback/manual-complete/status/disconnect endpoints
   - deterministic static adapter coverage in the API scenario
   - disconnect clears token and pending state without changing provider auth mode
+- Slice 4 implemented:
+  - centralized OpenAI auth resolver for configured/effective auth modes
+  - runtime `validate_api_keys` now accepts connected OAuth and explicit
+    fallback paths
+  - configuration health/model availability now reflects OAuth connected,
+    disconnected, fallback, and kill-switch states
+  - provider status uses the resolver for effective auth mode and fallback
+    availability
+  - API scenario asserts model availability changes with OAuth connect/disconnect
 
 ## Local Smoke Tests During Development
 

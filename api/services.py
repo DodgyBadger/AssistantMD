@@ -57,6 +57,7 @@ from core.llm.openai_oauth import (
     complete_openai_oauth_from_redirect,
     get_openai_oauth_status,
     is_openai_oauth_internal_secret,
+    resolve_openai_auth,
     start_openai_oauth as start_openai_oauth_attempt,
 )
 from core.runtime.paths import get_system_root
@@ -2459,7 +2460,6 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
         raw_api_key = config.api_key
         raw_base_url = getattr(config, "base_url", None)
         stored_user_editable = getattr(config, "user_editable", False)
-        auth_mode = getattr(config, "auth_mode", "api_key")
         fallback_enabled = bool(
             getattr(config, "oauth_api_key_fallback_enabled", False)
         )
@@ -2467,7 +2467,6 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
         raw_api_key = config.get('api_key')
         raw_base_url = config.get('base_url')
         stored_user_editable = config.get('user_editable', False)
-        auth_mode = config.get("auth_mode", "api_key")
         fallback_enabled = bool(config.get("oauth_api_key_fallback_enabled", False))
 
     api_key_env = raw_api_key if raw_api_key else None
@@ -2496,8 +2495,14 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
 
     oauth_enabled = _openai_oauth_enabled()
     oauth_connection = get_openai_oauth_status()
-    configured_auth_mode = auth_mode if auth_mode in {"api_key", "oauth"} else "api_key"
-    effective_auth_mode = configured_auth_mode if oauth_enabled else "api_key"
+    resolution = resolve_openai_auth(
+        config,
+        oauth_enabled=oauth_enabled,
+        base_url_available=base_url_has_value,
+        emit_log=False,
+    )
+    configured_auth_mode = resolution.configured_auth_mode
+    effective_auth_mode = resolution.effective_auth_mode
     oauth_status = "disabled" if not oauth_enabled else oauth_connection.status
     oauth_disabled_reason = "global_setting" if not oauth_enabled else None
 
@@ -2507,7 +2512,7 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
     provider_info.oauth_status = oauth_status
     provider_info.oauth_disabled_reason = oauth_disabled_reason
     provider_info.oauth_api_key_fallback_enabled = fallback_enabled
-    provider_info.oauth_api_key_fallback_available = api_key_has_value
+    provider_info.oauth_api_key_fallback_available = resolution.fallback_available
     provider_info.oauth_account_id = oauth_connection.account_id
     provider_info.oauth_expires_at = oauth_connection.expires_at
     provider_info.oauth_last_refresh_at = oauth_connection.last_refresh_at

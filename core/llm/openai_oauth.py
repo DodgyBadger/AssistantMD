@@ -8,12 +8,13 @@ import hashlib
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from core.settings.secrets_store import (
     delete_secret,
     get_secret_value,
+    secret_has_value,
     set_secret_value,
 )
 
@@ -26,6 +27,8 @@ OPENAI_OAUTH_INTERNAL_SECRETS = frozenset(
 OPENAI_OAUTH_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
 OPENAI_OAUTH_PENDING_TTL_SECONDS = 600
 OPENAI_OAUTH_CLIENT_ID = "codex-cli"
+OPENAI_AUTH_MODE_API_KEY = "api_key"
+OPENAI_AUTH_MODE_OAUTH = "oauth"
 
 
 class OpenAIOAuthStateError(ValueError):
@@ -90,6 +93,25 @@ class OpenAIOAuthTokenResult:
     account_id: str | None = None
 
 
+@dataclass(frozen=True)
+class OpenAIAuthResolution:
+    """Resolved OpenAI auth decision for availability and runtime construction."""
+
+    configured_auth_mode: str
+    effective_auth_mode: str
+    oauth_enabled: bool
+    oauth_connected: bool
+    api_key_name: str | None
+    api_key_available: bool
+    base_url_available: bool
+    fallback_enabled: bool
+    fallback_available: bool
+    fallback_used: bool
+    available: bool
+    status: str
+    message: str | None = None
+
+
 class OpenAIOAuthTokenAdapter(Protocol):
     """Adapter boundary for real or fake token exchange and refresh."""
 
@@ -145,6 +167,131 @@ def get_openai_oauth_token_adapter() -> OpenAIOAuthTokenAdapter:
     if _token_adapter is None:
         raise OpenAIOAuthStateError("OpenAI OAuth token adapter is not configured.")
     return _token_adapter
+
+
+def resolve_openai_auth(
+    provider_config: Any,
+    *,
+    oauth_enabled: bool,
+    base_url_available: bool = False,
+    emit_log: bool = True,
+) -> OpenAIAuthResolution:
+    """Resolve effective OpenAI auth behavior from config and stored state."""
+
+    configured_auth_mode = _provider_string(
+        provider_config, "auth_mode", OPENAI_AUTH_MODE_API_KEY
+    )
+    if configured_auth_mode not in {OPENAI_AUTH_MODE_API_KEY, OPENAI_AUTH_MODE_OAUTH}:
+        configured_auth_mode = OPENAI_AUTH_MODE_API_KEY
+
+    api_key_name = _provider_optional_string(provider_config, "api_key")
+    api_key_available = bool(api_key_name and secret_has_value(api_key_name))
+    fallback_enabled = _provider_bool(
+        provider_config, "oauth_api_key_fallback_enabled", False
+    )
+    fallback_available = api_key_available or base_url_available
+    oauth_status = get_openai_oauth_status()
+    oauth_connected = oauth_status.connected
+
+    if not oauth_enabled:
+        resolution = _api_key_resolution(
+            configured_auth_mode=configured_auth_mode,
+            oauth_enabled=False,
+            oauth_connected=oauth_connected,
+            api_key_name=api_key_name,
+            api_key_available=api_key_available,
+            base_url_available=base_url_available,
+            fallback_enabled=fallback_enabled,
+            fallback_available=fallback_available,
+            fallback_used=False,
+            status="oauth_disabled",
+            message=_api_key_missing_message(api_key_name, fallback_available),
+        )
+        if emit_log:
+            _log_openai_auth_resolution(resolution)
+        return resolution
+
+    if configured_auth_mode == OPENAI_AUTH_MODE_API_KEY:
+        resolution = _api_key_resolution(
+            configured_auth_mode=configured_auth_mode,
+            oauth_enabled=True,
+            oauth_connected=oauth_connected,
+            api_key_name=api_key_name,
+            api_key_available=api_key_available,
+            base_url_available=base_url_available,
+            fallback_enabled=fallback_enabled,
+            fallback_available=fallback_available,
+            fallback_used=False,
+            status="api_key",
+            message=_api_key_missing_message(api_key_name, fallback_available),
+        )
+        if emit_log:
+            _log_openai_auth_resolution(resolution)
+        return resolution
+
+    if oauth_connected:
+        resolution = OpenAIAuthResolution(
+            configured_auth_mode=configured_auth_mode,
+            effective_auth_mode=OPENAI_AUTH_MODE_OAUTH,
+            oauth_enabled=True,
+            oauth_connected=True,
+            api_key_name=api_key_name,
+            api_key_available=api_key_available,
+            base_url_available=base_url_available,
+            fallback_enabled=fallback_enabled,
+            fallback_available=fallback_available,
+            fallback_used=False,
+            available=True,
+            status="oauth_connected",
+        )
+        if emit_log:
+            _log_openai_auth_resolution(resolution)
+        return resolution
+
+    if fallback_enabled and fallback_available:
+        resolution = OpenAIAuthResolution(
+            configured_auth_mode=configured_auth_mode,
+            effective_auth_mode=OPENAI_AUTH_MODE_API_KEY,
+            oauth_enabled=True,
+            oauth_connected=False,
+            api_key_name=api_key_name,
+            api_key_available=api_key_available,
+            base_url_available=base_url_available,
+            fallback_enabled=True,
+            fallback_available=True,
+            fallback_used=True,
+            available=True,
+            status="oauth_fallback",
+        )
+        if emit_log:
+            _log_openai_auth_resolution(resolution)
+        return resolution
+
+    message = (
+        "OpenAI OAuth is selected but no connected OAuth account is available. "
+        "Reconnect OpenAI OAuth or switch the provider back to API-key auth."
+    )
+    if fallback_available:
+        message += " API-key fallback is configured but not enabled."
+
+    resolution = OpenAIAuthResolution(
+        configured_auth_mode=configured_auth_mode,
+        effective_auth_mode=OPENAI_AUTH_MODE_OAUTH,
+        oauth_enabled=True,
+        oauth_connected=False,
+        api_key_name=api_key_name,
+        api_key_available=api_key_available,
+        base_url_available=base_url_available,
+        fallback_enabled=fallback_enabled,
+        fallback_available=fallback_available,
+        fallback_used=False,
+        available=False,
+        status="oauth_unavailable",
+        message=message,
+    )
+    if emit_log:
+        _log_openai_auth_resolution(resolution)
+    return resolution
 
 
 def is_openai_oauth_internal_secret(name: str) -> bool:
@@ -500,3 +647,93 @@ def _single_query_value(query: dict[str, list[str]], key: str) -> str | None:
         return None
     value = values[0].strip()
     return value or None
+
+
+def _api_key_resolution(
+    *,
+    configured_auth_mode: str,
+    oauth_enabled: bool,
+    oauth_connected: bool,
+    api_key_name: str | None,
+    api_key_available: bool,
+    base_url_available: bool,
+    fallback_enabled: bool,
+    fallback_available: bool,
+    fallback_used: bool,
+    status: str,
+    message: str | None,
+) -> OpenAIAuthResolution:
+    available = api_key_available or base_url_available
+    return OpenAIAuthResolution(
+        configured_auth_mode=configured_auth_mode,
+        effective_auth_mode=OPENAI_AUTH_MODE_API_KEY,
+        oauth_enabled=oauth_enabled,
+        oauth_connected=oauth_connected,
+        api_key_name=api_key_name,
+        api_key_available=api_key_available,
+        base_url_available=base_url_available,
+        fallback_enabled=fallback_enabled,
+        fallback_available=fallback_available,
+        fallback_used=fallback_used,
+        available=available,
+        status=status if available else "api_key_unavailable",
+        message=message if not available else None,
+    )
+
+
+def _api_key_missing_message(
+    api_key_name: str | None,
+    fallback_available: bool,
+) -> str | None:
+    if fallback_available:
+        return None
+    if api_key_name:
+        return f"Configure {api_key_name}"
+    return "Configure OpenAI API-key auth or connect OpenAI OAuth."
+
+
+def _provider_string(provider_config: Any, key: str, default: str) -> str:
+    value = _provider_value(provider_config, key)
+    if not isinstance(value, str) or not value.strip():
+        return default
+    return value.strip()
+
+
+def _provider_optional_string(provider_config: Any, key: str) -> str | None:
+    value = _provider_value(provider_config, key)
+    if not isinstance(value, str) or not value.strip() or value.lower() == "null":
+        return None
+    return value.strip()
+
+
+def _provider_bool(provider_config: Any, key: str, default: bool) -> bool:
+    value = _provider_value(provider_config, key)
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _provider_value(provider_config: Any, key: str) -> Any:
+    if isinstance(provider_config, Mapping):
+        return provider_config.get(key)
+    return getattr(provider_config, key, None)
+
+
+def _log_openai_auth_resolution(resolution: OpenAIAuthResolution) -> None:
+    from core.logger import UnifiedLogger
+
+    logger = UnifiedLogger(tag="openai-oauth")
+    logger.info(
+        "OpenAI auth mode resolved",
+        data={
+            "mode": resolution.effective_auth_mode,
+            "configured_mode": resolution.configured_auth_mode,
+            "oauth_globally_enabled": resolution.oauth_enabled,
+            "has_api_key_fallback": resolution.fallback_available,
+            "fallback_enabled": resolution.fallback_enabled,
+            "fallback_used": resolution.fallback_used,
+            "oauth_connected": resolution.oauth_connected,
+            "available": resolution.available,
+            "status": resolution.status,
+        },
+    )

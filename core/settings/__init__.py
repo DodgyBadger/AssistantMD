@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
+from core.llm.openai_oauth import resolve_openai_auth
 from core.settings.store import (
     ModelConfig,
     ProviderConfig,
@@ -170,6 +171,10 @@ def validate_settings(
     providers = providers_config or get_providers_config()
     models = models_config or get_models_config()
 
+    def _openai_oauth_enabled_configured() -> bool:
+        entry = get_general_settings().get("openai_oauth_enabled")
+        return bool(getattr(entry, "value", False))
+
     def _provider_base_url_configured(provider_cfg: Any) -> bool:
         """Return True when provider base_url resolves from secret or literal URL."""
         raw_base_url = getattr(provider_cfg, "base_url", None)
@@ -201,6 +206,22 @@ def validate_settings(
                 name=f"model:{model_name}",
                 message=f"Model '{model_name}' references unknown provider '{provider_name}'.",
             )
+            continue
+
+        if provider_name == "openai":
+            resolution = resolve_openai_auth(
+                provider_config,
+                oauth_enabled=_openai_oauth_enabled_configured(),
+                base_url_available=_provider_base_url_configured(provider_config),
+                emit_log=False,
+            )
+            status.model_availability[model_name] = resolution.available
+            if not resolution.available:
+                status.add_issue(
+                    name=f"model:{model_name}",
+                    message=resolution.message or "Configure OpenAI auth.",
+                    severity="warning",
+                )
             continue
 
         api_key_name = getattr(provider_config, "api_key", None)
