@@ -28,7 +28,8 @@ from tenacity import retry_if_exception, stop_after_attempt
 from core.llm.thinking import ThinkingValue
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
-from core.llm.openai_runtime import build_openai_provider
+from core.llm.openai_auth import OPENAI_AUTH_MODE_OAUTH
+from core.llm.openai_runtime import build_openai_provider_with_resolution
 from core.settings import (
     get_default_api_timeout,
     get_default_max_output_tokens,
@@ -221,14 +222,16 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
         settings_kwargs = _base_settings_kwargs(thinking)
         provider_config = get_provider_config(provider)
         http_client = _build_retrying_model_http_client()
-        openai_provider = build_openai_provider(
+        openai_build = build_openai_provider_with_resolution(
             provider_config=provider_config,
             http_client=http_client,
         )
+        if openai_build.resolution.effective_auth_mode == OPENAI_AUTH_MODE_OAUTH:
+            settings_kwargs["openai_store"] = False
         return OpenAIResponsesModel(
             model_string,
             provider=_mark_provider_owns_http_client(
-                openai_provider,
+                openai_build.provider,
                 http_client,
             ),
             settings=OpenAIResponsesModelSettings(**settings_kwargs),

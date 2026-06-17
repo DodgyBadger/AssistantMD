@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
@@ -37,6 +38,14 @@ class OpenAIOAuthRuntimeAdapter(Protocol):
 
 
 OPENAI_CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+
+
+@dataclass(frozen=True)
+class OpenAIProviderBuildResult:
+    """OpenAI provider plus the auth resolution used to build it."""
+
+    provider: OpenAIProvider
+    resolution: OpenAIAuthResolution
 
 
 class DefaultOpenAIOAuthRuntimeAdapter:
@@ -91,6 +100,19 @@ def build_openai_provider(
 ) -> OpenAIProvider:
     """Build an OpenAI provider according to the effective auth mode."""
 
+    return build_openai_provider_with_resolution(
+        provider_config=provider_config,
+        http_client=http_client,
+    ).provider
+
+
+def build_openai_provider_with_resolution(
+    *,
+    provider_config: dict[str, Any],
+    http_client: httpx.AsyncClient,
+) -> OpenAIProviderBuildResult:
+    """Build an OpenAI provider and return its auth resolution."""
+
     api_key = _resolve_config_value(provider_config.get("api_key"))
     base_url = _resolve_config_value(provider_config.get("base_url"))
     resolution = resolve_openai_auth(
@@ -102,18 +124,24 @@ def build_openai_provider(
     )
 
     if resolution.effective_auth_mode == OPENAI_AUTH_MODE_API_KEY:
-        return OpenAIProvider(
-            api_key=api_key,
-            base_url=base_url,
-            http_client=http_client,
+        return OpenAIProviderBuildResult(
+            provider=OpenAIProvider(
+                api_key=api_key,
+                base_url=base_url,
+                http_client=http_client,
+            ),
+            resolution=resolution,
         )
 
     if resolution.effective_auth_mode == OPENAI_AUTH_MODE_OAUTH:
         adapter = _oauth_runtime_adapter or DefaultOpenAIOAuthRuntimeAdapter()
-        return adapter.build_provider(
-            provider_config=provider_config,
+        return OpenAIProviderBuildResult(
+            provider=adapter.build_provider(
+                provider_config=provider_config,
+                resolution=resolution,
+                http_client=http_client,
+            ),
             resolution=resolution,
-            http_client=http_client,
         )
 
     raise ValueError(
