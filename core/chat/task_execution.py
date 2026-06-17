@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +50,7 @@ class ChatStreamTaskStart:
 
 
 CHAT_TASK_EVENT_BUFFER = ChatTaskEventBuffer()
+_CHAT_TASK_FAILURES: dict[str, BaseException] = {}
 
 
 async def start_prepared_chat_stream_task(
@@ -416,6 +419,7 @@ async def _run_prepared_chat_stream_task(
             raise limit_error from exc
         except Exception as exc:
             classification = classify_exception(exc, phase="agent_stream")
+            _CHAT_TASK_FAILURES[task.task_id] = exc
             chat_executor._log_chat_failure(
                 "Streaming chat execution failed",
                 vault_name=vault_name,
@@ -456,6 +460,50 @@ async def _run_prepared_chat_stream_task(
             vault_name=vault_name,
             vault_path=vault_path,
         )
+
+
+async def stream_chat_task_sse(
+    *,
+    task_id: str,
+    event_buffer: ChatTaskEventBuffer | None = None,
+    after_sequence: int = 0,
+    keepalive_seconds: float = 15.0,
+    raise_terminal_errors: bool = False,
+) -> AsyncIterator[str]:
+    """Stream buffered chat task events as SSE chunks."""
+    buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
+    iterator = buffer.subscribe(task_id, after_sequence=after_sequence).__aiter__()
+    pending_event: asyncio.Task[Any] | None = None
+    try:
+        while True:
+            if pending_event is None:
+                pending_event = asyncio.create_task(iterator.__anext__())
+            try:
+                event = await asyncio.wait_for(
+                    asyncio.shield(pending_event),
+                    timeout=keepalive_seconds,
+                )
+            except TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            except StopAsyncIteration:
+                pending_event = None
+                return
+            pending_event = None
+
+            payload = dict(event.data)
+            payload.setdefault("event", event.event)
+            payload.setdefault("sequence", event.sequence)
+            yield f"data: {json.dumps(payload)}\n\n"
+            if (
+                raise_terminal_errors
+                and event.event == "error"
+                and (failure := _CHAT_TASK_FAILURES.pop(task_id, None)) is not None
+            ):
+                raise failure
+    finally:
+        if pending_event is not None and not pending_event.done():
+            pending_event.cancel()
 
 
 def _delta_event_data(delta_text: str) -> dict[str, Any]:

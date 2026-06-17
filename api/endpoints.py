@@ -3,7 +3,6 @@ API endpoint implementations for the AssistantMD system.
 """
 
 
-import asyncio
 import json
 from typing import List
 
@@ -13,7 +12,7 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER
+from core.chat.task_execution import stream_chat_task_sse
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
@@ -161,30 +160,6 @@ from api.import_models import (
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 logger = UnifiedLogger(tag="api-endpoints")
 _CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
-
-
-async def _chat_task_event_stream(task_id: str, after_sequence: int):
-    """Yield buffered chat task events as SSE chunks."""
-    iterator = CHAT_TASK_EVENT_BUFFER.subscribe(
-        task_id,
-        after_sequence=after_sequence,
-    ).__aiter__()
-    while True:
-        try:
-            event = await asyncio.wait_for(
-                iterator.__anext__(),
-                timeout=_CHAT_TASK_EVENT_KEEPALIVE_SECONDS,
-            )
-        except TimeoutError:
-            yield ": keepalive\n\n"
-            continue
-        except StopAsyncIteration:
-            return
-
-        payload = dict(event.data)
-        payload.setdefault("event", event.event)
-        payload.setdefault("sequence", event.sequence)
-        yield f"data: {json.dumps(payload)}\n\n"
 
 
 def _parse_form_bool(value: object, default: bool = False) -> bool:
@@ -571,7 +546,11 @@ async def chat_task_events(task_id: str, after_sequence: int = 0):
                 details={"task_id": task_id},
             )
         return StreamingResponse(
-            _chat_task_event_stream(task_id, after_sequence),
+            stream_chat_task_sse(
+                task_id=task_id,
+                after_sequence=after_sequence,
+                keepalive_seconds=_CHAT_TASK_EVENT_KEEPALIVE_SECONDS,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",

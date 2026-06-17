@@ -227,6 +227,8 @@ Risk:
 
 ### Slice 4: Compatible `/api/chat/execute` Streaming Path
 
+Status: implemented.
+
 Scope:
 
 - Update `stream=true` handling to start a background chat task and immediately
@@ -242,6 +244,19 @@ Validation:
   `chat_usage_limits`, and `model_failure_classification` targeted scenarios.
 - Add one scenario where the compatibility SSE consumer is cancelled and the
   task continues to terminal.
+
+Completed validation:
+
+- `python validation/run_validation.py run integration/core/chat_stream_keepalive integration/core/chat_stream_failure_logging integration/core/chat_usage_limits integration/core/model_failure_classification integration/core/api_endpoints integration/core/chat_task_event_stream_api integration/core/chat_stream_background_task`
+- `python -m ruff check core/chat/executor.py core/chat/task_execution.py core/chat/task_events.py api/endpoints.py validation/scenarios/integration/core/chat_stream_keepalive.py validation/scenarios/integration/core/chat_stream_failure_logging.py validation/scenarios/integration/core/chat_usage_limits.py validation/scenarios/integration/core/model_failure_classification.py validation/scenarios/integration/core/chat_task_event_stream_api.py validation/scenarios/integration/core/chat_stream_background_task.py`
+- `python -m compileall core/chat/executor.py core/chat/task_execution.py core/chat/task_events.py api/endpoints.py validation/scenarios/integration/core/chat_stream_keepalive.py validation/scenarios/integration/core/chat_stream_failure_logging.py validation/scenarios/integration/core/chat_usage_limits.py validation/scenarios/integration/core/model_failure_classification.py validation/scenarios/integration/core/chat_task_event_stream_api.py validation/scenarios/integration/core/chat_stream_background_task.py`
+
+Cleanup completed:
+
+- Removed the old request-owned `_stream_prepared_chat_prompt(...)` producer,
+  queue, and cancellation path from `core/chat/executor.py`.
+- `execute_chat_prompt_stream(...)` now starts a background chat task and
+  subscribes to the shared buffered task event stream.
 
 Risk:
 

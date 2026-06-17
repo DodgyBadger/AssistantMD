@@ -12,7 +12,7 @@ from pydantic_ai import AgentRunResultEvent, PartStartEvent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from core.chat.executor import PreparedChatExecution
-from core.chat.task_execution import start_prepared_chat_stream_task
+from core.chat.task_execution import start_prepared_chat_stream_task, stream_chat_task_sse
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
@@ -125,32 +125,18 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
             "Second chat task should be running before SSE subscriber disconnect",
         )
 
-        import api.endpoints as api_endpoints
-
-        original_keepalive = api_endpoints._CHAT_TASK_EVENT_KEEPALIVE_SECONDS
-        api_endpoints._CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 0.05
-        client = self._get_api_client()._client
+        sse_stream = stream_chat_task_sse(
+            task_id=running.task.task_id,
+            keepalive_seconds=0.05,
+        )
         try:
-            with client.stream(
-                "GET",
-                f"/api/chat/tasks/{running.task.task_id}/events",
-            ) as response:
-                self.soft_assert_equal(
-                    response.status_code,
-                    200,
-                    "Streaming response should open for running chat task",
-                )
-                first_payload = ""
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
-                        first_payload = line
-                        break
-                self.soft_assert(
-                    "still running" in first_payload,
-                    "Running event stream should deliver the initial delta",
-                )
+            first_payload = await sse_stream.__anext__()
+            self.soft_assert(
+                "still running" in first_payload,
+                "Running event stream should deliver the initial delta",
+            )
         finally:
-            api_endpoints._CHAT_TASK_EVENT_KEEPALIVE_SECONDS = original_keepalive
+            await sse_stream.aclose()
 
         after_disconnect = await get_runtime_context().task_coordinator.get_task(
             running.task.task_id
