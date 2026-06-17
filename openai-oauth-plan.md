@@ -112,8 +112,13 @@ codes, PKCE verifier values, or raw token endpoint responses.
   - manual paste of the final redirect URL, with raw authorization code accepted
     only when it can be resolved unambiguously
 - Pending auth state is single-use.
-- Device-code auth is deferred. PKCE with automatic callback plus manual paste
-  completion covers the initial remote/headless deployment requirement.
+- PKCE with automatic callback plus manual paste completion remains supported,
+  but live testing showed OpenAI's consent page can stall before redirect even
+  when the request shape matches OpenClaw's browser flow.
+- Add OpenClaw-style device-code auth as the next connection path. It better
+  matches remote/VPS deployments because the user completes authorization in a
+  normal local browser by entering a short code, while AssistantMD polls for the
+  resulting authorization code.
 
 ### Logging And Validation
 
@@ -518,6 +523,104 @@ Testable artifacts:
 - Pending OpenAI OAuth status shows a `Cancel` action instead of a disabled
   disconnect action.
 
+### Slice 13: OpenClaw Device-Code Connection Flow
+
+Add the OpenClaw-style device-code flow as a second OpenAI OAuth connection
+path while keeping the current PKCE/browser flow available for comparison.
+
+OpenClaw reference:
+
+- Inspected `/tmp/openclaw-inspect` at commit
+  `a0a0e5e4cbbfd96a0cd75f1b051c2fef7de4b85a`.
+- Relevant implementation:
+  `extensions/openai/openai-chatgpt-device-code.ts`.
+- Device-code request:
+  `POST https://auth.openai.com/api/accounts/deviceauth/usercode` with JSON
+  `{ "client_id": "app_EMoamEEZ73f0CkXaXp7hrann" }`.
+- Poll request:
+  `POST https://auth.openai.com/api/accounts/deviceauth/token` with JSON
+  `{ "device_auth_id": "...", "user_code": "..." }`.
+- Poll success returns an `authorization_code` and `code_verifier`.
+- Final token exchange uses `POST https://auth.openai.com/oauth/token` with
+  form fields:
+  `grant_type=authorization_code`,
+  `code=<authorization_code>`,
+  `redirect_uri=https://auth.openai.com/deviceauth/callback`,
+  `client_id=app_EMoamEEZ73f0CkXaXp7hrann`, and
+  `code_verifier=<code_verifier>`.
+- Verification URL shown to the user is
+  `https://auth.openai.com/codex/device`.
+- Headers should stay close to OpenClaw for compatibility:
+  `originator: openclaw`, form/JSON content type as appropriate, and a stable
+  OpenClaw-compatible user agent. Product-specific naming can be revisited only
+  after the flow works end to end.
+- Polling treats `403` and `404` as still pending until timeout. Other errors
+  become sanitized connection failures.
+- Initial timeout is 15 minutes. Poll interval comes from the response when
+  present, defaults to five seconds, and is clamped to at least one second.
+
+Changes:
+
+- Extend the OpenAI OAuth adapter boundary with device-code methods:
+  - start/request device code
+  - poll device authorization
+  - exchange device authorization code for normal OAuth token state
+- Persist one active device-code pending state through the secrets store. The
+  state includes flow type, `device_auth_id`, `user_code`, verification URL,
+  poll interval, creation time, expiry time, and last poll metadata.
+- Treat device-code pending state as internal secret material. Hide it from the
+  generic Secrets UI and expose only sanitized status through provider/OAuth
+  status.
+- Starting any OpenAI connection flow replaces stale PKCE or device-code
+  pending state so repeated live attempts are recoverable.
+- Add API endpoints for the device-code lifecycle:
+  - start device-code auth
+  - check/poll device-code auth
+  - cancel pending auth, reusing the existing clear-state endpoint where
+    possible
+- Prefer an explicit `Check status` action for the first slice instead of a
+  background polling worker or long-held server request. This keeps the first
+  implementation deterministic and easy to validate.
+- On successful device-code completion, store the resulting token in the same
+  OpenAI OAuth token state used by PKCE and the runtime adapter.
+- Keep the global OpenAI OAuth kill switch authoritative for device-code start,
+  poll, completion, status, and runtime use.
+- Preserve API-key auth and explicit fallback behavior unchanged.
+- Add sanitized logs for device-code start, pending poll, success, expiry, and
+  failure. Do not log `device_auth_id`, `user_code`, authorization code,
+  `code_verifier`, access token, refresh token, raw token responses, or full
+  account identifiers.
+- Update the Configuration UI OpenAI provider panel to show:
+  - a `Connect with device code` action
+  - the verification URL
+  - the user code
+  - expiry/pending status
+  - explicit `Check status` and `Cancel` actions
+  - the existing PKCE authorization URL path for comparison while this is
+    experimental
+
+Testable artifacts:
+
+- Mocked device-code start returns verification URL, user code, expiry, and
+  poll interval without persisting a connected token.
+- Mocked pending poll on `403` or `404` returns pending status and does not
+  persist token state.
+- Mocked successful poll plus token exchange persists normal OpenAI OAuth token
+  state and clears pending device-code state.
+- Device-code pending expiry and cancel paths clear pending state without
+  changing `auth_mode`.
+- Internal device-code state does not appear in the generic Secrets list.
+- Global OAuth disable blocks device-code start and poll behavior and reports
+  API-key-only effective status.
+- Configuration UI syntax checks pass with both PKCE and device-code controls
+  present.
+
+Validation target:
+
+- Extend the existing provider/OAuth API scenario with deterministic
+  device-code start, pending poll, successful completion, cancel, hidden-secret,
+  and kill-switch assertions.
+
 ## Suggested Implementation Order
 
 1. Config and provider status contract.
@@ -532,6 +635,7 @@ Testable artifacts:
 10. Registered loopback redirect URI default for OAuth start.
 11. OpenClaw-compatible authorize metadata.
 12. Pending attempt cancellation from the Configuration UI.
+13. OpenClaw-style device-code connection flow.
 
 ## Current Progress
 
@@ -617,6 +721,10 @@ Testable artifacts:
 - Slice 12 implemented:
   - pending OpenAI OAuth attempts can be cancelled from the Configuration UI
     using the existing clear-state endpoint
+- Slice 13 planned:
+  - live PKCE/browser testing reached OpenAI consent but did not redirect after
+    Continue, so the next implementation path is OpenClaw's device-code
+    connection flow
 
 ## Local Smoke Tests During Development
 
@@ -634,6 +742,8 @@ Testable artifacts:
 - Sensitive-field scan for OpenAI OAuth logging/exposure boundaries.
 - Mocked Codex-compatible token exchange, token refresh, and OAuth runtime
   provider construction.
+- Mocked OpenClaw-style device-code start, pending poll, successful completion,
+  expiry, and cancel behavior.
 
 ## Validation Requests For Maintainers
 
@@ -644,6 +754,8 @@ Testable artifacts:
   - OAuth connect/disconnect lifecycle with deterministic fakes
   - model availability changes tied to auth state and kill-switch state
 - Manual browser verification of the Configuration tab OpenAI provider flow.
+- Manual device-code verification from a local browser while AssistantMD runs
+  on the VPS.
 
 ## Planning Exit Criteria
 
@@ -651,6 +763,7 @@ Testable artifacts:
 - API-key behavior remains stable and default.
 - OAuth can be disabled globally with one setting.
 - Runtime fallback to API key is explicit opt-in.
-- Remote/headless completion is first-class through manual paste.
+- Remote/headless completion is first-class through manual paste and the
+  planned device-code flow.
 - Feature development can proceed in small slices with deterministic API
   artifacts and explicit decision-boundary logging.
