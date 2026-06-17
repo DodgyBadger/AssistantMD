@@ -50,6 +50,7 @@ from core.settings.secrets_store import (
     delete_secret,
     secret_has_value,
 )
+from core.llm.openai_auth import resolve_openai_auth
 from core.llm.openai_oauth import (
     OpenAIOAuthStateError,
     clear_openai_oauth_state,
@@ -57,7 +58,6 @@ from core.llm.openai_oauth import (
     complete_openai_oauth_from_redirect,
     get_openai_oauth_status,
     is_openai_oauth_internal_secret,
-    resolve_openai_auth,
     start_openai_oauth as start_openai_oauth_attempt,
 )
 from core.runtime.paths import get_system_root
@@ -2498,6 +2498,8 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
     resolution = resolve_openai_auth(
         config,
         oauth_enabled=oauth_enabled,
+        oauth_connected=oauth_connection.connected,
+        api_key_available=api_key_has_value,
         base_url_available=base_url_has_value,
         emit_log=False,
     )

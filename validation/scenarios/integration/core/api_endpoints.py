@@ -9,12 +9,16 @@ import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 from core.llm.openai_oauth import (
+    OPENAI_OAUTH_CLIENT_ID,
+    OPENAI_OAUTH_ORIGINATOR,
+    OPENAI_OAUTH_SCOPE,
     OpenAIOAuthTokenResult,
     StaticOpenAIOAuthTokenAdapter,
     set_openai_oauth_token_adapter,
@@ -193,6 +197,17 @@ class ApiEndpointsScenario(BaseScenario):
         assert oauth_start_payload["auth_url"], "OAuth start returns auth URL"
         assert oauth_start_payload["state"], "OAuth start returns state"
         assert oauth_start_payload["redirect_uri"], "OAuth start returns redirect URI"
+        auth_url = urlparse(oauth_start_payload["auth_url"])
+        auth_query = parse_qs(auth_url.query)
+        assert auth_query.get("client_id") == [OPENAI_OAUTH_CLIENT_ID], (
+            "OpenAI OAuth start uses Codex client id"
+        )
+        assert auth_query.get("scope") == [OPENAI_OAUTH_SCOPE], (
+            "OpenAI OAuth start uses Codex OAuth scope"
+        )
+        assert auth_query.get("originator") == [OPENAI_OAUTH_ORIGINATOR], (
+            "OpenAI OAuth start identifies the Codex originator"
+        )
 
         pasted_redirect = (
             f"{oauth_start_payload['redirect_uri']}?code=validation-code"

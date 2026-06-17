@@ -5,6 +5,7 @@ Provides a single typed interface for environment-driven settings along with
 helpers to diagnose missing configuration required for runtime features.
 """
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,8 +14,8 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.llm.openai_auth import OPENAI_OAUTH_TOKEN_SECRET, resolve_openai_auth
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
-from core.llm.openai_oauth import resolve_openai_auth
 from core.settings.store import (
     ModelConfig,
     ProviderConfig,
@@ -191,6 +192,31 @@ def validate_settings(
             return True
         return "://" in base_url
 
+    def _provider_api_key_available(provider_cfg: Any) -> bool:
+        api_key_name = getattr(provider_cfg, "api_key", None)
+        if api_key_name is None and isinstance(provider_cfg, dict):
+            api_key_name = provider_cfg.get("api_key")
+        return bool(
+            isinstance(api_key_name, str)
+            and api_key_name.lower() != "null"
+            and api_key_name
+            and secret_has_value(api_key_name)
+        )
+
+    def _openai_oauth_token_available() -> bool:
+        raw_state = get_secret_value(OPENAI_OAUTH_TOKEN_SECRET)
+        if not raw_state:
+            return False
+        try:
+            token_state = json.loads(raw_state)
+        except json.JSONDecodeError:
+            return False
+        return bool(
+            isinstance(token_state, dict)
+            and isinstance(token_state.get("access_token"), str)
+            and token_state["access_token"].strip()
+        )
+
     for model_name, model_config in models.items():
         provider_name = getattr(model_config, "provider", None) or (
             model_config.get("provider") if isinstance(model_config, dict) else None
@@ -212,6 +238,8 @@ def validate_settings(
             resolution = resolve_openai_auth(
                 provider_config,
                 oauth_enabled=_openai_oauth_enabled_configured(),
+                oauth_connected=_openai_oauth_token_available(),
+                api_key_available=_provider_api_key_available(provider_config),
                 base_url_available=_provider_base_url_configured(provider_config),
                 emit_log=False,
             )

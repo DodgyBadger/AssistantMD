@@ -393,6 +393,38 @@ Testable artifacts:
 - Manual review confirms no secret material is exposed in logs, responses, or
   committed files.
 
+### Slice 8: Codex-Compatible Token And Runtime Adapter
+
+Replace the placeholder OAuth runtime/token boundaries with real
+Codex-compatible defaults while keeping deterministic fakes injectable for
+validation.
+
+Changes:
+
+- Use Codex-compatible OAuth client metadata in the authorize URL:
+  client id, scope, simplified-flow flag, organization claim request, and
+  originator.
+- Add an HTTP token adapter for authorization-code exchange and refresh-token
+  exchange against the OpenAI OAuth token endpoint.
+- Parse token response expiry and ChatGPT account id from stable fields or the
+  id token claims used by Codex.
+- Refresh stored OAuth access tokens on demand before runtime use, preserving
+  existing refresh tokens/account ids when refresh responses omit them.
+- Build OAuth-backed OpenAI providers against the ChatGPT Codex backend with
+  bearer-token auth and `ChatGPT-Account-ID` when available.
+- Keep the resolver pure so settings, API, validation, and runtime code pass
+  explicit state facts instead of importing the OAuth state module through
+  package initialization.
+
+Testable artifacts:
+
+- OAuth start URL contains the Codex-compatible public client contract.
+- Mocked authorization-code exchange uses form encoding and the expected client
+  metadata.
+- Mocked refresh uses the expected JSON body and updates stored token state.
+- Runtime provider construction targets the Codex backend and carries the
+  account header without exposing tokens.
+
 ## Suggested Implementation Order
 
 1. Config and provider status contract.
@@ -402,6 +434,7 @@ Testable artifacts:
 5. Codex-compatible runtime adapter.
 6. Configuration UI.
 7. Docs, logging review, and merge prep.
+8. Codex-compatible token exchange, refresh, and default runtime adapter.
 
 ## Current Progress
 
@@ -457,6 +490,17 @@ Testable artifacts:
     OAuth adapter boundary
   - hardening pass confirmed OAuth lifecycle logs avoid tokens, auth codes, PKCE
     verifier/state values, pasted redirect URLs, and raw token responses
+- Slice 8 implemented:
+  - OAuth authorize URLs now use Codex-compatible client id, scope, simplified
+    flow, organization claim, and originator parameters
+  - the default token adapter exchanges authorization codes and refresh tokens
+    through the OpenAI OAuth token endpoint
+  - token response parsing derives expiry and account id from response fields or
+    id token claims
+  - runtime OAuth provider construction now targets the ChatGPT Codex backend
+    with bearer-token auth and account header support
+  - OpenAI auth resolution moved into a pure module so settings import paths do
+    not depend on OAuth token-state helpers
 
 ## Local Smoke Tests During Development
 
@@ -472,6 +516,8 @@ Testable artifacts:
 - Configuration UI syntax and diff checks for the OpenAI provider surface.
 - Full touched-file Python compile and ruff checks.
 - Sensitive-field scan for OpenAI OAuth logging/exposure boundaries.
+- Mocked Codex-compatible token exchange, token refresh, and OAuth runtime
+  provider construction.
 
 ## Validation Requests For Maintainers
 

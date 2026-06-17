@@ -4,32 +4,40 @@ from __future__ import annotations
 
 import json
 import base64
+import binascii
 import hashlib
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import httpx
+
+from core.llm.openai_auth import (
+    OPENAI_OAUTH_PENDING_SECRET,
+    OPENAI_OAUTH_TOKEN_SECRET,
+)
 from core.settings.secrets_store import (
     delete_secret,
     get_secret_value,
-    secret_has_value,
     set_secret_value,
 )
 
 
-OPENAI_OAUTH_TOKEN_SECRET = "OPENAI_OAUTH_TOKEN_STATE"
-OPENAI_OAUTH_PENDING_SECRET = "OPENAI_OAUTH_PENDING_STATE"
 OPENAI_OAUTH_INTERNAL_SECRETS = frozenset(
     {OPENAI_OAUTH_TOKEN_SECRET, OPENAI_OAUTH_PENDING_SECRET}
 )
+OPENAI_OAUTH_ISSUER_URL = "https://auth.openai.com"
 OPENAI_OAUTH_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
+OPENAI_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 OPENAI_OAUTH_PENDING_TTL_SECONDS = 600
-OPENAI_OAUTH_CLIENT_ID = "codex-cli"
-OPENAI_AUTH_MODE_API_KEY = "api_key"
-OPENAI_AUTH_MODE_OAUTH = "oauth"
-
+OPENAI_OAUTH_REFRESH_WINDOW_SECONDS = 300
+OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+OPENAI_OAUTH_ORIGINATOR = "codex_cli_rs"
+OPENAI_OAUTH_SCOPE = (
+    "openid profile email offline_access api.connectors.read api.connectors.invoke"
+)
 
 class OpenAIOAuthStateError(ValueError):
     """Raised when stored OpenAI OAuth state is malformed or unusable."""
@@ -93,25 +101,6 @@ class OpenAIOAuthTokenResult:
     account_id: str | None = None
 
 
-@dataclass(frozen=True)
-class OpenAIAuthResolution:
-    """Resolved OpenAI auth decision for availability and runtime construction."""
-
-    configured_auth_mode: str
-    effective_auth_mode: str
-    oauth_enabled: bool
-    oauth_connected: bool
-    api_key_name: str | None
-    api_key_available: bool
-    base_url_available: bool
-    fallback_enabled: bool
-    fallback_available: bool
-    fallback_used: bool
-    available: bool
-    status: str
-    message: str | None = None
-
-
 class OpenAIOAuthTokenAdapter(Protocol):
     """Adapter boundary for real or fake token exchange and refresh."""
 
@@ -151,6 +140,101 @@ class StaticOpenAIOAuthTokenAdapter:
         return self.token_result
 
 
+@dataclass
+class OpenAIOAuthHTTPTokenAdapter:
+    """Codex-compatible HTTP adapter for OpenAI OAuth exchange and refresh."""
+
+    token_url: str = OPENAI_OAUTH_TOKEN_URL
+    client_id: str = OPENAI_OAUTH_CLIENT_ID
+    timeout_seconds: float = 30.0
+    http_client: httpx.AsyncClient | None = None
+
+    async def exchange_code(
+        self,
+        *,
+        code: str,
+        code_verifier: str,
+        redirect_uri: str,
+    ) -> OpenAIOAuthTokenResult:
+        """Exchange an authorization code for OpenAI OAuth tokens."""
+
+        payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": self.client_id,
+            "code_verifier": code_verifier,
+        }
+        data = await self._post_form(payload)
+        return _token_result_from_response(data)
+
+    async def refresh_token(self, *, refresh_token: str) -> OpenAIOAuthTokenResult:
+        """Refresh OpenAI OAuth tokens using the Codex-compatible JSON body."""
+
+        payload = {
+            "client_id": self.client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+        data = await self._post_json(payload)
+        return _token_result_from_response(data)
+
+    async def _post_form(self, payload: dict[str, str]) -> dict[str, Any]:
+        return await self._post(
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=payload,
+        )
+
+    async def _post_json(self, payload: dict[str, str]) -> dict[str, Any]:
+        return await self._post(
+            headers={"Content-Type": "application/json"},
+            json_payload=payload,
+        )
+
+    async def _post(
+        self,
+        *,
+        headers: dict[str, str],
+        data: dict[str, str] | None = None,
+        json_payload: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        client = self.http_client
+        owns_client = client is None
+        if client is None:
+            client = httpx.AsyncClient(timeout=self.timeout_seconds)
+        try:
+            response = await client.post(
+                self.token_url,
+                headers=headers,
+                data=data,
+                json=json_payload,
+            )
+        except httpx.HTTPError as exc:
+            raise OpenAIOAuthStateError(
+                f"OpenAI OAuth token request failed: {type(exc).__name__}."
+            ) from exc
+        finally:
+            if owns_client:
+                await client.aclose()
+
+        if response.status_code < 200 or response.status_code >= 300:
+            raise OpenAIOAuthStateError(
+                f"OpenAI OAuth token request failed with HTTP {response.status_code}."
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth token response was not valid JSON."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth token response must be a JSON object."
+            )
+        return payload
+
+
 _token_adapter: OpenAIOAuthTokenAdapter | None = None
 
 
@@ -162,136 +246,11 @@ def set_openai_oauth_token_adapter(adapter: OpenAIOAuthTokenAdapter | None) -> N
 
 
 def get_openai_oauth_token_adapter() -> OpenAIOAuthTokenAdapter:
-    """Return the configured token adapter or fail closed."""
+    """Return the configured token adapter, defaulting to the real HTTP adapter."""
 
     if _token_adapter is None:
-        raise OpenAIOAuthStateError("OpenAI OAuth token adapter is not configured.")
+        return OpenAIOAuthHTTPTokenAdapter()
     return _token_adapter
-
-
-def resolve_openai_auth(
-    provider_config: Any,
-    *,
-    oauth_enabled: bool,
-    base_url_available: bool = False,
-    emit_log: bool = True,
-) -> OpenAIAuthResolution:
-    """Resolve effective OpenAI auth behavior from config and stored state."""
-
-    configured_auth_mode = _provider_string(
-        provider_config, "auth_mode", OPENAI_AUTH_MODE_API_KEY
-    )
-    if configured_auth_mode not in {OPENAI_AUTH_MODE_API_KEY, OPENAI_AUTH_MODE_OAUTH}:
-        configured_auth_mode = OPENAI_AUTH_MODE_API_KEY
-
-    api_key_name = _provider_optional_string(provider_config, "api_key")
-    api_key_available = bool(api_key_name and secret_has_value(api_key_name))
-    fallback_enabled = _provider_bool(
-        provider_config, "oauth_api_key_fallback_enabled", False
-    )
-    fallback_available = api_key_available or base_url_available
-    oauth_status = get_openai_oauth_status()
-    oauth_connected = oauth_status.connected
-
-    if not oauth_enabled:
-        resolution = _api_key_resolution(
-            configured_auth_mode=configured_auth_mode,
-            oauth_enabled=False,
-            oauth_connected=oauth_connected,
-            api_key_name=api_key_name,
-            api_key_available=api_key_available,
-            base_url_available=base_url_available,
-            fallback_enabled=fallback_enabled,
-            fallback_available=fallback_available,
-            fallback_used=False,
-            status="oauth_disabled",
-            message=_api_key_missing_message(api_key_name, fallback_available),
-        )
-        if emit_log:
-            _log_openai_auth_resolution(resolution)
-        return resolution
-
-    if configured_auth_mode == OPENAI_AUTH_MODE_API_KEY:
-        resolution = _api_key_resolution(
-            configured_auth_mode=configured_auth_mode,
-            oauth_enabled=True,
-            oauth_connected=oauth_connected,
-            api_key_name=api_key_name,
-            api_key_available=api_key_available,
-            base_url_available=base_url_available,
-            fallback_enabled=fallback_enabled,
-            fallback_available=fallback_available,
-            fallback_used=False,
-            status="api_key",
-            message=_api_key_missing_message(api_key_name, fallback_available),
-        )
-        if emit_log:
-            _log_openai_auth_resolution(resolution)
-        return resolution
-
-    if oauth_connected:
-        resolution = OpenAIAuthResolution(
-            configured_auth_mode=configured_auth_mode,
-            effective_auth_mode=OPENAI_AUTH_MODE_OAUTH,
-            oauth_enabled=True,
-            oauth_connected=True,
-            api_key_name=api_key_name,
-            api_key_available=api_key_available,
-            base_url_available=base_url_available,
-            fallback_enabled=fallback_enabled,
-            fallback_available=fallback_available,
-            fallback_used=False,
-            available=True,
-            status="oauth_connected",
-        )
-        if emit_log:
-            _log_openai_auth_resolution(resolution)
-        return resolution
-
-    if fallback_enabled and fallback_available:
-        resolution = OpenAIAuthResolution(
-            configured_auth_mode=configured_auth_mode,
-            effective_auth_mode=OPENAI_AUTH_MODE_API_KEY,
-            oauth_enabled=True,
-            oauth_connected=False,
-            api_key_name=api_key_name,
-            api_key_available=api_key_available,
-            base_url_available=base_url_available,
-            fallback_enabled=True,
-            fallback_available=True,
-            fallback_used=True,
-            available=True,
-            status="oauth_fallback",
-        )
-        if emit_log:
-            _log_openai_auth_resolution(resolution)
-        return resolution
-
-    message = (
-        "OpenAI OAuth is selected but no connected OAuth account is available. "
-        "Reconnect OpenAI OAuth or switch the provider back to API-key auth."
-    )
-    if fallback_available:
-        message += " API-key fallback is configured but not enabled."
-
-    resolution = OpenAIAuthResolution(
-        configured_auth_mode=configured_auth_mode,
-        effective_auth_mode=OPENAI_AUTH_MODE_OAUTH,
-        oauth_enabled=True,
-        oauth_connected=False,
-        api_key_name=api_key_name,
-        api_key_available=api_key_available,
-        base_url_available=base_url_available,
-        fallback_enabled=fallback_enabled,
-        fallback_available=fallback_available,
-        fallback_used=False,
-        available=False,
-        status="oauth_unavailable",
-        message=message,
-    )
-    if emit_log:
-        _log_openai_auth_resolution(resolution)
-    return resolution
 
 
 def is_openai_oauth_internal_secret(name: str) -> bool:
@@ -325,9 +284,13 @@ def start_openai_oauth(
             "response_type": "code",
             "client_id": OPENAI_OAUTH_CLIENT_ID,
             "redirect_uri": redirect_uri,
+            "scope": OPENAI_OAUTH_SCOPE,
             "state": state,
             "code_challenge": _pkce_challenge(code_verifier),
             "code_challenge_method": "S256",
+            "id_token_add_organizations": "true",
+            "codex_cli_simplified_flow": "true",
+            "originator": OPENAI_OAUTH_ORIGINATOR,
         }
     )
     return OpenAIOAuthStartResult(
@@ -393,6 +356,58 @@ async def complete_openai_oauth_from_redirect(
         adapter=adapter,
         now=now,
     )
+
+
+async def ensure_fresh_openai_oauth_token(
+    *,
+    adapter: OpenAIOAuthTokenAdapter | None = None,
+    now: datetime | None = None,
+) -> OpenAIOAuthTokenState:
+    """Return a stored OAuth token, refreshing it when expiry is near."""
+
+    token_state = load_openai_oauth_token_state()
+    if token_state is None:
+        raise OpenAIOAuthStateError("OpenAI OAuth is not connected.")
+
+    if not _token_needs_refresh(token_state, now=now):
+        return token_state
+
+    if not token_state.refresh_token:
+        if _is_token_expired(token_state, now=now):
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth access token expired and no refresh token is stored."
+            )
+        return token_state
+
+    reference = _normalize_datetime(now or datetime.now(UTC))
+    token_adapter = adapter or get_openai_oauth_token_adapter()
+    try:
+        token_result = await token_adapter.refresh_token(
+            refresh_token=token_state.refresh_token
+        )
+    except OpenAIOAuthStateError as exc:
+        failed_state = token_result_to_state(
+            OpenAIOAuthTokenResult(
+                access_token=token_state.access_token,
+                refresh_token=token_state.refresh_token,
+                expires_at=token_state.expires_at,
+                account_id=token_state.account_id,
+            ),
+            previous=token_state,
+            refreshed_at=reference.isoformat(),
+            refresh_error=str(exc),
+        )
+        save_openai_oauth_token_state(failed_state)
+        raise
+
+    refreshed_state = token_result_to_state(
+        token_result,
+        previous=token_state,
+        refreshed_at=reference.isoformat(),
+        refresh_error=None,
+    )
+    save_openai_oauth_token_state(refreshed_state)
+    return refreshed_state
 
 
 def save_openai_oauth_token_state(state: OpenAIOAuthTokenState) -> None:
@@ -590,6 +605,58 @@ def _load_json_mapping(payload: str, label: str) -> dict[str, Any]:
     return raw
 
 
+def _token_result_from_response(payload: dict[str, Any]) -> OpenAIOAuthTokenResult:
+    access_token = _required_string(payload, "access_token", "OpenAI OAuth token response")
+    id_token = _optional_string(payload, "id_token")
+    refresh_token = _optional_string(payload, "refresh_token")
+    expires_at = _response_expires_at(payload, access_token=access_token, id_token=id_token)
+    account_id = _response_account_id(payload, id_token=id_token)
+    return OpenAIOAuthTokenResult(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_at=expires_at,
+        account_id=account_id,
+    )
+
+
+def _response_expires_at(
+    payload: dict[str, Any],
+    *,
+    access_token: str,
+    id_token: str | None,
+) -> str | None:
+    expires_at = _optional_string(payload, "expires_at")
+    if expires_at:
+        return expires_at
+
+    expires_in = payload.get("expires_in")
+    if isinstance(expires_in, int | float) and expires_in > 0:
+        return (datetime.now(UTC) + timedelta(seconds=float(expires_in))).isoformat()
+
+    for token in (id_token, access_token):
+        exp = _jwt_expiration(token)
+        if exp is not None:
+            return exp.isoformat()
+    return None
+
+
+def _response_account_id(
+    payload: dict[str, Any],
+    *,
+    id_token: str | None,
+) -> str | None:
+    explicit = _optional_string(payload, "account_id")
+    if explicit:
+        return explicit
+    claims = _jwt_claims(id_token)
+    auth_claims = claims.get("https://api.openai.com/auth")
+    if isinstance(auth_claims, dict):
+        account_id = auth_claims.get("chatgpt_account_id")
+        if isinstance(account_id, str) and account_id.strip():
+            return account_id.strip()
+    return None
+
+
 def _required_string(raw: dict[str, Any], key: str, label: str) -> str:
     value = raw.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -604,10 +671,57 @@ def _optional_string(raw: dict[str, Any], key: str) -> str | None:
     return value
 
 
+def _jwt_expiration(token: str | None) -> datetime | None:
+    claims = _jwt_claims(token)
+    exp = claims.get("exp")
+    if isinstance(exp, int | float):
+        return datetime.fromtimestamp(exp, tz=UTC)
+    return None
+
+
+def _jwt_claims(token: str | None) -> dict[str, Any]:
+    if not token:
+        return {}
+    parts = token.split(".")
+    if len(parts) != 3 or not parts[1]:
+        return {}
+    payload = parts[1]
+    padding = "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(f"{payload}{padding}")
+        claims = json.loads(decoded)
+    except (binascii.Error, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
 def _is_expired(expires_at: str, *, now: datetime | None = None) -> bool:
     expiry = _parse_datetime(expires_at, "expires_at")
     reference = _normalize_datetime(now or datetime.now(UTC))
     return expiry <= reference
+
+
+def _is_token_expired(
+    token_state: OpenAIOAuthTokenState,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not token_state.expires_at:
+        return False
+    return _is_expired(token_state.expires_at, now=now)
+
+
+def _token_needs_refresh(
+    token_state: OpenAIOAuthTokenState,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not token_state.expires_at:
+        return False
+    expiry = _parse_datetime(token_state.expires_at, "expires_at")
+    reference = _normalize_datetime(now or datetime.now(UTC))
+    refresh_at = expiry - timedelta(seconds=OPENAI_OAUTH_REFRESH_WINDOW_SECONDS)
+    return refresh_at <= reference
 
 
 def _parse_datetime(value: str, field_name: str) -> datetime:
@@ -647,93 +761,3 @@ def _single_query_value(query: dict[str, list[str]], key: str) -> str | None:
         return None
     value = values[0].strip()
     return value or None
-
-
-def _api_key_resolution(
-    *,
-    configured_auth_mode: str,
-    oauth_enabled: bool,
-    oauth_connected: bool,
-    api_key_name: str | None,
-    api_key_available: bool,
-    base_url_available: bool,
-    fallback_enabled: bool,
-    fallback_available: bool,
-    fallback_used: bool,
-    status: str,
-    message: str | None,
-) -> OpenAIAuthResolution:
-    available = api_key_available or base_url_available
-    return OpenAIAuthResolution(
-        configured_auth_mode=configured_auth_mode,
-        effective_auth_mode=OPENAI_AUTH_MODE_API_KEY,
-        oauth_enabled=oauth_enabled,
-        oauth_connected=oauth_connected,
-        api_key_name=api_key_name,
-        api_key_available=api_key_available,
-        base_url_available=base_url_available,
-        fallback_enabled=fallback_enabled,
-        fallback_available=fallback_available,
-        fallback_used=fallback_used,
-        available=available,
-        status=status if available else "api_key_unavailable",
-        message=message if not available else None,
-    )
-
-
-def _api_key_missing_message(
-    api_key_name: str | None,
-    fallback_available: bool,
-) -> str | None:
-    if fallback_available:
-        return None
-    if api_key_name:
-        return f"Configure {api_key_name}"
-    return "Configure OpenAI API-key auth or connect OpenAI OAuth."
-
-
-def _provider_string(provider_config: Any, key: str, default: str) -> str:
-    value = _provider_value(provider_config, key)
-    if not isinstance(value, str) or not value.strip():
-        return default
-    return value.strip()
-
-
-def _provider_optional_string(provider_config: Any, key: str) -> str | None:
-    value = _provider_value(provider_config, key)
-    if not isinstance(value, str) or not value.strip() or value.lower() == "null":
-        return None
-    return value.strip()
-
-
-def _provider_bool(provider_config: Any, key: str, default: bool) -> bool:
-    value = _provider_value(provider_config, key)
-    if value is None:
-        return default
-    return bool(value)
-
-
-def _provider_value(provider_config: Any, key: str) -> Any:
-    if isinstance(provider_config, Mapping):
-        return provider_config.get(key)
-    return getattr(provider_config, key, None)
-
-
-def _log_openai_auth_resolution(resolution: OpenAIAuthResolution) -> None:
-    from core.logger import UnifiedLogger
-
-    logger = UnifiedLogger(tag="openai-oauth")
-    logger.info(
-        "OpenAI auth mode resolved",
-        data={
-            "mode": resolution.effective_auth_mode,
-            "configured_mode": resolution.configured_auth_mode,
-            "oauth_globally_enabled": resolution.oauth_enabled,
-            "has_api_key_fallback": resolution.fallback_available,
-            "fallback_enabled": resolution.fallback_enabled,
-            "fallback_used": resolution.fallback_used,
-            "oauth_connected": resolution.oauth_connected,
-            "available": resolution.available,
-            "status": resolution.status,
-        },
-    )
