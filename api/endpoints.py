@@ -50,6 +50,9 @@ from .models import (
     SystemSettingsResponse,
     UpdateSettingsRequest,
     ModelConfigRequest,
+    OpenAIOAuthCompleteRequest,
+    OpenAIOAuthStartRequest,
+    OpenAIOAuthStartResponse,
     ProviderConfigRequest,
     ModelInfo,
     ProviderInfo,
@@ -124,6 +127,10 @@ from .services import (
     upsert_configurable_model,
     delete_configurable_model,
     get_configurable_providers,
+    start_openai_oauth_connection,
+    complete_openai_oauth_callback,
+    complete_openai_oauth_manual,
+    disconnect_openai_oauth_connection,
     upsert_configurable_provider,
     delete_configurable_provider,
     list_secrets,
@@ -660,6 +667,62 @@ async def list_providers():
     """List provider configurations."""
     try:
         return get_configurable_providers()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/providers/openai/oauth/start",
+    response_model=OpenAIOAuthStartResponse,
+)
+async def start_openai_oauth(request: Request, payload: OpenAIOAuthStartRequest):
+    """Start an OpenAI OAuth connection attempt."""
+    try:
+        callback_url = str(request.url_for("complete_openai_oauth_callback_endpoint"))
+        return start_openai_oauth_connection(
+            payload,
+            default_redirect_uri=callback_url,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/system/providers/openai/oauth/callback", response_model=ProviderInfo)
+async def complete_openai_oauth_callback_endpoint(code: str, state: str):
+    """Complete OpenAI OAuth from callback query parameters."""
+    try:
+        return await complete_openai_oauth_callback(code=code, state=state)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/providers/openai/oauth/complete", response_model=ProviderInfo)
+async def complete_openai_oauth_manual_endpoint(request: OpenAIOAuthCompleteRequest):
+    """Complete OpenAI OAuth from a pasted redirect URL or code/state pair."""
+    try:
+        return await complete_openai_oauth_manual(request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/system/providers/openai/oauth/status", response_model=ProviderInfo)
+async def get_openai_oauth_status_endpoint():
+    """Return OpenAI provider status including sanitized OAuth metadata."""
+    try:
+        return next(
+            provider
+            for provider in get_configurable_providers()
+            if provider.name == "openai"
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete("/system/providers/openai/oauth", response_model=OperationResult)
+async def disconnect_openai_oauth_endpoint():
+    """Disconnect OpenAI OAuth without changing provider auth mode."""
+    try:
+        return disconnect_openai_oauth_connection()
     except Exception as e:
         return create_error_response(e)
 

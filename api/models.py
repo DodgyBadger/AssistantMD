@@ -697,6 +697,35 @@ class ProviderConfigRequest(BaseModel):
     base_url_value: Optional[str] = Field(None, description="Optional base URL value to persist in the secrets store")
 
 
+class OpenAIOAuthStartRequest(BaseModel):
+    """Payload for starting an OpenAI OAuth connection."""
+
+    redirect_uri: Optional[str] = Field(
+        None,
+        description="Optional callback URI; defaults to the API callback endpoint",
+    )
+
+
+class OpenAIOAuthStartResponse(BaseModel):
+    """Bootstrap response for an OpenAI OAuth connection attempt."""
+
+    auth_url: str = Field(..., description="Authorization URL to open in a browser")
+    state: str = Field(..., description="Opaque OAuth state for this connection attempt")
+    redirect_uri: str = Field(..., description="Callback URI bound to this attempt")
+    expires_at: str = Field(..., description="Pending connection expiry timestamp")
+
+
+class OpenAIOAuthCompleteRequest(BaseModel):
+    """Payload for completing OpenAI OAuth manually."""
+
+    redirect_url: Optional[str] = Field(
+        None,
+        description="Full pasted redirect URL containing code and state",
+    )
+    code: Optional[str] = Field(None, description="Authorization code")
+    state: Optional[str] = Field(None, description="OAuth state")
+
+
 class OperationResult(BaseModel):
     """Generic success response for configuration operations."""
 

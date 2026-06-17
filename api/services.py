@@ -51,8 +51,13 @@ from core.settings.secrets_store import (
     secret_has_value,
 )
 from core.llm.openai_oauth import (
+    OpenAIOAuthStateError,
+    clear_openai_oauth_state,
+    complete_openai_oauth,
+    complete_openai_oauth_from_redirect,
     get_openai_oauth_status,
     is_openai_oauth_internal_secret,
+    start_openai_oauth as start_openai_oauth_attempt,
 )
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
@@ -94,6 +99,9 @@ from .models import (
     ConfigurationIssueInfo,
     ProviderInfo,
     ModelConfigRequest,
+    OpenAIOAuthCompleteRequest,
+    OpenAIOAuthStartRequest,
+    OpenAIOAuthStartResponse,
     ProviderConfigRequest,
     CachePurgeResponse,
     SystemTemplateSeedResponse,
@@ -2595,6 +2603,80 @@ def get_configurable_providers() -> List[ProviderInfo]:
         _build_provider_info(name, config)
         for name, config in providers_config.items()
     ]
+
+
+def _openai_provider_info(restart_required: bool = False) -> ProviderInfo:
+    providers_config = get_providers_config()
+    config = providers_config.get("openai")
+    if config is None:
+        raise SystemConfigurationError("Built-in openai provider is not configured.")
+    return _build_provider_info("openai", config, restart_required=restart_required)
+
+
+def start_openai_oauth_connection(
+    payload: OpenAIOAuthStartRequest,
+    *,
+    default_redirect_uri: str,
+) -> OpenAIOAuthStartResponse:
+    """Start an OpenAI OAuth connection attempt."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    redirect_uri = payload.redirect_uri or default_redirect_uri
+    try:
+        result = start_openai_oauth_attempt(redirect_uri=redirect_uri)
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info(
+        "OpenAI OAuth start created",
+        data={"redirect_uri_configured": bool(payload.redirect_uri)},
+    )
+    return OpenAIOAuthStartResponse(
+        auth_url=result.auth_url,
+        state=result.state,
+        redirect_uri=result.redirect_uri,
+        expires_at=result.expires_at,
+    )
+
+
+async def complete_openai_oauth_callback(code: str, state: str) -> ProviderInfo:
+    """Complete OpenAI OAuth from callback query parameters."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        await complete_openai_oauth(code=code, state=state)
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info("OpenAI OAuth callback completed", data={"manual": False})
+    return _openai_provider_info()
+
+
+async def complete_openai_oauth_manual(
+    payload: OpenAIOAuthCompleteRequest,
+) -> ProviderInfo:
+    """Complete OpenAI OAuth from a pasted redirect URL or code/state pair."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        await complete_openai_oauth_from_redirect(
+            redirect_url=payload.redirect_url,
+            code=payload.code,
+            state=payload.state,
+        )
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info("OpenAI OAuth manual completion finished", data={"manual": True})
+    return _openai_provider_info()
+
+
+def disconnect_openai_oauth_connection() -> OperationResult:
+    """Clear OpenAI OAuth token and pending state without changing provider mode."""
+
+    clear_openai_oauth_state()
+    logger.info("OpenAI OAuth disconnected", data={})
+    return OperationResult(success=True, message="OpenAI OAuth connection cleared.")
 
 
 def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequest) -> ProviderInfo:

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import secrets
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from core.settings.secrets_store import (
     delete_secret,
@@ -19,6 +23,9 @@ OPENAI_OAUTH_PENDING_SECRET = "OPENAI_OAUTH_PENDING_STATE"
 OPENAI_OAUTH_INTERNAL_SECRETS = frozenset(
     {OPENAI_OAUTH_TOKEN_SECRET, OPENAI_OAUTH_PENDING_SECRET}
 )
+OPENAI_OAUTH_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
+OPENAI_OAUTH_PENDING_TTL_SECONDS = 600
+OPENAI_OAUTH_CLIENT_ID = "codex-cli"
 
 
 class OpenAIOAuthStateError(ValueError):
@@ -47,6 +54,16 @@ class OpenAIOAuthPendingState:
     created_at: str
     expires_at: str
     return_metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OpenAIOAuthStartResult:
+    """Bootstrap data for an OAuth connection attempt."""
+
+    auth_url: str
+    state: str
+    redirect_uri: str
+    expires_at: str
 
 
 @dataclass(frozen=True)
@@ -89,10 +106,146 @@ class OpenAIOAuthTokenAdapter(Protocol):
         """Refresh an OAuth access token."""
 
 
+@dataclass(frozen=True)
+class StaticOpenAIOAuthTokenAdapter:
+    """Deterministic token adapter for validation and smoke tests."""
+
+    token_result: OpenAIOAuthTokenResult
+
+    async def exchange_code(
+        self,
+        *,
+        code: str,
+        code_verifier: str,
+        redirect_uri: str,
+    ) -> OpenAIOAuthTokenResult:
+        """Return the configured token result."""
+
+        return self.token_result
+
+    async def refresh_token(self, *, refresh_token: str) -> OpenAIOAuthTokenResult:
+        """Return the configured token result."""
+
+        return self.token_result
+
+
+_token_adapter: OpenAIOAuthTokenAdapter | None = None
+
+
+def set_openai_oauth_token_adapter(adapter: OpenAIOAuthTokenAdapter | None) -> None:
+    """Set the process-local token adapter used by OAuth completion."""
+
+    global _token_adapter
+    _token_adapter = adapter
+
+
+def get_openai_oauth_token_adapter() -> OpenAIOAuthTokenAdapter:
+    """Return the configured token adapter or fail closed."""
+
+    if _token_adapter is None:
+        raise OpenAIOAuthStateError("OpenAI OAuth token adapter is not configured.")
+    return _token_adapter
+
+
 def is_openai_oauth_internal_secret(name: str) -> bool:
     """Return True when a secret name belongs to internal OpenAI OAuth state."""
 
     return name in OPENAI_OAUTH_INTERNAL_SECRETS
+
+
+def start_openai_oauth(
+    *,
+    redirect_uri: str,
+    now: datetime | None = None,
+) -> OpenAIOAuthStartResult:
+    """Create pending PKCE state and return OAuth bootstrap data."""
+
+    reference = _normalize_datetime(now or datetime.now(UTC))
+    expires_at = (reference + timedelta(seconds=OPENAI_OAUTH_PENDING_TTL_SECONDS))
+    state = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(64)
+    pending = OpenAIOAuthPendingState(
+        state=state,
+        code_verifier=code_verifier,
+        redirect_uri=redirect_uri,
+        created_at=reference.isoformat(),
+        expires_at=expires_at.isoformat(),
+    )
+    save_openai_oauth_pending_state(pending)
+
+    query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": OPENAI_OAUTH_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "code_challenge": _pkce_challenge(code_verifier),
+            "code_challenge_method": "S256",
+        }
+    )
+    return OpenAIOAuthStartResult(
+        auth_url=f"{OPENAI_OAUTH_AUTHORIZE_URL}?{query}",
+        state=state,
+        redirect_uri=redirect_uri,
+        expires_at=expires_at.isoformat(),
+    )
+
+
+async def complete_openai_oauth(
+    *,
+    code: str,
+    state: str,
+    adapter: OpenAIOAuthTokenAdapter | None = None,
+    now: datetime | None = None,
+) -> OpenAIOAuthTokenState:
+    """Consume pending PKCE state and persist exchanged OAuth tokens."""
+
+    pending = consume_openai_oauth_pending_state(state=state, now=now)
+    token_adapter = adapter or get_openai_oauth_token_adapter()
+    token_result = await token_adapter.exchange_code(
+        code=code,
+        code_verifier=pending.code_verifier,
+        redirect_uri=pending.redirect_uri,
+    )
+    token_state = token_result_to_state(token_result)
+    save_openai_oauth_token_state(token_state)
+    return token_state
+
+
+async def complete_openai_oauth_from_redirect(
+    *,
+    redirect_url: str | None = None,
+    code: str | None = None,
+    state: str | None = None,
+    adapter: OpenAIOAuthTokenAdapter | None = None,
+    now: datetime | None = None,
+) -> OpenAIOAuthTokenState:
+    """Complete OAuth from a pasted redirect URL or raw code/state pair."""
+
+    resolved_code = code
+    resolved_state = state
+    if redirect_url:
+        parsed_code, parsed_state = _parse_redirect_values(redirect_url)
+        resolved_code = parsed_code
+        resolved_state = parsed_state
+
+    if not resolved_code:
+        raise OpenAIOAuthStateError("OpenAI OAuth completion requires a code.")
+
+    if not resolved_state:
+        pending = load_openai_oauth_pending_state(now=now, cleanup_expired=True)
+        if pending is None:
+            raise OpenAIOAuthStateError(
+                "OpenAI OAuth completion requires state when no pending attempt exists."
+            )
+        resolved_state = pending.state
+
+    return await complete_openai_oauth(
+        code=resolved_code,
+        state=resolved_state,
+        adapter=adapter,
+        now=now,
+    )
 
 
 def save_openai_oauth_token_state(state: OpenAIOAuthTokenState) -> None:
@@ -306,9 +459,7 @@ def _optional_string(raw: dict[str, Any], key: str) -> str | None:
 
 def _is_expired(expires_at: str, *, now: datetime | None = None) -> bool:
     expiry = _parse_datetime(expires_at, "expires_at")
-    reference = now or datetime.now(UTC)
-    if reference.tzinfo is None:
-        reference = reference.replace(tzinfo=UTC)
+    reference = _normalize_datetime(now or datetime.now(UTC))
     return expiry <= reference
 
 
@@ -322,3 +473,30 @@ def _parse_datetime(value: str, field_name: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed
+
+
+def _normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _pkce_challenge(code_verifier: str) -> str:
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _parse_redirect_values(redirect_url: str) -> tuple[str | None, str | None]:
+    parsed = urlparse(redirect_url)
+    query = parse_qs(parsed.query)
+    code = _single_query_value(query, "code")
+    state = _single_query_value(query, "state")
+    return code, state
+
+
+def _single_query_value(query: dict[str, list[str]], key: str) -> str | None:
+    values = query.get(key) or []
+    if not values:
+        return None
+    value = values[0].strip()
+    return value or None

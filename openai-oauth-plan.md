@@ -420,6 +420,12 @@ Testable artifacts:
   - sanitized OAuth status object wired into OpenAI provider status
   - internal OAuth secret filtering from the generic Secrets list
   - API scenario assertion for hidden internal OAuth token state
+- Slice 3 implemented:
+  - PKCE OAuth start helper with persisted pending state and bootstrap URL
+  - callback and manual completion helpers using the injectable token adapter
+  - OpenAI OAuth start/callback/manual-complete/status/disconnect endpoints
+  - deterministic static adapter coverage in the API scenario
+  - disconnect clears token and pending state without changing provider auth mode
 
 ## Local Smoke Tests During Development
 

@@ -7,12 +7,18 @@ import base64
 import json
 
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
+from core.llm.openai_oauth import (
+    OpenAIOAuthTokenResult,
+    StaticOpenAIOAuthTokenAdapter,
+    set_openai_oauth_token_adapter,
+)
 from validation.core.base_scenario import BaseScenario
 
 
@@ -159,6 +165,68 @@ class ApiEndpointsScenario(BaseScenario):
         assert updated_openai_payload["oauth_api_key_fallback_enabled"] is True, (
             "OpenAI provider records explicit API-key fallback opt-in"
         )
+
+        oauth_enable = self.call_api(
+            "/api/system/settings/general/openai_oauth_enabled",
+            method="PUT",
+            data={"value": "true"},
+        )
+        assert oauth_enable.status_code == 200, "OpenAI OAuth can be enabled"
+        token_expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        set_openai_oauth_token_adapter(
+            StaticOpenAIOAuthTokenAdapter(
+                OpenAIOAuthTokenResult(
+                    access_token="validation-access-token",
+                    refresh_token="validation-refresh-token",
+                    expires_at=token_expiry,
+                    account_id="validation-account",
+                )
+            )
+        )
+        oauth_start = self.call_api(
+            "/api/system/providers/openai/oauth/start",
+            method="POST",
+            data={},
+        )
+        assert oauth_start.status_code == 200, "OpenAI OAuth start succeeds"
+        oauth_start_payload = oauth_start.json()
+        assert oauth_start_payload["auth_url"], "OAuth start returns auth URL"
+        assert oauth_start_payload["state"], "OAuth start returns state"
+        assert oauth_start_payload["redirect_uri"], "OAuth start returns redirect URI"
+
+        pasted_redirect = (
+            f"{oauth_start_payload['redirect_uri']}?code=validation-code"
+            f"&state={oauth_start_payload['state']}"
+        )
+        oauth_complete = self.call_api(
+            "/api/system/providers/openai/oauth/complete",
+            method="POST",
+            data={"redirect_url": pasted_redirect},
+        )
+        assert oauth_complete.status_code == 200, (
+            "OpenAI OAuth manual completion succeeds with fake adapter"
+        )
+        oauth_complete_payload = oauth_complete.json()
+        assert oauth_complete_payload["oauth_status"] == "connected", (
+            "OpenAI OAuth status reports connected after completion"
+        )
+        assert oauth_complete_payload["oauth_account_id"] == "validation-account", (
+            "OpenAI OAuth status exposes sanitized account metadata"
+        )
+
+        oauth_disconnect = self.call_api(
+            "/api/system/providers/openai/oauth",
+            method="DELETE",
+        )
+        assert oauth_disconnect.status_code == 200, (
+            "OpenAI OAuth disconnect succeeds"
+        )
+        oauth_status = self.call_api("/api/system/providers/openai/oauth/status")
+        assert oauth_status.status_code == 200, "OpenAI OAuth status endpoint succeeds"
+        assert oauth_status.json()["oauth_status"] == "disconnected", (
+            "OpenAI OAuth status reports disconnected after disconnect"
+        )
+        set_openai_oauth_token_adapter(None)
 
         provider_alias = "validation-provider"
         created_provider = self.call_api(
