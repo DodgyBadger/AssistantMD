@@ -169,14 +169,14 @@ class OpenAIOAuthHTTPTokenAdapter:
         return _token_result_from_response(data)
 
     async def refresh_token(self, *, refresh_token: str) -> OpenAIOAuthTokenResult:
-        """Refresh OpenAI OAuth tokens using the Codex-compatible JSON body."""
+        """Refresh OpenAI OAuth tokens using the Codex-compatible form body."""
 
         payload = {
             "client_id": self.client_id,
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
-        data = await self._post_json(payload)
+        data = await self._post_form(payload)
         return _token_result_from_response(data)
 
     async def _post_form(self, payload: dict[str, str]) -> dict[str, Any]:
@@ -185,18 +185,11 @@ class OpenAIOAuthHTTPTokenAdapter:
             data=payload,
         )
 
-    async def _post_json(self, payload: dict[str, str]) -> dict[str, Any]:
-        return await self._post(
-            headers={"Content-Type": "application/json"},
-            json_payload=payload,
-        )
-
     async def _post(
         self,
         *,
         headers: dict[str, str],
         data: dict[str, str] | None = None,
-        json_payload: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         client = self.http_client
         owns_client = client is None
@@ -207,7 +200,6 @@ class OpenAIOAuthHTTPTokenAdapter:
                 self.token_url,
                 headers=headers,
                 data=data,
-                json=json_payload,
             )
         except httpx.HTTPError as exc:
             raise OpenAIOAuthStateError(
@@ -610,7 +602,11 @@ def _token_result_from_response(payload: dict[str, Any]) -> OpenAIOAuthTokenResu
     id_token = _optional_string(payload, "id_token")
     refresh_token = _optional_string(payload, "refresh_token")
     expires_at = _response_expires_at(payload, access_token=access_token, id_token=id_token)
-    account_id = _response_account_id(payload, id_token=id_token)
+    account_id = _response_account_id(
+        payload,
+        access_token=access_token,
+        id_token=id_token,
+    )
     return OpenAIOAuthTokenResult(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -643,17 +639,19 @@ def _response_expires_at(
 def _response_account_id(
     payload: dict[str, Any],
     *,
+    access_token: str,
     id_token: str | None,
 ) -> str | None:
     explicit = _optional_string(payload, "account_id")
     if explicit:
         return explicit
-    claims = _jwt_claims(id_token)
-    auth_claims = claims.get("https://api.openai.com/auth")
-    if isinstance(auth_claims, dict):
-        account_id = auth_claims.get("chatgpt_account_id")
-        if isinstance(account_id, str) and account_id.strip():
-            return account_id.strip()
+    for token in (access_token, id_token):
+        claims = _jwt_claims(token)
+        auth_claims = claims.get("https://api.openai.com/auth")
+        if isinstance(auth_claims, dict):
+            account_id = auth_claims.get("chatgpt_account_id")
+            if isinstance(account_id, str) and account_id.strip():
+                return account_id.strip()
     return None
 
 

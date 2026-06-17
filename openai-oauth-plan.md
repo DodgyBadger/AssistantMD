@@ -421,8 +421,36 @@ Testable artifacts:
 - OAuth start URL contains the Codex-compatible public client contract.
 - Mocked authorization-code exchange uses form encoding and the expected client
   metadata.
-- Mocked refresh uses the expected JSON body and updates stored token state.
+- Mocked refresh updates stored token state.
 - Runtime provider construction targets the Codex backend and carries the
+  account header without exposing tokens.
+
+### Slice 9: OpenClaw Compatibility Tightening
+
+Reconcile the real adapter with the current OpenClaw implementation where it
+differs from Codex CLI source inspection.
+
+Changes:
+
+- Refresh tokens with the same URL-encoded form request shape OpenClaw uses for
+  OpenAI Codex OAuth.
+- Derive ChatGPT account id from the access-token claims first, matching
+  OpenClaw's stored `{ access, refresh, expires, accountId }` contract.
+- Preserve the id-token account-id fallback for compatibility with the previous
+  local parser and other Codex-compatible responses.
+- Keep the current OAuth scope unchanged in this slice. Codex Rust includes
+  `api.connectors.read` and `api.connectors.invoke`; OpenClaw currently uses
+  only `openid profile email offline_access`. That difference should be decided
+  with a separate live/manual verification pass.
+- Defer file-lock refresh coordination. OpenClaw uses a file lock around refresh
+  because it supports multiple agent sessions/processes; AssistantMD should add
+  equivalent coordination only when its runtime concurrency model requires it.
+
+Testable artifacts:
+
+- Mocked refresh uses form encoding and expected client metadata.
+- Mocked token responses can derive account id from access-token JWT claims.
+- Runtime provider construction still targets the Codex backend and carries the
   account header without exposing tokens.
 
 ## Suggested Implementation Order
@@ -435,6 +463,7 @@ Testable artifacts:
 6. Configuration UI.
 7. Docs, logging review, and merge prep.
 8. Codex-compatible token exchange, refresh, and default runtime adapter.
+9. OpenClaw compatibility tightening for refresh shape and account identity.
 
 ## Current Progress
 
@@ -501,6 +530,11 @@ Testable artifacts:
     with bearer-token auth and account header support
   - OpenAI auth resolution moved into a pure module so settings import paths do
     not depend on OAuth token-state helpers
+- Slice 9 implemented:
+  - OpenClaw compatibility inspection completed at
+    `a0a0e5e4cbbfd96a0cd75f1b051c2fef7de4b85a`
+  - refresh request encoding and account-id extraction were aligned with
+    OpenClaw's OpenAI Codex OAuth implementation
 
 ## Local Smoke Tests During Development
 
