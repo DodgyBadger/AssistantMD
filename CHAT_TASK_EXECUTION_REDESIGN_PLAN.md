@@ -405,5 +405,6 @@ Risk:
 
 ## Next Phase
 
-Move to Feature Development with Slice 6 only. Keep queued-message behavior
-separate from the cancellation fix and commit after a focused smoke test.
+The planned task-owned chat execution slices are implemented. Next work should
+come from new product requirements or maintainer validation feedback rather
+than extending this redesign plan by default.
