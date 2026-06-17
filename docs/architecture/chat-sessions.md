@@ -63,6 +63,8 @@ history back to chat.
 Chat execution registers a process-local task scoped to `chat_session:<session_id>`.
 
 - Non-streaming and streaming chat runs both use the same task kind (`chat`) and API source (`api`).
+- Streaming chat emits SSE keepalive comments during idle waits so long-running
+  model or tool calls keep the response connection active.
 - `chat_tool_calls_limit` applies Pydantic AI `UsageLimits(tool_calls_limit=...)` to chat runs when the setting is positive; `0` disables this guard.
 - `delegate_tool_calls_limit` and `delegate_timeout_seconds` separately bound child agents launched by `delegate(...)`.
 - `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.

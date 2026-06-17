@@ -6,6 +6,7 @@ Persists canonical chat history in the structured chat store.
 """
 
 import asyncio
+import contextlib
 import json
 import traceback
 from dataclasses import dataclass, field
@@ -74,6 +75,8 @@ PromptInput = str | Sequence[UserContent]
 
 _CHAT_STORE = ChatStore()
 _LATEST_TURN_FAILURE_METADATA_KEY = "latest_turn_failure"
+_STREAM_KEEPALIVE_INTERVAL_SECONDS = 15.0
+_STREAM_QUEUE_DONE = object()
 
 
 @dataclass(frozen=True)
@@ -1190,7 +1193,10 @@ async def _stream_prepared_chat_prompt(
             },
         )
 
-        try:
+        queue: asyncio.Queue[str | BaseException | object] = asyncio.Queue()
+
+        async def _enqueue_stream_events() -> None:
+            nonlocal final_result, full_response
             async for event in prepared.agent.run_stream_events(
                 prepared.user_prompt,
                 message_history=prepared.message_history,
@@ -1209,7 +1215,7 @@ async def _stream_prepared_chat_prompt(
                                 "finish_reason": None,
                             }],
                         }
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        await queue.put(f"data: {json.dumps(chunk)}\n\n")
 
                 elif isinstance(event, PartDeltaEvent):
                     if isinstance(event.delta, TextPartDelta):
@@ -1223,7 +1229,7 @@ async def _stream_prepared_chat_prompt(
                                 "finish_reason": None,
                             }],
                         }
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        await queue.put(f"data: {json.dumps(chunk)}\n\n")
 
                 elif isinstance(event, FunctionToolCallEvent):
                     tool_id = event.tool_call_id
@@ -1260,7 +1266,7 @@ async def _stream_prepared_chat_prompt(
                             "memory_rss_bytes": _get_process_rss_bytes(),
                         },
                     )
-                    yield f"data: {json.dumps(metadata_chunk)}\n\n"
+                    await queue.put(f"data: {json.dumps(metadata_chunk)}\n\n")
 
                 elif isinstance(event, FunctionToolResultEvent):
                     tool_id = event.tool_call_id
@@ -1299,7 +1305,7 @@ async def _stream_prepared_chat_prompt(
                             "memory_rss_bytes": _get_process_rss_bytes(),
                         },
                     )
-                    yield f"data: {json.dumps(metadata_chunk)}\n\n"
+                    await queue.put(f"data: {json.dumps(metadata_chunk)}\n\n")
 
                 elif isinstance(event, AgentRunResultEvent):
                     final_result = event.result
@@ -1313,25 +1319,211 @@ async def _stream_prepared_chat_prompt(
                 }],
                 "tool_summary": tool_activity,
             }
-            yield f"data: {json.dumps(final_chunk)}\n\n"
+            await queue.put(f"data: {json.dumps(final_chunk)}\n\n")
 
-        except asyncio.CancelledError as exc:
+        async def _produce_stream() -> None:
+            try:
+                await _enqueue_stream_events()
+
+            except asyncio.CancelledError as exc:
+                await runtime.task_coordinator.mark_cancelled(task.task_id, reason="cancelled")
+                _log_chat_failure(
+                    "Streaming chat execution cancelled",
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                    streaming=True,
+                    phase="agent_stream",
+                    prompt_length=len(prepared.prompt_for_history),
+                    attached_image_count=prepared.attached_image_count,
+                    context_template=prepared.context_template,
+                    workspace_path=prepared.workspace_path,
+                    extra=_summarize_tool_activity(tool_activity),
+                    exc=exc,
+                )
+                cancel_chunk = {
+                    "event": "cancelled",
+                    "choices": [{
+                        "delta": {},
+                        "index": 0,
+                        "finish_reason": "cancelled",
+                    }],
+                }
+                await queue.put(f"data: {json.dumps(cancel_chunk)}\n\n")
+            except ChatCapabilityError as exc:
+                logger.warning("Streaming capability mismatch", data=exc.details)
+                _record_latest_turn_failure(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    exc=exc,
+                    phase="agent_stream",
+                    streaming=True,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                )
+                error_chunk = {
+                    "event": "error",
+                    "choices": [{
+                        "delta": {"content": f"\n\n❌ Error: {str(exc)}"},
+                        "index": 0,
+                        "finish_reason": "error",
+                    }],
+                    "details": exc.details,
+                }
+                await queue.put(f"data: {json.dumps(error_chunk)}\n\n")
+            except ContextTemplateExecutionError as exc:
+                details = build_context_template_error_details(
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    template_name=exc.template_name,
+                    phase=exc.phase,
+                    template_pointer=exc.template_pointer,
+                )
+                logger.warning("Streaming context template execution failure", data=details | {"error": str(exc)})
+                _record_latest_turn_failure(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    exc=exc,
+                    phase="agent_stream",
+                    streaming=True,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                )
+                error_chunk = {
+                    "event": "error",
+                    "choices": [{
+                        "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                        "index": 0,
+                        "finish_reason": "error",
+                    }],
+                    "details": details,
+                }
+                await queue.put(f"data: {json.dumps(error_chunk)}\n\n")
+            except ChatContextTemplateError as exc:
+                logger.warning("Streaming context template failure", data=exc.details)
+                _record_latest_turn_failure(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    exc=exc,
+                    phase="agent_stream",
+                    streaming=True,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                )
+                error_chunk = {
+                    "event": "error",
+                    "choices": [{
+                        "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
+                        "index": 0,
+                        "finish_reason": "error",
+                    }],
+                    "details": exc.details,
+                }
+                await queue.put(f"data: {json.dumps(error_chunk)}\n\n")
+            except UsageLimitExceeded as exc:
+                limit_error = _build_chat_usage_limit_error(exc)
+                _log_chat_failure(
+                    f"Streaming chat {_usage_limit_label(limit_error)} exceeded",
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                    streaming=True,
+                    phase="agent_stream",
+                    prompt_length=len(prepared.prompt_for_history),
+                    attached_image_count=prepared.attached_image_count,
+                    context_template=prepared.context_template,
+                    workspace_path=prepared.workspace_path,
+                    extra={**_summarize_tool_activity(tool_activity), **limit_error.details},
+                    exc=exc,
+                )
+                _record_latest_turn_failure(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    exc=exc,
+                    phase="agent_stream",
+                    streaming=True,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                )
+                error_chunk = {
+                    "event": "error",
+                    "choices": [{
+                        "delta": {"content": f"\n\n{_usage_limit_display_label(limit_error)} reached: {str(limit_error)}"},
+                        "index": 0,
+                        "finish_reason": "error",
+                    }],
+                    "details": limit_error.details,
+                }
+                await queue.put(f"data: {json.dumps(error_chunk)}\n\n")
+            except Exception as e:
+                classification = classify_exception(e, phase="agent_stream")
+                _log_chat_failure(
+                    "Streaming chat execution failed",
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                    streaming=True,
+                    phase="agent_stream",
+                    prompt_length=len(prepared.prompt_for_history),
+                    attached_image_count=prepared.attached_image_count,
+                    context_template=prepared.context_template,
+                    workspace_path=prepared.workspace_path,
+                    extra=_summarize_tool_activity(tool_activity),
+                    exc=e,
+                )
+                _record_latest_turn_failure(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    exc=e,
+                    phase="agent_stream",
+                    streaming=True,
+                    model=prepared.model,
+                    tools=prepared.tools,
+                )
+                error_chunk = {
+                    "event": "error",
+                    "choices": [{
+                        "delta": {"content": "\n\n❌ Error: An unexpected error occurred"},
+                        "index": 0,
+                        "finish_reason": "error",
+                    }],
+                    "details": classification.to_metadata(),
+                }
+                await queue.put(f"data: {json.dumps(error_chunk)}\n\n")
+                await queue.put(e)
+            finally:
+                await queue.put(_STREAM_QUEUE_DONE)
+
+        producer = asyncio.create_task(_produce_stream())
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=_STREAM_KEEPALIVE_INTERVAL_SECONDS,
+                    )
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+                if item is _STREAM_QUEUE_DONE:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        except asyncio.CancelledError:
+            producer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await producer
             await runtime.task_coordinator.mark_cancelled(task.task_id, reason="cancelled")
-            _log_chat_failure(
-                "Streaming chat execution cancelled",
-                vault_name=vault_name,
-                session_id=session_id,
-                model=prepared.model,
-                tools=prepared.tools,
-                streaming=True,
-                phase="agent_stream",
-                prompt_length=len(prepared.prompt_for_history),
-                attached_image_count=prepared.attached_image_count,
-                context_template=prepared.context_template,
-                workspace_path=prepared.workspace_path,
-                extra=_summarize_tool_activity(tool_activity),
-                exc=exc,
-            )
+            while not queue.empty():
+                item = queue.get_nowait()
+                if isinstance(item, str) and '"event": "cancelled"' in item:
+                    yield item
+                    return
             cancel_chunk = {
                 "event": "cancelled",
                 "choices": [{
@@ -1342,153 +1534,11 @@ async def _stream_prepared_chat_prompt(
             }
             yield f"data: {json.dumps(cancel_chunk)}\n\n"
             return
-        except ChatCapabilityError as exc:
-            logger.warning("Streaming capability mismatch", data=exc.details)
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=exc,
-                phase="agent_stream",
-                streaming=True,
-                model=prepared.model,
-                tools=prepared.tools,
-            )
-            error_chunk = {
-                "event": "error",
-                "choices": [{
-                    "delta": {"content": f"\n\n❌ Error: {str(exc)}"},
-                    "index": 0,
-                    "finish_reason": "error",
-                }],
-                "details": exc.details,
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            return
-        except ContextTemplateExecutionError as exc:
-            details = build_context_template_error_details(
-                vault_name=vault_name,
-                session_id=session_id,
-                template_name=exc.template_name,
-                phase=exc.phase,
-                template_pointer=exc.template_pointer,
-            )
-            logger.warning("Streaming context template execution failure", data=details | {"error": str(exc)})
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=exc,
-                phase="agent_stream",
-                streaming=True,
-                model=prepared.model,
-                tools=prepared.tools,
-            )
-            error_chunk = {
-                "event": "error",
-                "choices": [{
-                    "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
-                    "index": 0,
-                    "finish_reason": "error",
-                }],
-                "details": details,
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            return
-        except ChatContextTemplateError as exc:
-            logger.warning("Streaming context template failure", data=exc.details)
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=exc,
-                phase="agent_stream",
-                streaming=True,
-                model=prepared.model,
-                tools=prepared.tools,
-            )
-            error_chunk = {
-                "event": "error",
-                "choices": [{
-                    "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
-                    "index": 0,
-                    "finish_reason": "error",
-                }],
-                "details": exc.details,
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            return
-        except UsageLimitExceeded as exc:
-            limit_error = _build_chat_usage_limit_error(exc)
-            _log_chat_failure(
-                f"Streaming chat {_usage_limit_label(limit_error)} exceeded",
-                vault_name=vault_name,
-                session_id=session_id,
-                model=prepared.model,
-                tools=prepared.tools,
-                streaming=True,
-                phase="agent_stream",
-                prompt_length=len(prepared.prompt_for_history),
-                attached_image_count=prepared.attached_image_count,
-                context_template=prepared.context_template,
-                workspace_path=prepared.workspace_path,
-                extra={**_summarize_tool_activity(tool_activity), **limit_error.details},
-                exc=exc,
-            )
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=exc,
-                phase="agent_stream",
-                streaming=True,
-                model=prepared.model,
-                tools=prepared.tools,
-            )
-            error_chunk = {
-                "event": "error",
-                "choices": [{
-                    "delta": {"content": f"\n\n{_usage_limit_display_label(limit_error)} reached: {str(limit_error)}"},
-                    "index": 0,
-                    "finish_reason": "error",
-                }],
-                "details": limit_error.details,
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            return
-        except Exception as e:
-            classification = classify_exception(e, phase="agent_stream")
-            _log_chat_failure(
-                "Streaming chat execution failed",
-                vault_name=vault_name,
-                session_id=session_id,
-                model=prepared.model,
-                tools=prepared.tools,
-                streaming=True,
-                phase="agent_stream",
-                prompt_length=len(prepared.prompt_for_history),
-                attached_image_count=prepared.attached_image_count,
-                context_template=prepared.context_template,
-                workspace_path=prepared.workspace_path,
-                extra=_summarize_tool_activity(tool_activity),
-                exc=e,
-            )
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=e,
-                phase="agent_stream",
-                streaming=True,
-                model=prepared.model,
-                tools=prepared.tools,
-            )
-            error_chunk = {
-                "event": "error",
-                "choices": [{
-                    "delta": {"content": "\n\n❌ Error: An unexpected error occurred"},
-                    "index": 0,
-                    "finish_reason": "error",
-                }],
-                "details": classification.to_metadata(),
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            raise
+        finally:
+            if not producer.done():
+                producer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await producer
 
         if final_result:
             async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
