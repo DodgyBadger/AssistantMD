@@ -491,15 +491,32 @@ Changes:
   32-character hex state and 43-character base64url verifier.
 - Emit authorize query parameters in OpenClaw's order.
 - Match OpenClaw's remote UX more closely by always exposing the authorization
-  URL for manual opening in the user's local browser, instead of relying only on
-  a browser popup.
+  URL in the OpenAI provider panel for manual opening in the user's local
+  browser, instead of relying only on a browser popup or transient status text.
 
 Testable artifacts:
 
 - OAuth start authorization URL contains OpenClaw-compatible scope and
   originator values.
 - OAuth start state and PKCE verifier shape match OpenClaw's current flow.
-- Configuration UI always shows the authorization URL for copy/paste testing.
+- Configuration UI shows the authorization URL in a stable copyable panel for
+  live testing.
+
+### Slice 12: Pending Attempt Cancellation
+
+Make repeated live OAuth attempts easier to reset without direct API calls.
+
+Changes:
+
+- Allow the Configuration UI to clear pending OAuth state before a token is
+  connected.
+- Reuse the existing disconnect endpoint, which already clears both token and
+  pending state.
+
+Testable artifacts:
+
+- Pending OpenAI OAuth status shows a `Cancel` action instead of a disabled
+  disconnect action.
 
 ## Suggested Implementation Order
 
@@ -514,6 +531,7 @@ Testable artifacts:
 9. OpenClaw compatibility tightening for refresh shape and account identity.
 10. Registered loopback redirect URI default for OAuth start.
 11. OpenClaw-compatible authorize metadata.
+12. Pending attempt cancellation from the Configuration UI.
 
 ## Current Progress
 
@@ -594,8 +612,11 @@ Testable artifacts:
     flow after live testing reached consent but stalled after Continue
   - OAuth state, PKCE verifier length, and authorize query parameter order now
     match OpenClaw's current implementation
-  - Configuration UI now always displays the authorization URL so remote/VPS
-    tests can open it manually like OpenClaw's remote flow
+  - Configuration UI now displays the authorization URL in the OpenAI provider
+    panel so remote/VPS tests can open it manually like OpenClaw's remote flow
+- Slice 12 implemented:
+  - pending OpenAI OAuth attempts can be cancelled from the Configuration UI
+    using the existing clear-state endpoint
 
 ## Local Smoke Tests During Development
 

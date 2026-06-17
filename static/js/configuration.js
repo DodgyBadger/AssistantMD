@@ -55,6 +55,7 @@
         providerEdit: null,
         providerDraft: null,
         openAiOauthPaste: '',
+        openAiOauthAuthUrl: '',
         isOpenAiOauthBusy: false,
         secretEdit: null,
         secretDraft: null,
@@ -735,6 +736,7 @@
         const oauthStatus = provider.oauth_status || 'disabled';
         const connected = oauthStatus === 'connected';
         const pending = oauthStatus === 'pending';
+        const canClearOAuth = connected || pending;
         const disabledReason = provider.oauth_disabled_reason || '';
         const accountText = provider.oauth_account_id ? `Account ${provider.oauth_account_id}` : 'No account connected';
         const expiresText = provider.oauth_expires_at ? `Expires ${formatDateTime(provider.oauth_expires_at)}` : 'No token expiry recorded';
@@ -752,6 +754,15 @@
         const disableControls = state.isOpenAiOauthBusy || !oauthEnabled;
         const disabledAttr = disableControls ? 'disabled' : '';
         const pasteValue = escapeHtml(state.openAiOauthPaste || '');
+        const authUrl = state.openAiOauthAuthUrl || '';
+        const authUrlValue = escapeHtml(authUrl);
+        const authUrlPanel = authUrl
+            ? `<div class="mt-3 space-y-2">
+                    <div class="text-xs font-medium text-txt-secondary">OpenAI auth URL</div>
+                    <textarea readonly class="w-full min-h-[76px] px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary text-xs font-mono resize-y">${authUrlValue}</textarea>
+                    <a href="${authUrlValue}" target="_blank" rel="noopener" class="inline-flex text-xs text-accent hover:text-accent-hover">Open in browser</a>
+                </div>`
+            : '';
 
         return `
             <div class="rounded-lg border border-border-secondary bg-app-elevated px-4 py-3">
@@ -769,13 +780,14 @@
                     </div>
                     <div class="flex flex-wrap gap-2 justify-end">
                         <button type="button" data-action="openai-oauth-start" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${disabledAttr}>${connected ? 'Reconnect' : 'Connect'}</button>
-                        <button type="button" data-action="openai-oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${state.isOpenAiOauthBusy || !connected ? 'disabled' : ''}>Disconnect</button>
+                        <button type="button" data-action="openai-oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${state.isOpenAiOauthBusy || !canClearOAuth ? 'disabled' : ''}>${pending ? 'Cancel' : 'Disconnect'}</button>
                     </div>
                 </div>
                 <div class="mt-3 flex flex-col gap-2 md:flex-row">
                     <input data-openai-oauth-paste class="w-full flex-1 px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="Paste the final redirect URL or code" value="${pasteValue}" ${disabledAttr} />
                     <button type="button" data-action="openai-oauth-complete" class="shrink-0 px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed" ${disableControls || !state.openAiOauthPaste.trim() ? 'disabled' : ''}>Complete OAuth</button>
                 </div>
+                ${authUrlPanel}
             </div>
         `;
     }
@@ -1779,10 +1791,11 @@ async function saveModelRow(rowKey) {
             const result = await response.json();
             const opened = window.open(result.auth_url, '_blank', 'noopener');
             state.openAiOauthPaste = '';
+            state.openAiOauthAuthUrl = result.auth_url || '';
             await loadProviders();
             const popupText = opened
-                ? `OpenAI OAuth URL opened. If the consent page hangs, copy this URL into a normal browser tab, then paste the final redirect URL here: ${result.auth_url}`
-                : `Open this URL, then paste the final redirect URL here: ${result.auth_url}`;
+                ? 'OpenAI OAuth URL opened. The URL is also shown in the OpenAI provider panel for manual copy/paste.'
+                : 'Open the OAuth URL shown in the OpenAI provider panel, then paste the final redirect URL here.';
             setStatus(elements.providerFeedback, popupText, 'info');
         } catch (error) {
             setStatus(elements.providerFeedback, `Failed to start OpenAI OAuth: ${error.message}`, 'error');
@@ -1821,6 +1834,7 @@ async function saveModelRow(rowKey) {
 
             await response.json();
             state.openAiOauthPaste = '';
+            state.openAiOauthAuthUrl = '';
             await loadProviders();
             await loadModels();
             await notifyConfigChanged();
@@ -1853,6 +1867,7 @@ async function saveModelRow(rowKey) {
 
             await response.json();
             state.openAiOauthPaste = '';
+            state.openAiOauthAuthUrl = '';
             await loadProviders();
             await loadModels();
             await notifyConfigChanged();
