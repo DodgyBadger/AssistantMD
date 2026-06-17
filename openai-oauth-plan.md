@@ -666,11 +666,32 @@ Known remaining compatibility risks:
 - Policy/support drift: OpenAI can change endpoint behavior, allowed fields, or
   subscription enforcement without warning.
 
+Data retention and ZDR research findings:
+
+- OpenAI Platform API has documented data controls: API inputs/outputs are not
+  used for training by default, abuse-monitoring logs are retained up to 30
+  days by default, and approved organizations can enable Zero Data Retention for
+  eligible endpoints.
+- For Platform API `/v1/responses`, `store: false` disables Responses
+  application-state storage, and ZDR forces `store` to behave as `false`; this
+  does not mean every `store: false` request is ZDR.
+- Codex signed in with a ChatGPT account is documented under ChatGPT/Codex plan
+  controls, not Platform API project data-retention controls. ChatGPT training
+  data controls apply to Codex content, and Pro/Plus conversations may be used
+  for model improvement unless training is disabled.
+- Therefore, AssistantMD must not describe OAuth-backed Codex requests as ZDR,
+  even though the Codex endpoint requires `store: false`.
+- If ZDR or contractual retention guarantees matter for a workload, the user
+  should use the API-key path against a ZDR-enabled Platform project rather
+  than the experimental OAuth path.
+
 Risk mitigation:
 
 - Keep the global `openai_oauth_enabled` kill switch authoritative.
 - Keep API-key auth stable and default.
 - Keep explicit API-key fallback user-controlled to avoid surprise API charges.
+- Label the OAuth/Codex path as experimental and not ZDR-guaranteed anywhere we
+  surface privacy or data-retention guidance.
 - Treat every Codex runtime compatibility change as OAuth-only unless proven
   safe for Platform API-key requests.
 - Prefer small observed-failure fixes over a broad custom transport rewrite.
@@ -876,6 +897,9 @@ Manual live tests:
 - Large context or compaction-adjacent session to ensure no server-side storage
   assumption slips in.
 - Invalid/unsupported model alias to verify the user-facing error is clear.
+- Privacy/ZDR review: confirm UI/docs do not imply OAuth-backed Codex traffic
+  inherits Platform API ZDR, data residency, or project-level retention
+  controls.
 
 ## Validation Requests For Maintainers
 
