@@ -435,6 +435,12 @@ Testable artifacts:
   - provider status uses the resolver for effective auth mode and fallback
     availability
   - API scenario asserts model availability changes with OAuth connect/disconnect
+- Slice 5 implemented:
+  - OpenAI model construction now routes through a dedicated runtime factory
+  - API-key and explicit fallback modes build normal Pydantic AI OpenAI providers
+  - OAuth effective mode routes through an injectable runtime adapter boundary
+  - OAuth mode fails clearly when the real Codex-compatible adapter is not
+    configured
 
 ## Local Smoke Tests During Development
 

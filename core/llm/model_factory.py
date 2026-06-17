@@ -28,6 +28,7 @@ from tenacity import retry_if_exception, stop_after_attempt
 from core.llm.thinking import ThinkingValue
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
+from core.llm.openai_runtime import build_openai_provider
 from core.settings import (
     get_default_api_timeout,
     get_default_max_output_tokens,
@@ -219,13 +220,15 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
     elif provider == "openai":
         settings_kwargs = _base_settings_kwargs(thinking)
         provider_config = get_provider_config(provider)
-        api_key = _resolve_config_value(provider_config.get("api_key"))
-        base_url = _resolve_config_value(provider_config.get("base_url"))
         http_client = _build_retrying_model_http_client()
+        openai_provider = build_openai_provider(
+            provider_config=provider_config,
+            http_client=http_client,
+        )
         return OpenAIResponsesModel(
             model_string,
             provider=_mark_provider_owns_http_client(
-                OpenAIProvider(api_key=api_key, base_url=base_url, http_client=http_client),
+                openai_provider,
                 http_client,
             ),
             settings=OpenAIResponsesModelSettings(**settings_kwargs),
