@@ -7,7 +7,10 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/runtime/execution_tasks.py` — task lifecycle model, scope helpers, cancellation results
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
 - `core/ingestion/task_execution.py` — ingestion job task wrapper for API and scheduler paths
-- `core/chat/executor.py` — chat task registration for streaming and non-streaming runs
+- `core/chat/executor.py` — non-streaming chat task registration and compatibility streaming entry point
+- `core/chat/task_execution.py` — task-owned streaming chat execution, per-session chat queueing, and SSE event serialization
+- `core/chat/task_events.py` — process-local replay buffer for streaming chat task events
+- `core/chat/surface_adapter.py` — normalized adapter contract for non-web chat surfaces
 - `core/chat/compaction.py` — automatic compaction task registration
 - `api/services.py` — API adapters for task listing, detail, and cancellation
 
@@ -37,7 +40,14 @@ Task kind, source, scope, and label values are centralized in `core/runtime/exec
 
 ## Lifecycle
 
-Tasks start through `TaskCoordinator.track_current_task(...)`.
+Tasks start through `TaskCoordinator.track_current_task(...)` when the current
+coroutine owns the work. Background work can create a queued record with
+`TaskCoordinator.create_queued_task(...)` and later attach the running
+`asyncio.Task` with `TaskCoordinator.track_existing_task(...)`.
+
+Task-owned streaming chat uses the queued form: the API returns a task snapshot
+immediately, the background runner attaches to that task, and subscribers read
+process-local buffered events by task id.
 
 Lifecycle statuses:
 
@@ -60,6 +70,18 @@ Terminal statuses remain queryable until the bounded terminal history is pruned.
 - Missing task IDs return `None`; API services translate that into a 404 response.
 
 Chat session cancellation is scope-oriented at the API layer: `/api/chat/sessions/{session_id}/cancel` resolves the active `chat_session:<session_id>` task and cancels that task ID.
+
+Streaming chat is also task-oriented at the API layer:
+
+- `POST /api/chat/tasks` starts a queued task-owned streaming chat run and
+  returns `{session_id, task}`.
+- `GET /api/chat/tasks/{task_id}/events?after_sequence=0` replays and streams
+  buffered chat task events for the current process.
+- `POST /api/tasks/{task_id}/cancel` cancels a known chat task id directly.
+
+For a given chat session, task-owned chat runs are serialized by task creation
+time. Later runs remain `queued` until older non-terminal chat tasks in the same
+`chat_session:<session_id>` scope finish.
 
 Manual workflow execution is task-oriented at the API layer: `/api/workflows/execute`
 starts the workflow in the background and returns the created task snapshot.

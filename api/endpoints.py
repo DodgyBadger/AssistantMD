@@ -246,7 +246,7 @@ async def _parse_chat_execute_payload(
         return payload, uploads
 
     raise ValueError(
-        "Unsupported Content-Type for /api/chat/execute. Use application/json or multipart/form-data."
+        "Unsupported Content-Type for chat execution. Use application/json or multipart/form-data."
     )
 
 
