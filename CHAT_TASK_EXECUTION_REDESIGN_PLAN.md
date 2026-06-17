@@ -337,6 +337,8 @@ Risk:
 
 ### Slice 7: External Chat Surface Adapter Contract
 
+Status: implemented.
+
 Scope:
 
 - Add this only after the core web chat UI uses task-owned execution reliably.
@@ -359,6 +361,19 @@ Validation:
   cancellation.
 - Assert the resulting chat session history is identical to a comparable web
   chat task.
+
+Completed validation:
+
+- `python -m ruff check core/chat/surface_adapter.py validation/scenarios/integration/core/chat_surface_adapter.py`
+- `python -m compileall core/chat/surface_adapter.py validation/scenarios/integration/core/chat_surface_adapter.py`
+- `python validation/run_validation.py run integration/core/chat_surface_adapter`
+- `python validation/run_validation.py run integration/core/chat_surface_adapter integration/core/chat_task_session_queue integration/core/chat_task_event_stream_api`
+
+Cleanup completed:
+
+- Kept platform-specific Telegram, Discord, and CLI logic out of core chat.
+- Added only a normalized adapter contract that reuses queued chat tasks and
+  buffered task events.
 
 Risk:
 
