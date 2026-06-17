@@ -264,6 +264,8 @@ Risk:
 
 ### Slice 5: UI Task Subscription
 
+Status: implemented.
+
 Scope:
 
 - Change `static/app.js` to use `POST /api/chat/tasks` plus
@@ -278,6 +280,20 @@ Validation:
 - Manual browser smoke test for send, stop, refresh/reconnect, and tool events.
 - Existing API scenarios should remain stable because compatibility endpoint
   still exists.
+
+Completed validation:
+
+- `node --check static/app.js`
+- `python -m compileall api/endpoints.py api/models.py core/chat/task_execution.py core/chat/executor.py`
+- `python -m ruff check api/endpoints.py api/models.py core/chat/task_execution.py core/chat/executor.py validation/scenarios/integration/core/api_endpoints.py`
+- `python validation/run_validation.py run integration/core/api_endpoints integration/core/chat_task_event_stream_api integration/core/chat_stream_keepalive integration/core/chat_stream_failure_logging integration/core/chat_stream_background_task`
+
+Cleanup completed:
+
+- Removed the UI's direct `/api/chat/execute` streaming body-reader path.
+- Factored browser-side SSE payload application into shared task-event helpers.
+- Routed stop-response through task cancellation first, with session cancellation
+  retained as a compatibility fallback.
 
 Risk:
 
@@ -359,5 +375,5 @@ Risk:
 
 ## Next Phase
 
-Move to Feature Development with Slice 1 only. Do not start the API or UI work
-until the event buffer contract is tested independently.
+Move to Feature Development with Slice 6 only. Keep queued-message behavior
+separate from the cancellation fix and commit after a focused smoke test.

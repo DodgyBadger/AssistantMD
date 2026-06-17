@@ -271,6 +271,13 @@ class ChatExecuteResponse(BaseModel):
     message_count: int = Field(..., description="Total messages in conversation")
 
 
+class ChatTaskStartResponse(BaseModel):
+    """Response model for starting task-owned streaming chat execution."""
+
+    session_id: str = Field(..., description="Session identifier")
+    task: "ExecutionTaskInfo" = Field(..., description="Execution task created for this chat run")
+
+
 class ExecutionTaskInfo(BaseModel):
     """Process-local execution task snapshot."""
 

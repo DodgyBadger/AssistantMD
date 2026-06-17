@@ -435,6 +435,23 @@ class ApiEndpointsScenario(BaseScenario):
         assert '"event": "done"' in chat_stream.text, "Streaming chat returns a terminal SSE event"
         assert '"event": "error"' not in chat_stream.text, "Streaming chat completes without an error event"
 
+        chat_task_start = self.call_api(
+            "/api/chat/tasks",
+            method="POST",
+            data={
+                **chat_payload,
+                "session_id": "api-task-stream-session",
+                "prompt": "Start a task-owned stream for the integration test.",
+            },
+        )
+        assert chat_task_start.status_code == 200, "Chat task start endpoint succeeds"
+        chat_task_payload = chat_task_start.json()
+        assert chat_task_payload.get("session_id") == "api-task-stream-session", (
+            "Chat task start preserves the requested session id"
+        )
+        chat_task_id = chat_task_payload.get("task", {}).get("task_id")
+        assert chat_task_id, "Chat task start returns a task id"
+
         tool_limit_update = self.call_api(
             "/api/system/settings/general/chat_tool_calls_limit",
             method="PUT",

@@ -12,7 +12,7 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.chat.task_execution import stream_chat_task_sse
+from core.chat.task_execution import start_chat_stream_task, stream_chat_task_sse
 from core.chat.executor import (
     ChatCapabilityError,
     ChatContextTemplateError,
@@ -47,6 +47,7 @@ from .models import (
     StatusResponse,
     ChatExecuteRequest,
     ChatExecuteResponse,
+    ChatTaskStartResponse,
     SystemLogResponse,
     SystemSettingsResponse,
     UpdateSettingsRequest,
@@ -412,6 +413,65 @@ async def _execute_chat_request(
     )
 
 
+async def _start_chat_task_request(
+    chat_request: ChatExecuteRequest,
+    image_uploads: list[UploadedImageAttachment],
+) -> ChatTaskStartResponse:
+    """Start task-owned streaming chat execution."""
+    runtime = get_runtime_context()
+    vault_path = str(runtime.config.data_root / chat_request.vault_name)
+    try:
+        session_id = resolve_chat_session_for_request(
+            requested_session_id=chat_request.session_id,
+            vault_name=chat_request.vault_name,
+        )
+        if chat_request.workspace_path is not None:
+            set_chat_session_workspace(
+                chat_request.vault_name,
+                session_id,
+                chat_request.workspace_path,
+            )
+    except ChatSessionVaultMismatch as exc:
+        raise ChatSessionVaultMismatchError(
+            session_id=exc.session_id,
+            requested_vault=exc.requested_vault,
+            bound_vault=exc.bound_vault,
+        ) from exc
+
+    resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
+    logger.info(
+        "Chat task request accepted",
+        data={
+            "vault_name": chat_request.vault_name,
+            "session_id": session_id,
+            "streaming": True,
+            "model": chat_request.model,
+            "thinking": thinking_value_to_label(resolved_thinking),
+            "tools": list(chat_request.tools),
+            "tools_count": len(chat_request.tools),
+            "prompt_length": len(chat_request.prompt),
+            "image_path_count": len(chat_request.image_paths),
+            "image_upload_count": len(image_uploads),
+            "context_template": chat_request.context_template,
+            "workspace_path": chat_request.workspace_path,
+        },
+    )
+    started = await start_chat_stream_task(
+        vault_name=chat_request.vault_name,
+        vault_path=vault_path,
+        prompt=chat_request.prompt,
+        image_paths=chat_request.image_paths,
+        image_uploads=image_uploads,
+        session_id=session_id,
+        tools=chat_request.tools,
+        model=chat_request.model,
+        thinking=resolved_thinking,
+        context_template=chat_request.context_template,
+    )
+    task = await get_execution_task(started.task.task_id)
+    return ChatTaskStartResponse(session_id=session_id, task=task)
+
+
 #######################################################################
 ## Health & Status Endpoints
 #######################################################################
@@ -562,6 +622,36 @@ async def chat_task_events(task_id: str, after_sequence: int = 0):
             },
         )
     except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/tasks", response_model=ChatTaskStartResponse)
+async def start_chat_task(request: Request):
+    """Start task-owned streaming chat execution and return its task snapshot."""
+    try:
+        chat_request, image_uploads = await _parse_chat_execute_payload(request)
+        return await _start_chat_task_request(chat_request, image_uploads)
+    except Exception as e:
+        if isinstance(e, APIException):
+            logger.warning(
+                "Chat task endpoint request rejected",
+                data={
+                    "path": str(request.url.path),
+                    "method": request.method,
+                    "error_type": e.error_type,
+                    "message": str(e.detail),
+                    "details": e.details,
+                },
+            )
+            return create_error_response(e)
+        logger.error(
+            "Chat task endpoint request failed",
+            data={
+                "path": str(request.url.path),
+                "method": request.method,
+                **serialize_exception(e),
+            },
+        )
         return create_error_response(e)
 
 
