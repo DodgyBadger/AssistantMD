@@ -25,6 +25,12 @@ Sections:
 - `providers`: provider wiring (secret pointer names, optional base-url pointers)
 - `tools`: tool registry used by chat, delegate child agents, and authored direct-tool calls
 
+Provider wiring can include provider-specific auth metadata. The built-in
+`openai` provider supports `auth_mode` (`api_key` or `oauth`) and
+`oauth_api_key_fallback_enabled`. API-key mode is the stable default. OAuth mode
+is controlled by the global `openai_oauth_enabled` setting; when that setting is
+false, OpenAI resolves as API-key-only even if OAuth tokens are stored.
+
 Runtime-relevant general settings include:
 
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
@@ -41,6 +47,8 @@ Runtime-relevant general settings include:
 - `compaction_type`: chat history compaction policy (`auto`, `suggested`, or `none`). `auto` is the default and is recommended for long-running tasks; if compaction happens too often, tune `compaction_token_threshold` before switching to `suggested` or `none`.
 - `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.
 - `compaction_token_threshold`: estimated-token threshold for suggesting or automatically running compaction. Increase this first if automatic compaction happens too often.
+- `openai_oauth_enabled`: authoritative kill switch for experimental OpenAI OAuth behavior.
+- `editable_builtin_providers`: built-in provider names whose non-secret metadata may be edited through the configuration API/UI. Built-in providers remain protected from deletion.
 
 ## Secrets Store
 
@@ -57,6 +65,12 @@ Key behavior:
 - Reads/writes are YAML-based and atomic.
 - Empty values are normalized consistently.
 - Helper APIs support list/get/set/remove/delete plus value-presence checks.
+
+OpenAI OAuth token state and pending PKCE state are persisted as internal secret
+entries in this store so they survive restarts. Those internal entries are not
+returned by the generic Secrets UI/API list and should only be accessed through
+`core/llm/openai_oauth.py`. Pending PKCE state has a short TTL and is lazily
+cleared when status or completion paths observe that it has expired.
 
 ## Configuration Health and Availability
 
@@ -78,6 +92,7 @@ Primary implementation: `core/settings/config_editor.py` and `api/services.py`
 Behavior:
 
 - user-editable models/providers can be created/updated/deleted through API
+- allowlisted built-in providers can edit supported non-secret metadata, but are not user-deletable
 - general settings are type-coerced and validated
 - secrets are managed separately from provider/model metadata
 - every successful update runs reload (`reload_configuration`) so caches/status stay current
@@ -97,5 +112,6 @@ Behavior:
 
 - Built-in/default config changes should update the settings template, not just active `system/settings.yaml`.
 - Keep secret names as pointers in provider/tool config; store secret values only in secrets store.
+- Keep provider-specific secret state behind subsystem helpers rather than exposing it through generic Secrets APIs.
 - Do not bypass reload paths after config writes.
 - Prefer typed helpers in `core/settings/*` over ad-hoc YAML parsing in feature code.

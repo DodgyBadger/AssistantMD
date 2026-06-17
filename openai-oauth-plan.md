@@ -450,6 +450,13 @@ Testable artifacts:
     fallback opt-in
   - Built-in providers remain visually identified and are not shown as deletable
     even when OpenAI is allowlisted for editing
+- Slice 7 implemented:
+  - architecture docs now describe OpenAI auth-mode metadata, the global OAuth
+    kill switch, built-in edit allowlist, and hidden internal OAuth secrets
+  - LLM architecture docs identify the OpenAI runtime auth factory and explicit
+    OAuth adapter boundary
+  - hardening pass confirmed OAuth lifecycle logs avoid tokens, auth codes, PKCE
+    verifier/state values, pasted redirect URLs, and raw token responses
 
 ## Local Smoke Tests During Development
 
@@ -463,6 +470,8 @@ Testable artifacts:
 - OpenAI runtime factory output for API-key, OAuth, disabled, failed, and
   explicit-fallback branches.
 - Configuration UI syntax and diff checks for the OpenAI provider surface.
+- Full touched-file Python compile and ruff checks.
+- Sensitive-field scan for OpenAI OAuth logging/exposure boundaries.
 
 ## Validation Requests For Maintainers
 
