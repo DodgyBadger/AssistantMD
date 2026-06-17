@@ -4,7 +4,7 @@ Pydantic models for API request and response schemas.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -343,6 +343,54 @@ class ProviderInfo(BaseModel):
     user_editable: bool = Field(False, description="If the provider entry can be edited via UI")
     api_key_has_value: bool = Field(False, description="True if the API key secret currently has a value")
     base_url_has_value: bool = Field(False, description="True if the base URL secret or literal value is set")
+    configured_auth_mode: Optional[str] = Field(
+        None,
+        description="Configured provider auth mode when the provider supports auth modes.",
+    )
+    effective_auth_mode: Optional[str] = Field(
+        None,
+        description="Runtime auth mode after global overrides are applied.",
+    )
+    oauth_enabled: bool = Field(
+        False,
+        description="True when OpenAI OAuth behavior is globally enabled.",
+    )
+    oauth_status: Optional[str] = Field(
+        None,
+        description="Sanitized OAuth connection status for providers that support OAuth.",
+    )
+    oauth_disabled_reason: Optional[str] = Field(
+        None,
+        description="Reason OAuth is unavailable or ignored, when applicable.",
+    )
+    oauth_api_key_fallback_enabled: bool = Field(
+        False,
+        description="True when OAuth failures may explicitly fall back to API-key auth.",
+    )
+    oauth_api_key_fallback_available: bool = Field(
+        False,
+        description="True when an API-key fallback secret is configured.",
+    )
+    oauth_account_id: Optional[str] = Field(
+        None,
+        description="Sanitized connected OpenAI account identifier, when available.",
+    )
+    oauth_expires_at: Optional[str] = Field(
+        None,
+        description="OAuth token expiry timestamp, when available.",
+    )
+    oauth_last_refresh_at: Optional[str] = Field(
+        None,
+        description="Last successful OAuth refresh timestamp, when available.",
+    )
+    oauth_last_refresh_error: Optional[str] = Field(
+        None,
+        description="Sanitized OAuth refresh failure category or message.",
+    )
+    oauth_pending_expires_at: Optional[str] = Field(
+        None,
+        description="Pending OAuth connection expiry timestamp, when available.",
+    )
     restart_required: bool = Field(
         False,
         description="True when recent edits require a full restart to take effect.",
@@ -637,6 +685,14 @@ class ProviderConfigRequest(BaseModel):
 
     api_key: Optional[str] = Field(None, description="Secret name containing the provider API key")
     base_url: Optional[str] = Field(None, description="Either a direct URL or the name of a stored secret")
+    auth_mode: Optional[Literal["api_key", "oauth"]] = Field(
+        None,
+        description="OpenAI auth mode; only supported for the built-in openai provider",
+    )
+    oauth_api_key_fallback_enabled: Optional[bool] = Field(
+        None,
+        description="Allow OpenAI OAuth failures to fall back to API-key auth",
+    )
     api_key_value: Optional[str] = Field(None, description="Optional API key value to persist in the secrets store")
     base_url_value: Optional[str] = Field(None, description="Optional base URL value to persist in the secrets store")
 

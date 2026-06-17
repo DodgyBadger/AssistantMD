@@ -4,6 +4,7 @@ validation harness' shared FastAPI TestClient.
 """
 
 import base64
+import json
 
 import sys
 from pathlib import Path
@@ -109,6 +110,56 @@ class ApiEndpointsScenario(BaseScenario):
         # Provider configuration lifecycle (create + delete)
         providers_resp = self.call_api("/api/system/providers")
         assert providers_resp.status_code == 200, "Provider listing succeeds"
+        providers_payload = providers_resp.json()
+        openai_provider = next(
+            provider for provider in providers_payload if provider["name"] == "openai"
+        )
+        assert openai_provider["user_editable"] is False, (
+            "Built-in OpenAI provider is protected by default"
+        )
+        assert openai_provider["configured_auth_mode"] == "api_key", (
+            "OpenAI provider defaults to API-key auth mode"
+        )
+        assert openai_provider["effective_auth_mode"] == "api_key", (
+            "OpenAI provider runs API-key auth while OAuth is disabled"
+        )
+        assert openai_provider["oauth_enabled"] is False, (
+            "OpenAI OAuth is globally disabled by default"
+        )
+        assert openai_provider["oauth_status"] == "disabled", (
+            "OpenAI OAuth status reports the global disable override"
+        )
+
+        allow_openai_edit = self.call_api(
+            "/api/system/settings/general/editable_builtin_providers",
+            method="PUT",
+            data={"value": '["openai"]'},
+        )
+        assert allow_openai_edit.status_code == 200, (
+            "Built-in provider edit allowlist can be updated"
+        )
+        updated_openai_provider = self.call_api(
+            "/api/system/providers/openai",
+            method="PUT",
+            data={
+                "auth_mode": "oauth",
+                "oauth_api_key_fallback_enabled": True,
+            },
+        )
+        assert updated_openai_provider.status_code == 200, (
+            "Allowlisted OpenAI provider accepts auth metadata updates"
+        )
+        updated_openai_payload = updated_openai_provider.json()
+        assert updated_openai_payload["configured_auth_mode"] == "oauth", (
+            "OpenAI provider records OAuth as the configured auth mode"
+        )
+        assert updated_openai_payload["effective_auth_mode"] == "api_key", (
+            "Global OAuth disable still forces API-key effective mode"
+        )
+        assert updated_openai_payload["oauth_api_key_fallback_enabled"] is True, (
+            "OpenAI provider records explicit API-key fallback opt-in"
+        )
+
         provider_alias = "validation-provider"
         created_provider = self.call_api(
             f"/api/system/providers/{provider_alias}",
@@ -147,6 +198,31 @@ class ApiEndpointsScenario(BaseScenario):
             entry["name"] == "VALIDATION_TEMP_SECRET" and entry["has_value"]
             for entry in updated_secrets.json()
         ), "Updated secret reported with value"
+
+        internal_oauth_secret = self.call_api(
+            "/api/system/secrets",
+            method="PUT",
+            data={
+                "name": "OPENAI_OAUTH_TOKEN_STATE",
+                "value": json.dumps(
+                    {
+                        "access_token": "validation-token",
+                        "account_id": "validation-account",
+                    }
+                ),
+            },
+        )
+        assert internal_oauth_secret.status_code == 200, (
+            "Internal OAuth secret can be persisted by the secrets store"
+        )
+        oauth_hidden_secrets = self.call_api("/api/system/secrets")
+        assert oauth_hidden_secrets.status_code == 200, (
+            "Secrets list still succeeds with internal OAuth state"
+        )
+        assert not any(
+            entry["name"] == "OPENAI_OAUTH_TOKEN_STATE"
+            for entry in oauth_hidden_secrets.json()
+        ), "Internal OpenAI OAuth token state is hidden from generic secrets"
 
         secret_clear = self.call_api(
             "/api/system/secrets",

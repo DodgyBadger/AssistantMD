@@ -11,7 +11,7 @@ import os
 import shutil
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -50,6 +50,8 @@ class ProviderConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     provider: dict[str, Any] | None = None
+    auth_mode: Literal["api_key", "oauth"] = "api_key"
+    oauth_api_key_fallback_enabled: bool = False
     user_editable: bool = False
 
 

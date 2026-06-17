@@ -69,6 +69,16 @@ settings:
     description: "OpenRouter provider slugs to skip for model calls. Default avoids known Azure routing compatibility issues with tool-using chats; set [] if your OpenRouter account intentionally routes through Azure."
     category: "Models"
     restart_required: false
+  openai_oauth_enabled:
+    value: false
+    description: "Enable experimental OpenAI OAuth connection controls. When false, OpenAI runs in API-key-only mode even if OAuth metadata or tokens exist."
+    category: "Advanced"
+    restart_required: false
+  editable_builtin_providers:
+    value: []
+    description: "Built-in provider names that may expose advanced metadata editing. Leave empty unless you intentionally need to edit protected provider entries."
+    category: "Advanced"
+    restart_required: false
   workflow_task_timeout_seconds:
     value: 0
     description: "Maximum seconds for one workflow execution task. 0 disables the workflow task timeout."
@@ -368,6 +378,8 @@ providers:
   openai:
     api_key: OPENAI_API_KEY
     base_url: null
+    auth_mode: api_key
+    oauth_api_key_fallback_enabled: false
     user_editable: false
   mistral:
     api_key: MISTRAL_API_KEY
