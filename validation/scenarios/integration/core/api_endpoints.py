@@ -17,6 +17,7 @@ from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 from core.llm.openai_oauth import (
     OPENAI_OAUTH_CLIENT_ID,
+    OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
     OPENAI_OAUTH_ORIGINATOR,
     OPENAI_OAUTH_SCOPE,
     OpenAIOAuthTokenResult,
@@ -196,7 +197,9 @@ class ApiEndpointsScenario(BaseScenario):
         oauth_start_payload = oauth_start.json()
         assert oauth_start_payload["auth_url"], "OAuth start returns auth URL"
         assert oauth_start_payload["state"], "OAuth start returns state"
-        assert oauth_start_payload["redirect_uri"], "OAuth start returns redirect URI"
+        assert oauth_start_payload["redirect_uri"] == OPENAI_OAUTH_LOOPBACK_REDIRECT_URI, (
+            "OAuth start defaults to the Codex loopback redirect URI"
+        )
         auth_url = urlparse(oauth_start_payload["auth_url"])
         auth_query = parse_qs(auth_url.query)
         assert auth_query.get("client_id") == [OPENAI_OAUTH_CLIENT_ID], (

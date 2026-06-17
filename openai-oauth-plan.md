@@ -453,6 +453,27 @@ Testable artifacts:
 - Runtime provider construction still targets the Codex backend and carries the
   account header without exposing tokens.
 
+### Slice 10: Registered Redirect URI Default
+
+Fix the browser-start flow so OpenAI receives a redirect URI accepted by the
+Codex OAuth client.
+
+Changes:
+
+- Default OAuth start attempts to the Codex loopback redirect URI:
+  `http://localhost:1455/auth/callback`.
+- Keep explicit redirect URI override support for deterministic validation and
+  future controlled experiments.
+- Treat remote/VPS deployments as manual-paste flows by default. The browser may
+  land on a localhost URL that AssistantMD cannot receive; the user copies that
+  final redirect URL into AssistantMD's manual completion field.
+
+Testable artifacts:
+
+- OAuth start responses bind pending state to the loopback redirect URI unless
+  the caller explicitly overrides it.
+- The generated authorization URL includes the same loopback redirect URI.
+
 ## Suggested Implementation Order
 
 1. Config and provider status contract.
@@ -464,6 +485,7 @@ Testable artifacts:
 7. Docs, logging review, and merge prep.
 8. Codex-compatible token exchange, refresh, and default runtime adapter.
 9. OpenClaw compatibility tightening for refresh shape and account identity.
+10. Registered loopback redirect URI default for OAuth start.
 
 ## Current Progress
 
@@ -535,6 +557,10 @@ Testable artifacts:
     `a0a0e5e4cbbfd96a0cd75f1b051c2fef7de4b85a`
   - refresh request encoding and account-id extraction were aligned with
     OpenClaw's OpenAI Codex OAuth implementation
+- Slice 10 implemented:
+  - OAuth start now defaults to the registered Codex loopback redirect URI
+    instead of AssistantMD's API callback URL
+  - API scenario coverage now asserts the loopback redirect default
 
 ## Local Smoke Tests During Development
 

@@ -702,7 +702,7 @@ class OpenAIOAuthStartRequest(BaseModel):
 
     redirect_uri: Optional[str] = Field(
         None,
-        description="Optional callback URI; defaults to the API callback endpoint",
+        description="Optional callback URI; defaults to the Codex loopback callback",
     )
 
 

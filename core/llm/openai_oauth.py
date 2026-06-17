@@ -35,6 +35,7 @@ OPENAI_OAUTH_PENDING_TTL_SECONDS = 600
 OPENAI_OAUTH_REFRESH_WINDOW_SECONDS = 300
 OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 OPENAI_OAUTH_ORIGINATOR = "codex_cli_rs"
+OPENAI_OAUTH_LOOPBACK_REDIRECT_URI = "http://localhost:1455/auth/callback"
 OPENAI_OAUTH_SCOPE = (
     "openid profile email offline_access api.connectors.read api.connectors.invoke"
 )

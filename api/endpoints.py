@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
+from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.chat.executor import (
     ChatCapabilityError,
@@ -675,13 +676,12 @@ async def list_providers():
     "/system/providers/openai/oauth/start",
     response_model=OpenAIOAuthStartResponse,
 )
-async def start_openai_oauth(request: Request, payload: OpenAIOAuthStartRequest):
+async def start_openai_oauth(payload: OpenAIOAuthStartRequest):
     """Start an OpenAI OAuth connection attempt."""
     try:
-        callback_url = str(request.url_for("complete_openai_oauth_callback_endpoint"))
         return start_openai_oauth_connection(
             payload,
-            default_redirect_uri=callback_url,
+            default_redirect_uri=OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
         )
     except Exception as e:
         return create_error_response(e)
