@@ -76,3 +76,90 @@ That would let work continue through client disconnects and allow reconnecting
 to an active run. It is feasible but touches API contracts, UI state
 rehydration, task event buffering, and transcript persistence, so it should be a
 separate feature effort.
+
+### Problem This Solves
+
+The keepalive fix reduces idle-timeout cancellations, but it does not make chat
+execution independent from the live browser/proxy connection. If the client
+disconnects, reloads, sleeps, changes network, or an upstream closes the stream
+for reasons unrelated to idleness, the current streaming request can still
+cancel the underlying agent run.
+
+The deeper fix changes ownership:
+
+- the execution task owns the agent run;
+- the SSE response observes the task;
+- explicit user stop remains the only normal UI action that cancels the task.
+
+### Target Architecture
+
+1. `/api/chat/execute` creates a chat execution task and starts the agent run in
+   a background task managed by `TaskCoordinator`.
+2. The task writes structured stream events into a bounded task-event buffer:
+   deltas, tool starts, tool finishes, errors, cancellation, and completion.
+3. The initial HTTP response either subscribes immediately to that buffer as SSE
+   or returns `{session_id, task_id}` for a separate subscribe endpoint.
+4. A new SSE endpoint, for example `/api/tasks/{task_id}/events`, streams
+   buffered events from a cursor and then follows live events.
+5. If an SSE client disconnects, only the subscriber stops. The agent task keeps
+   running unless the user calls `/chat/sessions/{session_id}/cancel` or
+   `/api/tasks/{task_id}/cancel`.
+6. The UI stores `session_id`, `task_id`, and the last received event cursor so
+   it can reconnect after refresh or transient network failure.
+7. When the agent finishes, normal chat persistence still appends completed
+   assistant messages to `chat_sessions.db`; failed/cancelled runs keep the
+   existing recovery marker behavior.
+
+### Contract Questions
+
+- Event retention: task snapshots are process-local today. Reconnect support
+  needs a bounded in-memory event buffer at minimum, and possibly persisted
+  task-event rows if reconnect-after-restart matters.
+- Partial assistant output: decide whether partial deltas are only UI state or
+  also persisted as an incomplete assistant draft.
+- Cursor shape: prefer a monotonic integer sequence per task event over
+  timestamp-based replay.
+- Backpressure: buffers need clear limits and overflow behavior for very long
+  generations or disconnected clients.
+- Completion cleanup: decide how long completed task event buffers remain
+  available after terminal status.
+- Rollback: failed/cancelled task rollback should remain tied to terminal task
+  status, not subscriber disconnect.
+
+### Likely Implementation Slices
+
+1. Introduce a `TaskEventBuffer` service owned by `RuntimeContext`.
+2. Refactor streaming chat execution so the agent run pushes existing SSE-shaped
+   event payloads into the buffer instead of yielding directly to the HTTP
+   response.
+3. Add a subscriber generator that reads from the buffer with keepalives and a
+   cursor.
+4. Wire `/chat/execute` streaming mode to start the background task and attach a
+   subscriber to it.
+5. Add a reconnect endpoint or extend active-task/session APIs to expose the
+   subscribe URL and latest cursor.
+6. Update the frontend to reconnect to an active task after reload/session load
+   and to keep using the explicit cancel endpoint for stop.
+7. Document runtime limits and update validation scenarios.
+
+### Validation Targets
+
+- Start a streaming chat, disconnect the subscriber, and assert the task remains
+  running.
+- Reconnect with a cursor and assert missed tool/delta events replay in order.
+- Explicit cancel still cancels the task and triggers rollback for task-scoped
+  vault mutations.
+- Completed runs persist final assistant messages exactly once even if multiple
+  subscribers attach.
+- Buffer overflow produces a deterministic recoverable error or requires a full
+  session reload, depending on chosen contract.
+
+### Risks
+
+- This is a real API/UI contract change, not just an executor refactor.
+- Process-local tasks still disappear on server restart unless event/task state
+  becomes durable.
+- Multiple subscribers must not duplicate persistence or mutate shared
+  per-turn state.
+- Partial-output UX needs careful treatment so users are not shown stale text as
+  a completed answer.
