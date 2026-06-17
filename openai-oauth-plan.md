@@ -487,11 +487,15 @@ Changes:
 - Use `originator=openclaw` instead of Codex CLI's `codex_cli_rs`.
 - Keep the same public Codex client id, simplified-flow flag, organization
   claim request, PKCE parameters, and loopback redirect URI.
+- Match OpenClaw's random state and PKCE verifier shape:
+  32-character hex state and 43-character base64url verifier.
+- Emit authorize query parameters in OpenClaw's order.
 
 Testable artifacts:
 
 - OAuth start authorization URL contains OpenClaw-compatible scope and
   originator values.
+- OAuth start state and PKCE verifier shape match OpenClaw's current flow.
 
 ## Suggested Implementation Order
 
@@ -584,6 +588,8 @@ Testable artifacts:
 - Slice 11 implemented:
   - OAuth authorize scope and originator now match OpenClaw's OpenAI Codex OAuth
     flow after live testing reached consent but stalled after Continue
+  - OAuth state, PKCE verifier length, and authorize query parameter order now
+    match OpenClaw's current implementation
 
 ## Local Smoke Tests During Development
 

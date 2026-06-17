@@ -5,6 +5,7 @@ validation harness' shared FastAPI TestClient.
 
 import base64
 import json
+import re
 
 import sys
 from datetime import UTC, datetime, timedelta
@@ -196,7 +197,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert oauth_start.status_code == 200, "OpenAI OAuth start succeeds"
         oauth_start_payload = oauth_start.json()
         assert oauth_start_payload["auth_url"], "OAuth start returns auth URL"
-        assert oauth_start_payload["state"], "OAuth start returns state"
+        assert re.fullmatch(r"[0-9a-f]{32}", oauth_start_payload["state"]), (
+            "OAuth start returns OpenClaw-compatible hex state"
+        )
         assert oauth_start_payload["redirect_uri"] == OPENAI_OAUTH_LOOPBACK_REDIRECT_URI, (
             "OAuth start defaults to the Codex loopback redirect URI"
         )

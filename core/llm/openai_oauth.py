@@ -259,8 +259,8 @@ def start_openai_oauth(
 
     reference = _normalize_datetime(now or datetime.now(UTC))
     expires_at = (reference + timedelta(seconds=OPENAI_OAUTH_PENDING_TTL_SECONDS))
-    state = secrets.token_urlsafe(32)
-    code_verifier = secrets.token_urlsafe(64)
+    state = secrets.token_hex(16)
+    code_verifier = secrets.token_urlsafe(32)
     pending = OpenAIOAuthPendingState(
         state=state,
         code_verifier=code_verifier,
@@ -276,9 +276,9 @@ def start_openai_oauth(
             "client_id": OPENAI_OAUTH_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "scope": OPENAI_OAUTH_SCOPE,
-            "state": state,
             "code_challenge": _pkce_challenge(code_verifier),
             "code_challenge_method": "S256",
+            "state": state,
             "id_token_add_organizations": "true",
             "codex_cli_simplified_flow": "true",
             "originator": OPENAI_OAUTH_ORIGINATOR,
