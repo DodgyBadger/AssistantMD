@@ -1192,6 +1192,7 @@ async def execute_chat_prompt_stream(
         vault_name=vault_name,
         vault_path=vault_path,
         session_id=session_id,
+        force_current_loop=True,
     )
     async for chunk in stream_chat_task_sse(
         task_id=started.task.task_id,

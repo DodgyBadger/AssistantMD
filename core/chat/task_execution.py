@@ -61,6 +61,7 @@ async def start_prepared_chat_stream_task(
     vault_path: str,
     session_id: str,
     event_buffer: ChatTaskEventBuffer | None = None,
+    force_current_loop: bool = False,
 ) -> ChatStreamTaskStart:
     """Start a prepared streaming chat run in a background execution task."""
     runtime = get_runtime_context()
@@ -90,6 +91,7 @@ async def start_prepared_chat_stream_task(
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
         ),
+        force_current_loop=force_current_loop,
     )
     return ChatStreamTaskStart(task=task, session_id=session_id)
 
