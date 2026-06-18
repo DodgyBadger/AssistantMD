@@ -8,7 +8,8 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/runtime/background.py` — runtime-loop background task spawning and shutdown registration
 - `core/runtime/task_runner.py` — generic background execution task runner shell
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
-- `core/ingestion/task_execution.py` — ingestion job task wrapper for API and scheduler paths
+- `core/ingestion/task_execution.py` — ingestion job task wrapper for inline API paths
+- `core/ingestion/worker.py` — scheduled ingestion worker using the runtime task runner
 - `core/chat/executor.py` — non-streaming chat task registration and compatibility streaming entry point
 - `core/chat/task_execution.py` — task-owned streaming chat execution, per-session chat queueing, and SSE event serialization
 - `core/chat/task_events.py` — process-local replay buffer for streaming chat task events
@@ -62,6 +63,8 @@ terminal status is recorded.
 Task-owned streaming chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read
 process-local buffered events by task id.
+Scheduled ingestion jobs also use the queued background form so scheduler-owned
+imports are visible as ingestion execution tasks while they run.
 
 Lifecycle statuses:
 

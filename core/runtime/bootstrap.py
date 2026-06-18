@@ -129,10 +129,20 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         task_coordinator = TaskCoordinator(
             terminal_observers=[handle_task_terminal_for_rollback],
         )
+        background_tasks: set[asyncio.Task] = set()
+        background_spawner = RuntimeBackgroundSpawner(
+            background_loop=asyncio.get_running_loop(),
+            background_tasks=background_tasks,
+        )
+        task_runner = ExecutionTaskRunner(
+            task_coordinator=task_coordinator,
+            background_spawner=background_spawner,
+        )
         ingestion_worker = IngestionWorker(
             process_job_fn=ingestion_service.process_job,
             max_concurrent=ingestion_max_concurrent,
             task_coordinator=task_coordinator,
+            task_runner=task_runner,
         )
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
@@ -173,15 +183,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
-        background_tasks: set[asyncio.Task] = set()
-        background_spawner = RuntimeBackgroundSpawner(
-            background_loop=asyncio.get_running_loop(),
-            background_tasks=background_tasks,
-        )
-        task_runner = ExecutionTaskRunner(
-            task_coordinator=task_coordinator,
-            background_spawner=background_spawner,
-        )
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
             task_runner=task_runner,

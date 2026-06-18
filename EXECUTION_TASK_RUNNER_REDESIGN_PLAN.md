@@ -261,6 +261,8 @@ Commit boundary:
 
 ### Slice 7: Migrate Ingestion And Compaction Where It Helps
 
+Status: in progress. Scheduled ingestion worker migration complete.
+
 Goal: bring remaining long-running task types under the same runner where they are actually detached or cancellable.
 
 Changes:
