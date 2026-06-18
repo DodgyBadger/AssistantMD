@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AssistantMD already has one shared task state model through `TaskCoordinator`, but task execution policy is still split across subsystem-specific launch paths. The next architecture step is to add a shared runtime task runner so long-running work uses one place for spawning, queued attachment, cancellation, timeout, lane/concurrency gates, and background-task ownership.
+AssistantMD already has one shared task state model through `TaskCoordinator`, and this plan adds the shared runtime task runner so long-running work uses one place for spawning, queued attachment, cancellation, timeout, lane/concurrency gates, and background-task ownership.
 
 This plan keeps domain behavior in domain modules while moving generic execution mechanics into `core/runtime`.
 
@@ -282,6 +282,8 @@ Commit boundary:
 - One commit after each task type migration if the diff is non-trivial.
 
 ### Slice 8: Documentation And ADR Update
+
+Status: complete.
 
 Goal: make the architecture contract match the new design.
 

@@ -29,7 +29,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 3. Bootstrap seeds system authoring files, validates configuration, initializes scheduler + authoring loader + ingestion services + execution task coordination, then sets global runtime context.
 4. Runtime reload syncs discovered workflows into APScheduler jobs.
 5. Chat requests flow through `core/chat/executor.py`, which composes model, tools, context-template capability, tool-output cache hooks, execution task tracking, and canonical session persistence.
-6. Workflow triggers execute through the workflow governor and authoring engine, which enforce vault-level execution lanes before running user-authored Python in a Monty sandbox with host-provided capability functions and vault writes.
+6. Workflow triggers execute through the workflow governor and runtime task runner before running user-authored Python in a Monty sandbox with host-provided capability functions and vault writes.
 
 ## Subsystems at a Glance
 
@@ -37,7 +37,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | --- | --- | --- |
 | [Runtime](runtime.md) | Bootstrap, global context, path roots, config reload | `core/runtime/` |
 | [API + UI](api-ui.md) | Endpoints, static UI, exception and lifecycle wiring | `api/`, `main.py`, `static/` |
-| [Execution Tasks](execution-tasks.md) | Process-local task snapshots, cancellation, and task lifecycle events | `core/runtime/execution_tasks.py`, `core/runtime/workflow_governor.py` |
+| [Execution Tasks](execution-tasks.md) | Process-local task snapshots, cancellation, and task lifecycle events | `core/runtime/execution_tasks.py`, `core/runtime/task_runner.py`, `core/runtime/workflow_governor.py` |
 | [Vault State](vault-state.md) | Vault manifest, change feed, task mutation audit, snapshots, and rollback | `core/vault_state/` |
 | [Authoring](authoring-engine.md) | Discover/parse/execute workflows and context templates in the Monty sandbox, including script helpers | `core/authoring/` |
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |

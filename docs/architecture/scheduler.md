@@ -40,17 +40,21 @@ This avoids heavy object serialization in persistent job storage.
 
 Scheduled workflow jobs call `core/authoring/engine.py`, which delegates execution to `RuntimeContext.workflow_governor`.
 
-The governor:
+The workflow governor:
 
-- registers a process-local workflow execution task
-- serializes workflow execution by vault scope (`workflow_vault:<vault_name>`)
+- routes workflow tasks through `ExecutionTaskRunner`
+- supplies the vault scope (`workflow_vault:<vault_name>`) used for runner
+  serialization
 - queues overlapping workflow runs in the same vault until the active workflow
   completes
 - optionally limits total concurrent workflow executions across all vaults
-- applies `workflow_task_timeout_seconds` when configured
+- supplies `workflow_task_timeout_seconds` to the runner when configured
 - emits workflow lifecycle validation events
 
-APScheduler remains responsible for schedule timing and persistence. The governor owns in-process concurrency and lifecycle policy for the actual workflow run.
+APScheduler remains responsible for schedule timing and persistence. Runtime
+execution policy owns in-process task running mechanics for the actual workflow
+run, while the governor owns workflow-specific result metadata, global workflow
+concurrency policy, and lifecycle logging.
 
 `max_concurrent_workflows` in general settings controls global workflow
 concurrency across vaults. `0` disables the global limit. The per-vault lane is

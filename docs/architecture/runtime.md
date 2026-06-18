@@ -29,7 +29,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 
 1. Build `RuntimeConfig`.
 2. `bootstrap_runtime(...)` seeds bootstrap roots, runs registered system database migrations, and validates config.
-3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, and workflow governor.
+3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, task runner, and workflow governor.
 4. Register global runtime context.
 5. Sync workflows and reserved system jobs into the scheduler, then resume scheduler.
 6. Start vault-state manifest refresh in the background so web startup is not blocked by a full vault scan.
