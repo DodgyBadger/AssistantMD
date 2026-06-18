@@ -10,10 +10,11 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - If cancellation lands during queue wait or preflight, the task record can become `cancelled` without a terminal chat event in the event buffer.
    - Fix direction: attach the worker handle to the execution task before queue wait/preflight, or make the full queued lifecycle run inside one coordinator-tracked context.
 
-2. High: chat background tasks are still spawned on the caller's current event loop.
-   - Chat uses direct `asyncio.create_task`, while workflow background work routes through the runtime background loop.
-   - This is architectural drift and keeps chat work sensitive to request-loop/TestClient lifecycle behavior.
-   - Fix direction: extract a shared runtime background spawner and use it for chat, workflow, compaction, ingestion, and similar long-running tasks.
+2. High: chat background tasks are still spawned on the caller's current event loop. Status: addressed in the current slice.
+   - Chat now starts background work through `ExecutionTaskRunner.start_background`.
+   - The runtime bootstrap creates one `RuntimeBackgroundSpawner` and one `ExecutionTaskRunner`, then injects that runner into chat, workflow, and ingestion paths.
+   - Workflow background starts also route through the shared runner, so chat and workflow no longer have separate background-spawn policy.
+   - Remaining direct `asyncio.create_task` usage is limited to subscriber/test helpers or fallback ingestion construction without an injected task runner.
 
 3. Medium: `_CHAT_TASK_FAILURES` can retain exception objects indefinitely.
    - Generic stream failures store original exception objects.
