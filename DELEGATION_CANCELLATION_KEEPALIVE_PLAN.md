@@ -68,14 +68,12 @@ Focused validation run during implementation:
 - `python -m ruff check core/chat/executor.py validation/scenarios/integration/core/chat_stream_keepalive.py`
 - `python -m compileall core/chat/executor.py validation/scenarios/integration/core/chat_stream_keepalive.py`
 
-## Deferred Larger Fix
+## Implemented Larger Fix
 
-A more robust long-term design is a resumable chat task model where `/chat/execute`
-starts or attaches to a process-local task and SSE subscribes to task events.
-That would let work continue through client disconnects and allow reconnecting
-to an active run. It is feasible but touches API contracts, UI state
-rehydration, task event buffering, and transcript persistence, so it should be a
-separate feature effort.
+Chat now uses a task-owned execution model. `POST /api/chat/tasks` starts a
+process-local task, and SSE clients subscribe to task events through
+`GET /api/chat/tasks/{task_id}/events`. Work can continue through client
+disconnects, and completed responses are available when the session is reloaded.
 
 ### Problem This Solves
 
@@ -134,8 +132,8 @@ The deeper fix changes ownership:
    response.
 3. Add a subscriber generator that reads from the buffer with keepalives and a
    cursor.
-4. Wire `/chat/execute` streaming mode to start the background task and attach a
-   subscriber to it.
+4. Start chat through the task API and attach subscribers to the task event
+   stream.
 5. Add a reconnect endpoint or extend active-task/session APIs to expose the
    subscribe URL and latest cursor.
 6. Update the frontend to reconnect to an active task after reload/session load
