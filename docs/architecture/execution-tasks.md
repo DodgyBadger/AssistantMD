@@ -20,7 +20,7 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 ## Task model
 
 `TaskCoordinator` stores active and recently terminal tasks in memory. It is part of `RuntimeContext` and is not a persistent job store.
-Runtime bootstrap may attach terminal observers to the coordinator. Observers run after terminal lifecycle events and are used for process-local follow-up work such as vault mutation rollback.
+Runtime bootstrap may attach terminal observers to the coordinator. Observers run after terminal lifecycle events and are used for process-local follow-up work such as vault mutation rollback. For live worker tasks, terminal observers run after the worker coroutine has unwound from cancellation, timeout, failure, or completion.
 
 Vault-state mutation rows store the task id, kind, source, scope, and label from the active execution task. Chat mutations are grouped by chat-session scope for user-facing activity views; workflow and ingestion mutations remain grouped by individual task run.
 
@@ -60,6 +60,11 @@ When a task spec includes a timeout, the runner enforces it and marks the task
 `timed_out`; domain hooks may attach task-specific timeout metadata before the
 terminal status is recorded.
 
+Runtime shutdown requests cancellation for active tasks, waits for
+runtime-owned background handles to settle, then marks any remaining unfinished
+records cancelled. This keeps terminal observers ordered after live worker
+cleanup.
+
 Task-owned chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read
 process-local buffered events by task id.
@@ -96,7 +101,14 @@ Chat is task-oriented at the API layer:
   returns `{session_id, task}`.
 - `GET /api/chat/tasks/{task_id}/events?after_sequence=0` replays and streams
   buffered chat task events for the current process.
+- If a known terminal chat task exists but its process-local event buffer has
+  been pruned, the event endpoint returns `410 ChatTaskEventsExpired`.
 - `POST /api/tasks/{task_id}/cancel` cancels a known chat task id directly.
+
+The task-owned streaming path is the canonical chat execution path. Chat clients
+submit tasks and observe live SSE events, task state, or persisted session
+history; the chat API does not expose a separate synchronous request/response
+execution path.
 
 For a given chat session, task-owned chat runs are serialized by task creation
 time. Later runs remain `queued` until older non-terminal chat tasks in the same

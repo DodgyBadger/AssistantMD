@@ -66,9 +66,13 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
 - Chat turns use the same task kind (`chat`) and API source (`api`).
 - Chat starts with `POST /api/chat/tasks` and streams
   buffered events from `GET /api/chat/tasks/{task_id}/events`.
+- Task-owned streaming is the canonical chat execution path. Callers that do
+  not need live tokens still submit a chat task and can observe task state or
+  reload persisted session history after completion.
 - Chat event streaming emits SSE keepalive comments from the subscriber loop during
   idle waits so long-running model or tool calls keep the response connection
   active without tying the model run to that subscriber.
+- If a subscriber disconnects, the chat task continues running unless cancelled.
 - Multiple chat starts for the same session are serialized by
   creation time. Later tasks stay `queued` until older non-terminal chat tasks
   in the same session finish, so each run prepares against completed prior
