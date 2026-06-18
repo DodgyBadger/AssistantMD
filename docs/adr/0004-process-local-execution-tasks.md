@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, backfilled.
+Accepted, backfilled. Amended by
+[0019 - Centralize Runtime Execution Task Running](0019-runtime-execution-task-runner.md).
 
 ## Context
 
@@ -17,6 +18,10 @@ Use a process-local `TaskCoordinator` owned by `RuntimeContext` to track active
 and recently terminal execution tasks. Use `WorkflowGovernor` as the workflow
 policy layer for vault execution lanes, workflow timeout, lifecycle metadata,
 and workflow task registration.
+
+ADR 0019 preserves the `TaskCoordinator` decision and supersedes the assumption
+that task running policy should live in workflow-specific code. Generic task
+running mechanics now belong in a runtime-owned execution task runner.
 
 ## Rationale
 
