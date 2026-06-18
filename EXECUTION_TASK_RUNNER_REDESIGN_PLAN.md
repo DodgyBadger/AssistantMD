@@ -213,6 +213,8 @@ Commit boundary:
 
 ### Slice 5: Move Workflow Timeout Into Runner
 
+Status: complete.
+
 Goal: make timeout enforcement generic while preserving workflow metadata.
 
 Changes:

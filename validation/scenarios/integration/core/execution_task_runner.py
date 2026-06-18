@@ -103,6 +103,44 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             "Runner should call failure hook with the original exception",
         )
 
+        timeout_hook: list[tuple[str, float, str]] = []
+        timed_out_task = await runtime.task_runner.start_background(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.CHAT,
+                scope="runner:timed-out",
+                source=ExecutionTaskSource.SYSTEM,
+                label="runner-timed-out",
+                metadata={"probe": "timed_out"},
+                timeout_seconds=0.01,
+                timeout_reason="validation_timeout",
+            ),
+            _slow_task,
+            hooks=ExecutionTaskHooks(
+                on_timed_out=lambda task_id, timeout, reason: _record_timeout(
+                    timeout_hook,
+                    task_id,
+                    timeout,
+                    reason,
+                ),
+            ),
+        )
+        timed_out = await self._wait_for_task_terminal(timed_out_task.task_id)
+        self.soft_assert_equal(
+            timed_out.status if timed_out else None,
+            "timed_out",
+            "Runner should mark timed-out background work timed_out",
+        )
+        self.soft_assert_equal(
+            timed_out.terminal_reason if timed_out else "",
+            "validation_timeout",
+            "Runner should preserve configured timeout reason",
+        )
+        self.soft_assert_equal(
+            timeout_hook,
+            [(timed_out_task.task_id, 0.01, "validation_timeout")],
+            "Runner should call timeout hook before terminal completion",
+        )
+
         gate_entered = asyncio.Event()
         release_gate = asyncio.Event()
         gate_order: list[str] = []
@@ -221,6 +259,10 @@ async def _fail_task(_task) -> None:
     raise RuntimeError("forced runner failure")
 
 
+async def _slow_task(_task) -> None:
+    await asyncio.sleep(1)
+
+
 async def _record_task_id(task_ids: list[str], task_id: str) -> None:
     task_ids.append(task_id)
 
@@ -231,6 +273,15 @@ async def _record_failure(
     exc: BaseException,
 ) -> None:
     failures.append((task_id, type(exc).__name__))
+
+
+async def _record_timeout(
+    timeouts: list[tuple[str, float, str]],
+    task_id: str,
+    timeout_seconds: float,
+    reason: str,
+) -> None:
+    timeouts.append((task_id, timeout_seconds, reason))
 
 
 async def _hold_gate(

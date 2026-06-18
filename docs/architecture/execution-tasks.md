@@ -55,6 +55,9 @@ it creates queued task records, attaches the runtime background worker with
 callers.
 It also owns keyed execution gates used to serialize related tasks, such as chat
 runs for one session and workflow runs for one vault.
+When a task spec includes a timeout, the runner enforces it and marks the task
+`timed_out`; domain hooks may attach task-specific timeout metadata before the
+terminal status is recorded.
 
 Task-owned streaming chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read

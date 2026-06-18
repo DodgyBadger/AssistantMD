@@ -20,6 +20,8 @@ class ExecutionTaskSpec:
     source: str
     label: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    timeout_seconds: float | None = None
+    timeout_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class ExecutionTaskHooks:
 
     on_cancelled: Callable[[str], Awaitable[None]] | None = None
     on_failed: Callable[[str, BaseException], Awaitable[None]] | None = None
+    on_timed_out: Callable[[str, float, str], Awaitable[Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -90,7 +93,12 @@ class ExecutionTaskRunner:
                 async with self._task_coordinator.track_existing_task(task.task_id) as tracked_task:
                     if start_immediately:
                         await self._task_coordinator.mark_started(tracked_task.task_id)
-                    await run(tracked_task)
+                    await self.run_with_timeout(
+                        tracked_task,
+                        spec,
+                        lambda: run(tracked_task),
+                        hooks=hooks,
+                    )
             except asyncio.CancelledError:
                 await self._call_cancelled_hook(hooks, task.task_id)
                 raise
@@ -103,6 +111,27 @@ class ExecutionTaskRunner:
 
         self._background_spawner.spawn(_run)
         return task
+
+    async def run_with_timeout(
+        self,
+        task: ExecutionTaskSnapshot,
+        spec: ExecutionTaskSpec,
+        run: Callable[[], Awaitable[Any]],
+        *,
+        hooks: ExecutionTaskHooks | None = None,
+    ) -> Any:
+        """Run work under an optional execution-task timeout."""
+        timeout = spec.timeout_seconds
+        if timeout is None or timeout <= 0:
+            return await run()
+
+        try:
+            return await asyncio.wait_for(run(), timeout=timeout)
+        except TimeoutError:
+            reason = spec.timeout_reason or f"execution_task_timeout:{timeout:g}s"
+            result = await self._call_timed_out_hook(hooks, task.task_id, timeout, reason)
+            await self._task_coordinator.mark_timed_out(task.task_id, reason=reason)
+            return result
 
     async def run_with_gate(
         self,
@@ -204,3 +233,14 @@ class ExecutionTaskRunner:
     ) -> None:
         if hooks is not None and hooks.on_failed is not None:
             await hooks.on_failed(task_id, exc)
+
+    @staticmethod
+    async def _call_timed_out_hook(
+        hooks: ExecutionTaskHooks | None,
+        task_id: str,
+        timeout_seconds: float,
+        reason: str,
+    ) -> Any:
+        if hooks is not None and hooks.on_timed_out is not None:
+            return await hooks.on_timed_out(task_id, timeout_seconds, reason)
+        return None

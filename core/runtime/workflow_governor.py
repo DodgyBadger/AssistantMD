@@ -26,7 +26,13 @@ from .execution_tasks import (
     TaskCoordinator,
     workflow_vault_scope,
 )
-from .task_runner import ExecutionGatePolicy, ExecutionGateWait, ExecutionTaskRunner
+from .task_runner import (
+    ExecutionGatePolicy,
+    ExecutionGateWait,
+    ExecutionTaskHooks,
+    ExecutionTaskRunner,
+    ExecutionTaskSpec,
+)
 
 WorkflowSource = ExecutionTaskSource
 
@@ -155,26 +161,12 @@ class WorkflowGovernor:
                         include_load_errors=include_load_errors,
                     )
                     timeout = get_workflow_task_timeout_seconds()
-                    try:
-                        if timeout > 0:
-                            result = await asyncio.wait_for(
-                                execute_workflow_by_id(
-                                    global_id,
-                                    step_name=step_name,
-                                    expect_failure=expect_failure,
-                                    include_load_errors=include_load_errors,
-                                ),
-                                timeout=timeout,
-                            )
-                        else:
-                            result = await execute_workflow_by_id(
-                                global_id,
-                                step_name=step_name,
-                                expect_failure=expect_failure,
-                                include_load_errors=include_load_errors,
-                            )
-                    except TimeoutError:
-                        reason = f"workflow_task_timeout:{timeout:g}s"
+
+                    async def _record_workflow_timeout(
+                        _task_id: str,
+                        timeout_seconds: float,
+                        reason: str,
+                    ) -> WorkflowExecutionResult:
                         timeout_classification = FailureClassification(
                             error_type="TimeoutError",
                             failure_kind="workflow_timeout",
@@ -190,11 +182,11 @@ class WorkflowGovernor:
                             success=False,
                             global_id=global_id,
                             status="timed_out",
-                            execution_time_seconds=timeout,
+                            execution_time_seconds=timeout_seconds,
                             output_files=[],
                             reason=reason,
                             details=[],
-                            message=f"Workflow '{global_id}' timed out after {timeout:g} seconds",
+                            message=f"Workflow '{global_id}' timed out after {timeout_seconds:g} seconds",
                         )
                         await self._task_coordinator.update_metadata(
                             active_task_id,
@@ -214,7 +206,6 @@ class WorkflowGovernor:
                                 ),
                             },
                         )
-                        await self._task_coordinator.mark_timed_out(active_task_id, reason=reason)
                         self._log_workflow_event(
                             "workflow_task_timed_out",
                             global_id=global_id,
@@ -227,13 +218,35 @@ class WorkflowGovernor:
                             step_name=step_name,
                             expect_failure=expect_failure,
                             include_load_errors=include_load_errors,
-                            execution_time_seconds=timeout,
+                            execution_time_seconds=timeout_seconds,
                             output_files=[],
                             message=timeout_result.message,
                             failure_kind=timeout_classification.failure_kind,
                             retryable=timeout_classification.retryable,
                         )
                         return timeout_result
+
+                    result = await self._task_runner.run_with_timeout(
+                        task,
+                        ExecutionTaskSpec(
+                            kind=ExecutionTaskKind.WORKFLOW,
+                            scope=workflow_vault_scope(vault_name),
+                            source=source,
+                            label=global_id,
+                            metadata={},
+                            timeout_seconds=timeout,
+                            timeout_reason=f"workflow_task_timeout:{timeout:g}s",
+                        ),
+                        lambda: execute_workflow_by_id(
+                            global_id,
+                            step_name=step_name,
+                            expect_failure=expect_failure,
+                            include_load_errors=include_load_errors,
+                        ),
+                        hooks=ExecutionTaskHooks(on_timed_out=_record_workflow_timeout),
+                    )
+                    if str(result.status or "").strip().lower() == ExecutionTaskStatus.TIMED_OUT.value:
+                        return result
 
                     result = replace(result, details=[*result.details, f"task_id: {active_task_id}"])
                     await self._task_coordinator.update_metadata(
