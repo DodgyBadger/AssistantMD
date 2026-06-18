@@ -32,6 +32,23 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - Generic stop/stop-all dashboard behavior now lives in `static/js/execution-tasks.js`.
    - Workflow actions remain scoped to workflow-specific execution and result rendering.
 
+7. High: shutdown can trigger rollback before active tasks have actually stopped.
+   - `TaskCoordinator.shutdown(...)` requests cancellation and immediately marks every active task `cancelled`.
+   - Terminal observers run from that mark, including vault rollback.
+   - `RuntimeContext.shutdown(...)` waits for background tasks only after rollback may already have fired.
+   - Risk: rollback can run while a still-unwinding task continues to mutate files.
+   - Fix direction: request cancellation first, wait for tracked handles/background tasks to settle, then mark only genuinely unfinished or handle-less tasks terminal.
+
+8. Medium-high: expired chat event buffers can make SSE clients hang forever.
+   - The chat task event endpoint verifies the task exists, then subscribes to the process-local event buffer.
+   - If a terminal task still exists but its event stream has been pruned, `ChatTaskEventBuffer.subscribe(...)` creates a new empty stream and `stream_chat_task_sse(...)` keeps sending keepalives indefinitely.
+   - Fix direction: distinguish not-yet-started streams from expired streams; return a terminal SSE error or HTTP 410 for known terminal tasks whose event buffer is no longer retained.
+
+9. Medium security/reliability: chat multipart uploads are read fully before size limits apply.
+   - The task API reads each multipart image fully into memory before creating `BinaryContent`.
+   - Configured image byte limits are enforced later during chat preflight, after upload bytes are already resident.
+   - Fix direction: enforce upload count and byte limits at the API boundary before task creation, preferably before or during file reads.
+
 ## Test Gaps
 
 - Cancellation while a chat task is queued behind an earlier task. Status: covered in `validation/scenarios/integration/core/chat_task_session_queue.py`.
