@@ -6,6 +6,7 @@ import asyncio
 import contextvars
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -80,17 +81,22 @@ async def start_prepared_chat_stream_task(
 
     async def _run() -> None:
         try:
-            await _run_prepared_chat_stream_task(
-                task_id=task.task_id,
-                prepared=prepared,
-                vault_name=vault_name,
-                vault_path=vault_path,
-                session_id=session_id,
-                event_buffer=buffer,
-            )
+            async with runtime.task_coordinator.track_existing_task(task.task_id) as tracked_task:
+                await runtime.task_coordinator.mark_started(tracked_task.task_id)
+                await _run_prepared_chat_stream_task(
+                    task=tracked_task,
+                    prepared=prepared,
+                    vault_name=vault_name,
+                    vault_path=vault_path,
+                    session_id=session_id,
+                    event_buffer=buffer,
+                )
         except asyncio.CancelledError:
+            await _append_cancelled_if_open(buffer, task.task_id)
             raise
         except Exception:  # noqa: BLE001 - task status and stream event were recorded
+            if await _task_has_cancelled(task.task_id):
+                await _append_cancelled_if_open(buffer, task.task_id)
             return
 
     background_task = asyncio.create_task(_run(), context=contextvars.Context())
@@ -169,26 +175,39 @@ async def start_queued_chat_stream_task(
 
     async def _run() -> None:
         try:
-            await _wait_for_prior_chat_session_tasks(
-                task_id=task.task_id,
-                session_id=session_id,
-            )
-            prepared = await chat_executor._prepare_chat_execution(
-                vault_name=vault_name,
-                vault_path=vault_path,
-                prompt=prompt,
-                image_paths=image_paths,
-                image_uploads=image_uploads,
-                session_id=session_id,
-                tools=tools,
-                model=model,
-                thinking=thinking,
-                context_template=context_template,
-            )
+            async with runtime.task_coordinator.track_existing_task(task.task_id) as tracked_task:
+                await _wait_for_prior_chat_session_tasks(
+                    task_id=tracked_task.task_id,
+                    session_id=session_id,
+                )
+                prepared = await chat_executor._prepare_chat_execution(
+                    vault_name=vault_name,
+                    vault_path=vault_path,
+                    prompt=prompt,
+                    image_paths=image_paths,
+                    image_uploads=image_uploads,
+                    session_id=session_id,
+                    tools=tools,
+                    model=model,
+                    thinking=thinking,
+                    context_template=context_template,
+                )
+                await runtime.task_coordinator.mark_started(tracked_task.task_id)
+                await _run_prepared_chat_stream_task(
+                    task=tracked_task,
+                    prepared=prepared,
+                    vault_name=vault_name,
+                    vault_path=vault_path,
+                    session_id=session_id,
+                    event_buffer=buffer,
+                )
         except asyncio.CancelledError:
             await _append_cancelled_if_open(buffer, task.task_id)
             raise
         except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
+            if await _task_has_cancelled(task.task_id):
+                await _append_cancelled_if_open(buffer, task.task_id)
+                return
             await _publish_deferred_preflight_failure(
                 task_id=task.task_id,
                 exc=exc,
@@ -202,24 +221,18 @@ async def start_queued_chat_stream_task(
             )
             return
 
-        try:
-            await _run_prepared_chat_stream_task(
-                task_id=task.task_id,
-                prepared=prepared,
-                vault_name=vault_name,
-                vault_path=vault_path,
-                session_id=session_id,
-                event_buffer=buffer,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 - task status and stream event were recorded
-            return
-
     background_task = asyncio.create_task(_run(), context=contextvars.Context())
     runtime.background_tasks.add(background_task)
     background_task.add_done_callback(runtime.background_tasks.discard)
     return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def _task_has_cancelled(task_id: str) -> bool:
+    runtime = get_runtime_context()
+    snapshot = await runtime.task_coordinator.get_task(task_id)
+    if snapshot is None:
+        return True
+    return snapshot.status == "cancelled" or snapshot.cancel_requested
 
 
 async def _wait_for_prior_chat_session_tasks(*, task_id: str, session_id: str) -> None:
@@ -289,6 +302,13 @@ async def _append_cancelled_if_open(
         return
 
 
+@asynccontextmanager
+async def _provided_execution_task(
+    task: ExecutionTaskSnapshot,
+) -> AsyncIterator[ExecutionTaskSnapshot]:
+    yield task
+
+
 async def _publish_deferred_preflight_failure(
     *,
     task_id: str,
@@ -331,7 +351,8 @@ async def _publish_deferred_preflight_failure(
 
 async def _run_prepared_chat_stream_task(
     *,
-    task_id: str,
+    task_id: str | None = None,
+    task: ExecutionTaskSnapshot | None = None,
     prepared: chat_executor.PreparedChatExecution,
     vault_name: str,
     vault_path: str,
@@ -340,6 +361,14 @@ async def _run_prepared_chat_stream_task(
 ) -> None:
     """Run a prepared streaming chat task and publish buffered task events."""
     runtime = get_runtime_context()
+    if task is None and task_id is None:
+        raise ValueError("Either task or task_id is required")
+    task_context = (
+        _provided_execution_task(task)
+        if task is not None
+        else runtime.task_coordinator.track_existing_task(str(task_id))
+    )
+    should_mark_started = task is None
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
@@ -354,8 +383,9 @@ async def _run_prepared_chat_stream_task(
         tools=list(prepared.tools or []),
     )
 
-    async with runtime.task_coordinator.track_existing_task(task_id) as task:
-        await runtime.task_coordinator.mark_started(task.task_id)
+    async with task_context as task:
+        if should_mark_started:
+            await runtime.task_coordinator.mark_started(task.task_id)
         async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
             _CHAT_STORE.add_messages(
                 session_id,
