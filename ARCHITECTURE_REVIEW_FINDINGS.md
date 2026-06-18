@@ -16,10 +16,9 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - Workflow background starts also route through the shared runner, so chat and workflow no longer have separate background-spawn policy.
    - Direct `asyncio.create_task` usage for runtime work launch is centralized in `RuntimeBackgroundSpawner`; remaining direct usage is limited to subscriber/test helpers.
 
-3. Medium: `_CHAT_TASK_FAILURES` can retain exception objects indefinitely.
-   - Generic stream failures store original exception objects.
-   - The new task event route does not use `raise_terminal_errors=True`, so those exceptions may never be popped.
-   - Fix direction: store lightweight failure metadata or tie cleanup to task/event-buffer terminal retention.
+3. Medium: `_CHAT_TASK_FAILURES` can retain exception objects indefinitely. Status: addressed in the current slice.
+   - The raw exception side channel was removed.
+   - Chat task SSE now emits structured terminal error payloads without retaining exception objects after the task stream closes.
 
 4. Medium security/reliability: surface adapter bypasses workspace path normalization.
    - Web chat normalizes vault-relative workspace paths.
