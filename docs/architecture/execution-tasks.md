@@ -10,8 +10,8 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
 - `core/ingestion/task_execution.py` — ingestion job task wrapper for inline API paths
 - `core/ingestion/worker.py` — scheduled ingestion worker using the runtime task runner
-- `core/chat/executor.py` — non-streaming chat task registration and compatibility streaming entry point
-- `core/chat/task_execution.py` — task-owned streaming chat execution, per-session chat queueing, and SSE event serialization
+- `core/chat/executor.py` — shared chat preparation, model/tool configuration, and history helpers
+- `core/chat/task_execution.py` — task-owned chat execution, per-session chat queueing, and SSE event serialization
 - `core/chat/task_events.py` — process-local replay buffer for streaming chat task events
 - `core/chat/surface_adapter.py` — normalized adapter contract for non-web chat surfaces
 - `core/chat/compaction.py` — automatic compaction task registration
@@ -60,7 +60,7 @@ When a task spec includes a timeout, the runner enforces it and marks the task
 `timed_out`; domain hooks may attach task-specific timeout metadata before the
 terminal status is recorded.
 
-Task-owned streaming chat uses the queued form: the API returns a task snapshot
+Task-owned chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read
 process-local buffered events by task id.
 Scheduled ingestion jobs also use the queued background form so scheduler-owned
@@ -90,7 +90,7 @@ Terminal statuses remain queryable until the bounded terminal history is pruned.
 
 Chat session cancellation is scope-oriented at the API layer: `/api/chat/sessions/{session_id}/cancel` resolves the active `chat_session:<session_id>` task and cancels that task ID.
 
-Streaming chat is also task-oriented at the API layer:
+Chat is task-oriented at the API layer:
 
 - `POST /api/chat/tasks` starts a queued task-owned streaming chat run and
   returns `{session_id, task}`.

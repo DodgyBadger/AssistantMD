@@ -9,8 +9,8 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
 - `core/chat/history_service.py` — broker over persisted and in-memory conversation history
 - `core/chat/compaction.py` — summarize long sessions and record replay checkpoints
-- `core/chat/executor.py` — non-streaming chat execution and compatibility streaming entry point
-- `core/chat/task_execution.py` — task-owned streaming chat execution, event buffering, and per-session queueing
+- `core/chat/executor.py` — shared chat preparation, model/tool configuration, and history helpers
+- `core/chat/task_execution.py` — task-owned chat execution, event buffering, and per-session queueing
 
 ## SQLite store
 
@@ -63,15 +63,13 @@ history back to chat.
 
 Chat execution registers a process-local task scoped to `chat_session:<session_id>`.
 
-- Non-streaming and streaming chat runs both use the same task kind (`chat`) and API source (`api`).
-- Task-owned streaming chat starts with `POST /api/chat/tasks` and streams
+- Chat turns use the same task kind (`chat`) and API source (`api`).
+- Chat starts with `POST /api/chat/tasks` and streams
   buffered events from `GET /api/chat/tasks/{task_id}/events`.
-- `/api/chat/execute` remains the compatibility endpoint for non-streaming
-  JSON responses and streaming SSE responses.
-- Streaming chat emits SSE keepalive comments from the subscriber loop during
+- Chat event streaming emits SSE keepalive comments from the subscriber loop during
   idle waits so long-running model or tool calls keep the response connection
   active without tying the model run to that subscriber.
-- Multiple task-owned streaming starts for the same session are serialized by
+- Multiple chat starts for the same session are serialized by
   creation time. Later tasks stay `queued` until older non-terminal chat tasks
   in the same session finish, so each run prepares against completed prior
   history.
