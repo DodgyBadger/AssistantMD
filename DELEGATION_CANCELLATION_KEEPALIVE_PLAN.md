@@ -93,14 +93,14 @@ The deeper fix changes ownership:
 
 ### Target Architecture
 
-1. `/api/chat/execute` creates a chat execution task and starts the agent run in
-   a background task managed by `TaskCoordinator`.
+1. `POST /api/chat/tasks` creates a chat execution task and starts the agent run
+   in a background task managed by `TaskCoordinator`.
 2. The task writes structured stream events into a bounded task-event buffer:
    deltas, tool starts, tool finishes, errors, cancellation, and completion.
-3. The initial HTTP response either subscribes immediately to that buffer as SSE
-   or returns `{session_id, task_id}` for a separate subscribe endpoint.
-4. A new SSE endpoint, for example `/api/tasks/{task_id}/events`, streams
-   buffered events from a cursor and then follows live events.
+3. The initial HTTP response returns `{session_id, task}` for a separate
+   subscribe endpoint.
+4. `GET /api/chat/tasks/{task_id}/events` streams buffered events from a cursor
+   and then follows live events.
 5. If an SSE client disconnects, only the subscriber stops. The agent task keeps
    running unless the user calls `/chat/sessions/{session_id}/cancel` or
    `/api/tasks/{task_id}/cancel`.
