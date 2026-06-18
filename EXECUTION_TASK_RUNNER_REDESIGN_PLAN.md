@@ -238,6 +238,8 @@ Commit boundary:
 
 ### Slice 6: Thin WorkflowGovernor Into WorkflowTaskAdapter
 
+Status: complete.
+
 Goal: leave workflow-specific behavior in workflow code and remove generic runner responsibilities.
 
 Changes:

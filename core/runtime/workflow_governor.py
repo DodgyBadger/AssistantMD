@@ -51,8 +51,6 @@ class WorkflowGovernor:
     ) -> None:
         self._task_coordinator = task_coordinator
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
-        self._background_spawner = background_spawner
-        self._background_loop = background_loop
         self._task_runner = task_runner
         if self._task_runner is None:
             self._task_runner = ExecutionTaskRunner(
@@ -380,20 +378,10 @@ class WorkflowGovernor:
         background_tasks: set[asyncio.Task] | None = None,
     ) -> ExecutionTaskSnapshot:
         """Start one workflow in the background and return its execution task."""
+        del background_tasks
         vault_name, _workflow_name = self._split_workflow_identity(global_id)
-        task = await self._task_coordinator.create_queued_task(
-            kind=ExecutionTaskKind.WORKFLOW,
-            scope=workflow_vault_scope(vault_name),
-            source=source,
-            label=global_id,
-            metadata={
-                "workflow_id": global_id,
-                "vault": vault_name,
-                "step_name": step_name,
-            },
-        )
 
-        async def _run() -> None:
+        async def _run(task: ExecutionTaskSnapshot) -> None:
             try:
                 await self.execute_workflow(
                     global_id=global_id,
@@ -408,12 +396,21 @@ class WorkflowGovernor:
             except Exception:  # noqa: BLE001
                 return
 
-        spawner = self._background_spawner or RuntimeBackgroundSpawner(
-            background_loop=self._background_loop,
-            background_tasks=background_tasks,
+        return await self._task_runner.start_background(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.WORKFLOW,
+                scope=workflow_vault_scope(vault_name),
+                source=source,
+                label=global_id,
+                metadata={
+                    "workflow_id": global_id,
+                    "vault": vault_name,
+                    "step_name": step_name,
+                },
+            ),
+            _run,
+            start_immediately=False,
         )
-        spawner.spawn(_run)
-        return task
 
     async def _get_global_semaphore(self) -> asyncio.Semaphore | None:
         limit = get_max_concurrent_workflows()
