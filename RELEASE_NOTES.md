@@ -3,9 +3,9 @@
 
 ## 2026-06-17 - v0.6.8
 
-### Long-running chat and task visibility
+### Further hardening of long-running tasks
 
-AssistantMD is more reliable during long chat turns and other background work.
+Significant refactor to make AssistantMD more reliable during long chat turns and other background work.
 
 - Chat turns now run as managed execution tasks, so refreshing or closing the browser tab does not inherently cancel the model run.
 - Reopening a session after a disconnected run completes shows the completed response from normal chat history.
