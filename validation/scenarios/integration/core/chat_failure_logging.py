@@ -28,10 +28,8 @@ class ChatFailureLoggingScenario(BaseScenario):
         chat_executor._prepare_chat_execution = _forced_failure
         try:
             prompt = "Trigger the forced chat failure."
-            response = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            chat_result = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": prompt,
                     "session_id": "chat_failure_session",
@@ -39,7 +37,12 @@ class ChatFailureLoggingScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert response.status_code == 500, "Forced chat failure should return 500"
+            assert chat_result["start_response"].status_code == 200, (
+                "Forced chat failure task should start"
+            )
+            assert chat_result["terminal_event"].get("event") == "error", (
+                "Forced chat failure should emit a terminal error"
+            )
 
             transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_failure_session.md"
             assert not transcript.exists(), "Failed chat execution should not write a transcript by default"
@@ -48,10 +51,10 @@ class ChatFailureLoggingScenario(BaseScenario):
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
             content = activity_log.json()["content"]
 
-            assert '"message": "Chat request accepted"' in content, (
+            assert '"message": "Chat task request accepted"' in content, (
                 "Activity log should include chat request acceptance"
             )
-            assert '"message": "Chat execution failed"' in content, (
+            assert '"message": "Queued streaming chat preflight failed"' in content, (
                 "Activity log should include structured chat execution failure"
             )
             assert '"event": "chat_turn_failed"' in content, (
@@ -59,9 +62,6 @@ class ChatFailureLoggingScenario(BaseScenario):
             )
             assert '"status": "failed"' in content, (
                 "Activity log should include normalized chat failure status"
-            )
-            assert '"message": "Chat request failed before response"' in content, (
-                "Activity log should include API-layer failure context"
             )
             assert '"session_id": "chat_failure_session"' in content, (
                 "Activity log should include the failing session id"

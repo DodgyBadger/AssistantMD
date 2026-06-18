@@ -48,10 +48,8 @@ class ChatToolOverflowCacheScenario(BaseScenario):
             )
             assert update_setting.status_code == 200, "Scenario should lower chat overflow threshold"
 
-            response = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            chat_result = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Use the overflow_probe tool and then answer briefly.",
                     "session_id": "chat_tool_overflow_cache_session",
@@ -59,11 +57,15 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert response.status_code == 200, "Chat execution with oversized tool result should succeed"
+            assert chat_result["start_response"].status_code == 200, (
+                "Chat task with oversized tool result should start"
+            )
+            assert chat_result["terminal_event"].get("event") == "done", (
+                "Chat execution with oversized tool result should succeed"
+            )
 
-            payload = response.json()
-            response_text = payload["response"]
-            session_id = payload["session_id"]
+            response_text = chat_result["text"]
+            session_id = chat_result["session_id"]
 
             self.soft_assert("stored in cache ref '" in response_text, "Response should mention cache ref storage")
             self.soft_assert("Preview:" in response_text, "Response should include a compact preview")

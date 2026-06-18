@@ -44,9 +44,10 @@ class BasicHaikuContextTemplateScenario(BaseScenario):
         }
 
         checkpoint = self.event_checkpoint()
-        response = self.call_api("/api/chat/execute", method="POST", data=payload)
-        assert response.status_code == 200, "Context chat should succeed"
-        session_id = response.json().get("session_id")
+        chat_result = await self.run_chat_task(payload)
+        assert chat_result["start_response"].status_code == 200, "Context chat task should start"
+        assert chat_result["terminal_event"].get("event") == "done", "Context chat should succeed"
+        session_id = chat_result["session_id"]
         assert session_id, "Context chat should return a session id"
 
         events = self.events_since(checkpoint)
