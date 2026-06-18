@@ -36,4 +36,3 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
 
 - Cancellation while a chat task is queued behind an earlier task. Status: covered in `validation/scenarios/integration/core/chat_task_session_queue.py`.
 - Cancellation during deferred preflight before the task reaches agent streaming. Status: covered in `validation/scenarios/integration/core/chat_task_session_queue.py`.
-- Failure-retention cleanup after `/api/chat/tasks` errors.
