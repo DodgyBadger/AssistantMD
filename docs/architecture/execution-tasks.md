@@ -6,6 +6,7 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 
 - `core/runtime/execution_tasks.py` — task lifecycle model, scope helpers, cancellation results
 - `core/runtime/background.py` — runtime-loop background task spawning and shutdown registration
+- `core/runtime/task_runner.py` — generic background execution task runner shell
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
 - `core/ingestion/task_execution.py` — ingestion job task wrapper for API and scheduler paths
 - `core/chat/executor.py` — non-streaming chat task registration and compatibility streaming entry point
@@ -48,6 +49,10 @@ coroutine owns the work. Background work can create a queued record with
 Detached runtime work is spawned through `RuntimeBackgroundSpawner` so chat,
 workflow, and vault-state refresh background tasks use the runtime loop and
 runtime shutdown task set consistently.
+`ExecutionTaskRunner` provides the generic shell for background execution tasks:
+it creates queued task records, attaches the runtime background worker with
+`track_existing_task(...)`, and delegates domain-specific side effects to
+callers.
 
 Task-owned streaming chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read

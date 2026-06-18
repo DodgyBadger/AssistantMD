@@ -27,6 +27,7 @@ from .background import RuntimeBackgroundSpawner
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .execution_tasks import TaskCoordinator
+from .task_runner import ExecutionTaskRunner
 from .workflow_governor import WorkflowGovernor
 from .state import set_runtime_context, clear_runtime_context
 from .paths import set_bootstrap_roots
@@ -177,6 +178,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             background_loop=asyncio.get_running_loop(),
             background_tasks=background_tasks,
         )
+        task_runner = ExecutionTaskRunner(
+            task_coordinator=task_coordinator,
+            background_spawner=background_spawner,
+        )
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
             background_spawner=background_spawner,
@@ -190,6 +195,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             ingestion_worker=ingestion_worker,
             ingestion_interval=ingestion_interval,
             task_coordinator=task_coordinator,
+            task_runner=task_runner,
             workflow_governor=workflow_governor,
             background_spawner=background_spawner,
             boot_id=boot_id,

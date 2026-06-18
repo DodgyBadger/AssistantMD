@@ -20,6 +20,7 @@ from core.ingestion.worker import IngestionWorker
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
+from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.vault_state import VaultStateService
 from core.scheduling.system_jobs import sync_system_scheduler_jobs
@@ -56,6 +57,7 @@ class RuntimeContext:
     ingestion_worker: IngestionWorker
     ingestion_interval: int
     task_coordinator: TaskCoordinator
+    task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
     background_spawner: RuntimeBackgroundSpawner
     boot_id: int

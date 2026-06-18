@@ -94,13 +94,16 @@ Reload behavior:
 
 ## Execution Task Coordination
 
-Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`, and
-`WorkflowGovernor`.
+Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
+`ExecutionTaskRunner`, and `WorkflowGovernor`.
 
 `TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
 `RuntimeBackgroundSpawner` schedules detached runtime work onto the runtime loop
 and registers background handles in the runtime shutdown task set.
+
+`ExecutionTaskRunner` provides the shared shell for creating queued execution
+tasks and running them in the background under `TaskCoordinator` ownership.
 
 `WorkflowGovernor` is the policy layer for workflow runs. It queues workflow
 execution per vault, optionally limits total concurrent workflows across vaults,

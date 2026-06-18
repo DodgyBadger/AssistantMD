@@ -141,6 +141,8 @@ Commit boundary:
 
 ### Slice 2: Add Generic Background Task Runner Shell
 
+Status: complete.
+
 Goal: centralize create-queued-task, attach-existing-task, background handle registration, and terminal exception handling.
 
 Changes:
