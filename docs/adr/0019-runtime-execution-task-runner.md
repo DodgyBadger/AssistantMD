@@ -23,6 +23,11 @@ mutation provenance.
 spawning, queued task attachment, background handle registration, keyed gates,
 timeout enforcement, and inline task contexts for awaited work.
 
+Task terminal notification is part of the runtime execution contract. When
+shutdown or cancellation requests affect a live worker, terminal observers run
+after the owned worker has unwound, not merely after cancellation has been
+requested.
+
 Domain adapters own domain-specific behavior. They supply task identity,
 metadata, gate keys, timeout settings, lifecycle hooks, and domain results such
 as workflow metadata, chat events, ingestion job statuses, compaction summaries,
@@ -43,3 +48,7 @@ compaction, and future external chat surfaces.
 Keeping domain adapters thin prevents runtime infrastructure from learning
 workflow result schemas, chat SSE payloads, ingestion storage rules, or
 compaction summary contracts.
+
+Ordering terminal observers after worker unwind keeps follow-up policies, such
+as vault mutation rollback, from racing active task cleanup or late file
+mutations.
