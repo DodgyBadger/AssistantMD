@@ -14,7 +14,7 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - Chat now starts background work through `ExecutionTaskRunner.start_background`.
    - The runtime bootstrap creates one `RuntimeBackgroundSpawner` and one `ExecutionTaskRunner`, then injects that runner into chat, workflow, and ingestion paths.
    - Workflow background starts also route through the shared runner, so chat and workflow no longer have separate background-spawn policy.
-   - Remaining direct `asyncio.create_task` usage is limited to subscriber/test helpers or fallback ingestion construction without an injected task runner.
+   - Direct `asyncio.create_task` usage for runtime work launch is centralized in `RuntimeBackgroundSpawner`; remaining direct usage is limited to subscriber/test helpers.
 
 3. Medium: `_CHAT_TASK_FAILURES` can retain exception objects indefinitely.
    - Generic stream failures store original exception objects.

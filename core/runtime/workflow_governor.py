@@ -17,7 +17,6 @@ from core.settings import (
 )
 from core.tools.failures import FailureClassification, classify_exception
 
-from .background import RuntimeBackgroundSpawner
 from .execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSnapshot,
@@ -44,20 +43,12 @@ class WorkflowGovernor:
         self,
         *,
         task_coordinator: TaskCoordinator,
+        task_runner: ExecutionTaskRunner,
         logger: UnifiedLogger | None = None,
-        task_runner: ExecutionTaskRunner | None = None,
-        background_spawner: RuntimeBackgroundSpawner | None = None,
-        background_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._task_coordinator = task_coordinator
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
         self._task_runner = task_runner
-        if self._task_runner is None:
-            self._task_runner = ExecutionTaskRunner(
-                task_coordinator=task_coordinator,
-                background_spawner=background_spawner
-                or RuntimeBackgroundSpawner(background_loop=background_loop),
-            )
         self._global_limit_guard = asyncio.Lock()
         self._global_limit = 0
         self._global_semaphore: asyncio.Semaphore | None = None

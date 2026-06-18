@@ -186,7 +186,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
             task_runner=task_runner,
-            background_spawner=background_spawner,
         )
         runtime_context = RuntimeContext(
             config=config,

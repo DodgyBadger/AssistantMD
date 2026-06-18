@@ -10,7 +10,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.authoring.workflow_execution import WorkflowExecutionResult
+from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
+from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 import core.runtime.workflow_governor as governor_module
 from validation.core.base_scenario import BaseScenario
@@ -105,7 +107,11 @@ async def _run_probe(global_ids: tuple[str, str]) -> dict[str, Any]:
 
     governor_module.execute_workflow_by_id = fake_execute_workflow_by_id
     coordinator = TaskCoordinator()
-    governor = WorkflowGovernor(task_coordinator=coordinator)
+    task_runner = ExecutionTaskRunner(
+        task_coordinator=coordinator,
+        background_spawner=RuntimeBackgroundSpawner(background_loop=asyncio.get_running_loop()),
+    )
+    governor = WorkflowGovernor(task_coordinator=coordinator, task_runner=task_runner)
 
     results = await asyncio.gather(
         *(

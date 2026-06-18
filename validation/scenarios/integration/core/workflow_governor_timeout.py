@@ -9,7 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.authoring.workflow_execution import WorkflowExecutionResult
+from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
+from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 import core.runtime.workflow_governor as governor_module
 from validation.core.base_scenario import BaseScenario
@@ -49,7 +51,11 @@ class WorkflowGovernorTimeoutScenario(BaseScenario):
             governor_module.get_max_concurrent_workflows = lambda: 0
 
             coordinator = TaskCoordinator()
-            governor = WorkflowGovernor(task_coordinator=coordinator)
+            task_runner = ExecutionTaskRunner(
+                task_coordinator=coordinator,
+                background_spawner=RuntimeBackgroundSpawner(background_loop=asyncio.get_running_loop()),
+            )
+            governor = WorkflowGovernor(task_coordinator=coordinator, task_runner=task_runner)
             result = await governor.execute_workflow(
                 global_id="TimeoutVault/slow_probe",
                 source=ExecutionTaskSource.SCHEDULER,
