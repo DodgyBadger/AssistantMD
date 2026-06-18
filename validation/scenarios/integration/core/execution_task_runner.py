@@ -241,6 +241,51 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             "Runner gate should serialize same-key tasks",
         )
 
+        observer_states: list[bool] = []
+        cleanup_started = asyncio.Event()
+        cleanup_released = asyncio.Event()
+        cleanup_finished = asyncio.Event()
+        observed_task_id = ""
+
+        runtime.task_coordinator._terminal_observers.append(  # noqa: SLF001
+            lambda task: observer_states.append(cleanup_finished.is_set())
+            if task.task_id == observed_task_id
+            else None
+        )
+        shutdown_task = await runtime.task_runner.start_background(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.CHAT,
+                scope="runner:shutdown",
+                source=ExecutionTaskSource.SYSTEM,
+                label="runner-shutdown",
+                metadata={"probe": "shutdown"},
+            ),
+            lambda task: _wait_for_shutdown_cleanup(
+                task,
+                cleanup_started,
+                cleanup_released,
+                cleanup_finished,
+            ),
+        )
+        observed_task_id = shutdown_task.task_id
+        await self._wait_for_task_status(shutdown_task.task_id, "running")
+        await runtime.task_coordinator.shutdown(reason="validation_shutdown")
+        await asyncio.wait_for(cleanup_started.wait(), timeout=2.0)
+        self.soft_assert_equal(
+            observer_states,
+            [],
+            "Shutdown should not mark a live task terminal before cancellation cleanup finishes",
+        )
+        cleanup_released.set()
+        if runtime.background_tasks:
+            await asyncio.gather(*list(runtime.background_tasks), return_exceptions=True)
+        await runtime.task_coordinator.mark_unfinished_cancelled(reason="validation_shutdown")
+        self.soft_assert_equal(
+            observer_states,
+            [True],
+            "Shutdown should notify terminal observers after the worker has unwound",
+        )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
@@ -259,6 +304,15 @@ class ExecutionTaskRunnerScenario(BaseScenario):
         for _ in range(100):
             task = await runtime.task_coordinator.get_task(task_id)
             if task is not None and task.metadata.get(key) == value:
+                return task
+            await asyncio.sleep(0.02)
+        return None
+
+    async def _wait_for_task_status(self, task_id: str, status: str):
+        runtime = self._runtime()
+        for _ in range(100):
+            task = await runtime.task_coordinator.get_task(task_id)
+            if task is not None and task.status == status:
                 return task
             await asyncio.sleep(0.02)
         return None
@@ -282,6 +336,21 @@ async def _complete_inline_task(task, task_ids: list[str]) -> str:
 async def _wait_until_cancelled(_task, started: asyncio.Event) -> None:
     started.set()
     await asyncio.Event().wait()
+
+
+async def _wait_for_shutdown_cleanup(
+    _task,
+    cleanup_started: asyncio.Event,
+    cleanup_released: asyncio.Event,
+    cleanup_finished: asyncio.Event,
+) -> None:
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        cleanup_started.set()
+        await cleanup_released.wait()
+        cleanup_finished.set()
+        raise
 
 
 async def _fail_task(_task) -> None:

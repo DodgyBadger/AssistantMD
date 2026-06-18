@@ -87,6 +87,8 @@ class RuntimeContext:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
             self.background_tasks.clear()
 
+        await self.task_coordinator.mark_unfinished_cancelled(reason="runtime_shutdown")
+
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=True)
 
