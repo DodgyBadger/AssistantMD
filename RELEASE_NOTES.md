@@ -1,15 +1,20 @@
 # Release Notes
 
 
-## 2026-06-17 - Unreleased
+## 2026-06-17 - v0.6.8
 
-### Long-running chat execution
+### Long-running chat and task visibility
 
-- Streaming chat now runs as a task-owned background operation, so browser refreshes or SSE subscriber disconnects do not inherently cancel the model run.
-- The chat UI starts streaming runs through task APIs, reads buffered task events, and stops responses by cancelling the active task.
-- Multiple submitted prompts for the same chat session are queued behind the active run, preserving turn order for long-running sessions.
-- The Dashboard status area now shows active chat, workflow, compaction, ingestion, and other tasks with shared stop controls.
-- Added a normalized chat surface adapter contract so future Telegram, Discord, CLI, or other chat surfaces can reuse the same task-owned execution path.
+AssistantMD is more reliable during long chat turns and other background work.
+
+- Chat turns now run as managed execution tasks, so refreshing or closing the browser tab does not inherently cancel the model run.
+- Reopening a session after a disconnected run completes shows the completed response from normal chat history.
+- The chat Stop action now cancels the underlying execution task instead of depending on the browser's streaming connection.
+- The Dashboard status area shows active execution tasks for chat, workflows, compaction, ingestion, and related work in one place.
+- Task cancellation and rollback are ordered more safely, reducing the chance that cleanup runs while an agent task is still winding down.
+- Chat streaming recovery is clearer when an old completed task's live event buffer is no longer retained.
+- Oversized multipart image uploads are rejected earlier, before creating a chat task.
+- The old synchronous chat execution path has been retired; chat now uses one task-owned execution path for streaming, cancellation, transcript persistence, and tool activity.
 
 
 ## 2026-06-16 - v0.6.7
