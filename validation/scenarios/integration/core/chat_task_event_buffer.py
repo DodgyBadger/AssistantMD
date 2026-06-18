@@ -92,6 +92,14 @@ class ChatTaskEventBufferScenario(BaseScenario):
             [],
             "Terminal task retention should prune older terminal task streams",
         )
+        self.soft_assert(
+            not await retained.has_stream("task-gamma"),
+            "Pruned terminal task streams should no longer report retained state",
+        )
+        self.soft_assert(
+            await retained.has_stream("task-delta"),
+            "Newest terminal task stream should report retained state",
+        )
         self.soft_assert_equal(
             [event.event for event in await retained.events_after("task-delta")],
             ["done"],

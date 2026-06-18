@@ -12,7 +12,12 @@ from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.chat.task_execution import start_queued_chat_stream_task, stream_chat_task_sse
+from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
+from core.chat.task_execution import (
+    CHAT_TASK_EVENT_BUFFER,
+    start_queued_chat_stream_task,
+    stream_chat_task_sse,
+)
 from core.chat.executor import UploadedImageAttachment
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 
@@ -411,6 +416,16 @@ async def chat_task_events(task_id: str, after_sequence: int = 0):
                 status_code=404,
                 error_type="ExecutionTaskNotFound",
                 message=f"Chat execution task not found: {task_id}",
+                details={"task_id": task_id},
+            )
+        if (
+            task.status in TERMINAL_STATUS_VALUES
+            and not await CHAT_TASK_EVENT_BUFFER.has_stream(task_id)
+        ):
+            raise APIException(
+                status_code=410,
+                error_type="ChatTaskEventsExpired",
+                message=f"Chat task events are no longer retained: {task_id}",
                 details={"task_id": task_id},
             )
         return StreamingResponse(

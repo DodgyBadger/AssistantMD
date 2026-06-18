@@ -119,6 +119,11 @@ class ChatTaskEventBuffer:
             stream = self._streams.get(task_id)
             return stream is not None and stream.terminal_sequence is not None
 
+    async def has_stream(self, task_id: str) -> bool:
+        """Return whether buffered state is retained for a task stream."""
+        async with self._lock:
+            return task_id in self._streams
+
     async def subscribe(
         self,
         task_id: str,

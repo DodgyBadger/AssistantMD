@@ -12,7 +12,11 @@ from pydantic_ai import AgentRunResultEvent, PartStartEvent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from core.chat.executor import PreparedChatExecution
-from core.chat.task_execution import start_prepared_chat_stream_task, stream_chat_task_sse
+from core.chat.task_execution import (
+    CHAT_TASK_EVENT_BUFFER,
+    start_prepared_chat_stream_task,
+    stream_chat_task_sse,
+)
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
@@ -103,6 +107,43 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
             and '"event": "done"' in replay_after_delta.text,
             "Cursor replay should skip events at or before after_sequence",
         )
+
+        original_terminal_limit = CHAT_TASK_EVENT_BUFFER._max_terminal_tasks  # noqa: SLF001
+        CHAT_TASK_EVENT_BUFFER._max_terminal_tasks = 1  # noqa: SLF001
+        try:
+            pruner = await start_prepared_chat_stream_task(
+                prepared=PreparedChatExecution(
+                    agent=_CompletingStreamAgent(),
+                    message_history=None,
+                    prompt_for_history="Prune older stream events.",
+                    user_prompt="Prune older stream events.",
+                    attached_image_count=0,
+                    model="test",
+                    tools=[],
+                ),
+                vault_name=vault.name,
+                vault_path=str(vault),
+                session_id="chat_task_event_pruner_session",
+            )
+            pruner_task = await self._wait_for_task_terminal(pruner.task.task_id)
+            self.soft_assert_equal(
+                pruner_task.status if pruner_task else None,
+                "completed",
+                "Pruner chat task should complete before expired replay check",
+            )
+
+            expired_replay = self.call_api(f"/api/chat/tasks/{completed.task.task_id}/events")
+            self.soft_assert_equal(
+                expired_replay.status_code,
+                410,
+                "Expired terminal chat task event streams should return a terminal API response",
+            )
+            self.soft_assert(
+                "ChatTaskEventsExpired" in expired_replay.text,
+                "Expired terminal chat task event response should identify the retention miss",
+            )
+        finally:
+            CHAT_TASK_EVENT_BUFFER._max_terminal_tasks = original_terminal_limit  # noqa: SLF001
 
         running = await start_prepared_chat_stream_task(
             prepared=PreparedChatExecution(
