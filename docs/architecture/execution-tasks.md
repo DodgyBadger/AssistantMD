@@ -5,6 +5,7 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 ## Primary code
 
 - `core/runtime/execution_tasks.py` — task lifecycle model, scope helpers, cancellation results
+- `core/runtime/background.py` — runtime-loop background task spawning and shutdown registration
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
 - `core/ingestion/task_execution.py` — ingestion job task wrapper for API and scheduler paths
 - `core/chat/executor.py` — non-streaming chat task registration and compatibility streaming entry point
@@ -44,6 +45,9 @@ Tasks start through `TaskCoordinator.track_current_task(...)` when the current
 coroutine owns the work. Background work can create a queued record with
 `TaskCoordinator.create_queued_task(...)` and later attach the running
 `asyncio.Task` with `TaskCoordinator.track_existing_task(...)`.
+Detached runtime work is spawned through `RuntimeBackgroundSpawner` so chat,
+workflow, and vault-state refresh background tasks use the runtime loop and
+runtime shutdown task set consistently.
 
 Task-owned streaming chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read

@@ -17,6 +17,7 @@ from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
 from core.runtime.workflow_governor import WorkflowGovernor
@@ -56,6 +57,7 @@ class RuntimeContext:
     ingestion_interval: int
     task_coordinator: TaskCoordinator
     workflow_governor: WorkflowGovernor
+    background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime
     last_config_reload: Optional[datetime] = None
@@ -149,14 +151,11 @@ class RuntimeContext:
         results.update(vault_state_results)
         return results
 
-    def start_background_vault_state_refresh(self, *, reason: str) -> asyncio.Task:
+    def start_background_vault_state_refresh(self, *, reason: str) -> None:
         """Start a non-blocking refresh of all vault-state manifests."""
-        task = asyncio.create_task(
-            self._refresh_vault_state_in_background(reason=reason)
+        self.background_spawner.spawn(
+            lambda: self._refresh_vault_state_in_background(reason=reason)
         )
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
-        return task
 
     async def _refresh_vault_state_in_background(self, *, reason: str) -> None:
         self.logger.add_sink("validation").info(

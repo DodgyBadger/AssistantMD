@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 from dataclasses import replace
 from typing import Any
 
@@ -18,6 +17,7 @@ from core.settings import (
 )
 from core.tools.failures import FailureClassification, classify_exception
 
+from .background import RuntimeBackgroundSpawner
 from .execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSnapshot,
@@ -38,10 +38,12 @@ class WorkflowGovernor:
         *,
         task_coordinator: TaskCoordinator,
         logger: UnifiedLogger | None = None,
+        background_spawner: RuntimeBackgroundSpawner | None = None,
         background_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._task_coordinator = task_coordinator
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
+        self._background_spawner = background_spawner
         self._background_loop = background_loop
         self._lane_guard = asyncio.Lock()
         self._lane_locks: dict[str, asyncio.Lock] = {}
@@ -376,23 +378,12 @@ class WorkflowGovernor:
             except Exception:  # noqa: BLE001
                 return
 
-        def _spawn() -> None:
-            background_task = asyncio.create_task(_run(), context=contextvars.Context())
-            if background_tasks is not None:
-                background_tasks.add(background_task)
-                background_task.add_done_callback(background_tasks.discard)
-
-        self._schedule_background_spawn(_spawn)
+        spawner = self._background_spawner or RuntimeBackgroundSpawner(
+            background_loop=self._background_loop,
+            background_tasks=background_tasks,
+        )
+        spawner.spawn(_run)
         return task
-
-    def _schedule_background_spawn(self, callback) -> None:
-        """Schedule a background workflow on the runtime loop when available."""
-        current_loop = asyncio.get_running_loop()
-        target_loop = self._background_loop
-        if target_loop is not None and target_loop.is_running() and target_loop is not current_loop:
-            target_loop.call_soon_threadsafe(callback, context=contextvars.Context())
-            return
-        current_loop.call_soon(callback, context=contextvars.Context())
 
     async def _get_lane_lock(self, vault_name: str) -> asyncio.Lock:
         async with self._lane_guard:

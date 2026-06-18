@@ -23,6 +23,7 @@ from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.authoring.template_discovery import seed_system_templates
 # Note: Job setup now handled via runtime_context.reload_workflows()
+from .background import RuntimeBackgroundSpawner
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .execution_tasks import TaskCoordinator
@@ -171,9 +172,14 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
+        background_tasks: set[asyncio.Task] = set()
+        background_spawner = RuntimeBackgroundSpawner(
+            background_loop=asyncio.get_running_loop(),
+            background_tasks=background_tasks,
+        )
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
-            background_loop=asyncio.get_running_loop(),
+            background_spawner=background_spawner,
         )
         runtime_context = RuntimeContext(
             config=config,
@@ -185,8 +191,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             ingestion_interval=ingestion_interval,
             task_coordinator=task_coordinator,
             workflow_governor=workflow_governor,
+            background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,
+            background_tasks=background_tasks,
         )
 
         # Register context globally before job synchronization

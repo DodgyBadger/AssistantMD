@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -99,9 +98,7 @@ async def start_prepared_chat_stream_task(
                 await _append_cancelled_if_open(buffer, task.task_id)
             return
 
-    background_task = asyncio.create_task(_run(), context=contextvars.Context())
-    runtime.background_tasks.add(background_task)
-    background_task.add_done_callback(runtime.background_tasks.discard)
+    runtime.background_spawner.spawn(_run)
     return ChatStreamTaskStart(task=task, session_id=session_id)
 
 
@@ -221,9 +218,7 @@ async def start_queued_chat_stream_task(
             )
             return
 
-    background_task = asyncio.create_task(_run(), context=contextvars.Context())
-    runtime.background_tasks.add(background_task)
-    background_task.add_done_callback(runtime.background_tasks.discard)
+    runtime.background_spawner.spawn(_run)
     return ChatStreamTaskStart(task=task, session_id=session_id)
 
 

@@ -115,6 +115,8 @@ Hooks should be narrow and optional. The generic runner should not learn chat SS
 
 ### Slice 1: Introduce Runtime Background Spawner
 
+Status: complete.
+
 Goal: remove duplicated direct background spawning without changing task semantics.
 
 Changes:
