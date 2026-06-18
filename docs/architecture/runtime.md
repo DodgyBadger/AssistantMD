@@ -103,10 +103,10 @@ Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
 and registers background handles in the runtime shutdown task set.
 
 `ExecutionTaskRunner` provides the shared shell for creating queued execution
-tasks and running them in the background under `TaskCoordinator` ownership. It
-also owns keyed gates for runtime queueing and lane serialization, and enforces
-task-spec timeouts. Scheduled ingestion work uses this runner for detached
-job execution.
+tasks, running detached work in the background, and wrapping awaited inline work
+under `TaskCoordinator` ownership. It also owns keyed gates for runtime queueing
+and lane serialization, and enforces task-spec timeouts. Scheduled ingestion
+work uses this runner for detached job execution.
 
 `WorkflowGovernor` is the policy layer for workflow runs. It queues workflow
 execution per vault, optionally limits total concurrent workflows across vaults,

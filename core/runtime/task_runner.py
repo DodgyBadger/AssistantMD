@@ -112,6 +112,30 @@ class ExecutionTaskRunner:
         self._background_spawner.spawn(_run)
         return task
 
+    async def run_inline(
+        self,
+        spec: ExecutionTaskSpec,
+        run: Callable[[ExecutionTaskSnapshot], Awaitable[Any]],
+        *,
+        hooks: ExecutionTaskHooks | None = None,
+        start_immediately: bool = True,
+    ) -> Any:
+        """Run work in the current coroutine under execution task ownership."""
+        async with self._task_coordinator.track_current_task(
+            kind=spec.kind,
+            scope=spec.scope,
+            source=spec.source,
+            label=spec.label,
+            metadata=spec.metadata,
+            start_immediately=start_immediately,
+        ) as task:
+            return await self.run_with_timeout(
+                task,
+                spec,
+                lambda: run(task),
+                hooks=hooks,
+            )
+
     async def run_with_timeout(
         self,
         task: ExecutionTaskSnapshot,

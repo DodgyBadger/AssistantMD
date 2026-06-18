@@ -69,6 +69,7 @@ from core.runtime.execution_tasks import (
     compaction_task_label,
     workflow_vault_scope,
 )
+from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import replace_vault_file_content
@@ -1250,21 +1251,23 @@ async def compact_chat_session_history(
 ) -> ChatHistoryCompactionResponse:
     """Compact one chat session through the shared compaction service."""
     runtime = get_runtime_context()
-    async with runtime.task_coordinator.track_current_task(
-        kind=ExecutionTaskKind.HISTORY_COMPACTION,
-        scope=chat_session_scope(session_id),
-        source=ExecutionTaskSource.API,
-        label=compaction_task_label(session_id),
-        metadata={"vault": vault_name, "session_id": session_id},
-    ):
-        result = await compact_chat_history(
+    result = await runtime.task_runner.run_inline(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.HISTORY_COMPACTION,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=compaction_task_label(session_id),
+            metadata={"vault": vault_name, "session_id": session_id},
+        ),
+        lambda _task: compact_chat_history(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
             focus=focus,
             source=ExecutionTaskSource.API,
             store=_chat_store,
-        )
+        ),
+    )
     return ChatHistoryCompactionResponse(**result.as_api_dict())
 
 

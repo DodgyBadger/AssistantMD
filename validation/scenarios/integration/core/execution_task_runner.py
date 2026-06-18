@@ -43,6 +43,29 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             "Runner should mark successful background work started",
         )
 
+        inline_task_ids: list[str] = []
+        inline_result = await runtime.task_runner.run_inline(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.CHAT,
+                scope="runner:inline",
+                source=ExecutionTaskSource.SYSTEM,
+                label="runner-inline",
+                metadata={"probe": "inline"},
+            ),
+            lambda task: _complete_inline_task(task, inline_task_ids),
+        )
+        inline_terminal = await runtime.task_coordinator.get_task(inline_task_ids[0])
+        self.soft_assert_equal(
+            inline_result,
+            "inline-complete",
+            "Runner should return inline task results",
+        )
+        self.soft_assert_equal(
+            inline_terminal.status if inline_terminal else None,
+            "completed",
+            "Runner should mark successful inline work completed",
+        )
+
         cancel_hook_task_ids: list[str] = []
         cancel_started = asyncio.Event()
         cancelled_task = await runtime.task_runner.start_background(
@@ -248,6 +271,12 @@ class ExecutionTaskRunnerScenario(BaseScenario):
 
 async def _complete_task(_task) -> None:
     await asyncio.sleep(0)
+
+
+async def _complete_inline_task(task, task_ids: list[str]) -> str:
+    task_ids.append(task.task_id)
+    await asyncio.sleep(0)
+    return "inline-complete"
 
 
 async def _wait_until_cancelled(_task, started: asyncio.Event) -> None:

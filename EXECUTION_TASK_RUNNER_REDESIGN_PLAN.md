@@ -10,25 +10,23 @@ This plan keeps domain behavior in domain modules while moving generic execution
 
 `TaskCoordinator` is the shared process-local task registry. It owns task records, status transitions, cancellation handles, lifecycle events, bounded terminal history, and current-task context.
 
-`WorkflowGovernor` currently owns workflow-specific execution and several generic execution concerns:
+`WorkflowGovernor` owns workflow-specific execution and still owns workflow global concurrency policy:
 
-- background task spawning onto the runtime bootstrap loop
-- per-vault lane locking
 - optional global workflow concurrency
-- timeout wrapping
-- queued task creation and attachment
 - workflow failure metadata
 
-Chat task-owned streaming now uses `TaskCoordinator`, but `core/chat/task_execution.py` still creates background asyncio tasks directly. Chat also implements its own per-session queue and terminal stream-event handling.
+`ExecutionTaskRunner` now owns runtime background spawning, queued task creation and attachment, keyed gates for chat sessions and workflow vault lanes, and task-spec timeout enforcement.
 
-Ingestion and compaction use `TaskCoordinator.track_current_task(...)`, but their concurrency/spawn behavior lives in their callers:
+Task-type migrations completed so far:
 
-- `core/ingestion/worker.py` creates asyncio tasks for queued ingestion jobs.
-- API-triggered ingestion runs inline under a task context.
-- chat compaction runs inline after chat turns or API/tool calls.
-- vault-state refresh uses `RuntimeContext.start_background_vault_state_refresh(...)` with direct `asyncio.create_task`.
+- task-owned chat streaming uses the runner for background execution and chat-session gates.
+- workflow background starts use the runner; workflow execution uses runner gates and timeouts.
+- scheduled ingestion jobs use the runner for detached job execution.
+- manual and automatic chat history compaction use `run_inline(...)`.
+- API-triggered ingestion remains inline under a task context.
+- vault-state refresh uses the shared runtime background spawner and is not task-visible.
 
-The result is a shared task registry, not yet a shared task runner.
+The result is a shared task registry with a shared task runner for the migrated long-running execution paths.
 
 ## Target Design
 
@@ -261,7 +259,7 @@ Commit boundary:
 
 ### Slice 7: Migrate Ingestion And Compaction Where It Helps
 
-Status: in progress. Scheduled ingestion worker migration complete.
+Status: complete.
 
 Goal: bring remaining long-running task types under the same runner where they are actually detached or cancellable.
 

@@ -52,8 +52,8 @@ workflow, and vault-state refresh background tasks use the runtime loop and
 runtime shutdown task set consistently.
 `ExecutionTaskRunner` provides the generic shell for background execution tasks:
 it creates queued task records, attaches the runtime background worker with
-`track_existing_task(...)`, and delegates domain-specific side effects to
-callers.
+`track_existing_task(...)`, provides inline task ownership for awaited work, and
+delegates domain-specific side effects to callers.
 It also owns keyed execution gates used to serialize related tasks, such as chat
 runs for one session and workflow runs for one vault.
 When a task spec includes a timeout, the runner enforces it and marks the task
@@ -65,6 +65,8 @@ immediately, the background runner attaches to that task, and subscribers read
 process-local buffered events by task id.
 Scheduled ingestion jobs also use the queued background form so scheduler-owned
 imports are visible as ingestion execution tasks while they run.
+Manual and automatic chat history compaction use the inline runner form so the
+existing call remains awaited while lifecycle handling stays centralized.
 
 Lifecycle statuses:
 
