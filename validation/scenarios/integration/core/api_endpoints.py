@@ -329,9 +329,10 @@ class ApiEndpointsScenario(BaseScenario):
             "model": "test",
             "thinking": "off",
         }
-        chat_first = self.call_api("/api/chat/execute", method="POST", data=chat_payload)
-        assert chat_first.status_code == 200, "Chat execution succeeds"
-        session_id = chat_first.json()["session_id"]
+        chat_first = await self.run_chat_task(chat_payload)
+        assert chat_first["start_response"].status_code == 200, "Chat task start succeeds"
+        assert chat_first["terminal_event"].get("event") == "done", "Chat task completes"
+        session_id = chat_first["session_id"]
 
         from core.memory.session_summary import SessionSummaryStore
 
@@ -410,27 +411,36 @@ class ApiEndpointsScenario(BaseScenario):
         assert memory_delete.status_code == 200, "Session summary delete endpoint succeeds"
         assert memory_delete.json().get("deleted") is True, "Session summary delete reports deletion"
 
-        chat_second = self.call_api(
-            "/api/chat/execute",
-            method="POST",
-            data={
+        chat_second = await self.run_chat_task(
+            {
                 **chat_payload,
                 "session_id": session_id,
                 "prompt": "Add another thought for history depth.",
-            },
+            }
         )
-        assert chat_second.status_code == 200, "Follow-up chat execution succeeds"
+        assert chat_second["start_response"].status_code == 200, (
+            "Follow-up chat task start succeeds"
+        )
+        assert chat_second["terminal_event"].get("event") == "done", (
+            "Follow-up chat task completes"
+        )
 
-        chat_stream = self.call_api(
-            "/api/chat/execute",
-            method="POST",
-            data={
+        chat_stream_result = await self.run_chat_task(
+            {
                 **chat_payload,
-                "stream": True,
                 "prompt": "Stream a short response for the integration test.",
-            },
+            }
         )
-        assert chat_stream.status_code == 200, "Streaming chat execution succeeds"
+        assert chat_stream_result["start_response"].status_code == 200, (
+            "Streaming chat task start succeeds"
+        )
+        assert chat_stream_result["terminal_event"].get("event") == "done", (
+            "Streaming chat task completes"
+        )
+        chat_stream_task_id = chat_stream_result["task_id"]
+        assert chat_stream_task_id, "Streaming chat task start returns a task id"
+        chat_stream = self.call_api(f"/api/chat/tasks/{chat_stream_task_id}/events")
+        assert chat_stream.status_code == 200, "Streaming chat event endpoint succeeds"
         assert "data: " in chat_stream.text, "Streaming chat returns SSE-formatted chunks"
         assert '"event": "done"' in chat_stream.text, "Streaming chat returns a terminal SSE event"
         assert '"event": "error"' not in chat_stream.text, "Streaming chat completes without an error event"
@@ -480,24 +490,19 @@ class ApiEndpointsScenario(BaseScenario):
         original_prepare_agent_config = chat_executor._prepare_agent_config
         chat_executor._prepare_agent_config = _limited_tool_agent_config
         try:
-            limited_chat = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            limited_chat = await self.run_chat_task(
+                {
                     **chat_payload,
                     "prompt": "This run should hit the configured tool-call limit.",
                     "tools": ["first_limited_tool", "second_limited_tool"],
-                },
+                }
             )
-            limited_stream = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            limited_stream = await self.run_chat_task(
+                {
                     **chat_payload,
-                    "stream": True,
                     "prompt": "This streaming run should hit the configured tool-call limit.",
                     "tools": ["first_limited_tool", "second_limited_tool"],
-                },
+                }
             )
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
@@ -508,17 +513,23 @@ class ApiEndpointsScenario(BaseScenario):
             )
             assert reset_limit.status_code == 200, "Chat tool-call limit setting resets"
 
-        assert limited_chat.status_code == 400, "Chat tool-call limit returns client error"
-        limited_payload = limited_chat.json()
-        assert limited_payload.get("error") == "ChatToolCallLimitExceeded", (
-            "Tool-call limit error type is explicit"
+        assert limited_chat["start_response"].status_code == 200, (
+            "Tool-call limited chat task should start"
+        )
+        limited_payload = limited_chat["terminal_event"]
+        assert limited_payload.get("event") == "error", (
+            "Tool-call limit emits a terminal error event"
         )
         assert limited_payload.get("details", {}).get("setting") == "chat_tool_calls_limit", (
             "Tool-call limit response identifies the controlling setting"
         )
-        assert limited_stream.status_code == 200, "Streaming tool-call limit returns an SSE response"
-        assert '"event": "error"' in limited_stream.text, "Streaming tool-call limit emits error event"
-        assert "Tool-call limit reached" in limited_stream.text, (
+        assert limited_stream["start_response"].status_code == 200, (
+            "Streaming tool-call limited chat task should start"
+        )
+        assert limited_stream["terminal_event"].get("event") == "error", (
+            "Streaming tool-call limit emits error event"
+        )
+        assert "Tool-call limit reached" in limited_stream["text"], (
             "Streaming tool-call limit returns actionable error text"
         )
 
@@ -528,10 +539,8 @@ class ApiEndpointsScenario(BaseScenario):
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p6b8AAAAASUVORK5CYII="
             )
         )
-        capability_mismatch = self.call_api(
-            "/api/chat/execute",
-            method="POST",
-            data={
+        capability_mismatch = await self.run_chat_task(
+            {
                 "vault_name": vault.name,
                 "prompt": "Describe this image.",
                 "tools": [],
@@ -539,10 +548,14 @@ class ApiEndpointsScenario(BaseScenario):
                 "image_paths": [str(image_path)],
             },
         )
-        assert capability_mismatch.status_code == 400, "Vision mismatch returns client error"
-        mismatch_payload = capability_mismatch.json()
-        assert mismatch_payload.get("error") == "ChatCapabilityMismatch", "Capability mismatch error type is explicit"
-        assert "vision" in (mismatch_payload.get("message") or "").lower(), "Capability mismatch guidance mentions vision"
+        assert capability_mismatch["start_response"].status_code == 200, (
+            "Vision mismatch chat task should start"
+        )
+        mismatch_payload = capability_mismatch["terminal_event"]
+        assert mismatch_payload.get("event") == "error", "Capability mismatch emits an error event"
+        assert "vision" in capability_mismatch["text"].lower(), (
+            "Capability mismatch guidance mentions vision"
+        )
 
         await self.stop_system()
         self.teardown_scenario()

@@ -288,7 +288,9 @@ async def _publish_deferred_preflight_failure(
         workspace_path=workspace_path,
         exc=exc,
     )
-    if isinstance(exc, chat_executor.ChatContextTemplateError):
+    if isinstance(exc, chat_executor.ChatCapabilityError):
+        payload = _error_event_data(f"\n\nError: {str(exc)}", exc.details)
+    elif isinstance(exc, chat_executor.ChatContextTemplateError):
         payload = _error_event_data(f"\n\nTemplate error: {str(exc)}", exc.details)
     else:
         classification = classify_exception(exc, phase="preflight")
