@@ -8,7 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.chat.executor import PreparedChatExecution, execute_chat_prompt_stream
+from core.chat.executor import PreparedChatExecution
+from core.chat.task_execution import start_prepared_chat_stream_task, stream_chat_task_sse
+from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
 
@@ -37,36 +39,25 @@ class ChatStreamKeepaliveScenario(BaseScenario):
         vault = self.create_vault("ChatStreamKeepaliveVault")
         await self.start_system()
 
-        import core.chat.executor as chat_executor
-
-        original_prepare_chat_execution = chat_executor._prepare_chat_execution
-        original_keepalive_interval = chat_executor._STREAM_KEEPALIVE_INTERVAL_SECONDS
-
-        async def _prepared_idle_stream(*args, **kwargs):
-            return PreparedChatExecution(
-                agent=_DelayedStreamAgent(),
-                message_history=None,
-                prompt_for_history="Trigger idle streaming.",
-                user_prompt="Trigger idle streaming.",
-                attached_image_count=0,
-                model="test",
-                tools=[],
-            )
-
-        chat_executor._prepare_chat_execution = _prepared_idle_stream
-        chat_executor._STREAM_KEEPALIVE_INTERVAL_SECONDS = 0.01
         try:
-            chunks: list[str] = []
-            async for chunk in execute_chat_prompt_stream(
+            idle = await start_prepared_chat_stream_task(
+                prepared=PreparedChatExecution(
+                    agent=_DelayedStreamAgent(),
+                    message_history=None,
+                    prompt_for_history="Trigger idle streaming.",
+                    user_prompt="Trigger idle streaming.",
+                    attached_image_count=0,
+                    model="test",
+                    tools=[],
+                ),
                 vault_name=vault.name,
                 vault_path=str(vault),
-                prompt="Trigger idle streaming.",
-                image_paths=[],
-                image_uploads=[],
                 session_id="chat_stream_keepalive_session",
-                tools=[],
-                model="test",
-                context_template=None,
+            )
+            chunks: list[str] = []
+            async for chunk in stream_chat_task_sse(
+                task_id=idle.task.task_id,
+                keepalive_seconds=0.01,
             ):
                 chunks.append(chunk)
 
@@ -86,8 +77,8 @@ class ChatStreamKeepaliveScenario(BaseScenario):
                     "Keepalive should arrive before the terminal done event",
                 )
 
-            async def _prepared_hanging_stream(*args, **kwargs):
-                return PreparedChatExecution(
+            hanging = await start_prepared_chat_stream_task(
+                prepared=PreparedChatExecution(
                     agent=_HangingStreamAgent(),
                     message_history=None,
                     prompt_for_history="Cancel idle streaming.",
@@ -95,52 +86,39 @@ class ChatStreamKeepaliveScenario(BaseScenario):
                     attached_image_count=0,
                     model="test",
                     tools=[],
-                )
-
-            chat_executor._prepare_chat_execution = _prepared_hanging_stream
-            cancel_session_id = "chat_stream_keepalive_cancel_session"
+                ),
+                vault_name=vault.name,
+                vault_path=str(vault),
+                session_id="chat_stream_keepalive_cancel_session",
+            )
             cancel_chunks: list[str] = []
 
             async def _consume_stream() -> None:
-                async for chunk in execute_chat_prompt_stream(
-                    vault_name=vault.name,
-                    vault_path=str(vault),
-                    prompt="Cancel idle streaming.",
-                    image_paths=[],
-                    image_uploads=[],
-                    session_id=cancel_session_id,
-                    tools=[],
-                    model="test",
-                    context_template=None,
+                async for chunk in stream_chat_task_sse(
+                    task_id=hanging.task.task_id,
+                    keepalive_seconds=0.01,
                 ):
                     cancel_chunks.append(chunk)
 
             consume_task = asyncio.create_task(_consume_stream())
             try:
-                active_response = None
                 for _ in range(50):
-                    active_response = self.call_api(
-                        f"/api/chat/sessions/{cancel_session_id}/active-task"
+                    task_snapshot = await get_runtime_context().task_coordinator.get_task(
+                        hanging.task.task_id
                     )
-                    if active_response.status_code == 200:
+                    if task_snapshot is not None and task_snapshot.status == "running":
                         break
                     await asyncio.sleep(0.02)
 
                 self.soft_assert(
-                    active_response is not None and active_response.status_code == 200,
-                    "Streaming run should expose an active chat task",
+                    task_snapshot is not None and task_snapshot.status == "running",
+                    "Streaming run should expose a running chat task",
                 )
-                cancel_response = self.call_api(
-                    f"/api/chat/sessions/{cancel_session_id}/cancel",
-                    method="POST",
-                )
-                self.soft_assert_equal(
-                    cancel_response.status_code,
-                    200,
-                    "Streaming chat session cancel endpoint should succeed",
+                cancellation = await get_runtime_context().task_coordinator.cancel_task(
+                    hanging.task.task_id
                 )
                 self.soft_assert(
-                    cancel_response.json().get("cancelled") is True,
+                    cancellation is not None and cancellation.effective is True,
                     "Streaming chat session cancel should be effective",
                 )
                 await asyncio.wait_for(consume_task, timeout=1)
@@ -152,8 +130,6 @@ class ChatStreamKeepaliveScenario(BaseScenario):
                 if not consume_task.done():
                     consume_task.cancel()
         finally:
-            chat_executor._prepare_chat_execution = original_prepare_chat_execution
-            chat_executor._STREAM_KEEPALIVE_INTERVAL_SECONDS = original_keepalive_interval
             await self.stop_system()
             self.teardown_scenario()
 
