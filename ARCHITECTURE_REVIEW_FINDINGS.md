@@ -20,10 +20,9 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - The raw exception side channel was removed.
    - Chat task SSE now emits structured terminal error payloads without retaining exception objects after the task stream closes.
 
-4. Medium security/reliability: surface adapter bypasses workspace path normalization.
-   - Web chat normalizes vault-relative workspace paths.
-   - The surface adapter writes `workspace_path` directly into `ChatStore`.
-   - Fix direction: move workspace normalization into a core helper and require every chat surface to use it.
+4. Medium security/reliability: surface adapter bypasses workspace path normalization. Status: addressed in the current slice.
+   - Workspace path normalization now lives in `core.chat.workspace`.
+   - API chat and external chat surfaces use the same vault-relative path normalization before storing session workspace metadata.
 
 5. Medium: deferred preflight errors lose specific user-facing detail.
    - Queued chat preflight only special-cases template errors.

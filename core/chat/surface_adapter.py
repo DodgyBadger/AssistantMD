@@ -13,6 +13,7 @@ from core.chat.task_execution import (
     ChatStreamTaskStart,
     start_queued_chat_stream_task,
 )
+from core.chat.workspace import normalize_workspace_path
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.runtime.execution_tasks import ExecutionTaskCancellationResult
 from core.runtime.state import get_runtime_context
@@ -48,11 +49,12 @@ async def start_chat_surface_task(request: ChatSurfaceRequest) -> ChatStreamTask
         request.thinking,
         source_name=f"{request.surface} thinking",
     )
+    workspace_path = normalize_workspace_path(request.workspace_path)
     if request.workspace_path is not None:
         _CHAT_STORE.set_session_workspace(
             session_id=request.session_id,
             vault_name=request.vault_name,
-            workspace_path=request.workspace_path,
+            workspace_path=workspace_path or None,
         )
     started = await start_queued_chat_stream_task(
         vault_name=request.vault_name,
@@ -72,7 +74,7 @@ async def start_chat_surface_task(request: ChatSurfaceRequest) -> ChatStreamTask
             "surface": request.surface,
             "external_conversation_id": request.external_conversation_id,
             "surface_metadata": dict(request.metadata),
-            "workspace_path": request.workspace_path,
+            "workspace_path": workspace_path or None,
         },
     )
     return ChatStreamTaskStart(

@@ -103,11 +103,27 @@ class ChatSurfaceAdapterScenario(BaseScenario):
                     prompt="surface prompt",
                     model="test",
                     tools=[],
+                    workspace_path="Projects\\Surface/./Inbox",
                     metadata={"sender": "validation-user"},
                 )
             )
             completed_events = await self._collect_events(completed.task.task_id)
             completed_task = await self._wait_for_task_terminal(completed.task.task_id)
+            invalid_workspace_error = None
+            try:
+                await start_chat_surface_task(
+                    ChatSurfaceRequest(
+                        surface="telegram",
+                        external_conversation_id="telegram-chat-unsafe",
+                        vault_name=vault.name,
+                        session_id="unsafe-workspace-session",
+                        prompt="surface prompt",
+                        model="test",
+                        workspace_path="../outside",
+                    )
+                )
+            except ValueError as exc:
+                invalid_workspace_error = exc
 
             cancelled = await start_chat_surface_task(
                 ChatSurfaceRequest(
@@ -146,6 +162,21 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             completed_task.metadata.get("external_conversation_id") if completed_task else None,
             "telegram-chat-123",
             "Surface-started task should retain external conversation id",
+        )
+        self.soft_assert_equal(
+            completed_task.metadata.get("workspace_path") if completed_task else None,
+            "Projects/Surface/Inbox",
+            "Surface-started task should store normalized workspace metadata",
+        )
+        self.soft_assert_equal(
+            chat_executor._CHAT_STORE.get_session_workspace_path("telegram-session", vault.name),
+            "Projects/Surface/Inbox",
+            "Surface adapter should normalize workspace paths before storing session metadata",
+        )
+        self.soft_assert(
+            invalid_workspace_error is not None
+            and "cannot contain '..'" in str(invalid_workspace_error),
+            "Surface adapter should reject workspace traversal paths",
         )
         history = chat_executor._CHAT_STORE.get_history("telegram-session", vault.name) or []
         self.soft_assert(
