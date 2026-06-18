@@ -165,6 +165,8 @@ Commit boundary:
 
 ### Slice 3: Migrate Chat Background Streaming To Runner
 
+Status: complete.
+
 Goal: make chat task-owned streaming use the shared runner while preserving chat SSE behavior.
 
 Changes:

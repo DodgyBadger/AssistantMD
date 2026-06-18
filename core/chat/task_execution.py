@@ -34,6 +34,7 @@ from core.runtime.execution_tasks import (
     chat_task_label,
 )
 from core.runtime.state import get_runtime_context
+from core.runtime.task_runner import ExecutionTaskHooks, ExecutionTaskSpec
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
 
@@ -64,41 +65,32 @@ async def start_prepared_chat_stream_task(
     """Start a prepared streaming chat run in a background execution task."""
     runtime = get_runtime_context()
     buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
-    task = await runtime.task_coordinator.create_queued_task(
-        kind=ExecutionTaskKind.CHAT,
-        scope=chat_session_scope(session_id),
-        source=ExecutionTaskSource.API,
-        label=chat_task_label(session_id),
-        metadata={
-            "vault": vault_name,
-            "session_id": session_id,
-            "streaming": True,
-            "model": prepared.model,
-            "tools": list(prepared.tools),
-        },
+    task = await runtime.task_runner.start_background(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.CHAT,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=chat_task_label(session_id),
+            metadata={
+                "vault": vault_name,
+                "session_id": session_id,
+                "streaming": True,
+                "model": prepared.model,
+                "tools": list(prepared.tools),
+            },
+        ),
+        lambda task: _run_prepared_chat_stream_task(
+            task=task,
+            prepared=prepared,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=buffer,
+        ),
+        hooks=ExecutionTaskHooks(
+            on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+        ),
     )
-
-    async def _run() -> None:
-        try:
-            async with runtime.task_coordinator.track_existing_task(task.task_id) as tracked_task:
-                await runtime.task_coordinator.mark_started(tracked_task.task_id)
-                await _run_prepared_chat_stream_task(
-                    task=tracked_task,
-                    prepared=prepared,
-                    vault_name=vault_name,
-                    vault_path=vault_path,
-                    session_id=session_id,
-                    event_buffer=buffer,
-                )
-        except asyncio.CancelledError:
-            await _append_cancelled_if_open(buffer, task.task_id)
-            raise
-        except Exception:  # noqa: BLE001 - task status and stream event were recorded
-            if await _task_has_cancelled(task.task_id):
-                await _append_cancelled_if_open(buffer, task.task_id)
-            return
-
-    runtime.background_spawner.spawn(_run)
     return ChatStreamTaskStart(task=task, session_id=session_id)
 
 
@@ -155,58 +147,30 @@ async def start_queued_chat_stream_task(
     """Start a streaming chat task that waits behind earlier tasks in its session."""
     runtime = get_runtime_context()
     buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
-    task = await runtime.task_coordinator.create_queued_task(
-        kind=ExecutionTaskKind.CHAT,
-        scope=chat_session_scope(session_id),
-        source=ExecutionTaskSource.API,
-        label=chat_task_label(session_id),
-        metadata={
-            "vault": vault_name,
-            "session_id": session_id,
-            "streaming": True,
-            "model": model,
-            "tools": list(tools),
-            "queued_by_session": True,
-        },
-    )
 
-    async def _run() -> None:
+    async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         try:
-            async with runtime.task_coordinator.track_existing_task(task.task_id) as tracked_task:
-                await _wait_for_prior_chat_session_tasks(
-                    task_id=tracked_task.task_id,
-                    session_id=session_id,
-                )
-                prepared = await chat_executor._prepare_chat_execution(
-                    vault_name=vault_name,
-                    vault_path=vault_path,
-                    prompt=prompt,
-                    image_paths=image_paths,
-                    image_uploads=image_uploads,
-                    session_id=session_id,
-                    tools=tools,
-                    model=model,
-                    thinking=thinking,
-                    context_template=context_template,
-                )
-                await runtime.task_coordinator.mark_started(tracked_task.task_id)
-                await _run_prepared_chat_stream_task(
-                    task=tracked_task,
-                    prepared=prepared,
-                    vault_name=vault_name,
-                    vault_path=vault_path,
-                    session_id=session_id,
-                    event_buffer=buffer,
-                )
+            await _wait_for_prior_chat_session_tasks(
+                task_id=tracked_task.task_id,
+                session_id=session_id,
+            )
+            prepared = await chat_executor._prepare_chat_execution(
+                vault_name=vault_name,
+                vault_path=vault_path,
+                prompt=prompt,
+                image_paths=image_paths,
+                image_uploads=image_uploads,
+                session_id=session_id,
+                tools=tools,
+                model=model,
+                thinking=thinking,
+                context_template=context_template,
+            )
         except asyncio.CancelledError:
-            await _append_cancelled_if_open(buffer, task.task_id)
             raise
         except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
-            if await _task_has_cancelled(task.task_id):
-                await _append_cancelled_if_open(buffer, task.task_id)
-                return
             await _publish_deferred_preflight_failure(
-                task_id=task.task_id,
+                task_id=tracked_task.task_id,
                 exc=exc,
                 vault_name=vault_name,
                 session_id=session_id,
@@ -218,16 +182,38 @@ async def start_queued_chat_stream_task(
             )
             return
 
-    runtime.background_spawner.spawn(_run)
+        await runtime.task_coordinator.mark_started(tracked_task.task_id)
+        await _run_prepared_chat_stream_task(
+            task=tracked_task,
+            prepared=prepared,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=buffer,
+        )
+
+    task = await runtime.task_runner.start_background(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.CHAT,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=chat_task_label(session_id),
+            metadata={
+                "vault": vault_name,
+                "session_id": session_id,
+                "streaming": True,
+                "model": model,
+                "tools": list(tools),
+                "queued_by_session": True,
+            },
+        ),
+        _run,
+        hooks=ExecutionTaskHooks(
+            on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+        ),
+        start_immediately=False,
+    )
     return ChatStreamTaskStart(task=task, session_id=session_id)
-
-
-async def _task_has_cancelled(task_id: str) -> bool:
-    runtime = get_runtime_context()
-    snapshot = await runtime.task_coordinator.get_task(task_id)
-    if snapshot is None:
-        return True
-    return snapshot.status == "cancelled" or snapshot.cancel_requested
 
 
 async def _wait_for_prior_chat_session_tasks(*, task_id: str, session_id: str) -> None:
