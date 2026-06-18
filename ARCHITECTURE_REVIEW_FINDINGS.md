@@ -24,10 +24,9 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - Workspace path normalization now lives in `core.chat.workspace`.
    - API chat and external chat surfaces use the same vault-relative path normalization before storing session workspace metadata.
 
-5. Medium: deferred preflight errors lose specific user-facing detail.
-   - Queued chat preflight only special-cases template errors.
-   - Other known chat preflight failures become a generic unexpected-error SSE payload.
-   - Fix direction: map known chat preflight exception types to stable SSE error payloads.
+5. Medium: deferred preflight errors lose specific user-facing detail. Status: addressed in the current slice.
+   - Deferred chat preflight now maps known chat capability, context-template, usage-limit, image attachment, and unsupported model-alias errors to stable SSE error payloads.
+   - Unknown exceptions still use the generic unexpected-error message with structured classification metadata.
 
 6. Low drift: generic execution-task UI controls live in workflow modules.
    - Dashboard rendering is now generic, but stop/stop-all behavior is still in workflow action code.

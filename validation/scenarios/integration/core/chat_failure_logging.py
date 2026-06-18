@@ -24,6 +24,9 @@ class ChatFailureLoggingScenario(BaseScenario):
         async def _forced_failure(*args, **kwargs):
             raise RuntimeError("forced chat failure for logging validation")
 
+        async def _forced_user_correctable_failure(*args, **kwargs):
+            raise ValueError("Image file not found: missing-image.png")
+
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
         chat_executor._prepare_chat_execution = _forced_failure
         try:
@@ -71,6 +74,23 @@ class ChatFailureLoggingScenario(BaseScenario):
             )
             assert 'forced chat failure for logging validation' in content, (
                 "Activity log should include the failure message"
+            )
+
+            chat_executor._prepare_chat_execution = _forced_user_correctable_failure
+            image_error_result = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": prompt,
+                    "session_id": "chat_image_preflight_failure_session",
+                    "tools": [],
+                    "model": "test",
+                },
+            )
+            assert image_error_result["terminal_event"].get("event") == "error", (
+                "User-correctable preflight failure should emit a terminal error"
+            )
+            assert "Image file not found: missing-image.png" in image_error_result["text"], (
+                "User-correctable preflight failure should preserve the actionable message"
             )
         finally:
             chat_executor._prepare_chat_execution = original_prepare_chat_execution

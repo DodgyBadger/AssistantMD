@@ -286,18 +286,54 @@ async def _publish_deferred_preflight_failure(
         workspace_path=workspace_path,
         exc=exc,
     )
-    if isinstance(exc, chat_executor.ChatCapabilityError):
-        payload = _error_event_data(f"\n\nError: {str(exc)}", exc.details)
-    elif isinstance(exc, chat_executor.ChatContextTemplateError):
-        payload = _error_event_data(f"\n\nTemplate error: {str(exc)}", exc.details)
-    else:
-        classification = classify_exception(exc, phase="preflight")
-        payload = _error_event_data(
-            "\n\nError: An unexpected error occurred",
-            classification.to_metadata(),
-        )
+    payload = _preflight_error_event_data(exc)
     await event_buffer.append(task_id, "error", payload)
     await runtime.task_coordinator.mark_failed(task_id, reason=f"{type(exc).__name__}: {exc}")
+
+
+def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
+    """Build a user-facing terminal event for deferred chat preflight failures."""
+    if isinstance(exc, chat_executor.ChatCapabilityError):
+        return _error_event_data(f"\n\nError: {str(exc)}", exc.details)
+    if isinstance(exc, chat_executor.ChatContextTemplateError):
+        return _error_event_data(f"\n\nTemplate error: {str(exc)}", exc.details)
+    if isinstance(
+        exc,
+        (
+            chat_executor.ChatToolCallLimitError,
+            chat_executor.ChatModelRequestLimitError,
+        ),
+    ):
+        return _error_event_data(
+            f"\n\n{chat_executor._usage_limit_display_label(exc)} reached: {str(exc)}",
+            exc.details,
+        )
+
+    classification = classify_exception(exc, phase="preflight")
+    if _is_user_correctable_preflight_error(exc):
+        return _error_event_data(
+            f"\n\nError: {str(exc)}",
+            classification.to_metadata(),
+        )
+    return _error_event_data(
+        "\n\nError: An unexpected error occurred",
+        classification.to_metadata(),
+    )
+
+
+def _is_user_correctable_preflight_error(exc: Exception) -> bool:
+    """Return whether a preflight exception message is safe and actionable."""
+    if not isinstance(exc, ValueError):
+        return False
+    message = str(exc)
+    return (
+        message.startswith("Image path ")
+        or message.startswith("Image file not found: ")
+        or message.startswith("File is not an image and cannot be attached: ")
+        or message.startswith("Uploaded file ")
+        or message.startswith("Image ")
+        or message.startswith("Chat execution does not support skip mode model alias ")
+    )
 
 
 async def _run_prepared_chat_stream_task(
