@@ -20,6 +20,12 @@ from core.chat.task_execution import (
 )
 from core.chat.executor import UploadedImageAttachment
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
+from core.settings import (
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_bytes_total,
+    get_chunking_max_image_mb_per_image,
+    get_chunking_max_images_per_prompt,
+)
 
 from .models import (
     WorkflowLoadErrorsResponse,
@@ -153,6 +159,7 @@ from api.import_models import (
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 logger = UnifiedLogger(tag="api-endpoints")
 _CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
+_CHAT_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
 
 
 def _parse_form_tools(raw_tools: list[object]) -> list[str]:
@@ -201,21 +208,52 @@ async def _parse_chat_task_payload(
             }
         )
         uploads: list[UploadedImageAttachment] = []
-        for item in form.getlist("images"):
-            if not hasattr(item, "read"):
-                continue
-            raw_bytes = await item.read()
+        image_items = [item for item in form.getlist("images") if hasattr(item, "read")]
+        max_images = get_chunking_max_images_per_prompt()
+        if max_images > 0 and len(image_items) > max_images:
+            raise APIException(
+                status_code=413,
+                error_type="ChatImageUploadLimitExceeded",
+                message=(
+                    f"Too many image uploads ({len(image_items)}). "
+                    f"Maximum per prompt is chunking_max_images_per_prompt={max_images}."
+                ),
+                details={
+                    "image_count": len(image_items),
+                    "max_images": max_images,
+                },
+            )
+
+        max_total_bytes = get_chunking_max_image_bytes_total()
+        total_image_bytes = 0
+        for item in image_items:
+            display_name = (
+                str(getattr(item, "filename", None) or "uploaded-image").strip()
+                or "uploaded-image"
+            )
+            raw_bytes = await _read_chat_image_upload(item, display_name=display_name)
             if not raw_bytes:
                 continue
+            total_image_bytes += len(raw_bytes)
+            if max_total_bytes > 0 and total_image_bytes > max_total_bytes:
+                raise APIException(
+                    status_code=413,
+                    error_type="ChatImageUploadTotalTooLarge",
+                    message=(
+                        f"Image uploads exceed the configured total limit "
+                        f"({total_image_bytes} bytes)."
+                    ),
+                    details={
+                        "max_total_bytes": max_total_bytes,
+                        "total_image_bytes": total_image_bytes,
+                    },
+                )
             media_type = str(
                 getattr(item, "content_type", None) or "application/octet-stream"
             ).strip().lower()
             uploads.append(
                 UploadedImageAttachment(
-                    display_name=(
-                        str(getattr(item, "filename", None) or "uploaded-image").strip()
-                        or "uploaded-image"
-                    ),
+                    display_name=display_name,
                     content=BinaryContent(data=raw_bytes, media_type=media_type),
                 )
             )
@@ -224,6 +262,35 @@ async def _parse_chat_task_payload(
     raise ValueError(
         "Unsupported Content-Type for chat execution. Use application/json or multipart/form-data."
     )
+
+
+async def _read_chat_image_upload(item, *, display_name: str) -> bytes:
+    """Read one multipart image upload while enforcing the per-image byte limit."""
+    max_image_bytes = get_chunking_max_image_bytes_per_image()
+    chunks: list[bytes] = []
+    total_bytes = 0
+    while True:
+        chunk = await item.read(_CHAT_UPLOAD_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if max_image_bytes > 0 and total_bytes > max_image_bytes:
+            max_image_mb = get_chunking_max_image_mb_per_image()
+            raise APIException(
+                status_code=413,
+                error_type="ChatImageUploadTooLarge",
+                message=(
+                    f"Image '{display_name}' is too large to attach ({total_bytes} bytes). "
+                    f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+                ),
+                details={
+                    "display_name": display_name,
+                    "max_image_bytes": max_image_bytes,
+                    "size_bytes": total_bytes,
+                },
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def _start_chat_task_request(
