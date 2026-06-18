@@ -32,22 +32,20 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - Generic stop/stop-all dashboard behavior now lives in `static/js/execution-tasks.js`.
    - Workflow actions remain scoped to workflow-specific execution and result rendering.
 
-7. High: shutdown can trigger rollback before active tasks have actually stopped.
-   - `TaskCoordinator.shutdown(...)` requests cancellation and immediately marks every active task `cancelled`.
-   - Terminal observers run from that mark, including vault rollback.
-   - `RuntimeContext.shutdown(...)` waits for background tasks only after rollback may already have fired.
-   - Risk: rollback can run while a still-unwinding task continues to mutate files.
-   - Fix direction: request cancellation first, wait for tracked handles/background tasks to settle, then mark only genuinely unfinished or handle-less tasks terminal.
+7. High: shutdown can trigger rollback before active tasks have actually stopped. Status: addressed in the current slice.
+   - Runtime shutdown now requests cancellation, waits for runtime-owned background tasks to settle, then marks only remaining unfinished task records cancelled.
+   - Terminal observers, including vault rollback, now run after the task coroutine has had a chance to handle cancellation cleanup.
+   - Coverage: `validation/scenarios/integration/core/execution_task_runner.py`.
 
-8. Medium-high: expired chat event buffers can make SSE clients hang forever.
-   - The chat task event endpoint verifies the task exists, then subscribes to the process-local event buffer.
-   - If a terminal task still exists but its event stream has been pruned, `ChatTaskEventBuffer.subscribe(...)` creates a new empty stream and `stream_chat_task_sse(...)` keeps sending keepalives indefinitely.
-   - Fix direction: distinguish not-yet-started streams from expired streams; return a terminal SSE error or HTTP 410 for known terminal tasks whose event buffer is no longer retained.
+8. Medium-high: expired chat event buffers can make SSE clients hang forever. Status: addressed in the current slice.
+   - `ChatTaskEventBuffer` now exposes retained-stream detection.
+   - The chat task event endpoint returns HTTP 410 `ChatTaskEventsExpired` for known terminal chat tasks whose event stream has been pruned.
+   - Coverage: `validation/scenarios/integration/core/chat_task_event_buffer.py` and `validation/scenarios/integration/core/chat_task_event_stream_api.py`.
 
-9. Medium security/reliability: chat multipart uploads are read fully before size limits apply.
-   - The task API reads each multipart image fully into memory before creating `BinaryContent`.
-   - Configured image byte limits are enforced later during chat preflight, after upload bytes are already resident.
-   - Fix direction: enforce upload count and byte limits at the API boundary before task creation, preferably before or during file reads.
+9. Medium security/reliability: chat multipart uploads are read fully before size limits apply. Status: addressed in the current slice.
+   - Multipart chat image uploads are now read in bounded chunks with per-image, image-count, and total-image-byte limits enforced at the API boundary.
+   - Oversized uploads return HTTP 413 before an execution task is created.
+   - Coverage: `validation/scenarios/integration/core/chat_multipart_upload_limits.py`.
 
 ## Test Gaps
 
