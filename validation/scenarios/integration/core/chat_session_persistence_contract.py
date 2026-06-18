@@ -46,10 +46,8 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
         original_prepare_agent_config = chat_executor._prepare_agent_config
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         try:
-            response = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            response = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Use the session_probe tool and then answer briefly.",
                     "session_id": session_id,
@@ -57,19 +55,21 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert response.status_code == 200, "Chat execution should succeed for persistence contract coverage"
+            assert response["start_response"].status_code == 200, (
+                "Chat task should start for persistence contract coverage"
+            )
+            assert response["terminal_event"].get("event") == "done", (
+                "Chat execution should succeed for persistence contract coverage"
+            )
 
-            payload = response.json()
-            self.soft_assert_equal(payload["session_id"], session_id, "Expected stable explicit session id")
+            self.soft_assert_equal(response["session_id"], session_id, "Expected stable explicit session id")
             self.soft_assert(
-                "SESSION_PROBE_RESULT" in payload["response"],
+                "SESSION_PROBE_RESULT" in response["text"],
                 "Expected assistant response to reflect the tool result",
             )
 
-            mismatch_response = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            mismatch_response = await self.run_chat_task(
+                {
                     "vault_name": other_vault.name,
                     "prompt": "This should not run against a different vault.",
                     "session_id": session_id,
@@ -78,11 +78,11 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 },
             )
             self.soft_assert_equal(
-                mismatch_response.status_code,
+                mismatch_response["start_response"].status_code,
                 409,
                 "Reusing a chat session ID with another vault should be rejected",
             )
-            mismatch_payload = mismatch_response.json()
+            mismatch_payload = mismatch_response["start_response"].json()
             self.soft_assert_equal(
                 mismatch_payload.get("error"),
                 "ChatSessionVaultMismatch",
@@ -240,10 +240,8 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 "Transcript export should exclude tool-call and tool-return markers",
             )
 
-            follow_up = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            follow_up = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Call the session_probe tool again and answer with the result only.",
                     "session_id": session_id,
@@ -251,7 +249,10 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert follow_up.status_code == 200, "Follow-up chat execution should succeed"
+            assert follow_up["start_response"].status_code == 200, "Follow-up chat task should start"
+            assert follow_up["terminal_event"].get("event") == "done", (
+                "Follow-up chat execution should succeed"
+            )
 
             second_export_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/export",
@@ -354,10 +355,8 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 "Fork detail should expose copied workspace metadata",
             )
 
-            fork_follow_up = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            fork_follow_up = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Continue only in the forked session.",
                     "session_id": fork_session_id,
@@ -365,7 +364,12 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert fork_follow_up.status_code == 200, "Continuing the fork should succeed"
+            assert fork_follow_up["start_response"].status_code == 200, (
+                "Continuing the fork should start"
+            )
+            assert fork_follow_up["terminal_event"].get("event") == "done", (
+                "Continuing the fork should succeed"
+            )
             source_detail_after_fork = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}",
             )
