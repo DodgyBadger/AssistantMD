@@ -78,7 +78,6 @@ class ExecutionTaskRunner:
         *,
         hooks: ExecutionTaskHooks | None = None,
         start_immediately: bool = True,
-        force_current_loop: bool = False,
     ) -> ExecutionTaskSnapshot:
         """Create a queued task and run it in the runtime background."""
         task = await self._task_coordinator.create_queued_task(
@@ -110,7 +109,7 @@ class ExecutionTaskRunner:
                 await self._call_failed_hook(hooks, task.task_id, exc)
                 return
 
-        self._background_spawner.spawn(_run, force_current_loop=force_current_loop)
+        self._background_spawner.spawn(_run)
         return task
 
     async def run_inline(

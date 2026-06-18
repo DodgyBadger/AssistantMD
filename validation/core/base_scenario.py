@@ -458,20 +458,25 @@ class BaseScenario(ABC):
         from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER
 
         async def _collect_events() -> None:
-            async for buffered_event in CHAT_TASK_EVENT_BUFFER.subscribe(task_id):
-                event = dict(buffered_event.data)
-                event.setdefault("event", buffered_event.event)
-                event.setdefault("sequence", buffered_event.sequence)
-                result["events"].append(event)
-                choices = event.get("choices") or []
-                if choices:
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
-                    if isinstance(content, str):
-                        result["text"] += content
-                if buffered_event.is_terminal:
-                    result["terminal_event"] = event
-                    return
+            cursor = 0
+            while True:
+                events = await CHAT_TASK_EVENT_BUFFER.events_after(task_id, cursor)
+                for buffered_event in events:
+                    cursor = buffered_event.sequence
+                    event = dict(buffered_event.data)
+                    event.setdefault("event", buffered_event.event)
+                    event.setdefault("sequence", buffered_event.sequence)
+                    result["events"].append(event)
+                    choices = event.get("choices") or []
+                    if choices:
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if isinstance(content, str):
+                            result["text"] += content
+                    if buffered_event.is_terminal:
+                        result["terminal_event"] = event
+                        return
+                await asyncio.sleep(0.01)
 
         await asyncio.wait_for(_collect_events(), timeout=timeout_seconds)
         return result

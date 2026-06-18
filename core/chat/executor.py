@@ -5,12 +5,11 @@ Handles stateful/stateless chat with user-selected tools and models.
 Persists canonical chat history in the structured chat store.
 """
 
-import asyncio
 import json
 import traceback
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import List, Optional, AsyncIterator, Any, Sequence
+from typing import List, Optional, Any, Sequence
 from pathlib import Path
 
 from pydantic_ai import BinaryContent
@@ -35,11 +34,7 @@ from core.llm.model_utils import (
     model_supports_capability,
     resolve_model,
 )
-from core.authoring.context_manager import (
-    ContextTemplateExecutionError,
-    build_context_manager_history_processor,
-)
-from core.llm.capabilities.chat_context import build_context_template_error_details
+from core.authoring.context_manager import build_context_manager_history_processor
 from core.llm.capabilities.factory import build_chat_capabilities
 from core.settings import (
     get_chat_model_requests_limit,
@@ -49,16 +44,9 @@ from core.settings import (
     get_default_model_thinking,
 )
 from core.logger import UnifiedLogger
-from core.runtime.execution_tasks import (
-    ExecutionTaskKind,
-    ExecutionTaskSource,
-    chat_session_scope,
-    chat_task_label,
-)
 from core.runtime.state import get_runtime_context, has_runtime_context
 from core.runtime.buffers import BufferStore, get_session_buffer_store
 from core.tools.failures import classify_exception
-from core.tools.utils import estimate_token_count
 
 
 logger = UnifiedLogger(tag="chat-executor")
@@ -69,7 +57,6 @@ PromptInput = str | Sequence[UserContent]
 
 _CHAT_STORE = ChatStore()
 _LATEST_TURN_FAILURE_METADATA_KEY = "latest_turn_failure"
-_STREAM_KEEPALIVE_INTERVAL_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -635,16 +622,6 @@ def _build_model_capability_details(
 
 
 @dataclass
-class ChatExecutionResult:
-    """Result of chat prompt execution."""
-    response: str
-    session_id: str
-    message_count: int
-    compiled_context_path: Optional[str] = None
-    history_file: Optional[str] = None  # Path to saved chat history file
-
-
-@dataclass
 class ChatRunDeps:
     """Per-run dependencies/caches for chat agents."""
     context_manager_cache: dict[str, Any] = field(default_factory=dict)
@@ -891,312 +868,3 @@ def _prepare_agent_config(
         )
 
     return base_instructions, tool_instructions, model_instance, tool_functions
-
-
-async def execute_chat_prompt(
-    vault_name: str,
-    vault_path: str,
-    prompt: str,
-    image_paths: Optional[List[str]],
-    image_uploads: Optional[List[UploadedImageAttachment]],
-    session_id: str,
-    tools: List[str],
-    model: str,
-    thinking: ThinkingValue | None = None,
-    context_template: Optional[str] = None,
-) -> ChatExecutionResult:
-    """
-    Execute chat prompt with user-selected tools and model.
-
-    Args:
-        vault_name: Vault name for session tracking
-        vault_path: Full path to vault directory
-        prompt: User's prompt text
-        session_id: Session identifier for conversation tracking
-        tools: List of tool names selected by user
-        model: Model name selected by user
-    Returns:
-        ChatExecutionResult with response and session metadata
-    """
-    phase = "preflight"
-    attached_image_count = 0
-    prepared = None
-    accepted_user_persisted = False
-    initial_workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
-    _log_chat_lifecycle(
-        "Chat execution started",
-        vault_name=vault_name,
-        session_id=session_id,
-        model=model,
-        context_template=context_template,
-        workspace_path=initial_workspace_path,
-        extra={"thinking": thinking_value_to_label(thinking)},
-        tools=tools,
-        streaming=False,
-        phase=phase,
-        prompt_length=len(prompt),
-    )
-    try:
-        prepared = await _prepare_chat_execution(
-            vault_name=vault_name,
-            vault_path=vault_path,
-            prompt=prompt,
-            image_paths=image_paths,
-            image_uploads=image_uploads,
-            session_id=session_id,
-            tools=tools,
-            model=model,
-            thinking=thinking,
-            context_template=context_template,
-        )
-        attached_image_count = prepared.attached_image_count
-        _log_chat_lifecycle(
-            "Chat preflight completed",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=model,
-            tools=tools,
-            streaming=False,
-            phase=phase,
-            prompt_length=len(prompt),
-            attached_image_count=attached_image_count,
-            context_template=prepared.context_template,
-            workspace_path=prepared.workspace_path,
-            extra={
-                "history_message_count": len(prepared.message_history or []),
-                "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
-            },
-        )
-
-        phase = "agent_run"
-        runtime = get_runtime_context()
-        async with runtime.task_coordinator.track_current_task(
-            kind=ExecutionTaskKind.CHAT,
-            scope=chat_session_scope(session_id),
-            source=ExecutionTaskSource.API,
-            label=chat_task_label(session_id),
-            metadata={
-                "vault": vault_name,
-                "session_id": session_id,
-                "streaming": False,
-                "model": model,
-                "tools": list(tools),
-            },
-        ):
-            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
-                _CHAT_STORE.add_messages(session_id, vault_name, [_accepted_user_request(prepared)])
-                accepted_user_persisted = True
-            session_buffer_store = get_session_buffer_store(session_id)
-            run_deps = ChatRunDeps(
-                context_manager_now=_resolve_context_manager_now(),
-                buffer_store=session_buffer_store,
-                buffer_store_registry={"session": session_buffer_store},
-                session_id=session_id,
-                vault_name=vault_name,
-                message_history=list(prepared.message_history or []),
-                tools=list(prepared.tools or []),
-            )
-            result = await prepared.agent.run(
-                prepared.user_prompt,
-                message_history=prepared.message_history,
-                deps=run_deps,
-                usage_limits=_chat_usage_limits(),
-            )
-
-            phase = "session_persist"
-            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
-                _CHAT_STORE.add_messages(
-                    session_id,
-                    vault_name,
-                    _messages_after_accepted_user_request(result.new_messages()),
-                )
-                _clear_latest_turn_failure(session_id=session_id, vault_name=vault_name)
-        await _try_auto_compact_after_turn(
-            session_id=session_id,
-            vault_name=vault_name,
-            vault_path=vault_path,
-        )
-        _log_chat_lifecycle(
-            "Chat execution completed",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=model,
-            tools=tools,
-            streaming=False,
-            phase=phase,
-            prompt_length=len(prompt),
-            attached_image_count=attached_image_count,
-            context_template=prepared.context_template,
-            workspace_path=prepared.workspace_path,
-            extra={
-                "message_count": len(result.all_messages()),
-                "response_length": len(result.output or ""),
-            },
-        )
-
-        return ChatExecutionResult(
-            response=result.output,
-            session_id=session_id,
-            message_count=len(result.all_messages()),
-            history_file=None,
-        )
-    except asyncio.CancelledError as exc:
-        failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
-        _log_chat_failure(
-            "Chat execution cancelled",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=model,
-            tools=tools,
-            streaming=False,
-            phase=phase,
-            prompt_length=len(prompt),
-            attached_image_count=attached_image_count,
-            context_template=prepared.context_template if prepared else context_template,
-            workspace_path=failure_workspace_path,
-            exc=exc,
-        )
-        raise
-    except UsageLimitExceeded as exc:
-        limit_error = _build_chat_usage_limit_error(exc)
-        failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
-        _log_chat_failure(
-            f"Chat {_usage_limit_label(limit_error)} exceeded",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=model,
-            tools=tools,
-            streaming=False,
-            phase=phase,
-            prompt_length=len(prompt),
-            attached_image_count=attached_image_count,
-            context_template=prepared.context_template if prepared else context_template,
-            workspace_path=failure_workspace_path,
-            extra=limit_error.details,
-            exc=exc,
-        )
-        if accepted_user_persisted:
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=exc,
-                phase=phase,
-                streaming=False,
-                model=model,
-                tools=tools,
-            )
-        raise limit_error from exc
-    except Exception as exc:
-        failure_workspace_path = prepared.workspace_path if prepared else initial_workspace_path
-        _log_chat_failure(
-            "Chat execution failed",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=model,
-            tools=tools,
-            streaming=False,
-            phase=phase,
-            prompt_length=len(prompt),
-            attached_image_count=attached_image_count,
-            context_template=prepared.context_template if prepared else context_template,
-            workspace_path=failure_workspace_path,
-            exc=exc,
-        )
-        if accepted_user_persisted:
-            _record_latest_turn_failure(
-                session_id=session_id,
-                vault_name=vault_name,
-                exc=exc,
-                phase=phase,
-                streaming=False,
-                model=model,
-                tools=tools,
-            )
-        if isinstance(exc, ContextTemplateExecutionError):
-            details = build_context_template_error_details(
-                vault_name=vault_name,
-                session_id=session_id,
-                template_name=exc.template_name,
-                phase=exc.phase,
-                template_pointer=exc.template_pointer,
-            )
-            logger.warning(
-                "Selected context template failed during chat execution",
-                data=details | {"error": str(exc)},
-            )
-            raise ChatContextTemplateError(str(exc), details=details) from exc
-        raise
-
-
-
-async def execute_chat_prompt_stream(
-    vault_name: str,
-    vault_path: str,
-    prompt: str,
-    image_paths: Optional[List[str]],
-    image_uploads: Optional[List[UploadedImageAttachment]],
-    session_id: str,
-    tools: List[str],
-    model: str,
-    thinking: ThinkingValue | None = None,
-    context_template: Optional[str] = None,
-) -> AsyncIterator[str]:
-    """Preflight streaming chat execution and yield SSE chunks."""
-    try:
-        prepared = await _prepare_chat_execution(
-            vault_name=vault_name,
-            vault_path=vault_path,
-            prompt=prompt,
-            image_paths=image_paths,
-            image_uploads=image_uploads,
-            session_id=session_id,
-            tools=tools,
-            model=model,
-            thinking=thinking,
-            context_template=context_template,
-        )
-    except Exception as exc:
-        _log_chat_failure(
-            "Streaming chat preflight failed",
-            vault_name=vault_name,
-            session_id=session_id,
-            model=model,
-            tools=tools,
-            streaming=True,
-            phase="preflight",
-            prompt_length=len(prompt),
-            context_template=context_template,
-            workspace_path=_CHAT_STORE.get_session_workspace_path(session_id, vault_name),
-            exc=exc,
-        )
-        if isinstance(exc, ChatContextTemplateError):
-            error_chunk = {
-                "event": "error",
-                "choices": [{
-                    "delta": {"content": f"\n\nTemplate error: {str(exc)}"},
-                    "index": 0,
-                    "finish_reason": "error"
-                }],
-                "details": exc.details,
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            return
-        raise
-    from core.chat.task_execution import (
-        start_prepared_chat_stream_task,
-        stream_chat_task_sse,
-    )
-
-    started = await start_prepared_chat_stream_task(
-        prepared=prepared,
-        vault_name=vault_name,
-        vault_path=vault_path,
-        session_id=session_id,
-        force_current_loop=True,
-    )
-    async for chunk in stream_chat_task_sse(
-        task_id=started.task.task_id,
-        keepalive_seconds=_STREAM_KEEPALIVE_INTERVAL_SECONDS,
-        raise_terminal_errors=True,
-    ):
-        yield chunk

@@ -74,8 +74,8 @@ class WorkflowFileResponse(BaseModel):
     message: Optional[str] = Field(None, description="Human-readable update summary")
 
 
-class ChatExecuteRequest(BaseModel):
-    """Request model for chat execution."""
+class ChatTaskRequest(BaseModel):
+    """Request model for starting task-owned chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")
     prompt: str = Field(..., min_length=1, description="User prompt text")
     image_paths: List[str] = Field(
@@ -91,7 +91,6 @@ class ChatExecuteRequest(BaseModel):
     )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     workspace_path: Optional[str] = Field(None, description="Optional vault-relative workspace directory path")
-    stream: bool = Field(False, description="Whether to stream the response (SSE format)")
 
 
 #######################################################################
@@ -262,13 +261,6 @@ class ExecuteWorkflowResponse(BaseModel):
     status: str = Field(..., description="Current execution task status")
     task: "ExecutionTaskInfo" = Field(..., description="Execution task created for this workflow run")
     message: str = Field(..., description="Human-readable execution summary")
-
-
-class ChatExecuteResponse(BaseModel):
-    """Response model for chat execution."""
-    response: str = Field(..., description="The AI's response")
-    session_id: str = Field(..., description="Session identifier")
-    message_count: int = Field(..., description="Total messages in conversation")
 
 
 class ChatTaskStartResponse(BaseModel):

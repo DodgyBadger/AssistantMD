@@ -23,8 +23,6 @@ class RuntimeBackgroundSpawner:
     def spawn(
         self,
         coroutine_factory: Callable[[], Awaitable[Any]],
-        *,
-        force_current_loop: bool = False,
     ) -> None:
         """Schedule a coroutine factory and register the created task for shutdown."""
 
@@ -40,8 +38,7 @@ class RuntimeBackgroundSpawner:
         current_loop = asyncio.get_running_loop()
         target_loop = self._background_loop
         if (
-            not force_current_loop
-            and target_loop is not None
+            target_loop is not None
             and target_loop.is_running()
             and target_loop is not current_loop
         ):

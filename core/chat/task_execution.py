@@ -20,6 +20,7 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import TextPart
 
+from core.authoring.context_manager import ContextTemplateExecutionError
 from core.chat import executor as chat_executor
 from core.chat.chat_store import ChatStore
 from core.chat.compaction import chat_session_history_lock
@@ -61,7 +62,6 @@ async def start_prepared_chat_stream_task(
     vault_path: str,
     session_id: str,
     event_buffer: ChatTaskEventBuffer | None = None,
-    force_current_loop: bool = False,
 ) -> ChatStreamTaskStart:
     """Start a prepared streaming chat run in a background execution task."""
     runtime = get_runtime_context()
@@ -91,7 +91,6 @@ async def start_prepared_chat_stream_task(
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
         ),
-        force_current_loop=force_current_loop,
     )
     return ChatStreamTaskStart(task=task, session_id=session_id)
 
@@ -509,7 +508,7 @@ async def _run_prepared_chat_stream_task(
                 _error_event_data(f"\n\nError: {str(exc)}", exc.details),
             )
             raise
-        except chat_executor.ContextTemplateExecutionError as exc:
+        except ContextTemplateExecutionError as exc:
             details = build_context_template_error_details(
                 vault_name=vault_name,
                 session_id=session_id,
