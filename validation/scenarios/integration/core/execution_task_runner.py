@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.runtime.execution_tasks import ExecutionTaskKind, ExecutionTaskSource
-from core.runtime.task_runner import ExecutionTaskHooks, ExecutionTaskSpec
+from core.runtime.task_runner import ExecutionGatePolicy, ExecutionTaskHooks, ExecutionTaskSpec
 from validation.core.base_scenario import BaseScenario
 
 
@@ -103,6 +103,83 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             "Runner should call failure hook with the original exception",
         )
 
+        gate_entered = asyncio.Event()
+        release_gate = asyncio.Event()
+        gate_order: list[str] = []
+        gate_policy = ExecutionGatePolicy(
+            key="runner:gate",
+            queued_status="queued_for_gate",
+            queued_metadata={"gate_reason": "validation_gate_active"},
+            clear_metadata={"gate_reason": None},
+        )
+        first_gate_task = await runtime.task_runner.start_background(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.CHAT,
+                scope="runner:gate",
+                source=ExecutionTaskSource.SYSTEM,
+                label="runner-gate-first",
+                metadata={"probe": "gate_first"},
+            ),
+            lambda task: runtime.task_runner.run_with_gate(
+                task,
+                gate_policy,
+                lambda: _hold_gate("first", gate_order, gate_entered, release_gate),
+            ),
+        )
+        await asyncio.wait_for(gate_entered.wait(), timeout=2.0)
+        second_gate_task = await runtime.task_runner.start_background(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.CHAT,
+                scope="runner:gate",
+                source=ExecutionTaskSource.SYSTEM,
+                label="runner-gate-second",
+                metadata={"probe": "gate_second"},
+            ),
+            lambda task: runtime.task_runner.run_with_gate(
+                task,
+                gate_policy,
+                lambda: _record_gate_entry("second", gate_order),
+            ),
+        )
+        queued_second = await self._wait_for_task_metadata(
+            second_gate_task.task_id,
+            "gate_reason",
+            "validation_gate_active",
+        )
+        self.soft_assert_equal(
+            queued_second.heartbeat_status if queued_second else None,
+            "queued_for_gate",
+            "Runner gate should heartbeat waiting tasks with the configured status",
+        )
+        self.soft_assert_equal(
+            queued_second.metadata.get("queue_position") if queued_second else None,
+            1,
+            "Runner gate should record queue position for waiting tasks",
+        )
+        self.soft_assert_equal(
+            queued_second.metadata.get("waiting_for_task_id") if queued_second else None,
+            first_gate_task.task_id,
+            "Runner gate should identify the holder task while waiting",
+        )
+        release_gate.set()
+        first_gate_terminal = await self._wait_for_task_terminal(first_gate_task.task_id)
+        second_gate_terminal = await self._wait_for_task_terminal(second_gate_task.task_id)
+        self.soft_assert_equal(
+            first_gate_terminal.status if first_gate_terminal else None,
+            "completed",
+            "First gated runner task should complete",
+        )
+        self.soft_assert_equal(
+            second_gate_terminal.status if second_gate_terminal else None,
+            "completed",
+            "Second gated runner task should complete after gate release",
+        )
+        self.soft_assert_equal(
+            gate_order,
+            ["first", "second"],
+            "Runner gate should serialize same-key tasks",
+        )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
@@ -112,6 +189,15 @@ class ExecutionTaskRunnerScenario(BaseScenario):
         for _ in range(100):
             task = await runtime.task_coordinator.get_task(task_id)
             if task is not None and task.is_terminal:
+                return task
+            await asyncio.sleep(0.02)
+        return None
+
+    async def _wait_for_task_metadata(self, task_id: str, key: str, value):
+        runtime = self._runtime()
+        for _ in range(100):
+            task = await runtime.task_coordinator.get_task(task_id)
+            if task is not None and task.metadata.get(key) == value:
                 return task
             await asyncio.sleep(0.02)
         return None
@@ -145,3 +231,18 @@ async def _record_failure(
     exc: BaseException,
 ) -> None:
     failures.append((task_id, type(exc).__name__))
+
+
+async def _hold_gate(
+    label: str,
+    gate_order: list[str],
+    entered: asyncio.Event,
+    release: asyncio.Event,
+) -> None:
+    gate_order.append(label)
+    entered.set()
+    await release.wait()
+
+
+async def _record_gate_entry(label: str, gate_order: list[str]) -> None:
+    gate_order.append(label)

@@ -34,7 +34,7 @@ from core.runtime.execution_tasks import (
     chat_task_label,
 )
 from core.runtime.state import get_runtime_context
-from core.runtime.task_runner import ExecutionTaskHooks, ExecutionTaskSpec
+from core.runtime.task_runner import ExecutionGatePolicy, ExecutionTaskHooks, ExecutionTaskSpec
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
 
@@ -149,47 +149,58 @@ async def start_queued_chat_stream_task(
     buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
 
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
-        try:
-            await _wait_for_prior_chat_session_tasks(
-                task_id=tracked_task.task_id,
-                session_id=session_id,
-            )
-            prepared = await chat_executor._prepare_chat_execution(
+        async def _run_in_session_gate() -> None:
+            try:
+                prepared = await chat_executor._prepare_chat_execution(
+                    vault_name=vault_name,
+                    vault_path=vault_path,
+                    prompt=prompt,
+                    image_paths=image_paths,
+                    image_uploads=image_uploads,
+                    session_id=session_id,
+                    tools=tools,
+                    model=model,
+                    thinking=thinking,
+                    context_template=context_template,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
+                await _publish_deferred_preflight_failure(
+                    task_id=tracked_task.task_id,
+                    exc=exc,
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    prompt=prompt,
+                    tools=tools,
+                    model=model,
+                    context_template=context_template,
+                    event_buffer=buffer,
+                )
+                return
+
+            await runtime.task_coordinator.mark_started(tracked_task.task_id)
+            await _run_prepared_chat_stream_task(
+                task=tracked_task,
+                prepared=prepared,
                 vault_name=vault_name,
                 vault_path=vault_path,
-                prompt=prompt,
-                image_paths=image_paths,
-                image_uploads=image_uploads,
                 session_id=session_id,
-                tools=tools,
-                model=model,
-                thinking=thinking,
-                context_template=context_template,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
-            await _publish_deferred_preflight_failure(
-                task_id=tracked_task.task_id,
-                exc=exc,
-                vault_name=vault_name,
-                session_id=session_id,
-                prompt=prompt,
-                tools=tools,
-                model=model,
-                context_template=context_template,
                 event_buffer=buffer,
             )
-            return
 
-        await runtime.task_coordinator.mark_started(tracked_task.task_id)
-        await _run_prepared_chat_stream_task(
-            task=tracked_task,
-            prepared=prepared,
-            vault_name=vault_name,
-            vault_path=vault_path,
-            session_id=session_id,
-            event_buffer=buffer,
+        await runtime.task_runner.run_with_gate(
+            tracked_task,
+            ExecutionGatePolicy(
+                key=chat_session_scope(session_id),
+                queued_status="queued",
+                queued_metadata={},
+                clear_metadata={
+                    "queue_position": 0,
+                    "waiting_for_task_id": None,
+                },
+            ),
+            _run_in_session_gate,
         )
 
     task = await runtime.task_runner.start_background(
@@ -214,49 +225,6 @@ async def start_queued_chat_stream_task(
         start_immediately=False,
     )
     return ChatStreamTaskStart(task=task, session_id=session_id)
-
-
-async def _wait_for_prior_chat_session_tasks(*, task_id: str, session_id: str) -> None:
-    """Hold a queued chat task until older tasks in the same session finish."""
-    runtime = get_runtime_context()
-    scope = chat_session_scope(session_id)
-
-    while True:
-        own_task = await runtime.task_coordinator.get_task(task_id)
-        if own_task is None:
-            raise asyncio.CancelledError
-        if own_task.is_terminal:
-            raise asyncio.CancelledError
-
-        active_tasks = await runtime.task_coordinator.list_tasks(
-            kind=ExecutionTaskKind.CHAT,
-            scope=scope,
-            include_terminal=False,
-        )
-        older_tasks = [
-            task
-            for task in active_tasks
-            if task.task_id != task_id and task.created_at < own_task.created_at
-        ]
-        if not older_tasks:
-            await runtime.task_coordinator.update_metadata(
-                task_id,
-                {
-                    "queue_position": 0,
-                    "waiting_for_task_id": None,
-                },
-            )
-            return
-
-        await runtime.task_coordinator.heartbeat(
-            task_id,
-            status="queued",
-            metadata={
-                "queue_position": len(older_tasks),
-                "waiting_for_task_id": older_tasks[0].task_id,
-            },
-        )
-        await asyncio.sleep(0.05)
 
 
 async def _append_cancelled_if_open(

@@ -189,6 +189,8 @@ Commit boundary:
 
 ### Slice 4: Extract Generic Gate/Queue Policy
 
+Status: complete.
+
 Goal: move lane locks and queue heartbeats out of workflow/chat-specific loops where possible.
 
 Changes:

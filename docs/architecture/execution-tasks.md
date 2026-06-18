@@ -53,6 +53,8 @@ runtime shutdown task set consistently.
 it creates queued task records, attaches the runtime background worker with
 `track_existing_task(...)`, and delegates domain-specific side effects to
 callers.
+It also owns keyed execution gates used to serialize related tasks, such as chat
+runs for one session and workflow runs for one vault.
 
 Task-owned streaming chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read
