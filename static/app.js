@@ -82,6 +82,7 @@ const chatElements = {
 const dashElements = {
     systemStatus: document.getElementById('system-status'),
     executionTasksStatus: document.getElementById('dashboard-execution-tasks-status'),
+    executionTaskResult: document.getElementById('dashboard-execution-task-result'),
     workflowsStatus: document.getElementById('dashboard-workflows-status'),
     workflowSchedulerBadge: document.getElementById('dashboard-workflows-scheduler-badge'),
     vaultActivityStatus: document.getElementById('dashboard-vault-activity-status'),
@@ -172,8 +173,16 @@ const workflowActions = window.WorkflowActions.create({
         fetchExecutionTasks,
         displaySystemStatus,
         isTerminalTaskStatus,
-        activeExecutionTasks: () => dashboardView.activeExecutionTasks(),
         selectedVault: () => chatElements.vaultSelector?.value || '',
+    },
+});
+
+const executionTaskActions = window.ExecutionTaskActions.create({
+    elements: dashElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        fetchExecutionTasks,
+        activeExecutionTasks: () => dashboardView.activeExecutionTasks(),
     },
 });
 
@@ -189,8 +198,8 @@ dashboardView = window.DashboardView.create({
         openWorkflowFileEditor: workflowActions.openFileEditor,
         toggleWorkflowEnabled: workflowActions.toggleWorkflowEnabled,
         executeWorkflow: workflowActions.executeWorkflow,
-        stopExecutionTask: workflowActions.stopExecutionTask,
-        stopAllExecutionTasks: workflowActions.stopAllExecutionTasks,
+        stopExecutionTask: executionTaskActions.stopExecutionTask,
+        stopAllExecutionTasks: executionTaskActions.stopAllExecutionTasks,
     },
 });
 

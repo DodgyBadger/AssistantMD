@@ -28,13 +28,12 @@ Reviewed after the task-owned chat execution refactor on `fix/delegation-errors`
    - Deferred chat preflight now maps known chat capability, context-template, usage-limit, image attachment, and unsupported model-alias errors to stable SSE error payloads.
    - Unknown exceptions still use the generic unexpected-error message with structured classification metadata.
 
-6. Low drift: generic execution-task UI controls live in workflow modules.
-   - Dashboard rendering is now generic, but stop/stop-all behavior is still in workflow action code.
-   - Fix direction: extract or rename this into an execution-task controller once the core path is stable.
+6. Low drift: generic execution-task UI controls live in workflow modules. Status: addressed in the current slice.
+   - Generic stop/stop-all dashboard behavior now lives in `static/js/execution-tasks.js`.
+   - Workflow actions remain scoped to workflow-specific execution and result rendering.
 
 ## Test Gaps
 
 - Cancellation while a chat task is queued behind an earlier task. Status: covered in `validation/scenarios/integration/core/chat_task_session_queue.py`.
 - Cancellation during deferred preflight before the task reaches agent streaming. Status: covered in `validation/scenarios/integration/core/chat_task_session_queue.py`.
 - Failure-retention cleanup after `/api/chat/tasks` errors.
-- Dashboard stop-all policy for mixed task kinds.
