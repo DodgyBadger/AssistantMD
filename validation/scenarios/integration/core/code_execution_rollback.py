@@ -9,7 +9,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
-from core.chat.executor import PreparedChatExecution, execute_chat_prompt
+from core.chat.executor import PreparedChatExecution
 from core.runtime.execution_tasks import chat_session_scope
 from core.tools.code_execution import CodeExecution
 from validation.core.base_scenario import BaseScenario
@@ -44,6 +44,11 @@ class _CodeExecutionFailingAgent:
             raise RuntimeError(f"code_execution mutation failed before parent failure: {result}")
         raise RuntimeError("forced parent chat failure after code_execution mutation")
 
+    async def run_stream_events(self, *args, **kwargs):
+        await self.run(*args, **kwargs)
+        if False:
+            yield None
+
 
 class CodeExecutionRollbackScenario(BaseScenario):
     """Validate code_execution file mutations rollback with the parent chat task."""
@@ -71,24 +76,22 @@ class CodeExecutionRollbackScenario(BaseScenario):
         session_id = "code_execution_rollback_session"
         try:
             checkpoint = self.event_checkpoint()
-            caught = None
-            try:
-                await execute_chat_prompt(
-                    vault_name=vault.name,
-                    vault_path=str(vault),
-                    prompt="Use code_execution then fail.",
-                    image_paths=[],
-                    image_uploads=[],
-                    session_id=session_id,
-                    tools=["code_execution", "file_ops_safe"],
-                    model="test",
-                    context_template=None,
-                )
-            except RuntimeError as exc:
-                caught = exc
+            result = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "Use code_execution then fail.",
+                    "session_id": session_id,
+                    "tools": ["code_execution", "file_ops_safe"],
+                    "model": "test",
+                }
+            )
             events = self.events_since(checkpoint)
 
-            self.soft_assert(caught is not None, "Forced parent chat failure should propagate")
+            self.soft_assert_equal(
+                result["terminal_event"].get("event"),
+                "error",
+                "Forced parent chat failure should emit an error event",
+            )
             failed_event = self.assert_event_contains(
                 events,
                 name="execution_task_failed",
