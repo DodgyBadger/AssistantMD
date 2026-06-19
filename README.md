@@ -12,17 +12,19 @@ Your collection of markdown files is called a vault (borrowing the term from Obs
 
 - Mount one or more markdown vaults. Vaults are isolated from each other - each chat session is locked to exactly one vault.
 - Compatible with all major LLM providers, including local models and any OpenAI-compatible endpoint. Supports API keys today; OpenAI subscription access via OAuth is in testing.
+- Tuned for long-running tasks, tool-heavy agents, and deep work sessions.
 - Image support for models that support it. Markdown files containing inline images are sent with interleaved text and images in the order they appear so the model has full contextual understanding.
 - Clean, minimal UI including an even more minimal focus mode.
-- Built-in tools: read/write to your vaults; web extraction, crawl and browser for online research; sandboxed code execution; chat history retrieval; subagents; run workflows; goal tracking for long-running work.
+- Built-in tools: read/write to your vaults; web extraction, crawl and browser for online research; sandboxed code execution; chat history retrieval; subagents; run workflows; goal tracking for long-running tasks.
 - Nightly chat history summarization and indexing (disabled by default, enable in Dashboard > Workflows).
 - Export chat sessions to markdown.
 - Import PDFs and URLs to markdown using basic extraction, OCR (with Mistral API key), or converting PDF pages to images for when even OCR can't maintain sufficient fidelity.
 - Automatic tracking and snapshots for vault files changed through AssistantMD.
 - Model aliases so you don't have to update scripts every time you upgrade a model string.
 - Extensive settings for model routing, tools, workflows, imports, memory, and runtime behavior.
+- Smaller risk surface by focusing agent collaboration inside your vault instead of broad access to external apps, APIs, and integrations.
 
-And last but not least, **composability**. AssistantMD gives you a set of building blocks to shape agent behavior: chat for direct collaboration, skills for reusable procedures, workflows for repeatable or scheduled automation, context assembly for deciding what the agent sees, and session summaries for recalling prior work. Start with the default setup; it will get you pretty far. See the [Build Guide](docs/use/build-guide.md) for the full pattern.
+And last but not least, **composability**. AssistantMD gives you a set of building blocks to shape agent behavior: chat for direct collaboration, skills for reusable procedures, workflows for repeatable or scheduled automation, context assembly for deciding what the agent sees, and session summaries for recalling prior work. Start with the default setup; it will get you pretty far. See the [Build Guide](docs/use/build-guide.md) for the full details; once AssistantMD is running, the chat agent can help you adapt the setup.
 
 ## Documentation
 
