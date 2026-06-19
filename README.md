@@ -1,55 +1,28 @@
 # AssistantMD
 
-> [!WARNING]
-> **v0.6.0 introduces a major change that breaks all existing automations. See the [release notes](RELEASE_NOTES.md) for details. Pin your docker compose file to v0.5.0 (ghcr.io/dodgybadger/assistantmd:v0.5.0) if you are not ready to migrate.**
-
 AssistantMD turns a markdown vault into a collaborative workbench for you and an AI agent. It is built on three core principles:
 
-- Full ownership of your files and workflows.
-- Maximum flexibility to structure work around your needs.
-- A markdown vault as the source of truth for you and the agent.
+- Full ownership of your files, skills, workflows and memory.
+- Flexibility to structure work around your needs, even on a per-project basis.
+- Plain text markdown files as the source of truth for you and the agent.
 
-A vault is a collection of markdown files (borrowing the term from Obsidian). A personal vault might look like this:
+Your collection of markdown files is called a vault (borrowing the term from Obsidian). Each folder in your vault is both a place to organize your knowledge and projects, and a shared workspace for collaborating with the agent. At the start of each chat session, you can set a workspace folder so that the session stays oriented (but not locked) to that folder. Add `README.md` and `playbook.md` to your workspace folders to further orient and guide AI-assisted work sessions.
 
-```text
-Personal_Vault/
-├── Coursework/
-│   └── HR Certificate/
-│       ├── Module 01/
-│       └── Module 02/
-├── Projects/
-│   ├── Grant Proposal/
-│   └── Home Renovation/
-└── Writing/
-    ├── Research Briefs/
-    └── Draft Essays/
-```
+## Features
 
-Each folder can be both a place to organize your own knowledge and a shared workbench for collaborating with the agent. Keep notes, sources, drafts, prompts, skills, review items, and outputs together so the context you build for yourself is also the context the agent works from. For chat sessions, you can choose a workspace folder so the default context setup can load local orientation files such as `README.md` and `playbook.md`.
+- Mount one or more markdown vaults. Vaults are isolated from each other - each chat session is locked to exactly one vault.
+- Compatible with all major LLM providers, including local models and any OpenAI-compatible endpoint. Supports API keys today; OpenAI subscription access via OAuth is in testing.
+- Image support for models that support it. Markdown files containing inline images are sent with interleaved text and images in the order they appear so the model has full contextual understanding.
+- Clean, minimal UI including an even more minimal focus mode.
+- Built-in tools: read/write to your vaults; web extraction, crawl and browser for online research; sandboxed code execution; chat history retrieval; subagents; run workflows; goal tracking for long-running work.
+- Nightly chat history summarization and indexing (disabled by default, enable in Dashboard > Workflows).
+- Export chat sessions to markdown.
+- Import PDFs and URLs to markdown using basic extraction, OCR (with Mistral API key), or converting PDF pages to images for when even OCR can't maintain sufficient fidelity.
+- Automatic tracking and snapshots for vault files changed through AssistantMD.
+- Model aliases so you don't have to update scripts every time you upgrade a model string.
+- Extensive settings for model routing, tools, workflows, imports, memory, and runtime behavior.
 
-AssistantMD adds its own `AssistantMD/` folder for reusable skills, workflow scripts, exported chat transcripts, imports, and optional context files.
-
-AssistantMD gives you a set of composable building blocks to shape agent behavior: chat for direct collaboration, skills for reusable procedures, workflows for repeatable or scheduled automation, context assembly for deciding what the agent sees, and session summaries for recalling prior work. Start with the default setup; it will get you pretty far. See the [Build Guide](docs/use/build-guide.md) for the full pattern.
-
-### Chat
-
-Use chat when you want the agent to work directly against your vault: answer questions from your notes, reorganize files, draft from existing material, or research something and save the result.
-
-### Skills
-
-Skills are markdown procedures. Use them when you want the agent to follow the same process every time: meeting prep, literature review, inbox triage, source evaluation, or report drafting.
-
-### Workflow Scripts
-
-Workflow scripts are Python stored in markdown files. Use them when work should run on a schedule or needs predictable sequencing: scan new notes, prepare a weekly review, summarize stale sessions, or maintain memory notes.
-
-### Context Assembly
-
-A context assembly script controls what the chat agent knows at the start of each session: history, files, skills, instructions, policies or memory notes.
-
-### Long-term Context and Recall
-
-AssistantMD does not impose one fixed memory model. The default setup uses two complementary patterns: user-owned markdown notes for explicit durable facts and preferences, and session summaries for recall across prior chats. Session summaries are searched through the `session_ops` tool; enable or customize the packaged nightly session summary workflow when you want them maintained automatically.
+And last but not least, **composability**. AssistantMD gives you a set of building blocks to shape agent behavior: chat for direct collaboration, skills for reusable procedures, workflows for repeatable or scheduled automation, context assembly for deciding what the agent sees, and session summaries for recalling prior work. Start with the default setup; it will get you pretty far. See the [Build Guide](docs/use/build-guide.md) for the full pattern.
 
 ## Documentation
 
