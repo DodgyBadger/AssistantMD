@@ -478,7 +478,25 @@ class BaseScenario(ABC):
                         return
                 await asyncio.sleep(0.01)
 
-        await asyncio.wait_for(_collect_events(), timeout=timeout_seconds)
+        try:
+            await asyncio.wait_for(_collect_events(), timeout=timeout_seconds)
+        except TimeoutError as exc:
+            from core.runtime.state import get_runtime_context
+
+            task = await get_runtime_context().task_coordinator.get_task(task_id)
+            buffered_events = await CHAT_TASK_EVENT_BUFFER.events_after(task_id, 0)
+            last_event = buffered_events[-1] if buffered_events else None
+            raise AssertionError(
+                "Timed out waiting for chat task terminal event "
+                f"after {timeout_seconds:g}s: "
+                f"task_id={task_id}, "
+                f"status={task.status if task else None}, "
+                f"cancel_requested={task.cancel_requested if task else None}, "
+                f"terminal_reason={task.terminal_reason if task else None}, "
+                f"buffered_event_count={len(buffered_events)}, "
+                f"last_buffered_event={last_event.event if last_event else None}, "
+                f"last_buffered_sequence={last_event.sequence if last_event else None}"
+            ) from exc
         return result
 
     def _parse_sse_events(self, text: str) -> List[Dict[str, Any]]:
