@@ -264,7 +264,13 @@ class BaseScenario(ABC):
                 raise AssertionError(f"Execution task did not finish within {timeout_seconds:g}s: {task_id}")
             await asyncio.sleep(0.25)
 
-    async def trigger_job(self, vault: VaultPath, assistant_name: str) -> bool:
+    async def trigger_job(
+        self,
+        vault: VaultPath,
+        assistant_name: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> bool:
         """Trigger a scheduled job and wait for completion."""
         global_id = f"{vault.name}/{assistant_name}"
         self._log_timeline(f"Triggering job: {global_id}")
@@ -272,9 +278,12 @@ class BaseScenario(ABC):
         # Trigger the job
         self._get_system_controller().trigger_job_manually(global_id)
         
-        # Wait for completion (no timeout - matches production behavior)
+        # Wait for completion; most scenarios keep production-like unbounded waits.
         self._log_timeline(f"Waiting for job completion: {global_id}")
-        success = await self._get_system_controller().wait_for_scheduled_run(global_id)
+        success = await self._get_system_controller().wait_for_scheduled_run(
+            global_id,
+            timeout_seconds=timeout_seconds,
+        )
         
         if success:
             self._log_timeline(f"✅ Job completed successfully: {global_id}")
