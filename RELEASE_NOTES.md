@@ -1,20 +1,18 @@
 # Release Notes
 
 
-## 2026-06-17 - v0.6.8
+## 2026-06-19 - v0.6.8
 
 ### Further hardening of long-running tasks
 
 Significant refactor to make AssistantMD more reliable during long chat turns and other background work.
 
-- Chat turns now run as managed execution tasks, so refreshing or closing the browser tab does not inherently cancel the model run.
-- Reopening a session after a disconnected run completes shows the completed response from normal chat history.
-- The chat Stop action now cancels the underlying execution task instead of depending on the browser's streaming connection.
-- The Dashboard status area shows active execution tasks for chat, workflows, compaction, ingestion, and related work in one place.
-- Task cancellation and rollback are ordered more safely, reducing the chance that cleanup runs while an agent task is still winding down.
-- Chat streaming recovery is clearer when an old completed task's live event buffer is no longer retained.
+- Chat turns now run as managed execution tasks, so refreshing or closing the browser tab does not cancel the model run.
+- Task cancellation and rollback are ordered more safely, reducing the chance that cleanup runs while a task is winding down.
 - Oversized multipart image uploads are rejected earlier, before creating a chat task.
 - The old synchronous chat execution path has been retired; chat now uses one task-owned execution path for streaming, cancellation, transcript persistence, and tool activity.
+- The Dashboard shows active execution tasks for chat, workflows, compaction, ingestion, and related work in one place.
+- Fixed bug in files_ops_safe.list that caused empty results on root directory when using the recursive flag.
 
 
 ## 2026-06-16 - v0.6.7
