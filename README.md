@@ -16,6 +16,7 @@ Your collection of markdown files is called a vault (borrowing the term from Obs
 - Image support for models that support it. Markdown files containing inline images are sent with interleaved text and images in the order they appear so the model has full contextual understanding.
 - Clean, minimal UI including an even more minimal focus mode.
 - Built-in tools: read/write to your vaults; web extraction, crawl and browser for online research; sandboxed code execution; chat history retrieval; subagents; run workflows; goal tracking for long-running tasks.
+- Context overflow protection for large tool results and long-running sessions.
 - Nightly chat history summarization and indexing (disabled by default, enable in Dashboard > Workflows).
 - Export chat sessions to markdown.
 - Import PDFs and URLs to markdown using basic extraction, OCR (with Mistral API key), or converting PDF pages to images for when even OCR can't maintain sufficient fidelity.
