@@ -4,7 +4,7 @@ AssistantMD turns a markdown vault into a collaborative workbench for you and an
 
 - Full ownership of your files, skills, workflows and memory.
 - Flexibility to structure work around your needs, even on a per-project basis.
-- Plain text markdown files as the source of truth for you and the agent.
+- Plain text markdown files as the shared source of truth for you and the agent.
 
 Your collection of markdown files is called a vault (borrowing the term from Obsidian). Each folder in your vault is both a place to organize your knowledge and projects, and a shared workspace for collaborating with the agent. At the start of each chat session, you can set a workspace folder so that the session stays oriented (but not locked) to that folder. Add `README.md` and `playbook.md` to your workspace folders to further orient and guide AI-assisted work sessions.
 
@@ -14,8 +14,8 @@ Your collection of markdown files is called a vault (borrowing the term from Obs
 - Compatible with all major LLM providers, including local models and any OpenAI-compatible endpoint. Supports API keys today; OpenAI subscription access via OAuth is in testing.
 - Tuned for long-running tasks, tool-heavy agents, and deep work sessions.
 - Image support for models that support it. Markdown files containing inline images are sent with interleaved text and images in the order they appear so the model has full contextual understanding.
-- Clean, minimal UI including an even more minimal focus mode.
-- Built-in tools: read/write to your vaults; web extraction, crawl and browser for online research; sandboxed code execution; chat history retrieval; subagents; run workflows; goal tracking for long-running tasks.
+- Clean, minimal UI including an even more minimal focus mode. And of course dark-mode!
+- Agent tools: read/write to your vaults; web extraction, crawl and browser for online research; sandboxed code execution; chat history retrieval; subagents; run workflows; goal tracking for long-running tasks.
 - Context overflow protection for large tool results.
 - Nightly chat history summarization and indexing (disabled by default, enable in Dashboard > Workflows).
 - Export chat sessions to markdown.
@@ -39,18 +39,10 @@ And last but not least, **composability**. AssistantMD gives you a set of buildi
 ## Requirements
 
 - Docker Engine or Docker Desktop
-- At least one LLM API key or endpoint. AssistantMD can use OpenAI, Anthropic, Google, Mistral, Grok, OpenRouter, or OpenAI-compatible local/custom endpoints.
+- At least one LLM API key or endpoint.
 - Comfort with the terminal
 
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-
-## Attributions
-
-Some design ideas in AssistantMD were shaped by the work of others:
-
-- **RLM-style research loops**: https://alexzhang13.github.io/blog/2025/rlm/
-- Third-party software notices: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
