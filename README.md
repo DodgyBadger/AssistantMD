@@ -46,7 +46,7 @@ And last but not least, **composability**. AssistantMD gives you a set of buildi
 
 Likely future work includes OpenAI subscription support, better import workflows, direct vault-file browsing in the UI, improved provider caching, and carefully scoped household/team deployment options that preserve AssistantMD's single-user vault model.
 
-Exploratory areas include richer chat-session search, prompt/eval tools, provider batch processing for cheaper long-running workflows, and broader multimodal support.
+Exploratory areas include richer chat-session retrieval, prompt/eval tools, provider batch processing for cheaper long-running workflows, and broader multimodal support.
 
 ## License
 

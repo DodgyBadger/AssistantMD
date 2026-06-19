@@ -178,6 +178,13 @@ def build_chat_tool_output_cache_capability(
         preview = text[:preview_limit]
         if len(text) > preview_limit:
             preview += "\n… [truncated]"
+        notice = _build_cached_tool_overflow_notice(
+            tool_name=call.tool_name,
+            cache_ref=cache_ref,
+            token_count=token_count,
+            token_limit=token_limit,
+            preview=preview,
+        )
 
         logger.info(
             "Chat oversized tool result stored in cache",
@@ -198,20 +205,14 @@ def build_chat_tool_output_cache_capability(
             tool_name=call.tool_name,
             event_type="overflow_cached",
             args=args if isinstance(args, dict) else None,
-            result_text=preview,
+            result_text=notice,
             result_metadata={
                 "token_count": token_count,
                 "token_limit": token_limit,
             },
             artifact_ref=cache_ref,
         )
-        return _build_cached_tool_overflow_notice(
-            tool_name=call.tool_name,
-            cache_ref=cache_ref,
-            token_count=token_count,
-            token_limit=token_limit,
-            preview=preview,
-        )
+        return notice
 
     return hooks
 
@@ -318,9 +319,11 @@ def _build_cached_tool_overflow_notice(
     token_limit: int,
     preview: str,
 ) -> str:
+    read_snippet = f'artifact = await read_cache(ref={cache_ref!r})'
     return (
         f"Tool '{tool_name}' produced a large result ({token_count} estimated tokens > {token_limit}) "
         f"and it was stored in cache ref '{cache_ref}'. Preview:\n\n{preview}\n\n"
-        "Do not request the full content inline. Switch to `code_execution` and use "
-        f"`await read_cache(ref={cache_ref!r})` to inspect the cached artifact by ref."
+        "Do not request the full content inline or re-run the originating tool. "
+        "Call `code_execution` with a script that reads the artifact in the current chat session, "
+        f"for example `{read_snippet}`."
     )
