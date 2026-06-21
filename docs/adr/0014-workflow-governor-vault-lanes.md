@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, backfilled.
+Accepted, backfilled. Superseded in part by
+[0019 - Centralize Runtime Execution Task Running](0019-runtime-execution-task-runner.md).
 
 ## Context
 
@@ -19,6 +20,13 @@ workflow execution task, serializes workflow execution by vault scope, applies
 workflow timeout and optional global concurrency limits, and provides one policy
 path for scheduler, API, system-template, and tool-triggered workflow runs.
 
+ADR 0019 preserves the user-facing workflow invariants from this decision:
+workflow execution remains serialized by vault, workflow timeout remains
+enforced, and all workflow triggers use one policy path. It supersedes the
+implementation ownership: generic spawning, queueing, lane, concurrency, and
+timeout mechanics should move to the runtime execution task runner, leaving
+workflow-specific result shaping and metadata in workflow code.
+
 ## Rationale
 
 Vault-scoped lanes are conservative and user-centered: one vault's workflows run
@@ -30,8 +38,9 @@ sources.
 
 ## Consequences
 
-- APScheduler persists and fires jobs; the governor owns in-process workflow
-  execution policy.
+- APScheduler persists and fires jobs; runtime execution policy owns generic
+  task running mechanics, while workflow code owns workflow-specific execution
+  behavior.
 - Manual API runs and `workflow_run` use the same workflow path as scheduled
   runs.
 - The per-vault lane is always active.

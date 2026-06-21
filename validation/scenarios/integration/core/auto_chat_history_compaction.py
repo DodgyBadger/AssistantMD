@@ -70,10 +70,8 @@ class AutoChatHistoryCompactionScenario(BaseScenario):
         compaction._generate_compaction_summary = _summary_stub
         session_id = "auto_chat_history_compaction_session"
         try:
-            response = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            chat_result = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Trigger automatic compaction after this short answer.",
                     "session_id": session_id,
@@ -85,7 +83,10 @@ class AutoChatHistoryCompactionScenario(BaseScenario):
             chat_executor._prepare_agent_config = original_prepare_agent_config
             compaction._generate_compaction_summary = original_generate_summary
 
-        assert response.status_code == 200, "Chat execution should complete before auto compaction"
+        assert chat_result["start_response"].status_code == 200, "Chat task start should succeed"
+        assert chat_result["terminal_event"].get("event") == "done", (
+            "Chat task should complete before auto compaction assertion"
+        )
         assert captured_summary_inputs == {
             "older_count": 1,
             "recent_count": 1,

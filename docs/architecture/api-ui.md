@@ -36,6 +36,9 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, system jobs, system authoring refresh, and database migration status/manual fallback.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
+- `/api/chat/tasks` is the canonical chat execution entrypoint. It creates a task-owned streaming chat run; clients observe live events through `/api/chat/tasks/{task_id}/events`, task status through `/api/tasks/{task_id}`, or persisted history through session detail endpoints.
+- `/api/chat/tasks/{task_id}/events` returns `410 ChatTaskEventsExpired` when a known terminal chat task still exists but its process-local event buffer has been pruned.
+- Multipart chat image uploads enforce configured image count, per-image bytes, and total image bytes at the API boundary while reading upload streams. Oversized uploads return `413` before task creation.
 - `/api/vaults/{vault_name}/task-mutations` exposes grouped task file mutation activity for the Dashboard tab.
 - `/api/vault-state/snapshots/{snapshot_id}/content` serves retained vault-state snapshot files inline after resolving them under the managed snapshot root.
 - `/api/vault-state/cleanup` deletes expired vault-state mutation rows and retained task snapshot artifacts.

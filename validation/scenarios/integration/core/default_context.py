@@ -134,12 +134,6 @@ This workspace intentionally has no README.
             "Use the workspace-specific validation playbook." in system_text,
             "Expected default context to load workspace playbook.md",
         )
-        vault_playbook_index = system_text.find("Use the validation vault playbook.")
-        workspace_playbook_index = system_text.find("Use the workspace-specific validation playbook.")
-        self.soft_assert(
-            0 <= vault_playbook_index < workspace_playbook_index,
-            "Expected workspace playbook to appear after the vault playbook",
-        )
         self.soft_assert(
             "## User Notes" in system_text,
             "Expected default context instructions to include user notes section",

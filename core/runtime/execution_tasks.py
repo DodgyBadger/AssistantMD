@@ -490,10 +490,14 @@ class TaskCoordinator:
         )
 
     async def shutdown(self, *, reason: str = "runtime_shutdown") -> None:
-        """Cancel all active tasks and mark unfinished records cancelled."""
+        """Request cancellation for all active tasks."""
         active_tasks = await self.list_tasks(include_terminal=False)
         for task in active_tasks:
             await self.cancel_task(task.task_id, reason=reason)
+
+    async def mark_unfinished_cancelled(self, *, reason: str = "runtime_shutdown") -> None:
+        """Mark any remaining non-terminal task records cancelled."""
+        active_tasks = await self.list_tasks(include_terminal=False)
         for task in active_tasks:
             await self.mark_cancelled(task.task_id, reason=reason)
 

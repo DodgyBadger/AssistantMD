@@ -105,10 +105,8 @@ class ChatCacheMultiPassScenario(BaseScenario):
 
             checkpoint = self.event_checkpoint()
 
-            first = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            first = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Use overflow_probe and then answer briefly.",
                     "session_id": session_id,
@@ -116,12 +114,13 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert first.status_code == 200, "Initial oversized tool call should succeed"
+            assert first["start_response"].status_code == 200, "Initial oversized tool call should start"
+            assert first["terminal_event"].get("event") == "done", (
+                "Initial oversized tool call should succeed"
+            )
 
-            second = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            second = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Inspect the repeated note and show the beginning.",
                     "session_id": session_id,
@@ -129,17 +128,18 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert second.status_code == 200, "First local exploration pass should succeed"
-            second_text = second.json()["response"]
+            assert second["start_response"].status_code == 200, "First local exploration pass should start"
+            assert second["terminal_event"].get("event") == "done", (
+                "First local exploration pass should succeed"
+            )
+            second_text = second["text"]
             self.soft_assert(
                 "OVERFLOW_SEGMENT" in second_text,
                 "First local exploration pass should read the repeated note content",
             )
 
-            third = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            third = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Inspect the same repeated note again and count the repeated token.",
                     "session_id": session_id,
@@ -147,8 +147,11 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert third.status_code == 200, "Second local exploration pass should succeed"
-            third_text = third.json()["response"]
+            assert third["start_response"].status_code == 200, "Second local exploration pass should start"
+            assert third["terminal_event"].get("event") == "done", (
+                "Second local exploration pass should succeed"
+            )
+            third_text = third["text"]
             self.soft_assert(
                 "1200" in third_text,
                 "Second local exploration pass should revisit the same note and compute a deterministic result",

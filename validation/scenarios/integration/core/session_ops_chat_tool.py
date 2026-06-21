@@ -69,10 +69,8 @@ class SessionOpsChatToolScenario(BaseScenario):
         original_prepare = chat_executor._prepare_agent_config
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         try:
-            upserted = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            upserted = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Write a summary for this chat session.",
                     "session_id": session_id,
@@ -81,7 +79,16 @@ class SessionOpsChatToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            self.soft_assert_equal(upserted.status_code, 200, "Summary chat should succeed")
+            self.soft_assert_equal(
+                upserted["start_response"].status_code,
+                200,
+                "Summary chat task should start",
+            )
+            self.soft_assert_equal(
+                upserted["terminal_event"].get("event"),
+                "done",
+                "Summary chat should succeed",
+            )
             current = store.get_session_summary(vault_name=vault.name, session_id=session_id)
             self.soft_assert(
                 current is not None and current.summary == "Chat summary testing",
@@ -265,10 +272,8 @@ class SessionOpsChatToolScenario(BaseScenario):
                 SessionSummaryStore.search_session_summaries_by_field = original_search_by_field
 
             current_case["name"] = "get"
-            fetched = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            fetched = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Fetch the current session summary.",
                     "session_id": session_id,
@@ -276,7 +281,16 @@ class SessionOpsChatToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            self.soft_assert_equal(fetched.status_code, 200, "Fetch chat should succeed")
+            self.soft_assert_equal(
+                fetched["start_response"].status_code,
+                200,
+                "Fetch chat task should start",
+            )
+            self.soft_assert_equal(
+                fetched["terminal_event"].get("event"),
+                "done",
+                "Fetch chat should succeed",
+            )
 
             deleted = self.call_api(
                 f"/api/chat/sessions/{session_id}",

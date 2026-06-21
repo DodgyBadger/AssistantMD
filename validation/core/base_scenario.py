@@ -6,6 +6,7 @@ real user workflows with readable, high-level operations.
 """
 
 import asyncio
+import json
 import sys
 import inspect
 from pathlib import Path
@@ -263,7 +264,13 @@ class BaseScenario(ABC):
                 raise AssertionError(f"Execution task did not finish within {timeout_seconds:g}s: {task_id}")
             await asyncio.sleep(0.25)
 
-    async def trigger_job(self, vault: VaultPath, assistant_name: str) -> bool:
+    async def trigger_job(
+        self,
+        vault: VaultPath,
+        assistant_name: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> bool:
         """Trigger a scheduled job and wait for completion."""
         global_id = f"{vault.name}/{assistant_name}"
         self._log_timeline(f"Triggering job: {global_id}")
@@ -271,9 +278,12 @@ class BaseScenario(ABC):
         # Trigger the job
         self._get_system_controller().trigger_job_manually(global_id)
         
-        # Wait for completion (no timeout - matches production behavior)
+        # Wait for completion; most scenarios keep production-like unbounded waits.
         self._log_timeline(f"Waiting for job completion: {global_id}")
-        success = await self._get_system_controller().wait_for_scheduled_run(global_id)
+        success = await self._get_system_controller().wait_for_scheduled_run(
+            global_id,
+            timeout_seconds=timeout_seconds,
+        )
         
         if success:
             self._log_timeline(f"✅ Job completed successfully: {global_id}")
@@ -427,6 +437,96 @@ class BaseScenario(ABC):
         response = self._get_api_client().call_api(endpoint, method, data, params=params, headers=headers)
         self._log_timeline(f"   -> Status {response.status_code}")
         return response
+
+    async def run_chat_task(
+        self,
+        data: dict,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Start a task-owned chat turn and collect its buffered events."""
+        start_response = self.call_api("/api/chat/tasks", method="POST", data=data)
+        result: Dict[str, Any] = {
+            "start_response": start_response,
+            "session_id": None,
+            "task_id": None,
+            "events": [],
+            "terminal_event": None,
+            "text": "",
+        }
+        if start_response.status_code != 200:
+            return result
+
+        payload = start_response.json()
+        task_id = payload.get("task", {}).get("task_id")
+        result["session_id"] = payload.get("session_id")
+        result["task_id"] = task_id
+        if not task_id:
+            return result
+
+        from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER
+
+        async def _collect_events() -> None:
+            cursor = 0
+            while True:
+                events = await CHAT_TASK_EVENT_BUFFER.events_after(task_id, cursor)
+                for buffered_event in events:
+                    cursor = buffered_event.sequence
+                    event = dict(buffered_event.data)
+                    event.setdefault("event", buffered_event.event)
+                    event.setdefault("sequence", buffered_event.sequence)
+                    result["events"].append(event)
+                    choices = event.get("choices") or []
+                    if choices:
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if isinstance(content, str):
+                            result["text"] += content
+                    if buffered_event.is_terminal:
+                        result["terminal_event"] = event
+                        return
+                await asyncio.sleep(0.01)
+
+        try:
+            await asyncio.wait_for(_collect_events(), timeout=timeout_seconds)
+        except TimeoutError as exc:
+            from core.runtime.state import get_runtime_context
+
+            task = await get_runtime_context().task_coordinator.get_task(task_id)
+            buffered_events = await CHAT_TASK_EVENT_BUFFER.events_after(task_id, 0)
+            last_event = buffered_events[-1] if buffered_events else None
+            raise AssertionError(
+                "Timed out waiting for chat task terminal event "
+                f"after {timeout_seconds:g}s: "
+                f"task_id={task_id}, "
+                f"status={task.status if task else None}, "
+                f"cancel_requested={task.cancel_requested if task else None}, "
+                f"terminal_reason={task.terminal_reason if task else None}, "
+                f"buffered_event_count={len(buffered_events)}, "
+                f"last_buffered_event={last_event.event if last_event else None}, "
+                f"last_buffered_sequence={last_event.sequence if last_event else None}"
+            ) from exc
+        return result
+
+    def _parse_sse_events(self, text: str) -> List[Dict[str, Any]]:
+        """Parse JSON payloads from an SSE response body."""
+        events: List[Dict[str, Any]] = []
+        for block in text.split("\n\n"):
+            data_lines = [
+                line.removeprefix("data: ").strip()
+                for line in block.splitlines()
+                if line.startswith("data: ")
+            ]
+            if not data_lines:
+                continue
+            raw = "\n".join(data_lines)
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                events.append(payload)
+        return events
     
 
 

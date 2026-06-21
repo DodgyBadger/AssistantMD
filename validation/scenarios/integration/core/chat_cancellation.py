@@ -1,6 +1,4 @@
-"""
-Integration scenario for cancelling an active non-streaming chat task.
-"""
+"""Integration scenario for cancelling an active task-owned chat turn."""
 
 import asyncio
 import sys
@@ -8,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.chat.executor import PreparedChatExecution, execute_chat_prompt
+from core.chat.executor import PreparedChatExecution
 from core.runtime.execution_tasks import chat_session_scope
 from core.runtime.state import get_runtime_context
 from core.utils.messages import extract_role_and_text
@@ -29,6 +27,16 @@ class _HangingAgent:
             content="created before cancellation\n",
         )
         await asyncio.Event().wait()
+
+    async def run_stream_events(self, *args, **kwargs):
+        write_vault_file(
+            vault_path=self._vault_path,
+            path="notes/cancelled-chat-write.md",
+            content="created before cancellation\n",
+        )
+        await asyncio.Event().wait()
+        if False:
+            yield None
 
 
 class ChatCancellationScenario(BaseScenario):
@@ -57,21 +65,21 @@ class ChatCancellationScenario(BaseScenario):
         original_prepare_agent_config = chat_executor._prepare_agent_config
         chat_executor._prepare_chat_execution = _prepared_hanging_chat
         session_id = "chat_cancellation_session"
-        chat_task = None
         try:
-            chat_task = asyncio.create_task(
-                execute_chat_prompt(
-                    vault_name=vault.name,
-                    vault_path=str(vault),
-                    prompt="Cancel this chat.",
-                    image_paths=[],
-                    image_uploads=[],
-                    session_id=session_id,
-                    tools=[],
-                    model="test",
-                    context_template=None,
-                )
+            start_response = self.call_api(
+                "/api/chat/tasks",
+                method="POST",
+                data={
+                    "vault_name": vault.name,
+                    "prompt": "Cancel this chat.",
+                    "session_id": session_id,
+                    "tools": [],
+                    "model": "test",
+                },
             )
+            assert start_response.status_code == 200, "Chat task should start"
+            task_id = start_response.json().get("task", {}).get("task_id")
+            assert task_id, "Chat task start should return a task id"
 
             runtime = get_runtime_context()
             active = []
@@ -80,12 +88,24 @@ class ChatCancellationScenario(BaseScenario):
                     scope=chat_session_scope(session_id),
                     include_terminal=False,
                 )
-                if active:
+                if active and active[-1].status == "running":
                     break
                 await asyncio.sleep(0.05)
 
-            assert active, "Chat execution should register an active task"
-            task_id = active[-1].task_id
+            assert active and active[-1].status == "running", (
+                "Chat execution should register a running task"
+            )
+            self.soft_assert_equal(
+                active[-1].task_id,
+                task_id,
+                "Active task list should include the started chat task",
+            )
+            written_path = Path(vault) / "notes/cancelled-chat-write.md"
+            for _ in range(50):
+                if written_path.exists():
+                    break
+                await asyncio.sleep(0.05)
+            assert written_path.exists(), "Hanging chat should write the rollback probe before cancellation"
 
             active_response = self.call_api(f"/api/chat/sessions/{session_id}/active-task")
             assert active_response.status_code == 200, "Active chat task endpoint succeeds"
@@ -103,13 +123,12 @@ class ChatCancellationScenario(BaseScenario):
                 "Chat session cancel should acknowledge cancellation"
             )
 
-            caught = None
-            try:
-                await chat_task
-            except asyncio.CancelledError as exc:
-                caught = exc
+            for _ in range(50):
+                task_snapshot = await runtime.task_coordinator.get_task(task_id)
+                if task_snapshot is not None and task_snapshot.is_terminal:
+                    break
+                await asyncio.sleep(0.05)
             rollback_events = self.events_since(checkpoint)
-            assert caught is not None, "Cancelled chat task should raise CancelledError"
 
             task_detail = self.call_api(f"/api/tasks/{task_id}")
             assert task_detail.status_code == 200, "Cancelled task detail remains queryable"
@@ -163,28 +182,23 @@ class ChatCancellationScenario(BaseScenario):
             chat_executor._prepare_agent_config = _patched_prepare_agent_config
             chat_executor._prepare_chat_execution = _capturing_prepare_chat_execution
 
-            follow_up = await execute_chat_prompt(
-                vault_name=vault.name,
-                vault_path=str(vault),
-                prompt="Continue after cancellation.",
-                image_paths=[],
-                image_uploads=[],
-                session_id=session_id,
-                tools=[],
-                model="test",
-                context_template=None,
+            follow_up = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "Continue after cancellation.",
+                    "session_id": session_id,
+                    "tools": [],
+                    "model": "test",
+                }
             )
-            assert follow_up.response, "Follow-up chat execution should complete"
+            assert follow_up["text"], "Follow-up chat execution should complete"
+            assert follow_up["terminal_event"].get("event") == "done", (
+                "Follow-up chat task should complete"
+            )
             assert captured_preflight_history == [("user", "Cancel this chat.")], (
                 "The next turn should load the cancelled user prompt from persisted session history"
             )
         finally:
-            if chat_task is not None and not chat_task.done():
-                chat_task.cancel()
-                try:
-                    await chat_task
-                except asyncio.CancelledError:
-                    pass
             chat_executor._prepare_chat_execution = original_prepare_chat_execution
             chat_executor._prepare_agent_config = original_prepare_agent_config
             await self.stop_system()

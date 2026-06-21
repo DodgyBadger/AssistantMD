@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.chat.executor import PreparedChatExecution, execute_chat_prompt, execute_chat_prompt_stream
+from core.chat.executor import PreparedChatExecution
 from core.utils.messages import extract_role_and_text
 from validation.core.base_scenario import BaseScenario
 
@@ -49,32 +49,20 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
         session_id = "chat_stream_failure_session"
         try:
             prompt = "Trigger the forced streaming chat failure."
-            stream = execute_chat_prompt_stream(
-                vault_name=vault.name,
-                vault_path=str(vault),
-                prompt=prompt,
-                image_paths=[],
-                image_uploads=[],
-                session_id=session_id,
-                tools=[],
-                model="test",
-                context_template=None,
+            failed_result = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": prompt,
+                    "session_id": session_id,
+                    "tools": [],
+                    "model": "test",
+                }
             )
-
-            chunks: list[str] = []
-            caught = None
-            try:
-                async for chunk in stream:
-                    chunks.append(chunk)
-            except RuntimeError as exc:
-                caught = exc
-
-            assert caught is not None, "Streaming failure should propagate after error chunk"
-            assert "forced streaming chat failure for logging validation" in str(caught), (
-                "Streaming failure should preserve the original error"
+            assert failed_result["start_response"].status_code == 200, (
+                "Streaming failure chat task should start"
             )
-            assert any('"event": "error"' in chunk for chunk in chunks), (
-                "Streaming failure should emit an SSE error chunk before raising"
+            assert failed_result["terminal_event"].get("event") == "error", (
+                "Streaming failure should emit an error event"
             )
 
             transcript = vault / "AssistantMD" / "Chat_Sessions" / "chat_stream_failure_session.md"
@@ -119,18 +107,19 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             chat_executor._prepare_agent_config = _patched_prepare_agent_config
             chat_executor._prepare_chat_execution = _capturing_prepare_chat_execution
 
-            follow_up = await execute_chat_prompt(
-                vault_name=vault.name,
-                vault_path=str(vault),
-                prompt="Continue after the streaming failure.",
-                image_paths=[],
-                image_uploads=[],
-                session_id=session_id,
-                tools=[],
-                model="test",
-                context_template=None,
+            follow_up = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "Continue after the streaming failure.",
+                    "session_id": session_id,
+                    "tools": [],
+                    "model": "test",
+                }
             )
-            assert follow_up.response, "Follow-up chat execution should complete"
+            assert follow_up["text"], "Follow-up chat execution should complete"
+            assert follow_up["terminal_event"].get("event") == "done", (
+                "Follow-up chat task should complete"
+            )
             assert captured_preflight_history[0] == ("user", "Trigger the forced streaming chat failure."), (
                 "The next turn should load the failed accepted user prompt"
             )

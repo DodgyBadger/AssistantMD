@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from pydantic_ai.exceptions import ModelHTTPError
 
-from core.chat.executor import PreparedChatExecution, execute_chat_prompt_stream
+from core.chat.executor import PreparedChatExecution
 from validation.core.base_scenario import BaseScenario
 
 
@@ -54,36 +54,25 @@ class ModelFailureClassificationScenario(BaseScenario):
         chat_executor._prepare_chat_execution = _prepared_failure
         session_id = "model_failure_classification_session"
         try:
-            stream = execute_chat_prompt_stream(
-                vault_name=vault.name,
-                vault_path=str(vault),
-                prompt="Trigger provider billing failure.",
-                image_paths=[],
-                image_uploads=[],
-                session_id=session_id,
-                tools=[],
-                model="gpt-mini",
-                context_template=None,
+            result = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "Trigger provider billing failure.",
+                    "session_id": session_id,
+                    "tools": [],
+                    "model": "gpt-mini",
+                }
             )
-
-            chunks: list[str] = []
-            caught = None
-            try:
-                async for chunk in stream:
-                    chunks.append(chunk)
-            except ModelHTTPError as exc:
-                caught = exc
-
-            assert caught is not None, "Provider model error should propagate after SSE error"
-            error_payload = "\n".join(chunks)
-            assert '"event": "error"' in error_payload, "Streaming should emit an error event"
-            assert '"failure_kind": "billing"' in error_payload, (
+            assert result["start_response"].status_code == 200, "Provider failure chat task should start"
+            error_event = result["terminal_event"]
+            assert error_event.get("event") == "error", "Streaming should emit an error event"
+            assert error_event.get("details", {}).get("failure_kind") == "billing", (
                 "Streaming error details should classify provider billing failures"
             )
-            assert '"retryable": false' in error_payload, (
+            assert error_event.get("details", {}).get("retryable") is False, (
                 "Billing failures should be non-retryable without user action"
             )
-            assert '"http_status": 400' in error_payload, (
+            assert error_event.get("details", {}).get("http_status") == 400, (
                 "Streaming error details should expose provider HTTP status"
             )
 

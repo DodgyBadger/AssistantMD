@@ -9,7 +9,8 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
 - `core/chat/history_service.py` — broker over persisted and in-memory conversation history
 - `core/chat/compaction.py` — summarize long sessions and record replay checkpoints
-- `core/chat/executor.py` — register chat execution tasks and persist completed turns
+- `core/chat/executor.py` — shared chat preparation, model/tool configuration, and history helpers
+- `core/chat/task_execution.py` — task-owned chat execution, event buffering, and per-session queueing
 
 ## SQLite store
 
@@ -62,11 +63,25 @@ history back to chat.
 
 Chat execution registers a process-local task scoped to `chat_session:<session_id>`.
 
-- Non-streaming and streaming chat runs both use the same task kind (`chat`) and API source (`api`).
+- Chat turns use the same task kind (`chat`) and API source (`api`).
+- Chat starts with `POST /api/chat/tasks` and streams
+  buffered events from `GET /api/chat/tasks/{task_id}/events`.
+- Task-owned streaming is the canonical chat execution path. Callers that do
+  not need live tokens still submit a chat task and can observe task state or
+  reload persisted session history after completion.
+- Chat event streaming emits SSE keepalive comments from the subscriber loop during
+  idle waits so long-running model or tool calls keep the response connection
+  active without tying the model run to that subscriber.
+- If a subscriber disconnects, the chat task continues running unless cancelled.
+- Multiple chat starts for the same session are serialized by
+  creation time. Later tasks stay `queued` until older non-terminal chat tasks
+  in the same session finish, so each run prepares against completed prior
+  history.
 - `chat_tool_calls_limit` applies Pydantic AI `UsageLimits(tool_calls_limit=...)` to chat runs when the setting is positive; `0` disables this guard.
 - `delegate_tool_calls_limit` and `delegate_timeout_seconds` separately bound child agents launched by `delegate(...)`.
 - `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.
 - `/api/chat/sessions/{session_id}/cancel` requests cancellation for the active chat task.
+- `/api/tasks/{task_id}/cancel` cancels a known chat task id directly.
 - A cancelled chat task reaches terminal status `cancelled`; the session remains queryable through normal session detail endpoints.
 
 See [Execution Tasks](execution-tasks.md) for task lifecycle and cancellation semantics.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -11,11 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai.exceptions import UsageLimitExceeded
 
 from core.chat.executor import (
-    ChatModelRequestLimitError,
     PreparedChatExecution,
     _failure_recovery_message,
-    execute_chat_prompt,
-    execute_chat_prompt_stream,
 )
 from validation.core.base_scenario import BaseScenario
 
@@ -68,42 +64,44 @@ class ChatUsageLimitsScenario(BaseScenario):
                 "A disabled chat tool-call setting should become Pydantic None",
             )
 
-            non_stream_session = "chat_usage_limit_non_stream"
-            caught = None
-            try:
-                await execute_chat_prompt(
-                    vault_name=vault.name,
-                    vault_path=str(vault),
-                    prompt="Trigger request limit.",
-                    image_paths=[],
-                    image_uploads=[],
-                    session_id=non_stream_session,
-                    tools=[],
-                    model="test",
-                    context_template=None,
-                )
-            except ChatModelRequestLimitError as exc:
-                caught = exc
+            request_limit_session = "chat_usage_limit_task"
+            request_limit = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "Trigger request limit.",
+                    "session_id": request_limit_session,
+                    "tools": [],
+                    "model": "test",
+                }
+            )
+            self.soft_assert_equal(
+                request_limit["start_response"].status_code,
+                200,
+                "Request-limit chat task should start",
+            )
+            request_limit_error = request_limit["terminal_event"]
+            self.soft_assert_equal(
+                request_limit_error.get("event") if request_limit_error else None,
+                "error",
+                "Request-limit chat task should emit an error event",
+            )
+            self.soft_assert(
+                "goal_ops checkpoints" in request_limit["text"],
+                "Request-limit message should direct continuation toward durable goal state",
+            )
+            self.soft_assert_equal(
+                request_limit_error.get("details", {}).get("setting") if request_limit_error else None,
+                "chat_model_requests_limit",
+                "Request-limit error should identify the controlling setting",
+            )
+            self.soft_assert_equal(
+                request_limit_error.get("details", {}).get("limit_kind") if request_limit_error else None,
+                "request_limit",
+                "Request-limit error should identify the Pydantic limit kind",
+            )
 
-            self.soft_assert(caught is not None, "Non-streaming request limit should raise explicit chat error")
-            if caught is not None:
-                self.soft_assert(
-                    "goal_ops checkpoints" in str(caught),
-                    "Request-limit message should direct continuation toward durable goal state",
-                )
-                self.soft_assert_equal(
-                    caught.details.get("setting"),
-                    "chat_model_requests_limit",
-                    "Request-limit error should identify the controlling setting",
-                )
-                self.soft_assert_equal(
-                    caught.details.get("limit_kind"),
-                    "request_limit",
-                    "Request-limit error should identify the Pydantic limit kind",
-                )
-
-            detail = self.call_api(f"/api/chat/sessions/{non_stream_session}?vault_name={vault.name}")
-            self.soft_assert_equal(detail.status_code, 200, "Failed non-streaming session detail should load")
+            detail = self.call_api(f"/api/chat/sessions/{request_limit_session}?vault_name={vault.name}")
+            self.soft_assert_equal(detail.status_code, 200, "Failed request-limit session detail should load")
             latest_failure = detail.json().get("latest_failure")
             self.soft_assert(latest_failure is not None, "Request-limit failure should persist recovery marker")
             if latest_failure:
@@ -126,33 +124,28 @@ class ChatUsageLimitsScenario(BaseScenario):
                 )
 
             stream_session = "chat_usage_limit_stream"
-            chunks = []
-            async for chunk in execute_chat_prompt_stream(
-                vault_name=vault.name,
-                vault_path=str(vault),
-                prompt="Trigger streaming request limit.",
-                image_paths=[],
-                image_uploads=[],
-                session_id=stream_session,
-                tools=[],
-                model="test",
-                context_template=None,
-            ):
-                chunks.append(chunk)
-
-            self.soft_assert(
-                any('"event": "error"' in chunk for chunk in chunks),
-                "Streaming request limit should emit an SSE error event",
+            stream_result = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "Trigger streaming request limit.",
+                    "session_id": stream_session,
+                    "tools": [],
+                    "model": "test",
+                }
             )
-            stream_error = self._first_sse_event(chunks, "error")
-            self.soft_assert(stream_error is not None, "Streaming error event should parse")
+            stream_error = stream_result["terminal_event"]
+            self.soft_assert_equal(
+                stream_error.get("event") if stream_error else None,
+                "error",
+                "Streaming request limit should emit an error event",
+            )
             if stream_error:
                 self.soft_assert(
-                    "Model-request limit reached" in stream_error["choices"][0]["delta"]["content"],
+                    "Model-request limit reached" in stream_result["text"],
                     "Streaming request limit should use model-request wording",
                 )
                 self.soft_assert(
-                    "goal_ops checkpoints" in stream_error["choices"][0]["delta"]["content"],
+                    "goal_ops checkpoints" in stream_result["text"],
                     "Streaming request-limit message should direct continuation toward durable goal state",
                 )
                 self.soft_assert_equal(
@@ -173,13 +166,3 @@ class ChatUsageLimitsScenario(BaseScenario):
             self.teardown_scenario()
 
         self.assert_no_failures()
-
-    @staticmethod
-    def _first_sse_event(chunks: list[str], event_name: str) -> dict | None:
-        for chunk in chunks:
-            if not chunk.startswith("data: "):
-                continue
-            payload = json.loads(chunk.removeprefix("data: ").strip())
-            if payload.get("event") == event_name:
-                return payload
-        return None
