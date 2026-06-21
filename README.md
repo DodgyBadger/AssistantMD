@@ -8,6 +8,8 @@ AssistantMD turns a markdown vault into a collaborative workbench for you and an
 
 Your collection of markdown files is called a vault (borrowing the term from Obsidian). Each folder in your vault is both a place to organize your knowledge and projects, and a shared workspace for collaborating with the agent. At the start of each chat session, you can set a workspace folder so that the session stays oriented (but not locked) to that folder. Add `README.md` and `playbook.md` to your workspace folders to further orient and guide AI-assisted work sessions.
 
+https://github.com/user-attachments/assets/887b05c8-ba99-4f47-9405-d5afcda7ce5c
+
 ## Features
 
 - Mount one or more markdown vaults. Vaults are isolated from each other - each chat session is locked to exactly one vault.
