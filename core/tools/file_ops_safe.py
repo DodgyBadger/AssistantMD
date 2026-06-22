@@ -702,7 +702,7 @@ Full documentation:
         path = path.strip()
         scope_relative_path: str | None = None
         if not path or path == ".":
-            path = "*"
+            path = "**/*" if recursive else "*"
 
         if '..' in path or path.startswith('/'):
             raise ValueError("Path cannot contain '..' or start with '/'")
@@ -913,7 +913,7 @@ Full documentation:
 
         is_glob = any(ch in rel for ch in "*?[")
         if not rel:
-            rel = "*"
+            rel = "**/*" if recursive else "*"
         elif not is_glob:
             abs_path = os.path.join(docs_root, rel)
             if os.path.isdir(abs_path):

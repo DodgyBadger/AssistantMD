@@ -13,16 +13,20 @@ from pydantic_ai import BinaryContent
 from core.logger import UnifiedLogger
 from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.chat.executor import (
-    ChatCapabilityError,
-    ChatContextTemplateError,
-    ChatModelRequestLimitError,
-    ChatToolCallLimitError,
-    UploadedImageAttachment,
-    execute_chat_prompt,
-    execute_chat_prompt_stream,
+from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
+from core.chat.task_execution import (
+    CHAT_TASK_EVENT_BUFFER,
+    start_queued_chat_stream_task,
+    stream_chat_task_sse,
 )
+from core.chat.executor import UploadedImageAttachment
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
+from core.settings import (
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_bytes_total,
+    get_chunking_max_image_mb_per_image,
+    get_chunking_max_images_per_prompt,
+)
 
 from .models import (
     WorkflowLoadErrorsResponse,
@@ -45,8 +49,8 @@ from .models import (
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
     StatusResponse,
-    ChatExecuteRequest,
-    ChatExecuteResponse,
+    ChatTaskRequest,
+    ChatTaskStartResponse,
     SystemLogResponse,
     SystemSettingsResponse,
     UpdateSettingsRequest,
@@ -88,11 +92,7 @@ from .models import (
 )
 from .exceptions import (
     APIException,
-    ChatCapabilityMismatchError,
-    ChatContextTemplateFailureError,
-    ChatModelRequestLimitExceededError,
     ChatSessionVaultMismatchError,
-    ChatToolCallLimitExceededError,
 )
 from .utils import create_error_response, serialize_exception
 from .services import (
@@ -170,22 +170,8 @@ from api.import_models import (
 # Create API router
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 logger = UnifiedLogger(tag="api-endpoints")
-
-
-
-def _parse_form_bool(value: object, default: bool = False) -> bool:
-    """Parse HTML form boolean values."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off", ""}:
-            return False
-    return default
+_CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
+_CHAT_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
 
 
 def _parse_form_tools(raw_tools: list[object]) -> list[str]:
@@ -207,20 +193,20 @@ def _looks_like_workflow_path(value: str) -> bool:
     return "/" in normalized or normalized.endswith((".md", ".markdown"))
 
 
-async def _parse_chat_execute_payload(
+async def _parse_chat_task_payload(
     request: Request,
-) -> tuple[ChatExecuteRequest, list[UploadedImageAttachment]]:
+) -> tuple[ChatTaskRequest, list[UploadedImageAttachment]]:
     """Parse chat request from JSON or multipart form-data."""
     content_type = (request.headers.get("content-type") or "").lower()
     if content_type.startswith("application/json"):
-        payload = ChatExecuteRequest.model_validate(await request.json())
+        payload = ChatTaskRequest.model_validate(await request.json())
         return payload, []
 
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
         tools = _parse_form_tools(form.getlist("tools"))
         image_paths = [str(item).strip() for item in form.getlist("image_paths") if str(item).strip()]
-        payload = ChatExecuteRequest.model_validate(
+        payload = ChatTaskRequest.model_validate(
             {
                 "vault_name": str(form.get("vault_name") or "").strip(),
                 "prompt": str(form.get("prompt") or "").strip(),
@@ -231,40 +217,99 @@ async def _parse_chat_execute_payload(
                 "thinking": str(form.get("thinking") or "").strip() or None,
                 "context_template": str(form.get("context_template") or "").strip() or None,
                 "workspace_path": str(form.get("workspace_path") or "").strip() or None,
-                "stream": _parse_form_bool(form.get("stream"), default=False),
             }
         )
         uploads: list[UploadedImageAttachment] = []
-        for item in form.getlist("images"):
-            if not hasattr(item, "read"):
-                continue
-            raw_bytes = await item.read()
+        image_items = [item for item in form.getlist("images") if hasattr(item, "read")]
+        max_images = get_chunking_max_images_per_prompt()
+        if max_images > 0 and len(image_items) > max_images:
+            raise APIException(
+                status_code=413,
+                error_type="ChatImageUploadLimitExceeded",
+                message=(
+                    f"Too many image uploads ({len(image_items)}). "
+                    f"Maximum per prompt is chunking_max_images_per_prompt={max_images}."
+                ),
+                details={
+                    "image_count": len(image_items),
+                    "max_images": max_images,
+                },
+            )
+
+        max_total_bytes = get_chunking_max_image_bytes_total()
+        total_image_bytes = 0
+        for item in image_items:
+            display_name = (
+                str(getattr(item, "filename", None) or "uploaded-image").strip()
+                or "uploaded-image"
+            )
+            raw_bytes = await _read_chat_image_upload(item, display_name=display_name)
             if not raw_bytes:
                 continue
+            total_image_bytes += len(raw_bytes)
+            if max_total_bytes > 0 and total_image_bytes > max_total_bytes:
+                raise APIException(
+                    status_code=413,
+                    error_type="ChatImageUploadTotalTooLarge",
+                    message=(
+                        f"Image uploads exceed the configured total limit "
+                        f"({total_image_bytes} bytes)."
+                    ),
+                    details={
+                        "max_total_bytes": max_total_bytes,
+                        "total_image_bytes": total_image_bytes,
+                    },
+                )
             media_type = str(
                 getattr(item, "content_type", None) or "application/octet-stream"
             ).strip().lower()
             uploads.append(
                 UploadedImageAttachment(
-                    display_name=(
-                        str(getattr(item, "filename", None) or "uploaded-image").strip()
-                        or "uploaded-image"
-                    ),
+                    display_name=display_name,
                     content=BinaryContent(data=raw_bytes, media_type=media_type),
                 )
             )
         return payload, uploads
 
     raise ValueError(
-        "Unsupported Content-Type for /api/chat/execute. Use application/json or multipart/form-data."
+        "Unsupported Content-Type for chat execution. Use application/json or multipart/form-data."
     )
 
 
-async def _execute_chat_request(
-    chat_request: ChatExecuteRequest,
+async def _read_chat_image_upload(item, *, display_name: str) -> bytes:
+    """Read one multipart image upload while enforcing the per-image byte limit."""
+    max_image_bytes = get_chunking_max_image_bytes_per_image()
+    chunks: list[bytes] = []
+    total_bytes = 0
+    while True:
+        chunk = await item.read(_CHAT_UPLOAD_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if max_image_bytes > 0 and total_bytes > max_image_bytes:
+            max_image_mb = get_chunking_max_image_mb_per_image()
+            raise APIException(
+                status_code=413,
+                error_type="ChatImageUploadTooLarge",
+                message=(
+                    f"Image '{display_name}' is too large to attach ({total_bytes} bytes). "
+                    f"Maximum per image is chunking_max_image_mb_per_image={max_image_mb} MB."
+                ),
+                details={
+                    "display_name": display_name,
+                    "max_image_bytes": max_image_bytes,
+                    "size_bytes": total_bytes,
+                },
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _start_chat_task_request(
+    chat_request: ChatTaskRequest,
     image_uploads: list[UploadedImageAttachment],
-):
-    """Execute chat request in streaming or non-streaming mode."""
+) -> ChatTaskStartResponse:
+    """Start task-owned streaming chat execution."""
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
     try:
@@ -284,13 +329,14 @@ async def _execute_chat_request(
             requested_vault=exc.requested_vault,
             bound_vault=exc.bound_vault,
         ) from exc
+
     resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
     logger.info(
-        "Chat request accepted",
+        "Chat task request accepted",
         data={
             "vault_name": chat_request.vault_name,
             "session_id": session_id,
-            "streaming": chat_request.stream,
+            "streaming": True,
             "model": chat_request.model,
             "thinking": thinking_value_to_label(resolved_thinking),
             "tools": list(chat_request.tools),
@@ -302,125 +348,20 @@ async def _execute_chat_request(
             "workspace_path": chat_request.workspace_path,
         },
     )
-
-    try:
-        if chat_request.stream:
-            stream = execute_chat_prompt_stream(
-                vault_name=chat_request.vault_name,
-                vault_path=vault_path,
-                prompt=chat_request.prompt,
-                image_paths=chat_request.image_paths,
-                image_uploads=image_uploads,
-                session_id=session_id,
-                tools=chat_request.tools,
-                model=chat_request.model,
-                thinking=resolved_thinking,
-                context_template=chat_request.context_template,
-            )
-
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache, no-transform",
-                    "Connection": "keep-alive",
-                    "Content-Encoding": "identity",
-                    "X-Accel-Buffering": "no",
-                    "X-Session-ID": session_id,
-                },
-            )
-
-        result = await execute_chat_prompt(
-            vault_name=chat_request.vault_name,
-            vault_path=vault_path,
-            prompt=chat_request.prompt,
-            image_paths=chat_request.image_paths,
-            image_uploads=image_uploads,
-            session_id=session_id,
-            tools=chat_request.tools,
-            model=chat_request.model,
-            thinking=resolved_thinking,
-            context_template=chat_request.context_template,
-        )
-    except ChatCapabilityError as exc:
-        logger.warning(
-            "Chat request capability mismatch",
-            data={
-                "vault_name": chat_request.vault_name,
-                "session_id": session_id,
-                "streaming": chat_request.stream,
-                "model": chat_request.model,
-                "tools": list(chat_request.tools),
-                "prompt_length": len(chat_request.prompt),
-                **exc.details,
-            },
-        )
-        raise ChatCapabilityMismatchError(str(exc), details=exc.details) from exc
-    except ChatContextTemplateError as exc:
-        logger.warning(
-            "Chat request context template failure",
-            data={
-                "vault_name": chat_request.vault_name,
-                "session_id": session_id,
-                "streaming": chat_request.stream,
-                "model": chat_request.model,
-                "tools": list(chat_request.tools),
-                "prompt_length": len(chat_request.prompt),
-                **exc.details,
-            },
-        )
-        raise ChatContextTemplateFailureError(str(exc), details=exc.details) from exc
-    except ChatToolCallLimitError as exc:
-        logger.warning(
-            "Chat request exceeded tool-call limit",
-            data={
-                "vault_name": chat_request.vault_name,
-                "session_id": session_id,
-                "streaming": chat_request.stream,
-                "model": chat_request.model,
-                "tools": list(chat_request.tools),
-                "prompt_length": len(chat_request.prompt),
-                **exc.details,
-            },
-        )
-        raise ChatToolCallLimitExceededError(str(exc), details=exc.details) from exc
-    except ChatModelRequestLimitError as exc:
-        logger.warning(
-            "Chat request exceeded model-request limit",
-            data={
-                "vault_name": chat_request.vault_name,
-                "session_id": session_id,
-                "streaming": chat_request.stream,
-                "model": chat_request.model,
-                "tools": list(chat_request.tools),
-                "prompt_length": len(chat_request.prompt),
-                **exc.details,
-            },
-        )
-        raise ChatModelRequestLimitExceededError(str(exc), details=exc.details) from exc
-    except Exception as exc:
-        logger.error(
-            "Chat request failed before response",
-            data={
-                "vault_name": chat_request.vault_name,
-                "session_id": session_id,
-                "streaming": chat_request.stream,
-                "model": chat_request.model,
-                "tools": list(chat_request.tools),
-                "tools_count": len(chat_request.tools),
-                "prompt_length": len(chat_request.prompt),
-                "image_path_count": len(chat_request.image_paths),
-                "image_upload_count": len(image_uploads),
-                **serialize_exception(exc),
-            },
-        )
-        raise
-
-    return ChatExecuteResponse(
-        response=result.response,
-        session_id=result.session_id,
-        message_count=result.message_count,
+    started = await start_queued_chat_stream_task(
+        vault_name=chat_request.vault_name,
+        vault_path=vault_path,
+        prompt=chat_request.prompt,
+        image_paths=chat_request.image_paths,
+        image_uploads=image_uploads,
+        session_id=session_id,
+        tools=chat_request.tools,
+        model=chat_request.model,
+        thinking=resolved_thinking,
+        context_template=chat_request.context_template,
     )
+    task = await get_execution_task(started.task.task_id)
+    return ChatTaskStartResponse(session_id=session_id, task=task)
 
 
 #######################################################################
@@ -541,6 +482,78 @@ async def cancel_task(task_id: str):
     try:
         return await cancel_execution_task(task_id)
     except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/chat/tasks/{task_id}/events")
+async def chat_task_events(task_id: str, after_sequence: int = 0):
+    """Stream buffered process-local chat task events as SSE."""
+    try:
+        task = await get_execution_task(task_id)
+        if task.kind != "chat":
+            raise APIException(
+                status_code=404,
+                error_type="ExecutionTaskNotFound",
+                message=f"Chat execution task not found: {task_id}",
+                details={"task_id": task_id},
+            )
+        if (
+            task.status in TERMINAL_STATUS_VALUES
+            and not await CHAT_TASK_EVENT_BUFFER.has_stream(task_id)
+        ):
+            raise APIException(
+                status_code=410,
+                error_type="ChatTaskEventsExpired",
+                message=f"Chat task events are no longer retained: {task_id}",
+                details={"task_id": task_id},
+            )
+        return StreamingResponse(
+            stream_chat_task_sse(
+                task_id=task_id,
+                after_sequence=after_sequence,
+                keepalive_seconds=_CHAT_TASK_EVENT_KEEPALIVE_SECONDS,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "Content-Encoding": "identity",
+                "X-Accel-Buffering": "no",
+                "X-Task-ID": task_id,
+                "X-Session-ID": str(task.metadata.get("session_id") or ""),
+            },
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/tasks", response_model=ChatTaskStartResponse)
+async def start_chat_task(request: Request):
+    """Start task-owned streaming chat execution and return its task snapshot."""
+    try:
+        chat_request, image_uploads = await _parse_chat_task_payload(request)
+        return await _start_chat_task_request(chat_request, image_uploads)
+    except Exception as e:
+        if isinstance(e, APIException):
+            logger.warning(
+                "Chat task endpoint request rejected",
+                data={
+                    "path": str(request.url.path),
+                    "method": request.method,
+                    "error_type": e.error_type,
+                    "message": str(e.detail),
+                    "details": e.details,
+                },
+            )
+            return create_error_response(e)
+        logger.error(
+            "Chat task endpoint request failed",
+            data={
+                "path": str(request.url.path),
+                "method": request.method,
+                **serialize_exception(e),
+            },
+        )
         return create_error_response(e)
 
 
@@ -1013,49 +1026,6 @@ async def workflow_tasks(vault_name: str | None = None):
     try:
         return await list_workflow_tasks(vault_name=vault_name)
     except Exception as e:
-        return create_error_response(e)
-
-
-#######################################################################
-## Chat Execution Endpoints
-#######################################################################
-
-@router.post("/chat/execute")
-async def chat_execute(request: Request):
-    """
-    Execute chat prompt with user-selected tools and model.
-
-    Supports both streaming and non-streaming responses based on the 'stream' parameter.
-    - stream=false (default): Returns complete response as JSON
-    - stream=true: Returns SSE (Server-Sent Events) stream with incremental chunks
-
-    Session ID is automatically generated based on vault name and timestamp.
-    Follows OpenAI API conventions for compatibility with standard clients.
-    """
-    try:
-        chat_request, image_uploads = await _parse_chat_execute_payload(request)
-        return await _execute_chat_request(chat_request, image_uploads)
-    except Exception as e:
-        if isinstance(e, APIException):
-            logger.warning(
-                "Chat endpoint request rejected",
-                data={
-                    "path": str(request.url.path),
-                    "method": request.method,
-                    "error_type": e.error_type,
-                    "message": str(e.detail),
-                    "details": e.details,
-                },
-            )
-            return create_error_response(e)
-        logger.error(
-            "Chat endpoint request failed",
-            data={
-                "path": str(request.url.path),
-                "method": request.method,
-                **serialize_exception(e),
-            },
-        )
         return create_error_response(e)
 
 

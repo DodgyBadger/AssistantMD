@@ -48,6 +48,9 @@ Attachment requires all applicable gates to pass:
 2. Text token gate (`raw_text_tokens <= auto_cache_max_tokens`)
 3. Image preflight gates (count, per-image bytes, total image bytes)
 
+Multipart chat image uploads enforce the same image count and byte limits at the
+API boundary while upload streams are read.
+
 Deterministic precedence:
 
 1. token overflow gate

@@ -96,7 +96,8 @@ class TavilyExtract(BaseTool):
             name='tavily_extract',
             description=(
                 "Extract full content from specific web pages. "
-                "Prefer this tool over browser for cleaner results."
+                "Prefer this before browser for cleaner results; if extraction fails, "
+                "returns thin content, or reports no content extracted, retry the same URL with browser."
             )
         )
     

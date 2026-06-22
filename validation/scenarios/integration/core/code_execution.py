@@ -1,8 +1,8 @@
 """
 Integration scenario for the chat-facing code_execution tool.
 
-Validates deterministic chat-scoped execution through the real /api/chat/execute
-path using a patched TestModel argument generator.
+Validates deterministic chat-scoped execution through the task-owned chat API
+using a patched TestModel argument generator.
 """
 
 import sys
@@ -173,10 +173,8 @@ class CodeExecutionScenario(BaseScenario):
                 week_start_day=0,
             )
 
-            allow_read = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            allow_read = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Read session history through code_execution.",
                     "session_id": "code_execution_allow_read",
@@ -184,8 +182,9 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_read.status_code == 200, "Memory read should succeed"
-            allow_text = allow_read.json()["response"]
+            assert allow_read["start_response"].status_code == 200, "Memory read task should start"
+            assert allow_read["terminal_event"].get("event") == "done", "Memory read should succeed"
+            allow_text = allow_read["text"]
             self.soft_assert(
                 "failed:" not in allow_text.lower(),
                 "Memory read should not return a Monty failure",
@@ -196,10 +195,8 @@ class CodeExecutionScenario(BaseScenario):
             )
 
             current_case["name"] = "allow_cache_read"
-            allow_cache_read = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            allow_cache_read = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Read a cached oversized tool artifact through code_execution.",
                     "session_id": "code_execution_allow_cache_read",
@@ -207,18 +204,17 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_cache_read.status_code == 200, "Cache read should succeed"
-            allow_cache_read_text = allow_cache_read.json()["response"]
+            assert allow_cache_read["start_response"].status_code == 200, "Cache read task should start"
+            assert allow_cache_read["terminal_event"].get("event") == "done", "Cache read should succeed"
+            allow_cache_read_text = allow_cache_read["text"]
             self.soft_assert(
                 "SEEDED_CACHE_CONTENT" in allow_cache_read_text,
                 "Cache read should return the cached artifact content",
             )
 
             current_case["name"] = "discovery"
-            discovery = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            discovery = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Inspect code_execution with no arguments first.",
                     "session_id": "code_execution_discovery",
@@ -226,18 +222,19 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert discovery.status_code == 200, "No-arg code_execution discovery should succeed"
-            discovery_text = discovery.json()["response"]
+            assert discovery["start_response"].status_code == 200, "No-arg code_execution task should start"
+            assert discovery["terminal_event"].get("event") == "done", (
+                "No-arg code_execution discovery should succeed"
+            )
+            discovery_text = discovery["text"]
             self.soft_assert(
                 bool(discovery_text.strip()),
                 "No-arg code_execution should return a non-empty discovery response",
             )
 
             current_case["name"] = "allow_file_read"
-            allow_file_read = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            allow_file_read = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Read a vault file through code_execution.",
                     "session_id": "code_execution_allow_file_read",
@@ -245,18 +242,17 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_file_read.status_code == 200, "Vault file read should succeed"
-            allow_file_read_text = allow_file_read.json()["response"]
+            assert allow_file_read["start_response"].status_code == 200, "Vault file read task should start"
+            assert allow_file_read["terminal_event"].get("event") == "done", "Vault file read should succeed"
+            allow_file_read_text = allow_file_read["text"]
             self.soft_assert(
                 "BLOCKED_CONTENT" in allow_file_read_text,
                 "Vault file read should return the file content",
             )
 
             current_case["name"] = "dynamic_attribute_helpers"
-            dynamic_attribute_helpers = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            dynamic_attribute_helpers = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Exercise dynamic Monty attribute helpers.",
                     "session_id": "code_execution_dynamic_attribute_helpers",
@@ -264,42 +260,57 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert dynamic_attribute_helpers.status_code == 200, "Dynamic attribute helper run should complete"
-            dynamic_attribute_helpers_text = dynamic_attribute_helpers.json()["response"]
+            assert dynamic_attribute_helpers["start_response"].status_code == 200, (
+                "Dynamic attribute helper task should start"
+            )
+            assert dynamic_attribute_helpers["terminal_event"].get("event") == "done", (
+                "Dynamic attribute helper run should complete"
+            )
+            dynamic_attribute_helpers_text = dynamic_attribute_helpers["text"]
             self.soft_assert(
                 "true" in dynamic_attribute_helpers_text.lower(),
                 "code_execution should support hasattr/getattr on helper result objects",
             )
 
             current_case["name"] = "streaming_detail"
-            streaming_detail = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            streaming_detail = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Stream code_execution detail payloads.",
                     "session_id": "code_execution_streaming_detail",
                     "tools": ["code_execution", "file_ops_safe"],
                     "model": "test",
-                    "stream": True,
                 },
             )
-            assert streaming_detail.status_code == 200, "Streaming detail run should succeed"
-            streaming_text = streaming_detail.text
+            assert streaming_detail["start_response"].status_code == 200, (
+                "Streaming detail task should start"
+            )
+            assert streaming_detail["terminal_event"].get("event") == "done", (
+                "Streaming detail run should succeed"
+            )
+            streaming_events = streaming_detail["events"]
             self.soft_assert(
-                '"arguments_detail"' in streaming_text and ("a" * 260) in streaming_text,
+                any(
+                    event.get("event") == "tool_call_started"
+                    and "arguments_detail" in event
+                    and ("a" * 260) in str(event.get("arguments_detail"))
+                    for event in streaming_events
+                ),
                 "Streaming code_execution events should include untruncated argument detail",
             )
             self.soft_assert(
-                '"result_detail"' in streaming_text and ("b" * 300) in streaming_text,
+                any(
+                    event.get("event") == "tool_call_finished"
+                    and "result_detail" in event
+                    and ("b" * 300) in str(event.get("result_detail"))
+                    for event in streaming_events
+                ),
                 "Streaming code_execution events should include untruncated result detail",
             )
 
             current_case["name"] = "allow_write"
-            allow_write = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            allow_write = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Write a derived cache artifact through code_execution.",
                     "session_id": "code_execution_allow_write",
@@ -307,8 +318,9 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_write.status_code == 200, "Allowed cache write should succeed"
-            write_text = allow_write.json()["response"]
+            assert allow_write["start_response"].status_code == 200, "Allowed cache write task should start"
+            assert allow_write["terminal_event"].get("event") == "done", "Allowed cache write should succeed"
+            write_text = allow_write["text"]
             self.soft_assert(
                 "WRITE_OK" in write_text,
                 "Allowed cache write should return the snippet result",
@@ -316,10 +328,8 @@ class CodeExecutionScenario(BaseScenario):
 
             current_case["name"] = "allow_image_input"
             checkpoint = self.event_checkpoint()
-            allow_image_input = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            allow_image_input = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Read an image through code_execution using delegate.",
                     "session_id": "code_execution_allow_image_input",
@@ -327,8 +337,13 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_image_input.status_code == 200, "Image input composition should succeed"
-            allow_image_input_text = allow_image_input.json()["response"]
+            assert allow_image_input["start_response"].status_code == 200, (
+                "Image input composition task should start"
+            )
+            assert allow_image_input["terminal_event"].get("event") == "done", (
+                "Image input composition should succeed"
+            )
+            allow_image_input_text = allow_image_input["text"]
             self.soft_assert(
                 "failed:" not in allow_image_input_text.lower(),
                 "Image input composition should not return a Monty failure",
@@ -345,10 +360,8 @@ class CodeExecutionScenario(BaseScenario):
 
             current_case["name"] = "full_surface"
             checkpoint = self.event_checkpoint()
-            full_surface = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            full_surface = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Exercise the full code_execution helper surface.",
                     "session_id": "code_execution_full_surface",
@@ -356,8 +369,13 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert full_surface.status_code == 200, "Full helper-surface run should succeed"
-            full_surface_text = full_surface.json()["response"]
+            assert full_surface["start_response"].status_code == 200, (
+                "Full helper-surface task should start"
+            )
+            assert full_surface["terminal_event"].get("event") == "done", (
+                "Full helper-surface run should succeed"
+            )
+            full_surface_text = full_surface["text"]
             self.soft_assert(
                 "failed:" not in full_surface_text.lower(),
                 "Full helper-surface run should not return a Monty failure",

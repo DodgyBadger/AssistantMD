@@ -29,7 +29,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 
 1. Build `RuntimeConfig`.
 2. `bootstrap_runtime(...)` seeds bootstrap roots, runs registered system database migrations, and validates config.
-3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, and workflow governor.
+3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, task runner, and workflow governor.
 4. Register global runtime context.
 5. Sync workflows and reserved system jobs into the scheduler, then resume scheduler.
 6. Start vault-state manifest refresh in the background so web startup is not blocked by a full vault scan.
@@ -94,14 +94,24 @@ Reload behavior:
 
 ## Execution Task Coordination
 
-Runtime owns a process-local `TaskCoordinator` and `WorkflowGovernor`.
+Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
+`ExecutionTaskRunner`, and `WorkflowGovernor`.
 
-`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
+`TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. Observers run from terminal lifecycle transitions after live worker coroutines have unwound. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
+
+`RuntimeBackgroundSpawner` schedules detached runtime work onto the runtime loop
+and registers background handles in the runtime shutdown task set.
+
+`ExecutionTaskRunner` provides the shared shell for creating queued execution
+tasks, running detached work in the background, and wrapping awaited inline work
+under `TaskCoordinator` ownership. It also owns keyed gates for runtime queueing
+and lane serialization, and enforces task-spec timeouts. Scheduled ingestion
+work uses this runner for detached job execution.
 
 `WorkflowGovernor` is the policy layer for workflow runs. It queues workflow
 execution per vault, optionally limits total concurrent workflows across vaults,
-registers workflow tasks, applies the configured workflow task timeout, and logs
-workflow lifecycle events.
+registers workflow tasks, supplies the configured workflow task timeout policy,
+and logs workflow lifecycle events.
 
 ## Common Failure Modes
 

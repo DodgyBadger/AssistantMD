@@ -67,6 +67,7 @@ from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.chat.workspace import normalize_workspace_path
 from core.goals import GoalOpsStore
 from core.memory.session_summary import SessionSummaryStore
 from core.system_migrations import (
@@ -81,6 +82,7 @@ from core.runtime.execution_tasks import (
     compaction_task_label,
     workflow_vault_scope,
 )
+from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import replace_vault_file_content
@@ -233,25 +235,23 @@ def _chat_workspace_info(path: str | None) -> ChatWorkspaceInfo | None:
 
 def _normalize_workspace_path(path: str | None) -> str:
     """Normalize a safe vault-relative workspace path string."""
-    raw_path = (path or "").strip().replace("\\", "/")
-    if not raw_path:
-        return ""
-    if raw_path.startswith("/"):
+    try:
+        return normalize_workspace_path(path)
+    except ValueError as exc:
+        message = str(exc)
+        error_type = "InvalidWorkspacePath"
+        if "relative to the vault" in message:
+            details = {"path": path}
+        elif "cannot contain '..'" in message:
+            details = {"path": path}
+        else:
+            details = {"path": path}
         raise APIException(
             status_code=400,
-            error_type="InvalidWorkspacePath",
-            message="Workspace path must be relative to the vault.",
-            details={"path": path},
-        )
-    parts = [part for part in raw_path.split("/") if part and part != "."]
-    if any(part == ".." for part in parts):
-        raise APIException(
-            status_code=400,
-            error_type="InvalidWorkspacePath",
-            message="Workspace path cannot contain '..'.",
-            details={"path": path},
-        )
-    return Path(*parts).as_posix() if parts else ""
+            error_type=error_type,
+            message=message,
+            details=details,
+        ) from exc
 
 
 def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> tuple[str, Path]:
@@ -1267,21 +1267,23 @@ async def compact_chat_session_history(
 ) -> ChatHistoryCompactionResponse:
     """Compact one chat session through the shared compaction service."""
     runtime = get_runtime_context()
-    async with runtime.task_coordinator.track_current_task(
-        kind=ExecutionTaskKind.HISTORY_COMPACTION,
-        scope=chat_session_scope(session_id),
-        source=ExecutionTaskSource.API,
-        label=compaction_task_label(session_id),
-        metadata={"vault": vault_name, "session_id": session_id},
-    ):
-        result = await compact_chat_history(
+    result = await runtime.task_runner.run_inline(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.HISTORY_COMPACTION,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=compaction_task_label(session_id),
+            metadata={"vault": vault_name, "session_id": session_id},
+        ),
+        lambda _task: compact_chat_history(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
             focus=focus,
             source=ExecutionTaskSource.API,
             store=_chat_store,
-        )
+        ),
+    )
     return ChatHistoryCompactionResponse(**result.as_api_dict())
 
 

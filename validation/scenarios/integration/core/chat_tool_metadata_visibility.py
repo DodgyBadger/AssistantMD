@@ -21,7 +21,12 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
             response = self.call_api("/api/metadata")
             assert response.status_code == 200, "Metadata endpoint should succeed"
             payload = response.json()
-            tool_names = {tool.get("name") for tool in payload.get("tools", [])}
+            tools = payload.get("tools", [])
+            tool_names = {tool.get("name") for tool in tools}
+            tool_descriptions = {
+                tool.get("name"): str(tool.get("description") or "")
+                for tool in tools
+            }
 
             self.soft_assert(
                 "code_execution" in tool_names,
@@ -30,6 +35,14 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
             self.soft_assert(
                 "session_ops" in tool_names,
                 "Chat metadata should expose session_ops",
+            )
+            self.soft_assert(
+                "browser" in tool_descriptions.get("tavily_extract", ""),
+                "tavily_extract metadata should tell users/models to fall back to browser",
+            )
+            self.soft_assert(
+                "tavily_extract fails" in tool_descriptions.get("browser", ""),
+                "browser metadata should identify tavily_extract failure fallback",
             )
         finally:
             await self.stop_system()

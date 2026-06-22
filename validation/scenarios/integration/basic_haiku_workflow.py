@@ -48,7 +48,11 @@ class BasicHaikuWorkflowScenario(BaseScenario):
         self.set_date("2025-01-15")  # Wednesday
 
         checkpoint = self.event_checkpoint()
-        assert await self.trigger_job(vault, "haiku_writer"), "Job should execute when triggered"
+        assert await self.trigger_job(
+            vault,
+            "haiku_writer",
+            timeout_seconds=30.0,
+        ), "Job should execute when triggered"
 
         events = self.events_since(checkpoint)
         self.assert_event_contains(

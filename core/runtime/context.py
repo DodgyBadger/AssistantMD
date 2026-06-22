@@ -17,8 +17,10 @@ from core.logger import UnifiedLogger
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
+from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.vault_state import VaultStateService
 from core.scheduling.system_jobs import sync_system_scheduler_jobs
@@ -55,7 +57,9 @@ class RuntimeContext:
     ingestion_worker: IngestionWorker
     ingestion_interval: int
     task_coordinator: TaskCoordinator
+    task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
+    background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime
     last_config_reload: Optional[datetime] = None
@@ -82,6 +86,8 @@ class RuntimeContext:
                 task.cancel()
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
             self.background_tasks.clear()
+
+        await self.task_coordinator.mark_unfinished_cancelled(reason="runtime_shutdown")
 
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=True)
@@ -149,14 +155,11 @@ class RuntimeContext:
         results.update(vault_state_results)
         return results
 
-    def start_background_vault_state_refresh(self, *, reason: str) -> asyncio.Task:
+    def start_background_vault_state_refresh(self, *, reason: str) -> None:
         """Start a non-blocking refresh of all vault-state manifests."""
-        task = asyncio.create_task(
-            self._refresh_vault_state_in_background(reason=reason)
+        self.background_spawner.spawn(
+            lambda: self._refresh_vault_state_in_background(reason=reason)
         )
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
-        return task
 
     async def _refresh_vault_state_in_background(self, *, reason: str) -> None:
         self.logger.add_sink("validation").info(

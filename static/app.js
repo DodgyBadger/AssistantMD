@@ -22,6 +22,7 @@ const state = {
     isLoading: false,
     isCancellingChat: false,
     activeChatSessionId: null,
+    activeChatTaskId: null,
     activeChatAbortController: null,
     systemStatus: null,
     sessionSummaryPreviewCache: {},
@@ -30,8 +31,8 @@ const state = {
     selectedActivityVault: '',
     dashboardVaultSort: { column: 'name', direction: 'asc' },
     dashboardWorkflowSort: { column: 'id', direction: 'asc' },
-    workflowTasks: [],
-    workflowTaskPollTimer: null,
+    executionTasks: [],
+    executionTaskPollTimer: null,
     vaultActivitySort: { column: 'last_run', direction: 'desc' },
     vaultActivityMutationSort: { column: 'time', direction: 'desc' },
     restartRequired: false,
@@ -80,6 +81,8 @@ const chatElements = {
 // DOM elements - Dashboard
 const dashElements = {
     systemStatus: document.getElementById('system-status'),
+    executionTasksStatus: document.getElementById('dashboard-execution-tasks-status'),
+    executionTaskResult: document.getElementById('dashboard-execution-task-result'),
     workflowsStatus: document.getElementById('dashboard-workflows-status'),
     workflowSchedulerBadge: document.getElementById('dashboard-workflows-scheduler-badge'),
     vaultActivityStatus: document.getElementById('dashboard-vault-activity-status'),
@@ -167,11 +170,19 @@ const workflowActions = window.WorkflowActions.create({
         fetchMetadata,
         populateSelectors,
         fetchSystemStatus,
-        fetchWorkflowTasks,
+        fetchExecutionTasks,
         displaySystemStatus,
         isTerminalTaskStatus,
-        activeWorkflowTasks: () => dashboardView.activeWorkflowTasks(),
         selectedVault: () => chatElements.vaultSelector?.value || '',
+    },
+});
+
+const executionTaskActions = window.ExecutionTaskActions.create({
+    elements: dashElements,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        fetchExecutionTasks,
+        activeExecutionTasks: () => dashboardView.activeExecutionTasks(),
     },
 });
 
@@ -182,13 +193,13 @@ dashboardView = window.DashboardView.create({
     callbacks: {
         renderVaultActivityResult: vaultActivity.renderResult,
         loadVaultActivity: vaultActivity.loadActivity,
-        fetchWorkflowTasks,
+        fetchExecutionTasks,
         isTerminalTaskStatus,
         openWorkflowFileEditor: workflowActions.openFileEditor,
         toggleWorkflowEnabled: workflowActions.toggleWorkflowEnabled,
         executeWorkflow: workflowActions.executeWorkflow,
-        stopWorkflow: workflowActions.stopWorkflow,
-        stopAllWorkflows: workflowActions.stopAllWorkflows,
+        stopExecutionTask: executionTaskActions.stopExecutionTask,
+        stopAllExecutionTasks: executionTaskActions.stopAllExecutionTasks,
     },
 });
 
@@ -548,6 +559,122 @@ function parseSseEvent(rawEvent) {
         console.warn('Failed to parse SSE chunk:', dataPayload, error);
         return null;
     }
+}
+
+function applyChatStreamPayload(payload, assistantMessage) {
+    const eventType = payload.event || 'delta';
+    if (eventType === 'delta') {
+        const delta = payload.choices?.[0]?.delta?.content;
+        if (delta) {
+            assistantMessage.fullText += delta;
+            renderAssistantMarkdown(assistantMessage);
+        }
+        return { finished: false, messageCount: 0 };
+    }
+
+    if (eventType === 'tool_call_started' || eventType === 'tool_call_finished') {
+        handleToolEvent(assistantMessage, payload);
+        return { finished: false, messageCount: 0 };
+    }
+
+    if (eventType === 'done') {
+        return { finished: true, messageCount: 1 };
+    }
+
+    if (eventType === 'cancelled') {
+        state.isCancellingChat = false;
+        syncChatControlLocks();
+        setAssistantStatus(assistantMessage, 'Stopped', 'done');
+        return { finished: true, messageCount: 0 };
+    }
+
+    if (eventType === 'error') {
+        const errorDelta = payload.choices?.[0]?.delta?.content;
+        if (errorDelta) {
+            assistantMessage.fullText += `\n\n${errorDelta}`;
+            renderAssistantMarkdown(assistantMessage);
+        }
+        assistantMessage.errorMessages.push(errorDelta || 'Unknown streaming error.');
+        setAssistantStatus(assistantMessage, 'Something went wrong', 'error');
+        return { finished: true, messageCount: 0 };
+    }
+
+    return { finished: false, messageCount: 0 };
+}
+
+async function consumeChatTaskEvents(taskId, assistantMessage, abortController) {
+    let lastSequence = 0;
+    let messageCount = 0;
+    let finished = false;
+
+    while (!finished) {
+        const streamUrl = `api/chat/tasks/${encodeURIComponent(taskId)}/events?after_sequence=${lastSequence}`;
+        const response = await fetch(streamUrl, {
+            method: 'GET',
+            signal: abortController.signal,
+            headers: { Accept: 'text/event-stream' }
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        if (!response.body || !response.body.getReader) {
+            throw new Error('Streaming responses are not supported in this browser.');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split(/\r?\n\r?\n/);
+            buffer = events.pop() || '';
+
+            for (const rawEvent of events) {
+                const payload = parseSseEvent(rawEvent);
+                if (!payload) continue;
+                if (Number.isInteger(payload.sequence)) {
+                    lastSequence = Math.max(lastSequence, payload.sequence);
+                }
+                const result = applyChatStreamPayload(payload, assistantMessage);
+                messageCount = Math.max(messageCount, result.messageCount);
+                if (result.finished) {
+                    finished = true;
+                    break;
+                }
+            }
+            if (finished) break;
+        }
+
+        if (!finished && buffer.trim()) {
+            const payload = parseSseEvent(buffer);
+            if (payload) {
+                if (Number.isInteger(payload.sequence)) {
+                    lastSequence = Math.max(lastSequence, payload.sequence);
+                }
+                const result = applyChatStreamPayload(payload, assistantMessage);
+                messageCount = Math.max(messageCount, result.messageCount);
+                finished = result.finished;
+            }
+        }
+
+        if (!finished) {
+            const taskResponse = await fetch(`api/tasks/${encodeURIComponent(taskId)}`, {
+                cache: 'no-store',
+                signal: abortController.signal
+            });
+            if (!taskResponse.ok) break;
+            const task = await taskResponse.json();
+            if (!['queued', 'running'].includes(task.status)) break;
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
+    }
+
+    return { finished, messageCount };
 }
 
 function syncChatControlLocks() {
@@ -1026,7 +1153,7 @@ async function fetchSystemStatus() {
             }
         }
         syncRestartFlagWithStorage();
-        await fetchWorkflowTasks({ render: false });
+        await fetchExecutionTasks({ render: false });
         displaySystemStatus();
         updateStatus();
         refreshChatEmptyState();
@@ -1042,20 +1169,20 @@ async function fetchSystemStatus() {
     }
 }
 
-async function fetchWorkflowTasks({ render = true } = {}) {
+async function fetchExecutionTasks({ render = true } = {}) {
     try {
-        const response = await fetch('api/tasks?kind=workflow&include_terminal=false', { cache: 'no-store' });
-        if (!response.ok) throw new Error('Failed to fetch workflow tasks');
+        const response = await fetch('api/tasks?include_terminal=false', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Failed to fetch execution tasks');
         const data = await response.json();
-        state.workflowTasks = data.tasks || [];
-        dashboardView.syncWorkflowTaskPolling();
+        state.executionTasks = data.tasks || [];
+        dashboardView.syncExecutionTaskPolling();
         if (render) {
             displaySystemStatus();
         }
     } catch (error) {
-        console.error('Error fetching workflow tasks:', error);
-        state.workflowTasks = [];
-        dashboardView.syncWorkflowTaskPolling();
+        console.error('Error fetching execution tasks:', error);
+        state.executionTasks = [];
+        dashboardView.syncExecutionTaskPolling();
         if (render && dashElements.executeWorkflowResult) {
             dashElements.executeWorkflowResult.innerHTML = `<p class="state-error">❌ Error: ${error.message}</p>`;
         }
@@ -1375,14 +1502,13 @@ async function sendMessage() {
     const loadingMessage = addLoadingMessage();
 
     try {
-        let response;
+        let startResponse;
         if (pendingUploads.length > 0) {
             const formData = new FormData();
             formData.append('vault_name', vault);
             formData.append('prompt', effectivePrompt);
             formData.append('model', model);
             formData.append('thinking', thinking);
-            formData.append('stream', 'true');
             if (contextTemplateValue) {
                 formData.append('context_template', contextTemplateValue);
             }
@@ -1394,7 +1520,7 @@ async function sendMessage() {
             pendingUploads.forEach((item) => {
                 formData.append('images', item.file, item.file.name);
             });
-            response = await fetch('api/chat/execute', {
+            startResponse = await fetch('api/chat/tasks', {
                 method: 'POST',
                 body: formData,
                 signal: abortController.signal
@@ -1408,10 +1534,9 @@ async function sendMessage() {
                 thinking: thinking,
                 context_template: contextTemplateValue,
                 workspace_path: workspacePathValue,
-                session_id: requestSessionId,
-                stream: true
+                session_id: requestSessionId
             };
-            response = await fetch('api/chat/execute', {
+            startResponse = await fetch('api/chat/tasks', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestData),
@@ -1419,120 +1544,37 @@ async function sendMessage() {
             });
         }
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `HTTP ${response.status}`);
+        if (!startResponse.ok) {
+            const errorData = await startResponse.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${startResponse.status}`);
         }
 
         clearPendingAttachments();
 
         removeLoadingMessage(loadingMessage);
 
-        const sessionId = response.headers.get('X-Session-ID');
-        if (sessionId) {
-            state.sessionId = sessionId;
+        const started = await startResponse.json();
+        if (started.session_id) {
+            state.sessionId = started.session_id;
             syncChatControlLocks();
             sessionControls.renderSelector();
             sessionControls.updateTitleRow();
             sessionControls.refreshCompactionProgress();
         }
-
-        // Fallback for environments that do not support streaming
-        if (!response.body || !response.body.getReader) {
-            const data = await response.json();
-            const fallbackMessage = createAssistantStreamingMessage();
-            fallbackMessage.fullText = data.response || 'No response content';
-            renderAssistantMarkdown(fallbackMessage);
-            finalizeAssistantMessage(fallbackMessage, {
-                sessionId: data.session_id || state.sessionId || 'unknown',
-                messageCount: data.message_count || (fallbackMessage.fullText ? 1 : 0),
-                toolCount: 0,
-                status: 'done'
-            });
-            if (vault && state.sessionId) {
-                await fetchSessions(vault, state.sessionId);
-                await loadSession(state.sessionId);
-            }
-            return;
+        const taskId = started.task?.task_id;
+        if (!taskId) {
+            throw new Error('Chat task did not return a task id.');
         }
+        state.activeChatTaskId = taskId;
 
         const assistantMessage = createAssistantStreamingMessage();
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let messageCount = 0;
-        let finished = false;
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const events = buffer.split(/\r?\n\r?\n/);
-            buffer = events.pop() || '';
-
-            for (const rawEvent of events) {
-                const payload = parseSseEvent(rawEvent);
-                if (!payload) continue;
-
-                const eventType = payload.event || 'delta';
-                if (eventType === 'delta') {
-                    const delta = payload.choices?.[0]?.delta?.content;
-                    if (delta) {
-                        assistantMessage.fullText += delta;
-                        renderAssistantMarkdown(assistantMessage);
-                    }
-                } else if (eventType === 'tool_call_started' || eventType === 'tool_call_finished') {
-                    handleToolEvent(assistantMessage, payload);
-                } else if (eventType === 'done') {
-                    finished = true;
-                    messageCount = Math.max(messageCount, 1);
-                } else if (eventType === 'cancelled') {
-                    finished = true;
-                    state.isCancellingChat = false;
-                    syncChatControlLocks();
-                    setAssistantStatus(assistantMessage, 'Stopped', 'done');
-                } else if (eventType === 'error') {
-                    finished = true;
-                    const errorDelta = payload.choices?.[0]?.delta?.content;
-                    if (errorDelta) {
-                        assistantMessage.fullText += `\n\n${errorDelta}`;
-                        renderAssistantMarkdown(assistantMessage);
-                    }
-                    assistantMessage.errorMessages.push(errorDelta || 'Unknown streaming error.');
-                    setAssistantStatus(assistantMessage, 'Something went wrong', 'error');
-                }
-            }
-        }
-
-        // Flush any remaining buffered data
-        if (buffer.trim()) {
-            const payload = parseSseEvent(buffer);
-            if (payload) {
-                const eventType = payload.event || 'delta';
-                if (eventType === 'delta') {
-                    const delta = payload.choices?.[0]?.delta?.content;
-                    if (delta) {
-                        assistantMessage.fullText += delta;
-                        renderAssistantMarkdown(assistantMessage);
-                    }
-                } else if (eventType === 'done') {
-                    finished = true;
-                } else if (eventType === 'cancelled') {
-                    finished = true;
-                    state.isCancellingChat = false;
-                    syncChatControlLocks();
-                    setAssistantStatus(assistantMessage, 'Stopped', 'done');
-                }
-            }
-        }
+        const streamResult = await consumeChatTaskEvents(taskId, assistantMessage, abortController);
 
         finalizeAssistantMessage(assistantMessage, {
             sessionId: state.sessionId || 'unknown',
-            messageCount: Math.max(messageCount, assistantMessage.fullText ? 1 : 0),
+            messageCount: Math.max(streamResult.messageCount, assistantMessage.fullText ? 1 : 0),
             toolCount: assistantMessage.toolStatusMap.size,
-            status: finished ? 'done' : 'incomplete'
+            status: streamResult.finished ? 'done' : 'incomplete'
         });
         if (vault) {
             await fetchSessions(vault, state.sessionId || '');
@@ -1553,6 +1595,7 @@ async function sendMessage() {
         state.isLoading = false;
         state.isCancellingChat = false;
         state.activeChatSessionId = null;
+        state.activeChatTaskId = null;
         state.activeChatAbortController = null;
         chatElements.sendBtn.disabled = false;
         syncChatControlLocks();
@@ -1563,16 +1606,26 @@ async function sendMessage() {
 
 async function stopChatResponse() {
     if (!state.isLoading || state.isCancellingChat) return;
+    const taskId = state.activeChatTaskId;
     const sessionId = state.activeChatSessionId || state.sessionId;
-    if (!sessionId) return;
+    if (!taskId && !sessionId) return;
 
     state.isCancellingChat = true;
     syncChatControlLocks();
     try {
-        const response = await fetch(
-            `api/chat/sessions/${encodeURIComponent(sessionId)}/cancel`,
-            { method: 'POST' }
-        );
+        let response = null;
+        if (taskId) {
+            response = await fetch(
+                `api/tasks/${encodeURIComponent(taskId)}/cancel`,
+                { method: 'POST' }
+            );
+        }
+        if ((!response || response.status === 404) && sessionId) {
+            response = await fetch(
+                `api/chat/sessions/${encodeURIComponent(sessionId)}/cancel`,
+                { method: 'POST' }
+            );
+        }
         if (response.status === 404) {
             if (state.activeChatAbortController) {
                 state.activeChatAbortController.abort();

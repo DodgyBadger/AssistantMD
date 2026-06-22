@@ -121,10 +121,8 @@ class DelegateToolScenario(BaseScenario):
         try:
             # --- Basic: delegate fires and completes ---
             checkpoint = self.event_checkpoint()
-            basic = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            basic = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Run a basic delegate call.",
                     "session_id": "delegate_basic",
@@ -132,7 +130,8 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert basic.status_code == 200, "Basic delegate call should succeed"
+            assert basic["start_response"].status_code == 200, "Basic delegate chat task should start"
+            assert basic["terminal_event"].get("event") == "done", "Basic delegate call should succeed"
             basic_events = self.events_since(checkpoint)
 
             self.assert_event_contains(
@@ -156,17 +155,15 @@ class DelegateToolScenario(BaseScenario):
                 },
             )
             self.soft_assert(
-                "failed:" not in basic.json()["response"].lower(),
+                "failed:" not in basic["text"].lower(),
                 "Basic delegate call should not produce a Monty failure response",
             )
 
             # --- Forbidden tool stripping: delegate and code_execution removed ---
             current_case["name"] = "forbidden_stripping"
             checkpoint = self.event_checkpoint()
-            stripping = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            stripping = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Test forbidden tool stripping.",
                     "session_id": "delegate_forbidden_stripping",
@@ -174,7 +171,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert stripping.status_code == 200, "Forbidden tool stripping call should succeed"
+            assert stripping["start_response"].status_code == 200, (
+                "Forbidden tool stripping chat task should start"
+            )
+            assert stripping["terminal_event"].get("event") == "done", (
+                "Forbidden tool stripping call should succeed"
+            )
             stripping_events = self.events_since(checkpoint)
 
             self.assert_event_contains(
@@ -195,10 +197,8 @@ class DelegateToolScenario(BaseScenario):
             # --- Child tool binding: delegate_tool_binding_resolved fires ---
             current_case["name"] = "child_tools"
             checkpoint = self.event_checkpoint()
-            child_tools = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            child_tools = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Test delegate with child tools.",
                     "session_id": "delegate_child_tools",
@@ -206,7 +206,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert child_tools.status_code == 200, "Delegate with child tools should succeed"
+            assert child_tools["start_response"].status_code == 200, (
+                "Delegate with child tools chat task should start"
+            )
+            assert child_tools["terminal_event"].get("event") == "done", (
+                "Delegate with child tools should succeed"
+            )
             child_events = self.events_since(checkpoint)
 
             self.assert_event_contains(
@@ -226,10 +231,8 @@ class DelegateToolScenario(BaseScenario):
             # --- Bounded child failures return tool output instead of aborting parent chat ---
             current_case["name"] = "limit_failure"
             checkpoint = self.event_checkpoint()
-            limit_failure = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            limit_failure = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Test delegate tool-call limit handling.",
                     "session_id": "delegate_limit_failure",
@@ -237,7 +240,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert limit_failure.status_code == 200, "Delegate limit failure should not abort chat"
+            assert limit_failure["start_response"].status_code == 200, (
+                "Delegate limit failure chat task should start"
+            )
+            assert limit_failure["terminal_event"].get("event") == "done", (
+                "Delegate limit failure should not abort chat"
+            )
             limit_events = self.events_since(checkpoint)
             self.assert_event_contains(
                 limit_events,
@@ -252,19 +260,17 @@ class DelegateToolScenario(BaseScenario):
                 },
             )
             self.soft_assert(
-                "tool-call limit" in limit_failure.json()["response"],
+                "tool-call limit" in limit_failure["text"],
                 "Delegate limit failure should return actionable text to the parent agent",
             )
             self.soft_assert(
-                "goal_ops" in limit_failure.json()["response"],
+                "goal_ops" in limit_failure["text"],
                 "Delegate limit failure should instruct parent to checkpoint before continuing",
             )
 
             current_case["name"] = "model_request_limit_failure"
-            model_request_limit_failure = self.call_api(
-                "/api/chat/execute",
-                method="POST",
-                data={
+            model_request_limit_failure = await self.run_chat_task(
+                {
                     "vault_name": vault.name,
                     "prompt": "Test delegate model-request limit handling.",
                     "session_id": "delegate_model_request_limit_failure",
@@ -272,7 +278,10 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert model_request_limit_failure.status_code == 200, (
+            assert model_request_limit_failure["start_response"].status_code == 200, (
+                "Delegate model-request limit failure chat task should start"
+            )
+            assert model_request_limit_failure["terminal_event"].get("event") == "done", (
                 "Delegate model-request limit failure should not abort chat"
             )
             request_limit_context = delegate_module._delegate_usage_limit_context(
@@ -290,11 +299,11 @@ class DelegateToolScenario(BaseScenario):
                 "Delegate request-limit context should identify the controlling setting",
             )
             self.soft_assert(
-                "model-request limit" in model_request_limit_failure.json()["response"],
+                "model-request limit" in model_request_limit_failure["text"],
                 "Delegate request-limit failure should use model-request wording",
             )
             self.soft_assert(
-                "goal_ops" in model_request_limit_failure.json()["response"],
+                "goal_ops" in model_request_limit_failure["text"],
                 "Delegate request-limit failure should instruct parent to checkpoint before continuing",
             )
 

@@ -32,6 +32,7 @@ from core.runtime.execution_tasks import (
     compaction_task_label,
 )
 from core.runtime.state import get_runtime_context, has_runtime_context
+from core.runtime.task_runner import ExecutionTaskSpec
 from core.settings import (
     get_compaction_keep_recent,
     get_compaction_token_threshold,
@@ -354,19 +355,21 @@ async def maybe_auto_compact_after_turn(
             vault_path=vault_path,
             source=ExecutionTaskSource.SYSTEM,
         )
-    async with runtime.task_coordinator.track_current_task(
-        kind=ExecutionTaskKind.HISTORY_COMPACTION,
-        scope=chat_session_scope(session_id),
-        source=ExecutionTaskSource.SYSTEM,
-        label=compaction_task_label(session_id),
-        metadata={"vault": vault_name, "session_id": session_id, "automatic": True},
-    ):
-        return await compact_chat_history(
+    return await runtime.task_runner.run_inline(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.HISTORY_COMPACTION,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.SYSTEM,
+            label=compaction_task_label(session_id),
+            metadata={"vault": vault_name, "session_id": session_id, "automatic": True},
+        ),
+        lambda _task: compact_chat_history(
             session_id=session_id,
             vault_name=vault_name,
             vault_path=vault_path,
             source=ExecutionTaskSource.SYSTEM,
-        )
+        ),
+    )
 
 
 async def _get_session_lock(*, session_id: str, vault_name: str) -> asyncio.Lock:

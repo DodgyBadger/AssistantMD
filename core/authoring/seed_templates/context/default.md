@@ -289,19 +289,19 @@ for path, item in skill_items_by_path.items():
 
 instructions = soul_instructions
 # Assemble the final instruction stack from broad to specific:
-# stance -> vault policy -> workspace policy -> user notes -> workspace README -> skills.
-instructions += "\n\n" + playbook_instructions
-if workspace_playbook_instructions:
-    instructions += "\n\n" + workspace_playbook_instructions
-if USER_NOTES_instructions:
-    instructions += "\n\n" + USER_NOTES_instructions
-if workspace_instructions:
-    instructions += "\n\n" + workspace_instructions
+# stance -> skills -> vault policy -> workspace orientation -> workspace policy -> user notes.
 if skills_lines:
     instructions += (
         SKILLS_PREAMBLE
         + "\n".join(skills_lines)
     )
+instructions += "\n\n" + playbook_instructions
+if workspace_instructions:
+    instructions += "\n\n" + workspace_instructions
+if workspace_playbook_instructions:
+    instructions += "\n\n" + workspace_playbook_instructions
+if USER_NOTES_instructions:
+    instructions += "\n\n" + USER_NOTES_instructions
 
 await assemble_context(history=history, instructions=instructions)
 ```

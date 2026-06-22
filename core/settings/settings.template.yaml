@@ -424,7 +424,7 @@ tools:
     user_editable: false
   tavily_extract:
     module: core.tools.tavily_extract
-    description: "Extract content from specific URLs. API key required."
+    description: "Extract content from specific URLs. If this fails, returns thin content, or reports no content extracted, retry the same URL with browser. API key required."
     requires_secrets:
       - TAVILY_API_KEY
     user_editable: false
@@ -436,7 +436,7 @@ tools:
     user_editable: false
   browser:
     module: core.tools.browser
-    description: "Browser-based page extraction using Playwright"
+    description: "Browser-based page extraction using Playwright. Use as the fallback for a known URL when tavily_extract fails, returns thin content, or reports no content extracted."
     requires_secrets: []
     user_editable: false
   workflow_run:

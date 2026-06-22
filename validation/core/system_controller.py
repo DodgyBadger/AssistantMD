@@ -336,7 +336,12 @@ class SystemController:
         
         self.logger.error(f"Job failed: {job_id} - {exception}")
     
-    async def wait_for_scheduled_run(self, global_id: str) -> bool:
+    async def wait_for_scheduled_run(
+        self,
+        global_id: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> bool:
         """Wait for a scheduled job to execute."""
         if not self.is_running:
             raise RuntimeError("System must be running to wait for scheduled runs")
@@ -354,9 +359,28 @@ class SystemController:
         self._pending_jobs[safe_job_id] = future
         
         try:
-            # Wait for execution (no timeout - matches production behavior)
-            await future
+            if timeout_seconds is None:
+                await future
+            else:
+                await asyncio.wait_for(future, timeout=timeout_seconds)
             return True
+        except TimeoutError as exc:
+            self._pending_jobs.pop(safe_job_id, None)
+            job = next(
+                (job for job in self._runtime.scheduler.get_jobs() if job.id == safe_job_id),
+                None,
+            )
+            pending_job_ids = sorted(self._pending_jobs)
+            raise AssertionError(
+                "Scheduled job did not complete "
+                f"within {timeout_seconds:g}s: "
+                f"global_id={global_id}, "
+                f"job_id={safe_job_id}, "
+                f"scheduler_running={self._runtime.scheduler.running if self._runtime else None}, "
+                f"next_run_time={getattr(job, 'next_run_time', None) if job else None}, "
+                f"execution_count={len(self._job_executions.get(safe_job_id, []))}, "
+                f"pending_job_ids={pending_job_ids}"
+            ) from exc
         except Exception as e:
             # Job executed but with error
             self.logger.error(f"Scheduled job {global_id} failed: {e}")

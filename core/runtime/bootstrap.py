@@ -23,9 +23,11 @@ from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.authoring.template_discovery import seed_system_templates
 # Note: Job setup now handled via runtime_context.reload_workflows()
+from .background import RuntimeBackgroundSpawner
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .execution_tasks import TaskCoordinator
+from .task_runner import ExecutionTaskRunner
 from .workflow_governor import WorkflowGovernor
 from .state import set_runtime_context, clear_runtime_context
 from .paths import set_bootstrap_roots
@@ -127,10 +129,20 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         task_coordinator = TaskCoordinator(
             terminal_observers=[handle_task_terminal_for_rollback],
         )
+        background_tasks: set[asyncio.Task] = set()
+        background_spawner = RuntimeBackgroundSpawner(
+            background_loop=asyncio.get_running_loop(),
+            background_tasks=background_tasks,
+        )
+        task_runner = ExecutionTaskRunner(
+            task_coordinator=task_coordinator,
+            background_spawner=background_spawner,
+        )
         ingestion_worker = IngestionWorker(
             process_job_fn=ingestion_service.process_job,
             max_concurrent=ingestion_max_concurrent,
             task_coordinator=task_coordinator,
+            task_runner=task_runner,
         )
         # Create persistent job store for scheduler
         job_store = create_job_store(system_root=str(config.system_root))
@@ -173,7 +185,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         started_at = datetime.now(UTC)
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
-            background_loop=asyncio.get_running_loop(),
+            task_runner=task_runner,
         )
         runtime_context = RuntimeContext(
             config=config,
@@ -184,9 +196,12 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             ingestion_worker=ingestion_worker,
             ingestion_interval=ingestion_interval,
             task_coordinator=task_coordinator,
+            task_runner=task_runner,
             workflow_governor=workflow_governor,
+            background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,
+            background_tasks=background_tasks,
         )
 
         # Register context globally before job synchronization
