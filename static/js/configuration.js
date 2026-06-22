@@ -735,6 +735,15 @@
         return BUILT_IN_PROVIDER_NAMES.has(String(name || '').toLowerCase());
     }
 
+    function renderOpenAiOAuthUnsupportedWarning(extraClass = '') {
+        const classSuffix = extraClass ? ` ${extraClass}` : '';
+        return `
+            <div class="rounded-md border border-border-secondary bg-app-card px-3 py-2 text-xs state-warning${classSuffix}">
+                OpenAI OAuth is experimental and is not officially supported by OpenAI for AssistantMD. Use it at your own risk: it could break if OpenAI changes the flow, and your account could be disabled if OpenAI decides to restrict this access.
+            </div>
+        `;
+    }
+
     function renderOpenAiOAuthPanel(provider) {
         const oauthEnabled = provider.oauth_enabled === true;
         const oauthStatus = provider.oauth_status || 'disabled';
@@ -808,6 +817,7 @@
                         <button type="button" data-action="openai-oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed" ${state.isOpenAiOauthBusy || !canClearOAuth ? 'disabled' : ''}>${pending ? 'Cancel' : 'Disconnect'}</button>
                     </div>
                 </div>
+                ${renderOpenAiOAuthUnsupportedWarning('mt-3')}
                 <div class="mt-3 flex flex-col gap-2 md:flex-row">
                     <input data-openai-oauth-paste class="w-full flex-1 px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="Paste the final redirect URL or code" value="${pasteValue}" ${disabledAttr} />
                     <button type="button" data-action="openai-oauth-complete" class="shrink-0 px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed" ${disableControls || !state.openAiOauthPaste.trim() ? 'disabled' : ''}>Complete OAuth</button>
@@ -857,6 +867,7 @@
                                 <option value="oauth" ${draft.auth_mode === 'oauth' ? 'selected' : ''}>OAuth</option>
                             </select>
                             <p class="text-xs text-txt-secondary mt-1">OAuth requires openai_oauth_enabled and a connected account.</p>
+                            ${draft.auth_mode === 'oauth' ? renderOpenAiOAuthUnsupportedWarning('mt-2') : ''}
                         </div>
                         <label class="flex items-start gap-3 rounded-md border border-border-secondary px-3 py-2">
                             <input data-provider-field="oauth_api_key_fallback_enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-border-secondary text-accent focus:ring-accent" ${draft.oauth_api_key_fallback_enabled ? 'checked' : ''} />
