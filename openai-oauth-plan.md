@@ -828,6 +828,16 @@ Testable artifacts:
   - API-key-backed OpenAI requests leave `openai_store` unset
   - live testing confirmed `gpt-5.5` can complete a large AssistantMD
     function-tool loop, including 37 `file_ops_safe` calls, through OAuth
+  - live UI testing later confirmed another OAuth-backed chat turn completed
+    32 tool calls without issue
+  - experiment-only stress probes were added under
+    `validation/scenarios/experiments`:
+    - `openai_oauth_codex_request_shape_probe.py` captures the low-level
+      Pydantic AI Responses mapping and verifies OAuth-shaped history omits
+      store-bound item ids while preserving function tool call ids
+    - `openai_oauth_codex_live_stress_probe.py` runs two live same-session
+      chat turns against the configured model with repeated `file_ops_safe`
+      reads, one intentional missing-file read, and a follow-up write artifact
 
 ## Local Smoke Tests During Development
 
@@ -878,6 +888,8 @@ Automated or deterministic tests:
   - OAuth disconnected with explicit API-key fallback
 - Secret scan confirms no OAuth token, refresh token, device code, auth code,
   PKCE verifier, or pasted redirect URL appears in logs/API responses.
+- Experiment-only deterministic request-shape probe:
+  `python validation/run_validation.py run experiments/openai_oauth_codex_request_shape_probe`.
 
 Manual live tests:
 
@@ -908,6 +920,10 @@ Manual live tests:
 - Privacy/ZDR review: confirm UI/docs do not imply OAuth-backed Codex traffic
   inherits Platform API ZDR, data residency, or project-level retention
   controls.
+- Experiment-only live stress probe:
+  `python validation/run_validation.py run experiments/openai_oauth_codex_live_stress_probe`.
+  This is intentionally outside CI because it spends live model quota and
+  depends on the current OpenAI OAuth/API configuration.
 
 ## Validation Requests For Maintainers
 
