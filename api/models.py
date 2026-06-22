@@ -342,6 +342,7 @@ class ProviderInfo(BaseModel):
     user_editable: bool = Field(False, description="If the provider entry can be edited via UI")
     api_key_has_value: bool = Field(False, description="True if the API key secret currently has a value")
     base_url_has_value: bool = Field(False, description="True if the base URL secret or literal value is set")
+    status_message: Optional[str] = Field(None, description="Optional availability warning or guidance")
     configured_auth_mode: Optional[str] = Field(
         None,
         description="Configured provider auth mode when the provider supports auth modes.",

@@ -751,10 +751,12 @@
                 ? 'API key fallback enabled and available'
                 : 'API key fallback enabled but no key is set'
             : 'API key fallback disabled';
-        const modeText = [
-            `Configured: ${formatAuthMode(provider.configured_auth_mode)}`,
-            `Effective: ${formatAuthMode(provider.effective_auth_mode)}`,
-        ].join(' · ');
+        const selectedMode = formatAuthMode(provider.configured_auth_mode);
+        const activeMode = formatAuthMode(provider.effective_auth_mode);
+        const selectedModeText = provider.configured_auth_mode && provider.configured_auth_mode !== provider.effective_auth_mode
+            ? `Selected ${selectedMode}`
+            : '';
+        const providerStatusMessage = provider.status_message || '';
         const statusTone = connected ? 'pill-success' : pending ? 'pill-warning' : 'pill-error';
         const disableControls = state.isOpenAiOauthBusy || !oauthEnabled;
         const disabledAttr = disableControls ? 'disabled' : '';
@@ -792,9 +794,10 @@
                             <span class="text-xs font-medium text-txt-secondary">OpenAI OAuth</span>
                             <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${statusTone} border">${escapeHtml(formatOAuthStatus(oauthStatus))}</span>
                         </div>
-                        <div class="text-xs text-txt-secondary">${escapeHtml(modeText)}</div>
+                        <div class="text-xs text-txt-secondary">Using ${escapeHtml(activeMode)}${selectedModeText ? ` · ${escapeHtml(selectedModeText)}` : ''}</div>
                         <div class="text-xs text-txt-secondary">${escapeHtml(accountText)} · ${escapeHtml(expiresText)} · ${escapeHtml(refreshText)}</div>
                         <div class="text-xs text-txt-secondary">${escapeHtml(fallbackText)}</div>
+                        ${providerStatusMessage ? `<div class="text-xs state-warning">${escapeHtml(providerStatusMessage)}</div>` : ''}
                         ${provider.oauth_last_refresh_error ? `<div class="text-xs state-error">${escapeHtml(provider.oauth_last_refresh_error)}</div>` : ''}
                         ${!oauthEnabled ? `<div class="text-xs state-warning">${escapeHtml(disabledReason || 'Disabled by openai_oauth_enabled.')}</div>` : ''}
                     </div>
