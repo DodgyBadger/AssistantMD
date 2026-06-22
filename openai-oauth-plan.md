@@ -820,6 +820,11 @@ Testable artifacts:
 - Slice 14 started:
   - OAuth-backed OpenAI runtime requests now set `openai_store=False` to satisfy
     the Codex backend's explicit `store: false` requirement
+  - OAuth-backed OpenAI runtime requests now set
+    `openai_send_reasoning_ids=False` so Pydantic AI does not replay Responses
+    item ids (`rs_`, `msg_`, `fc_`) that the store-disabled Codex backend
+    cannot resolve, while preserving local tool `call_id` values for tool
+    outputs
   - API-key-backed OpenAI requests leave `openai_store` unset
   - live testing confirmed `gpt-5.5` can complete a large AssistantMD
     function-tool loop, including 37 `file_ops_safe` calls, through OAuth
@@ -844,6 +849,9 @@ Testable artifacts:
   expiry, and cancel behavior.
 - OAuth-backed model construction sets `openai_store=False`; API-key-backed
   model construction leaves it unset.
+- OAuth-backed model construction sets `openai_send_reasoning_ids=False` so
+  replayed histories do not send store-bound Responses item ids to the Codex
+  endpoint.
 - Request-shape inspection for OAuth-backed OpenAI Responses payloads:
   confirm no stateful `previous_response_id`, server-side compaction, or
   storage-dependent settings are introduced without deliberate testing.

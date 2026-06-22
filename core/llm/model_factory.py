@@ -94,6 +94,12 @@ def _apply_openrouter_settings(
         settings_kwargs["openrouter_provider"] = provider_settings
 
 
+def _apply_openai_oauth_responses_settings(settings_kwargs: dict[str, object]) -> None:
+    """Apply Codex/ChatGPT Responses constraints for OAuth-backed OpenAI."""
+    settings_kwargs["openai_store"] = False
+    settings_kwargs["openai_send_reasoning_ids"] = False
+
+
 def _is_retryable_model_http_exception(exc: BaseException) -> bool:
     """Return whether Pydantic AI model HTTP transport should retry the exception."""
     if isinstance(exc, httpx.HTTPStatusError):
@@ -227,7 +233,7 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
             http_client=http_client,
         )
         if openai_build.resolution.effective_auth_mode == OPENAI_AUTH_MODE_OAUTH:
-            settings_kwargs["openai_store"] = False
+            _apply_openai_oauth_responses_settings(settings_kwargs)
         return OpenAIResponsesModel(
             model_string,
             provider=_mark_provider_owns_http_client(
