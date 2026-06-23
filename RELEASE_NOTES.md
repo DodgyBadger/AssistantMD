@@ -13,6 +13,7 @@
 - Clarified in model settings that only OpenAI is currently supported for embedding.
 - Session summarization now fails before extracting summaries when embedding setup is missing or unusable, with clearer logs so users can fix the configuration without ending up with incomplete summaries.
 - Installation doc now calls out the `OPENAI_API_KEY` requirement for embeddings.
+- Fixed UI rendering bug that falsely transformed dollar amounts into LaTeX.
 
 
 ## 2026-06-19 - v0.6.8
