@@ -614,6 +614,9 @@ class VaultStateService:
         root = Path(data_root)
         refreshed = 0
         failed = 0
+        files_created = 0
+        files_changed = 0
+        files_deleted = 0
         latest_sequence: int | None = None
         for vault_name in discover_vaults(str(root)):
             vault_path = root / vault_name
@@ -632,8 +635,13 @@ class VaultStateService:
                 )
                 continue
             refreshed += 1
+            files_created += result.files_created
+            files_changed += result.files_changed
+            files_deleted += result.files_deleted
             if result.latest_sequence is not None:
                 latest_sequence = result.latest_sequence
+
+        changes_detected = files_created + files_changed + files_deleted
 
         logger.add_sink("validation").info(
             "vault_state_refresh_all_completed",
@@ -642,6 +650,10 @@ class VaultStateService:
                 "data_root": str(root),
                 "vaults_refreshed": refreshed,
                 "vaults_failed": failed,
+                "files_created": files_created,
+                "files_changed": files_changed,
+                "files_deleted": files_deleted,
+                "changes_detected": changes_detected,
                 "latest_sequence": latest_sequence,
             },
         )
@@ -649,6 +661,10 @@ class VaultStateService:
             "vault_state_enabled": True,
             "vault_state_refreshed": refreshed,
             "vault_state_failed": failed,
+            "vault_state_files_created": files_created,
+            "vault_state_files_changed": files_changed,
+            "vault_state_files_deleted": files_deleted,
+            "vault_state_changes_detected": changes_detected,
             "vault_state_latest_sequence": latest_sequence,
         }
 
