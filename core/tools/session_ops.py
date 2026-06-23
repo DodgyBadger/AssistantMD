@@ -61,6 +61,10 @@ class SessionSummaryIndexingError(RuntimeError):
     """Raised when a durable session summary write cannot refresh vector indexes."""
 
 
+class SessionSummaryEmbeddingPreflightError(RuntimeError):
+    """Raised when session summarization cannot prepare the required embeddings."""
+
+
 class SessionOps(BaseTool):
     """Search and summarize chat sessions."""
 
@@ -199,6 +203,7 @@ class SessionOps(BaseTool):
                 elif op == "summarize_session":
                     _require(active_vault_name, "vault_name is required")
                     _require(active_session_id, "session_id is required")
+                    await _preflight_session_summary_embeddings()
                     extraction = await _summarize_session(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
@@ -319,6 +324,8 @@ class SessionOps(BaseTool):
                     result = result.to_dict()
                 return json.dumps(result, ensure_ascii=False, indent=2)
             except ModelRetry:
+                raise
+            except SessionSummaryEmbeddingPreflightError:
                 raise
             except SessionSummaryIndexingError:
                 raise
@@ -1314,6 +1321,32 @@ async def _index_session_summary_fields(
         )
         raise SessionSummaryIndexingError(
             f"Failed to index session summary fields for {session_id}: {exc}"
+        ) from exc
+
+
+async def _preflight_session_summary_embeddings() -> None:
+    """Fail before LLM extraction when summary vectors cannot be generated."""
+    try:
+        await VectorService().embed_documents(
+            ["session summary embedding preflight"],
+            model_alias="embeddings",
+        )
+        logger.info(
+            "session_summary_embedding_preflight_completed",
+            data={"model_alias": "embeddings"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "session_summary_embedding_preflight_failed",
+            data={
+                "model_alias": "embeddings",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        raise SessionSummaryEmbeddingPreflightError(
+            "Session summarization requires a usable embedding model alias "
+            f"'embeddings'; configure the embedding model before summarizing sessions: {exc}"
         ) from exc
 
 

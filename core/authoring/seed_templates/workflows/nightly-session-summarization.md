@@ -2,19 +2,23 @@
 run_type: workflow
 schedule: "cron: 0 2 * * *"
 enabled: false
-description: Summarize chat sessions with missing or stale stored summaries.
+description: Summarize chat sessions with missing or stale stored summaries. Requires the embeddings model alias; see docs/use/build-guide.md#session-summaries.
 ---
 
 ## Nightly session summarization
 
-This workflow is disabled by default. Run it manually while tuning the batch
-size, then enable it when the summarization behavior looks right.
+This workflow is disabled by default. It requires the `embeddings` model alias
+to be configured before summaries can be extracted and indexed. See
+`docs/use/build-guide.md#session-summaries`.
+
+Run it manually while tuning the batch size, then enable it when the
+summarization behavior looks right.
 
 ```python
 """Summarize a bounded batch of chat sessions with missing or stale summaries."""
 
 # Editable settings. Start with a small batch while testing so a misconfigured
-# summarization model or prompt policy fails quickly and visibly.
+# summarization model, embedding setup, or prompt policy fails quickly and visibly.
 BATCH_SIZE = 5
 SUMMARIZATION_MODEL = "gpt-mini"
 
