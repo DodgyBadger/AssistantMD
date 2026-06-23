@@ -447,7 +447,7 @@
             if (!text) return '';
 
             const pattern =
-                /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$)/g;
+                /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\))/g;
 
             return text.replace(pattern, (rawMath) => {
                 const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
@@ -461,7 +461,8 @@
 
             return segments.reduce((acc, rawMath, index) => {
                 const placeholder = `@@MATH_SEGMENT_${index}@@`;
-                return acc.split(placeholder).join(utils.escapeHtml(rawMath));
+                const mathHtml = `<span class="assistant-latex-segment">${utils.escapeHtml(rawMath)}</span>`;
+                return acc.split(placeholder).join(mathHtml);
             }, html);
         }
 
@@ -495,14 +496,16 @@
             if (!bodyDiv) return;
             const mathJax = getMathJax();
             if (!mathJax) return;
+            const mathNodes = Array.from(bodyDiv.querySelectorAll('.assistant-latex-segment'));
+            if (!mathNodes.length) return;
 
             mathTypesetQueue = mathTypesetQueue
                 .then(() => mathJax.startup?.promise)
                 .then(() => {
                     if (typeof mathJax.typesetClear === 'function') {
-                        mathJax.typesetClear([bodyDiv]);
+                        mathJax.typesetClear(mathNodes);
                     }
-                    return mathJax.typesetPromise([bodyDiv]);
+                    return mathJax.typesetPromise(mathNodes);
                 })
                 .catch((error) => {
                     console.warn('MathJax render failed:', error);
