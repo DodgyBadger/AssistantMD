@@ -1,6 +1,18 @@
 # Release Notes
 
 
+## 2026-06-23 - v0.6.9
+
+### Chat and workflow polish
+
+- Thinking text from models that expose it now appears intentionally while streaming, with lighter italic styling. By default it remains transient and disappears once the final response is complete.
+- Provider thinking parts are no longer persisted in message history by default, reducing chat token usage and making it more reliable to switch the same session between model providers.
+- Reduced noisy scheduled vault-refresh entries in the activity log.
+- The model configuration UI now makes the embedding-model contract clearer: embedding aliases currently support the OpenAI provider only.
+- Session summarization now fails before extracting summaries when embedding setup is missing or unusable, with clearer logs so users can fix the configuration without ending up with incomplete summaries.
+- Installation doc now calls out the `OPENAI_API_KEY` requirement for embeddings.
+
+
 ## 2026-06-19 - v0.6.8
 
 ### Further hardening of long-running tasks
