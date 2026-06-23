@@ -41,6 +41,11 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
             self._has_tool_call(default_history),
             "Default chat persistence should preserve tool call parts",
         )
+        self.soft_assert_equal(
+            self._provider_item_ids(default_history),
+            [],
+            "Default chat persistence should strip provider item ids when reasoning is dropped",
+        )
         default_detail = self.call_api(
             f"/api/chat/sessions/{default_session_id}?vault_name={vault.name}"
         )
@@ -52,6 +57,14 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
         self.soft_assert(
             "private reasoning summary" not in default_detail.text,
             "Default session detail should not show dropped reasoning parts",
+        )
+        default_payload = default_detail.json()
+        self.soft_assert(
+            all(
+                not message.get("thinking_content")
+                for message in default_payload.get("messages", [])
+            ),
+            "Default session detail should not expose dropped reasoning content",
         )
 
         update_setting = self.call_api(
@@ -86,6 +99,11 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
             self._has_tool_call(opt_in_history),
             "Opt-in chat persistence should preserve tool call parts",
         )
+        self.soft_assert_equal(
+            self._provider_item_ids(opt_in_history),
+            ["reasoning_content", "visible_message", "probe-item"],
+            "Opt-in chat persistence should preserve provider item ids with reasoning parts",
+        )
         opt_in_detail = self.call_api(
             f"/api/chat/sessions/{opt_in_session_id}?vault_name={vault.name}"
         )
@@ -94,10 +112,24 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
             200,
             "Opt-in reasoning-policy session detail should load",
         )
-        self.soft_assert(
-            "assistant-thinking" in opt_in_detail.text
-            and "private reasoning summary" in opt_in_detail.text,
-            "Opt-in session detail should render persisted reasoning as thinking text",
+        opt_in_payload = opt_in_detail.json()
+        opt_in_message = next(
+            (
+                message
+                for message in opt_in_payload.get("messages", [])
+                if message.get("role") == "assistant"
+            ),
+            {},
+        )
+        self.soft_assert_equal(
+            opt_in_message.get("thinking_content"),
+            "private reasoning summary",
+            "Opt-in session detail should expose persisted reasoning separately",
+        )
+        self.soft_assert_equal(
+            opt_in_message.get("content"),
+            "Visible answer.",
+            "Opt-in session detail should keep visible text separate from reasoning",
         )
 
         await self.stop_system()
@@ -110,16 +142,22 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
                 ThinkingPart(
                     content="private reasoning summary",
                     id="reasoning_content",
-                    provider_name="deepseek",
+                    provider_name="openai",
                 ),
-                TextPart(content="Visible answer."),
+                TextPart(
+                    content="Visible answer.",
+                    id="visible_message",
+                    provider_name="openai",
+                ),
                 ToolCallPart(
                     tool_name="probe",
                     args={"value": 1},
                     tool_call_id="probe-call",
+                    id="probe-item",
+                    provider_name="openai",
                 ),
             ],
-            provider_name="deepseek",
+            provider_name="openai",
         )
 
     def _thinking_part_count(self, history) -> int:
@@ -143,3 +181,12 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
             for message in history
             for part in getattr(message, "parts", [])
         )
+
+    def _provider_item_ids(self, history) -> list[str]:
+        ids: list[str] = []
+        for message in history:
+            for part in getattr(message, "parts", []):
+                item_id = getattr(part, "id", None)
+                if item_id:
+                    ids.append(item_id)
+        return ids

@@ -7,7 +7,9 @@
 
 - Provider thinking parts are no longer persisted in message history by default, reducing chat token usage and making it more reliable to switch the same session between model providers.
 - Improved display of thinking parts in the chat UI (for providers that expose it and if persistence is enabled).
+- Fixed OpenAI chat continuation failures caused by replaying provider item IDs after reasoning parts had been removed from stored history.
 - Reduced noisy vault-refresh entries in the activity log.
+- Fixed a rare vault identity race that could make vault activity and mutation history appear under inconsistent vault IDs.
 - Clarified in model settings that only OpenAI is currently supported for embedding.
 - Session summarization now fails before extracting summaries when embedding setup is missing or unusable, with clearer logs so users can fix the configuration without ending up with incomplete summaries.
 - Installation doc now calls out the `OPENAI_API_KEY` requirement for embeddings.

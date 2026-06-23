@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from typing import Any, Literal
 
 from pydantic import TypeAdapter
@@ -124,7 +124,14 @@ class ChatStore:
         )
         if not rows:
             return None
-        return [row.message for row in rows]
+        persist_reasoning = get_persist_model_reasoning_parts()
+        return [
+            _message_for_model_history(
+                row.message,
+                persist_reasoning_parts=persist_reasoning,
+            )
+            for row in rows
+        ]
 
     def get_stored_messages(
         self,
@@ -1408,9 +1415,52 @@ def _message_for_persistence(
     filtered_parts = [
         part for part in message.parts if not isinstance(part, ThinkingPart)
     ]
-    if len(filtered_parts) == len(message.parts):
+    portable_parts = _strip_response_provider_item_ids(filtered_parts)
+    if portable_parts == list(message.parts):
         return message
-    return replace(message, parts=filtered_parts)
+    return replace(message, parts=portable_parts)
+
+
+def _message_for_model_history(
+    message: ModelMessage,
+    *,
+    persist_reasoning_parts: bool,
+) -> ModelMessage:
+    """Return the message shape that is safe to replay as model history."""
+    if not isinstance(message, ModelResponse):
+        return message
+    if not persist_reasoning_parts:
+        return _message_for_persistence(
+            message,
+            persist_reasoning_parts=False,
+        )
+    if any(isinstance(part, ThinkingPart) for part in message.parts):
+        return message
+    portable_parts = _strip_response_provider_item_ids(message.parts)
+    if portable_parts == list(message.parts):
+        return message
+    return replace(message, parts=portable_parts)
+
+
+def _strip_response_provider_item_ids(parts) -> list:
+    """Remove provider response item ids that require exact reasoning-item replay."""
+    return [_strip_response_part_provider_item_id(part) for part in parts]
+
+
+def _strip_response_part_provider_item_id(part):
+    if not is_dataclass(part):
+        return part
+    field_names = {field.name for field in fields(part)}
+    updates: dict[str, Any] = {}
+    if "id" in field_names and getattr(part, "id", None) is not None:
+        updates["id"] = None
+    if "tool_call_id" in field_names:
+        tool_call_id = getattr(part, "tool_call_id", None)
+        if isinstance(tool_call_id, str) and "|" in tool_call_id:
+            updates["tool_call_id"] = tool_call_id.split("|", 1)[0]
+    if not updates:
+        return part
+    return replace(part, **updates)
 
 
 def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:

@@ -30,7 +30,9 @@ removes `ThinkingPart` entries from assistant responses before writing durable
 history so replay remains portable across providers and avoids recurring
 reasoning-token overhead. The general setting
 `persist_model_reasoning_parts=true` opts into storing those provider-native
-parts; existing stored rows are not rewritten when the setting changes.
+parts. When reasoning parts are not persisted, provider response item IDs that
+depend on an exact provider-native reasoning graph are also removed before
+replay.
 
 ## Workspace metadata
 
@@ -59,8 +61,9 @@ For compacted sessions, effective history is reconstructed from the latest
 compaction checkpoint plus raw messages appended after that checkpoint. Raw
 pre-checkpoint messages remain in `chat_messages` for durability, but normal
 runtime readers use effective history by default. Replay sends the effective
-history stored in the database as-is; reasoning-part filtering is a write-time
-policy, not a read-time sanitizer.
+history through the current reasoning history policy: persisted reasoning is
+kept when enabled or already present as complete provider-native history, while
+partial provider item graphs are normalized to portable transcript replay.
 
 `core/chat/history_service.py` is the shared broker over this store for tools,
 session summarization, and authoring helpers. Context scripts should access
