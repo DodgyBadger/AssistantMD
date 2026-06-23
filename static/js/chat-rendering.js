@@ -451,7 +451,9 @@
 
             return text.replace(pattern, (rawMath) => {
                 const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
-                segments.push(rawMath);
+                const display = rawMath.startsWith('\\[');
+                const tex = rawMath.slice(2, -2);
+                segments.push({ tex, display });
                 return placeholder;
             });
         }
@@ -459,9 +461,10 @@
         function restoreLatexPlaceholders(html, segments) {
             if (!html || !segments.length) return html;
 
-            return segments.reduce((acc, rawMath, index) => {
+            return segments.reduce((acc, segment, index) => {
                 const placeholder = `@@MATH_SEGMENT_${index}@@`;
-                const mathHtml = `<span class="assistant-latex-segment">${utils.escapeHtml(rawMath)}</span>`;
+                const display = segment.display ? 'true' : 'false';
+                const mathHtml = `<span class="assistant-latex-segment" data-math-display="${display}">${utils.escapeHtml(segment.tex)}</span>`;
                 return acc.split(placeholder).join(mathHtml);
             }, html);
         }
@@ -469,7 +472,7 @@
         function getMathJax() {
             if (typeof window === 'undefined') return null;
             const mathJax = window.MathJax;
-            if (!mathJax || typeof mathJax.typesetPromise !== 'function') return null;
+            if (!mathJax || typeof mathJax.tex2chtmlPromise !== 'function') return null;
             return mathJax;
         }
 
@@ -495,17 +498,29 @@
         function renderAssistantMath(bodyDiv) {
             if (!bodyDiv) return;
             const mathJax = getMathJax();
-            if (!mathJax) return;
-            const mathNodes = Array.from(bodyDiv.querySelectorAll('.assistant-latex-segment'));
+            if (!mathJax || typeof mathJax.tex2chtmlPromise !== 'function') return;
+            const mathNodes = Array.from(bodyDiv.querySelectorAll('.assistant-latex-segment:not(.assistant-latex-rendered)'));
             if (!mathNodes.length) return;
 
             mathTypesetQueue = mathTypesetQueue
                 .then(() => mathJax.startup?.promise)
                 .then(() => {
-                    if (typeof mathJax.typesetClear === 'function') {
-                        mathJax.typesetClear(mathNodes);
-                    }
-                    return mathJax.typesetPromise(mathNodes);
+                    const conversions = mathNodes.map((node) => {
+                        const tex = node.textContent || '';
+                        const display = node.dataset.mathDisplay === 'true';
+                        return mathJax.tex2chtmlPromise(tex, { display })
+                            .then((mathNode) => {
+                                node.replaceChildren(mathNode);
+                                node.classList.add('assistant-latex-rendered');
+                            })
+                            .catch((error) => {
+                                const open = display ? '\\[' : '\\(';
+                                const close = display ? '\\]' : '\\)';
+                                node.textContent = `${open}${tex}${close}`;
+                                console.warn('MathJax render failed:', error);
+                            });
+                    });
+                    return Promise.all(conversions);
                 })
                 .catch((error) => {
                     console.warn('MathJax render failed:', error);
