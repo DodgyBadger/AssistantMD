@@ -41,6 +41,18 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
             self._has_tool_call(default_history),
             "Default chat persistence should preserve tool call parts",
         )
+        default_detail = self.call_api(
+            f"/api/chat/sessions/{default_session_id}?vault_name={vault.name}"
+        )
+        self.soft_assert_equal(
+            default_detail.status_code,
+            200,
+            "Default reasoning-policy session detail should load",
+        )
+        self.soft_assert(
+            "private reasoning summary" not in default_detail.text,
+            "Default session detail should not show dropped reasoning parts",
+        )
 
         update_setting = self.call_api(
             "/api/system/settings/general/persist_model_reasoning_parts",
@@ -73,6 +85,19 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
         self.soft_assert(
             self._has_tool_call(opt_in_history),
             "Opt-in chat persistence should preserve tool call parts",
+        )
+        opt_in_detail = self.call_api(
+            f"/api/chat/sessions/{opt_in_session_id}?vault_name={vault.name}"
+        )
+        self.soft_assert_equal(
+            opt_in_detail.status_code,
+            200,
+            "Opt-in reasoning-policy session detail should load",
+        )
+        self.soft_assert(
+            "assistant-thinking" in opt_in_detail.text
+            and "private reasoning summary" in opt_in_detail.text,
+            "Opt-in session detail should render persisted reasoning as thinking text",
         )
 
         await self.stop_system()

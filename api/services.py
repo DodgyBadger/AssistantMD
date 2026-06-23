@@ -5,6 +5,7 @@ Handles business logic for status reporting, vault management, etc.
 
 import json
 import hashlib
+import html
 import mimetypes
 import re
 import shutil
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import yaml
+from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
@@ -1146,7 +1148,7 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
                 sequence_index=message.sequence_index,
                 fork_sequence_index=message.fork_sequence_index,
                 role=message.role,
-                content=message.content_text,
+                content=_chat_message_display_content(message),
                 message_type=message.message_type,
                 direction=message.direction,
                 is_tool_message=(
@@ -1173,6 +1175,40 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
             for event in tool_events
         ],
     )
+
+
+def _chat_message_display_content(message) -> str:
+    """Return chat content for UI rendering without changing stored search text."""
+    if not isinstance(message.message, ModelResponse):
+        return message.content_text
+
+    thinking_parts: list[str] = []
+    text_parts: list[str] = []
+    for part in getattr(message.message, "parts", []) or []:
+        if isinstance(part, ThinkingPart) and isinstance(part.content, str):
+            content = part.content.strip()
+            if content:
+                thinking_parts.append(content)
+        elif isinstance(part, TextPart) and isinstance(part.content, str):
+            content = part.content.strip()
+            if content:
+                text_parts.append(content)
+
+    if not thinking_parts:
+        return message.content_text
+
+    thinking_text = _format_thinking_display_text("\n\n".join(thinking_parts))
+    content_parts: list[str] = [
+        f'<span class="assistant-thinking">{html.escape(thinking_text)}</span>'
+    ]
+    if text_parts:
+        content_parts.append("\n\n".join(text_parts))
+    return "\n\n".join(content_parts)
+
+
+def _format_thinking_display_text(text: str) -> str:
+    """Light display cleanup for providers that stream sentence chunks without spaces."""
+    return re.sub(r"""([.!?]["')\]]?)(?=[A-Z])""", r"\1 ", text)
 
 
 def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:

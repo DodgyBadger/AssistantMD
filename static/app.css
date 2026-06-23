@@ -1301,6 +1301,13 @@ details summary::-webkit-details-marker {
 .message-bubble.message-assistant .message-body em {
     color: rgb(var(--text-primary));
 }
+.message-bubble.message-assistant .assistant-thinking {
+    display: block;
+    margin-bottom: 0.75rem;
+    color: rgb(var(--text-secondary));
+    font-style: italic;
+    white-space: pre-wrap;
+}
 .message-bubble.message-assistant .message-body h1,
 .message-bubble.message-assistant .message-body h2,
 .message-bubble.message-assistant .message-body h3,

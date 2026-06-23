@@ -16,6 +16,8 @@ from pydantic_ai import (
     PartDeltaEvent,
     PartStartEvent,
     TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
 )
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import TextPart
@@ -415,6 +417,12 @@ async def _run_prepared_chat_stream_task(
                             "delta",
                             _delta_event_data(delta_text),
                         )
+                    elif isinstance(event.part, ThinkingPart) and event.part.content:
+                        await event_buffer.append(
+                            task.task_id,
+                            "thinking_delta",
+                            _thinking_delta_event_data(event.part.content),
+                        )
 
                 elif isinstance(event, PartDeltaEvent):
                     if isinstance(event.delta, TextPartDelta):
@@ -425,6 +433,14 @@ async def _run_prepared_chat_stream_task(
                             "delta",
                             _delta_event_data(delta_text),
                         )
+                    elif isinstance(event.delta, ThinkingPartDelta):
+                        delta_text = event.delta.content_delta
+                        if delta_text:
+                            await event_buffer.append(
+                                task.task_id,
+                                "thinking_delta",
+                                _thinking_delta_event_data(delta_text),
+                            )
 
                 elif isinstance(event, FunctionToolCallEvent):
                     await _publish_tool_call_started(
@@ -717,6 +733,13 @@ def _delta_event_data(delta_text: str) -> dict[str, Any]:
             "index": 0,
             "finish_reason": None,
         }],
+    }
+
+
+def _thinking_delta_event_data(delta_text: str) -> dict[str, Any]:
+    return {
+        "event": "thinking_delta",
+        "delta": {"content": delta_text},
     }
 
 

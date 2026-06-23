@@ -640,11 +640,14 @@
                 indicator,
                 statusText,
                 bodyDiv,
+                thinkingDiv: null,
                 toolList,
                 toolCallsSection: null,
                 toolCallsSummaryTitle: null,
                 toolStatusMap: new Map(),
                 fullText: '',
+                thinkingText: '',
+                draftText: '',
                 errorMessages: [],
                 hasTools: false,
                 toolSummary: null,
@@ -697,8 +700,21 @@
             context.toolCallsSummaryTitle.textContent = `${label} (${total})`;
         }
 
+        function appendAssistantDelta(context, delta) {
+            if (!context || !delta) {
+                return;
+            }
+            if (context.hasTools) {
+                context.fullText += delta;
+            } else {
+                context.draftText += delta;
+            }
+            renderAssistantMarkdown(context);
+        }
+
         function renderAssistantMarkdown(context, options = {}) {
             const { finalize = false } = options;
+            renderAssistantThinking(context);
             renderAssistantHtml(context.bodyDiv, context.fullText);
             if (finalize) {
                 flushAssistantPostProcess(context);
@@ -706,6 +722,54 @@
                 scheduleAssistantPostProcess(context);
             }
             callbacks.scrollChatToBottom();
+        }
+
+        function renderAssistantThinking(context) {
+            const thinking = [context.thinkingText, context.draftText]
+                .filter(Boolean)
+                .join('\n\n')
+                .trim();
+            if (!thinking && context.thinkingDiv) {
+                context.thinkingDiv.remove();
+                context.thinkingDiv = null;
+                return;
+            }
+            if (!thinking) {
+                return;
+            }
+            if (!context.thinkingDiv) {
+                context.thinkingDiv = document.createElement('span');
+                context.thinkingDiv.className = 'assistant-thinking';
+                context.contentDiv.insertBefore(context.thinkingDiv, context.bodyDiv);
+            }
+            context.thinkingDiv.textContent = formatThinkingText(thinking);
+        }
+
+        function formatThinkingText(text) {
+            return String(text || '')
+                .replace(/([.!?]["')\]]?)(?=[A-Z])/g, '$1 ')
+                .replace(/[ \t]{2,}/g, ' ');
+        }
+
+        function promoteAssistantDraftToThinking(context) {
+            if (!context || !context.fullText) {
+                return;
+            }
+            context.draftText = context.draftText
+                ? `${context.draftText}\n\n${context.fullText}`
+                : context.fullText;
+            context.fullText = '';
+            renderAssistantMarkdown(context);
+        }
+
+        function promoteAssistantDraftToAnswer(context) {
+            if (!context || !context.draftText || context.hasTools) {
+                return;
+            }
+            context.fullText = context.fullText
+                ? `${context.fullText}\n\n${context.draftText}`
+                : context.draftText;
+            context.draftText = '';
         }
 
         function setAssistantStatus(context, label, state = 'thinking') {
@@ -727,9 +791,12 @@
             let entry = context.toolStatusMap.get(toolId);
 
             if (payload.event === 'tool_call_started' || !entry) {
+                if (payload.event === 'tool_call_started') {
+                    context.hasTools = true;
+                    promoteAssistantDraftToThinking(context);
+                }
                 ensureToolCallsSection(context);
                 entry = createToolStatusEntry(context, toolId, payload);
-                context.hasTools = true;
                 if (payload.event === 'tool_call_started') {
                     setAssistantStatus(context, 'Running tools', 'tools');
                 }
@@ -807,6 +874,7 @@
         }
 
         function finalizeAssistantMessage(context, metadata) {
+            promoteAssistantDraftToAnswer(context);
             renderAssistantMarkdown(context, { finalize: true });
 
             const hasError = context.errorMessages.length > 0;
@@ -1299,6 +1367,7 @@
             addLoadingMessage,
             removeLoadingMessage,
             createAssistantStreamingMessage,
+            appendAssistantDelta,
             renderAssistantMarkdown,
             setAssistantStatus,
             handleToolEvent,
