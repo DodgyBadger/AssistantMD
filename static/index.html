@@ -14,7 +14,12 @@
                 inlineMath: [['\\(', '\\)']],
                 displayMath: [['\\[', '\\]']],
                 processEscapes: true,
+                processEnvironments: false,
+                processRefs: false,
                 packages: { '[+]': ['noerrors', 'noundefined'] }
+            },
+            startup: {
+                typeset: false
             },
             options: {
                 skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
