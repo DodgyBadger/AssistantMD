@@ -1157,6 +1157,8 @@ details summary::-webkit-details-marker {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 .message-body {
     position: relative;
@@ -1303,9 +1305,57 @@ details summary::-webkit-details-marker {
 }
 .message-bubble.message-assistant .assistant-thinking {
     display: block;
+    max-width: 100%;
     margin-bottom: 0.75rem;
     color: rgb(var(--text-secondary));
     font-style: italic;
+    white-space: pre-wrap;
+}
+.message-bubble.message-assistant .assistant-thinking-collapsible {
+    overflow: hidden;
+}
+.message-bubble.message-assistant .assistant-thinking-toggle {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-style: inherit;
+    line-height: 1.5;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.message-bubble.message-assistant .assistant-thinking-chevron {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1rem;
+    color: rgb(var(--text-secondary));
+    font-style: normal;
+}
+.message-bubble.message-assistant .assistant-thinking-text {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding-left: 1.35rem;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+}
+.message-bubble.message-assistant .assistant-thinking.is-collapsed .assistant-thinking-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.message-bubble.message-assistant .assistant-thinking.is-expanded .assistant-thinking-text {
     white-space: pre-wrap;
 }
 .message-bubble.message-assistant .message-body h1,

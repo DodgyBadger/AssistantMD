@@ -5,7 +5,6 @@ Handles business logic for status reporting, vault management, etc.
 
 import json
 import hashlib
-import html
 import mimetypes
 import re
 import shutil
@@ -1149,6 +1148,7 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
                 fork_sequence_index=message.fork_sequence_index,
                 role=message.role,
                 content=_chat_message_display_content(message),
+                thinking_content=_chat_message_thinking_content(message),
                 message_type=message.message_type,
                 direction=message.direction,
                 is_tool_message=(
@@ -1182,28 +1182,35 @@ def _chat_message_display_content(message) -> str:
     if not isinstance(message.message, ModelResponse):
         return message.content_text
 
-    thinking_parts: list[str] = []
     text_parts: list[str] = []
+    for part in getattr(message.message, "parts", []) or []:
+        if isinstance(part, TextPart) and isinstance(part.content, str):
+            content = part.content.strip()
+            if content:
+                text_parts.append(content)
+
+    if not text_parts:
+        return message.content_text
+
+    return "\n\n".join(text_parts)
+
+
+def _chat_message_thinking_content(message) -> str:
+    """Return persisted provider thinking content separately from answer markdown."""
+    if not isinstance(message.message, ModelResponse):
+        return ""
+
+    thinking_parts: list[str] = []
     for part in getattr(message.message, "parts", []) or []:
         if isinstance(part, ThinkingPart) and isinstance(part.content, str):
             content = part.content.strip()
             if content:
                 thinking_parts.append(content)
-        elif isinstance(part, TextPart) and isinstance(part.content, str):
-            content = part.content.strip()
-            if content:
-                text_parts.append(content)
 
     if not thinking_parts:
-        return message.content_text
+        return ""
 
-    thinking_text = _format_thinking_display_text("\n\n".join(thinking_parts))
-    content_parts: list[str] = [
-        f'<span class="assistant-thinking">{html.escape(thinking_text)}</span>'
-    ]
-    if text_parts:
-        content_parts.append("\n\n".join(text_parts))
-    return "\n\n".join(content_parts)
+    return _format_thinking_display_text("\n\n".join(thinking_parts))
 
 
 def _format_thinking_display_text(text: str) -> str:

@@ -219,7 +219,8 @@
                     const assistantToolEvents = toolEventsForIds(toolEventsById, pendingToolCallIds);
                     pendingToolCallIds.clear();
                     renderPersistedAssistantMessage(message.content || '', assistantToolEvents, {
-                        sequenceIndex: forkSequenceIndex
+                        sequenceIndex: forkSequenceIndex,
+                        thinkingText: message.thinking_content || ''
                     });
                     return;
                 }
@@ -310,6 +311,9 @@
         function renderPersistedAssistantMessage(content, toolEvents, options = {}) {
             const context = createAssistantStreamingMessage();
             context.fullText = content || '';
+            context.thinkingText = options.thinkingText || '';
+            context.collapseThinking = Boolean(context.thinkingText);
+            context.thinkingExpanded = false;
             context.sequenceIndex = Number.isInteger(options.sequenceIndex) ? options.sequenceIndex : null;
             context.archivedToolEvents = Boolean(options.archivedToolEvents);
             renderAssistantMarkdown(context, { finalize: true });
@@ -641,12 +645,16 @@
                 statusText,
                 bodyDiv,
                 thinkingDiv: null,
+                thinkingTextSpan: null,
+                thinkingToggle: null,
                 toolList,
                 toolCallsSection: null,
                 toolCallsSummaryTitle: null,
                 toolStatusMap: new Map(),
                 fullText: '',
                 thinkingText: '',
+                collapseThinking: false,
+                thinkingExpanded: false,
                 draftText: '',
                 errorMessages: [],
                 hasTools: false,
@@ -738,11 +746,76 @@
                 return;
             }
             if (!context.thinkingDiv) {
-                context.thinkingDiv = document.createElement('span');
+                context.thinkingDiv = document.createElement('div');
                 context.thinkingDiv.className = 'assistant-thinking';
                 context.contentDiv.insertBefore(context.thinkingDiv, context.bodyDiv);
             }
-            context.thinkingDiv.textContent = formatThinkingText(thinking);
+            const formattedThinking = formatThinkingText(thinking);
+            if (!context.collapseThinking) {
+                renderPlainAssistantThinking(context, formattedThinking);
+                return;
+            }
+            renderCollapsibleAssistantThinking(context, formattedThinking);
+        }
+
+        function renderPlainAssistantThinking(context, text) {
+            context.thinkingDiv.className = 'assistant-thinking';
+            context.thinkingDiv.textContent = text;
+            context.thinkingTextSpan = null;
+            context.thinkingToggle = null;
+        }
+
+        function renderCollapsibleAssistantThinking(context, text) {
+            ensureCollapsibleThinkingStructure(context);
+            context.thinkingTextSpan.textContent = text;
+            setThinkingExpanded(context, Boolean(context.thinkingExpanded));
+        }
+
+        function ensureCollapsibleThinkingStructure(context) {
+            if (context.thinkingToggle && context.thinkingTextSpan) {
+                return;
+            }
+
+            context.thinkingDiv.innerHTML = '';
+            context.thinkingDiv.className = 'assistant-thinking assistant-thinking-collapsible';
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'assistant-thinking-toggle';
+            toggle.title = 'Show thinking';
+
+            const chevron = document.createElement('span');
+            chevron.className = 'assistant-thinking-chevron';
+            chevron.setAttribute('aria-hidden', 'true');
+            chevron.textContent = '▸';
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'assistant-thinking-text';
+
+            toggle.appendChild(chevron);
+            toggle.appendChild(textSpan);
+            toggle.addEventListener('click', () => {
+                context.thinkingExpanded = !context.thinkingExpanded;
+                setThinkingExpanded(context, context.thinkingExpanded);
+            });
+
+            context.thinkingDiv.appendChild(toggle);
+            context.thinkingToggle = toggle;
+            context.thinkingTextSpan = textSpan;
+        }
+
+        function setThinkingExpanded(context, expanded) {
+            if (!context.thinkingDiv || !context.thinkingToggle) {
+                return;
+            }
+            context.thinkingDiv.classList.toggle('is-expanded', expanded);
+            context.thinkingDiv.classList.toggle('is-collapsed', !expanded);
+            context.thinkingToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            context.thinkingToggle.title = expanded ? 'Hide thinking' : 'Show thinking';
+            const chevron = context.thinkingToggle.querySelector('.assistant-thinking-chevron');
+            if (chevron) {
+                chevron.textContent = expanded ? '▾' : '▸';
+            }
         }
 
         function formatThinkingText(text) {
