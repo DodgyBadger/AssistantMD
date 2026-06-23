@@ -80,14 +80,15 @@ class VaultStateScheduledRefreshScenario(BaseScenario):
         initial_events = service.changes_since(0)
         checkpoint = max((event.sequence for event in initial_events), default=0)
 
-        scheduled_activity_count = self._scheduled_refresh_activity_count()
+        vault_state_activity_count = self._vault_state_activity_count()
         run_scheduled_vault_state_refresh(controller.test_data_root)
         self.soft_assert_equal(
-            self._scheduled_refresh_activity_count(),
-            scheduled_activity_count,
-            "No-op scheduled refresh should stay out of System Activity",
+            self._vault_state_activity_count(),
+            vault_state_activity_count,
+            "No-op scheduled refresh should keep all vault-state events out of System Activity",
         )
 
+        scheduled_activity_count = self._scheduled_refresh_activity_count()
         (vault / "notes" / "external.md").write_text("External v2\n", encoding="utf-8")
         run_scheduled_vault_state_refresh(controller.test_data_root)
         self.soft_assert_equal(
@@ -140,10 +141,16 @@ class VaultStateScheduledRefreshScenario(BaseScenario):
         )
         refresh_settings_cache()
 
-    def _scheduled_refresh_activity_count(self) -> int:
+    def _activity_log_text(self) -> str:
         activity_log = self._get_system_controller()._system_root / "activity.log"
         if not activity_log.exists():
-            return 0
-        return activity_log.read_text(encoding="utf-8").count(
+            return ""
+        return activity_log.read_text(encoding="utf-8")
+
+    def _vault_state_activity_count(self) -> int:
+        return self._activity_log_text().count('"tag": "vault-state"')
+
+    def _scheduled_refresh_activity_count(self) -> int:
+        return self._activity_log_text().count(
             '"event": "vault_state_scheduled_refresh_completed"'
         )

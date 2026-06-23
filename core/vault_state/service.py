@@ -135,6 +135,7 @@ class VaultStateService:
         vault_path: str | Path,
         *,
         vault_name: str | None = None,
+        log_activity: bool = True,
     ) -> VaultStateRefreshResult:
         """Refresh the manifest for one vault path."""
         if not get_vault_state_enabled():
@@ -149,7 +150,12 @@ class VaultStateService:
         matcher = ExcludedPathMatcher.from_patterns(get_vault_state_excluded_patterns())
         now = datetime.now(UTC)
 
-        logger.add_sink("validation").info(
+        start_logger = (
+            logger.add_sink("validation")
+            if log_activity
+            else logger.set_sinks(["validation"])
+        )
+        start_logger.info(
             "vault_state_refresh_started",
             data={
                 "event": "vault_state_refresh_started",
@@ -338,7 +344,12 @@ class VaultStateService:
             changed_paths=tuple(changed_paths),
             deleted_paths=tuple(deleted_paths),
         )
-        logger.add_sink("validation").info(
+        completion_logger = (
+            logger.add_sink("validation")
+            if log_activity
+            else logger.set_sinks(["validation"])
+        )
+        completion_logger.info(
             "vault_state_refresh_completed",
             data={
                 "event": "vault_state_refresh_completed",
@@ -621,7 +632,11 @@ class VaultStateService:
         for vault_name in discover_vaults(str(root)):
             vault_path = root / vault_name
             try:
-                result = self.refresh_vault(vault_path, vault_name=vault_name)
+                result = self.refresh_vault(
+                    vault_path,
+                    vault_name=vault_name,
+                    log_activity=False,
+                )
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 logger.add_sink("validation").warning(
@@ -643,7 +658,13 @@ class VaultStateService:
 
         changes_detected = files_created + files_changed + files_deleted
 
-        logger.add_sink("validation").info(
+        should_log_activity = bool(failed or changes_detected)
+        completion_logger = (
+            logger.add_sink("validation")
+            if should_log_activity
+            else logger.set_sinks(["validation"])
+        )
+        completion_logger.info(
             "vault_state_refresh_all_completed",
             data={
                 "event": "vault_state_refresh_all_completed",
