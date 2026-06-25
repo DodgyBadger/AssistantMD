@@ -4,20 +4,36 @@
 - Primary integration testing is scenario validation under `validation/scenarios/`.
 - Prefer adding or adjusting scenario files by feature area (for example, `validation/scenarios/integration/`).
 - Scenario names should be descriptive and behavior-oriented (for example, `context_manager_cache_modes.py`).
+- Scenario coverage is for primary subsystem boundaries, durable contracts, and
+  regressions we have already seen or have strong reason to expect. Do not add a
+  scenario for every small UI detail, formatting tweak, or implementation helper.
+  Use focused smoke checks, code review, or an existing scenario assertion for
+  those narrower changes unless they protect an important cross-subsystem
+  contract.
 
 ## Integration Scenario Assertions
 - Never assert on non-deterministic LLM prose in integration scenarios.
 - Prefer deterministic artifacts: API responses, file contents, persisted state, validation events, tool calls, exact helper outputs, or stable contract fragments from static templates.
 - If a scenario needs to prove that an LLM-visible instruction exists, assert only the smallest stable contract terms rather than a full sentence that may be edited for tone.
+- Avoid asserting frontend CSS classes, markup structure, or copy unless that is
+  the explicit product contract under test. Prefer the stable data contract that
+  drives the UI, and leave visual styling details to manual review or a
+  purpose-built frontend harness.
 
 ## Validation-First Workflow
 
-Use the validation framework to shape feature design from day one, not as a final verification pass.
+Use the validation framework to shape feature design from day one for changes
+that affect durable behavior or subsystem boundaries, not as a blanket rule for
+every edit.
 
 ### 1) Write the feature spec in terms of artifacts
 - final artifacts users will observe (files, API responses, state changes)
 - internal artifacts required for confidence (validation events at key decision points)
 - non-negotiable invariants (what must never regress)
+- why the behavior warrants scenario coverage instead of a lighter smoke check:
+  for example, it crosses subsystem ownership, preserves user data, guards a
+  previously observed drift point, or defines a durable tool/API/runtime
+  contract
 
 ### 2) Add scenario assertions before implementation
 - create or extend a scenario with failing assertions for those artifacts

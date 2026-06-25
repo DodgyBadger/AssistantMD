@@ -1122,18 +1122,36 @@
         return text.length > limit ? `${text.slice(0, limit)}...` : text;
     }
 
-    function buildProviderOptions(selected) {
-        if (!state.providers.length) {
+    function buildProviderOptions(selected, { embeddingOnly = false } = {}) {
+        const providers = embeddingOnly
+            ? state.providers.filter((provider) => provider.name === 'openai')
+            : state.providers;
+        if (!providers.length) {
             return '<option value="">No providers available</option>';
         }
 
-        return state.providers.map((provider) => {
+        return providers.map((provider) => {
             const isSelected = provider.name === selected ? 'selected' : '';
             const label = provider.user_editable === false
                 ? `${provider.name} (built-in)`
                 : provider.name;
             return `<option value="${escapeHtml(provider.name)}" ${isSelected}>${escapeHtml(label)}</option>`;
         }).join('');
+    }
+
+    function capabilitiesIncludeEmbedding(capabilities) {
+        const values = Array.isArray(capabilities)
+            ? capabilities
+            : String(capabilities || '').split(',');
+        return values.some((item) => String(item).trim().toLowerCase() === 'embedding');
+    }
+
+    function renderEmbeddingProviderNotice() {
+        return `
+            <p class="text-xs state-warning mt-1">
+                Embedding models currently support only the OpenAI provider.
+            </p>
+        `;
     }
 
     function renderModelViewCard(model) {
@@ -1148,6 +1166,9 @@
         const capabilities = Array.isArray(model.capabilities) && model.capabilities.length
             ? model.capabilities.join(', ')
             : 'text';
+        const embeddingNotice = capabilitiesIncludeEmbedding(model.capabilities)
+            ? renderEmbeddingProviderNotice()
+            : '';
 
         const actions = editable
             ? `
@@ -1175,6 +1196,7 @@
                         <div>
                             <div class="text-xs font-medium text-txt-secondary mb-1">Provider</div>
                             <div class="text-sm text-txt-primary">${escapeHtml(model.provider)}</div>
+                            ${embeddingNotice}
                         </div>
                         <div>
                             <div class="text-xs font-medium text-txt-secondary mb-1">Model Identifier</div>
@@ -1192,10 +1214,17 @@
 
     function renderModelEditCard(draft, { isNew }) {
         const rowKey = isNew ? '__new' : (state.modelEdit?.key || draft.name || '');
-        const selectedProvider = draft.provider !== undefined ? draft.provider : (state.providers[0]?.name || '');
-        const providerOptions = buildProviderOptions(selectedProvider);
+        const isEmbeddingModel = capabilitiesIncludeEmbedding(draft.capabilities || 'text');
+        const selectedProvider = isEmbeddingModel
+            ? 'openai'
+            : draft.provider !== undefined ? draft.provider : (state.providers[0]?.name || '');
+        const providerOptions = buildProviderOptions(selectedProvider, { embeddingOnly: isEmbeddingModel });
 
         const providerDisabled = state.providers.length === 0 ? 'disabled' : '';
+        const providerHelp = isEmbeddingModel
+            ? 'Only the OpenAI provider is supported for embedding model aliases.'
+            : state.providers.length ? 'Select the provider powering this model.' : 'Add a provider before creating models.';
+        const embeddingNotice = isEmbeddingModel ? renderEmbeddingProviderNotice() : '';
 
         const renameHint = isNew
             ? '<p class="text-xs text-txt-secondary mt-1">Lowercase alias used in assistant files.</p>'
@@ -1215,7 +1244,8 @@
                             <select data-field="provider" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" ${providerDisabled}>
                                 ${providerOptions}
                             </select>
-                            <p class="text-xs text-txt-secondary mt-1">${state.providers.length ? 'Select the provider powering this model.' : 'Add a provider before creating models.'}</p>
+                            <p class="text-xs text-txt-secondary mt-1">${providerHelp}</p>
+                            ${embeddingNotice}
                         </div>
                     </div>
                     <div>
@@ -1272,6 +1302,7 @@ function handleModelInputChange(event) {
     if (!state.modelDraft) {
         state.modelDraft = {};
     }
+    const wasEmbeddingModel = capabilitiesIncludeEmbedding(state.modelDraft.capabilities || 'text');
     if (field === 'name') {
         const normalized = event.target.value.trim().toLowerCase();
         state.modelDraft[field] = normalized;
@@ -1280,6 +1311,14 @@ function handleModelInputChange(event) {
         }
     } else {
         state.modelDraft[field] = event.target.value;
+    }
+    const isEmbeddingModel = capabilitiesIncludeEmbedding(state.modelDraft.capabilities);
+    if (field === 'capabilities' && !wasEmbeddingModel && isEmbeddingModel) {
+        state.modelDraft.provider = 'openai';
+    }
+    if (field === 'capabilities' && wasEmbeddingModel !== isEmbeddingModel) {
+        renderModels();
+        focusModelInput('capabilities');
     }
 }
 
@@ -1368,6 +1407,10 @@ async function saveModelRow(rowKey) {
     }
     if (!capabilities.length) {
         setStatus(elements.modelFeedback, 'At least one capability is required (e.g. text).', 'error');
+        return;
+    }
+    if (capabilities.includes('embedding') && provider !== 'openai') {
+        setStatus(elements.modelFeedback, 'Embedding models currently support only the OpenAI provider.', 'error');
         return;
     }
 

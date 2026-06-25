@@ -60,7 +60,10 @@ APScheduler system job:
 The job periodically calls `refresh_all_vaults(...)` so external vault edits
 from Obsidian or other tools are observed without requiring app restart or
 manual rescan. Setting `vault_scan_interval_seconds` to `0` disables and removes
-the scheduled job.
+the scheduled job. Successful scheduled refreshes that do not detect file
+changes are validation-only events. Scheduled refreshes write to System Activity
+when they detect created, changed, or deleted files, or when one or more vaults
+fail to refresh.
 
 ## Mutation Routing
 

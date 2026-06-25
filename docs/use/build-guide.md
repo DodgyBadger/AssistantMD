@@ -136,6 +136,13 @@ The default setup includes an optional workflow that can summarize chats over
 time, and the `session_ops` tool can search or refresh those summaries when
 prior-work recall is useful.
 
+Session summary indexing requires a configured `embeddings` model alias. The
+current supported setup is the default OpenAI embedding model
+`text-embedding-3-small` with `OPENAI_API_KEY` configured in secrets. The
+nightly summarization workflow fails before extracting summaries when that
+embedding setup is unavailable, so failed runs do not leave incomplete session
+summary records behind.
+
 ---
 
 ## How pieces combine

@@ -25,6 +25,15 @@ The main tables are:
   system-maintained replacement history and the raw-message sequence boundary
   covered by that checkpoint
 
+Provider reasoning/thinking parts are transient by default. Chat persistence
+removes `ThinkingPart` entries from assistant responses before writing durable
+history so replay remains portable across providers and avoids recurring
+reasoning-token overhead. The general setting
+`persist_model_reasoning_parts=true` opts into storing those provider-native
+parts. When reasoning parts are not persisted, provider response item IDs that
+depend on an exact provider-native reasoning graph are also removed before
+replay.
+
 ## Workspace metadata
 
 Chat sessions may store a vault-relative workspace path in session metadata.
@@ -51,7 +60,10 @@ For uncompacted sessions, effective history is the stored raw message sequence.
 For compacted sessions, effective history is reconstructed from the latest
 compaction checkpoint plus raw messages appended after that checkpoint. Raw
 pre-checkpoint messages remain in `chat_messages` for durability, but normal
-runtime readers use effective history by default.
+runtime readers use effective history by default. Replay sends the effective
+history through the current reasoning history policy: persisted reasoning is
+kept when enabled or already present as complete provider-native history, while
+partial provider item graphs are normalized to portable transcript replay.
 
 `core/chat/history_service.py` is the shared broker over this store for tools,
 session summarization, and authoring helpers. Context scripts should access

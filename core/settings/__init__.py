@@ -507,6 +507,19 @@ def get_chat_model_requests_limit() -> int:
     return parsed if parsed > 0 else 0
 
 
+def get_persist_model_reasoning_parts() -> bool:
+    """Return whether provider reasoning parts should be stored in chat history."""
+    entry = get_general_settings().get("persist_model_reasoning_parts")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
 def get_delegate_tool_calls_limit() -> int:
     """Return the max tool calls per delegate child run; 0 disables the limit."""
     entry = get_general_settings().get("delegate_tool_calls_limit")

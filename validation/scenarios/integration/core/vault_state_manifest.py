@@ -2,11 +2,13 @@
 
 import sqlite3
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from validation.core.base_scenario import BaseScenario
+from core.vault_state.identity import resolve_or_create_vault_identity
 
 
 class VaultStateManifestScenario(BaseScenario):
@@ -23,6 +25,21 @@ class VaultStateManifestScenario(BaseScenario):
         from core.vault_state import VaultStateService
 
         service = VaultStateService()
+
+        concurrent_vault = vault.parent / "VaultStateConcurrentIdentityVault"
+        concurrent_vault.mkdir()
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            identities = list(
+                executor.map(
+                    lambda _: resolve_or_create_vault_identity(concurrent_vault).vault_id,
+                    range(16),
+                )
+            )
+        self.soft_assert_equal(
+            len(set(identities)),
+            1,
+            "Concurrent vault identity creation should return one stable id",
+        )
 
         checkpoint = self.event_checkpoint()
         first = service.refresh_vault(vault)
