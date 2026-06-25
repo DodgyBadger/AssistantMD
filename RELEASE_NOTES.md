@@ -3,11 +3,8 @@
 
 ## 2026-06-23 - v0.6.9
 
-### Chat and workflow polish
-
 - Provider thinking parts are no longer persisted in message history by default, reducing chat token usage and making it more reliable to switch the same session between model providers.
 - Improved display of thinking parts in the chat UI (for providers that expose it and if persistence is enabled).
-- Tightened LaTeX rendering to backslash delimiters only, preventing ordinary dollar figures from being interpreted as math.
 - Reduced noisy vault-refresh entries in the activity log; idle scheduled scans now stay out of the rotating activity log unless they detect changes or failures.
 - Fixed a rare vault identity race that could make vault activity and mutation history appear under inconsistent vault IDs.
 - Clarified in model settings that only OpenAI is currently supported for embedding.
