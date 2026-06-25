@@ -536,6 +536,7 @@ class ChatSessionMessageInfo(BaseModel):
     )
     role: str = Field(..., description="Normalized role for rendering")
     content: str = Field(..., description="Normalized rendered message content")
+    thinking_content: str = Field("", description="Persisted provider reasoning/thinking content for display")
     message_type: str = Field(..., description="Provider-native message class name")
     direction: str = Field(..., description="Request/response direction for the provider-native message")
     is_tool_message: bool = Field(False, description="Whether this row represents a tool call/return message")

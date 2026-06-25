@@ -16,6 +16,7 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.state import get_runtime_context
 from core.vault_state.file_mutations import mutate_vault_file
+from core.vault_state.identity import resolve_or_create_vault_identity
 
 
 class VaultStateMutationRecorderScenario(BaseScenario):
@@ -74,6 +75,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
 
         rows = self._mutation_rows(task_id)
         self.soft_assert(rows, "Mutation rows should be persisted")
+        current_vault_id = resolve_or_create_vault_identity(vault).vault_id
         operations_by_path = {(row["operation"], row["path"]) for row in rows}
         expected_operations = {
             ("write", "notes/created-by-workflow.md"),
@@ -230,7 +232,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 )
 
         self._insert_chat_session(vault_name=vault.name)
-        self._insert_chat_mutation_rows(vault_id=vault_id, vault_name=vault.name)
+        self._insert_chat_mutation_rows(vault_id=current_vault_id, vault_name=vault.name)
         chat_response = self.call_api(
             f"/api/vaults/{vault.name}/task-mutations",
             params={"limit": 5},
@@ -269,7 +271,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 "Chat group should retain per-turn task ids",
             )
 
-        manifest = self._manifest_row(vault_id, "notes/created-by-workflow.md")
+        manifest = self._manifest_row(current_vault_id, "notes/created-by-workflow.md")
         self.soft_assert(manifest is not None, "Manifest should update immediately after write")
         if manifest is not None:
             self.soft_assert_equal(manifest["deleted_at"], None, "Created file should be active")
@@ -301,7 +303,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             failure_events,
             name="vault_state_mutation_failed",
             expected={
-                "vault_id": vault_id,
+                "vault_id": current_vault_id,
                 "vault_name": vault.name,
                 "path": "notes/failing-write.md",
                 "operation": "write",

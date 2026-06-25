@@ -1,6 +1,18 @@
 # Release Notes
 
 
+## 2026-06-23 - v0.6.9
+
+- Provider thinking parts are no longer persisted in message history by default, reducing chat token usage and making it more reliable to switch the same session between model providers.
+- Improved display of thinking parts in the chat UI (for providers that expose it and if persistence is enabled).
+- Reduced noisy vault-refresh entries in the activity log; idle scheduled scans now stay out of the rotating activity log unless they detect changes or failures.
+- Fixed a rare vault identity race that could make vault activity and mutation history appear under inconsistent vault IDs.
+- Clarified in model settings that only OpenAI is currently supported for embedding.
+- Session summarization now fails before extracting summaries when embedding setup is missing or unusable, with clearer logs so users can fix the configuration without ending up with incomplete summaries.
+- Installation doc now calls out the `OPENAI_API_KEY` requirement for embeddings.
+- Fixed UI rendering bug that falsely transformed dollar amounts into LaTeX.
+
+
 ## 2026-06-19 - v0.6.8
 
 ### Further hardening of long-running tasks
@@ -341,7 +353,7 @@ Chat sessions are now persisted in SQLite and survive app restarts.
 ### Feature: LaTeX rendering in chat
 This release adds first-class LaTeX rendering in assistant responses using bundled MathJax in the chat UI.
 
-- Supports inline math (`$...$`, `\(...\)`) and display math (`$$...$$`, `\[...\]`).
+- Supports inline math (`\(...\)`) and display math (`\[...\]`).
 - Preserves math while markdown is parsed, then typesets math after render (including streaming responses).
 - Skips math parsing inside code blocks/inline code so examples stay literal.
 

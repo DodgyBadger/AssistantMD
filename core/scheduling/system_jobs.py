@@ -51,16 +51,25 @@ async def run_scheduled_ingestion_worker() -> None:
 def run_scheduled_vault_state_refresh(data_root: str) -> dict[str, Any]:
     """Refresh all vault-state manifests for the scheduler job store."""
     result = VaultStateService().refresh_all_vaults(Path(data_root))
-    logger.info(
+    data = {
+        "event": "vault_state_scheduled_refresh_completed",
+        "data_root": data_root,
+        "vault_state_enabled": result.get("vault_state_enabled"),
+        "vault_state_refreshed": result.get("vault_state_refreshed"),
+        "vault_state_failed": result.get("vault_state_failed"),
+        "vault_state_files_created": result.get("vault_state_files_created"),
+        "vault_state_files_changed": result.get("vault_state_files_changed"),
+        "vault_state_files_deleted": result.get("vault_state_files_deleted"),
+        "vault_state_changes_detected": result.get("vault_state_changes_detected"),
+        "vault_state_latest_sequence": result.get("vault_state_latest_sequence"),
+    }
+    should_log_activity = bool(
+        result.get("vault_state_failed") or result.get("vault_state_changes_detected")
+    )
+    log = logger.add_sink("validation") if should_log_activity else logger.set_sinks(["validation"])
+    log.info(
         "Vault state scheduled refresh completed",
-        data={
-            "event": "vault_state_scheduled_refresh_completed",
-            "data_root": data_root,
-            "vault_state_enabled": result.get("vault_state_enabled"),
-            "vault_state_refreshed": result.get("vault_state_refreshed"),
-            "vault_state_failed": result.get("vault_state_failed"),
-            "vault_state_latest_sequence": result.get("vault_state_latest_sequence"),
-        },
+        data=data,
     )
     return result
 

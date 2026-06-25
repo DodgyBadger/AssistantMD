@@ -34,6 +34,10 @@ false, OpenAI resolves as API-key-only even if OAuth tokens are stored.
 Runtime-relevant general settings include:
 
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
+- `persist_model_reasoning_parts`: when false, provider reasoning/thinking
+  parts are not persisted in durable chat history; when true, those parts are
+  stored with provider-native messages, which can increase replay tokens and
+  reduce portability across providers.
 - `delegate_tool_calls_limit`: maximum tool calls allowed inside one `delegate` child-agent run; `0` disables the limit.
 - `delegate_timeout_seconds`: maximum seconds allowed for one `delegate` child-agent run; `0` disables the timeout.
 - `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the workflow task timeout.

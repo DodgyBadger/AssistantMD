@@ -8,8 +8,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from pydantic_ai import AgentRunResultEvent, PartStartEvent
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai import AgentRunResultEvent, PartDeltaEvent, PartStartEvent
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+    UserPromptPart,
+)
 
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import (
@@ -35,7 +43,10 @@ class _FakeStreamResult:
 
 class _CompletingStreamAgent:
     async def run_stream_events(self, *args, **kwargs):
-        yield PartStartEvent(index=0, part=TextPart("api delta"))
+        yield PartStartEvent(index=0, part=ThinkingPart("thinking start "))
+        yield PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="thinking delta"))
+        yield PartStartEvent(index=1, part=TextPart("api "))
+        yield PartDeltaEvent(index=1, delta=TextPartDelta("delta"))
         yield AgentRunResultEvent(
             result=_FakeStreamResult(
                 prompt="Stream events over API.",
@@ -85,17 +96,21 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
             "Chat task event stream endpoint should return SSE for a chat task",
         )
         self.soft_assert(
-            '"event": "delta"' in replay.text and '"event": "done"' in replay.text,
-            "Chat task event stream should replay buffered delta and done events",
+            '"event": "thinking_delta"' in replay.text
+            and "thinking start " in replay.text
+            and "thinking delta" in replay.text
+            and '"event": "delta"' in replay.text
+            and '"event": "done"' in replay.text,
+            "Chat task event stream should replay buffered thinking, delta, and done events",
         )
         self.soft_assert(
-            "api delta" in replay.text,
+            "api " in replay.text and "delta" in replay.text,
             "Replayed SSE stream should include the buffered delta text",
         )
 
         replay_after_delta = self.call_api(
             f"/api/chat/tasks/{completed.task.task_id}/events",
-            params={"after_sequence": 1},
+            params={"after_sequence": 4},
         )
         self.soft_assert_equal(
             replay_after_delta.status_code,
@@ -103,6 +118,8 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
             "Chat task event stream should support cursor replay",
         )
         self.soft_assert(
+            '"event": "thinking_delta"' not in replay_after_delta.text
+            and
             '"event": "delta"' not in replay_after_delta.text
             and '"event": "done"' in replay_after_delta.text,
             "Cursor replay should skip events at or before after_sequence",

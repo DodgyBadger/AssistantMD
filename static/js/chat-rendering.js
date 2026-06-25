@@ -219,7 +219,8 @@
                     const assistantToolEvents = toolEventsForIds(toolEventsById, pendingToolCallIds);
                     pendingToolCallIds.clear();
                     renderPersistedAssistantMessage(message.content || '', assistantToolEvents, {
-                        sequenceIndex: forkSequenceIndex
+                        sequenceIndex: forkSequenceIndex,
+                        thinkingText: message.thinking_content || ''
                     });
                     return;
                 }
@@ -310,6 +311,9 @@
         function renderPersistedAssistantMessage(content, toolEvents, options = {}) {
             const context = createAssistantStreamingMessage();
             context.fullText = content || '';
+            context.thinkingText = options.thinkingText || '';
+            context.collapseThinking = Boolean(context.thinkingText);
+            context.thinkingExpanded = false;
             context.sequenceIndex = Number.isInteger(options.sequenceIndex) ? options.sequenceIndex : null;
             context.archivedToolEvents = Boolean(options.archivedToolEvents);
             renderAssistantMarkdown(context, { finalize: true });
@@ -443,11 +447,13 @@
             if (!text) return '';
 
             const pattern =
-                /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$)/g;
+                /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\))/g;
 
             return text.replace(pattern, (rawMath) => {
                 const placeholder = `@@MATH_SEGMENT_${segments.length}@@`;
-                segments.push(rawMath);
+                const display = rawMath.startsWith('\\[');
+                const tex = rawMath.slice(2, -2);
+                segments.push({ tex, display });
                 return placeholder;
             });
         }
@@ -455,16 +461,18 @@
         function restoreLatexPlaceholders(html, segments) {
             if (!html || !segments.length) return html;
 
-            return segments.reduce((acc, rawMath, index) => {
+            return segments.reduce((acc, segment, index) => {
                 const placeholder = `@@MATH_SEGMENT_${index}@@`;
-                return acc.split(placeholder).join(utils.escapeHtml(rawMath));
+                const display = segment.display ? 'true' : 'false';
+                const mathHtml = `<span class="assistant-latex-segment" data-math-display="${display}">${utils.escapeHtml(segment.tex)}</span>`;
+                return acc.split(placeholder).join(mathHtml);
             }, html);
         }
 
         function getMathJax() {
             if (typeof window === 'undefined') return null;
             const mathJax = window.MathJax;
-            if (!mathJax || typeof mathJax.typesetPromise !== 'function') return null;
+            if (!mathJax || typeof mathJax.tex2chtmlPromise !== 'function') return null;
             return mathJax;
         }
 
@@ -490,15 +498,29 @@
         function renderAssistantMath(bodyDiv) {
             if (!bodyDiv) return;
             const mathJax = getMathJax();
-            if (!mathJax) return;
+            if (!mathJax || typeof mathJax.tex2chtmlPromise !== 'function') return;
+            const mathNodes = Array.from(bodyDiv.querySelectorAll('.assistant-latex-segment:not(.assistant-latex-rendered)'));
+            if (!mathNodes.length) return;
 
             mathTypesetQueue = mathTypesetQueue
                 .then(() => mathJax.startup?.promise)
                 .then(() => {
-                    if (typeof mathJax.typesetClear === 'function') {
-                        mathJax.typesetClear([bodyDiv]);
-                    }
-                    return mathJax.typesetPromise([bodyDiv]);
+                    const conversions = mathNodes.map((node) => {
+                        const tex = node.textContent || '';
+                        const display = node.dataset.mathDisplay === 'true';
+                        return mathJax.tex2chtmlPromise(tex, { display })
+                            .then((mathNode) => {
+                                node.replaceChildren(mathNode);
+                                node.classList.add('assistant-latex-rendered');
+                            })
+                            .catch((error) => {
+                                const open = display ? '\\[' : '\\(';
+                                const close = display ? '\\]' : '\\)';
+                                node.textContent = `${open}${tex}${close}`;
+                                console.warn('MathJax render failed:', error);
+                            });
+                    });
+                    return Promise.all(conversions);
                 })
                 .catch((error) => {
                     console.warn('MathJax render failed:', error);
@@ -640,11 +662,18 @@
                 indicator,
                 statusText,
                 bodyDiv,
+                thinkingDiv: null,
+                thinkingTextSpan: null,
+                thinkingToggle: null,
                 toolList,
                 toolCallsSection: null,
                 toolCallsSummaryTitle: null,
                 toolStatusMap: new Map(),
                 fullText: '',
+                thinkingText: '',
+                collapseThinking: false,
+                thinkingExpanded: false,
+                draftText: '',
                 errorMessages: [],
                 hasTools: false,
                 toolSummary: null,
@@ -697,8 +726,21 @@
             context.toolCallsSummaryTitle.textContent = `${label} (${total})`;
         }
 
+        function appendAssistantDelta(context, delta) {
+            if (!context || !delta) {
+                return;
+            }
+            if (context.hasTools) {
+                context.fullText += delta;
+            } else {
+                context.draftText += delta;
+            }
+            renderAssistantMarkdown(context);
+        }
+
         function renderAssistantMarkdown(context, options = {}) {
             const { finalize = false } = options;
+            renderAssistantThinking(context);
             renderAssistantHtml(context.bodyDiv, context.fullText);
             if (finalize) {
                 flushAssistantPostProcess(context);
@@ -706,6 +748,119 @@
                 scheduleAssistantPostProcess(context);
             }
             callbacks.scrollChatToBottom();
+        }
+
+        function renderAssistantThinking(context) {
+            const thinking = [context.thinkingText, context.draftText]
+                .filter(Boolean)
+                .join('\n\n')
+                .trim();
+            if (!thinking && context.thinkingDiv) {
+                context.thinkingDiv.remove();
+                context.thinkingDiv = null;
+                return;
+            }
+            if (!thinking) {
+                return;
+            }
+            if (!context.thinkingDiv) {
+                context.thinkingDiv = document.createElement('div');
+                context.thinkingDiv.className = 'assistant-thinking';
+                context.contentDiv.insertBefore(context.thinkingDiv, context.bodyDiv);
+            }
+            const formattedThinking = formatThinkingText(thinking);
+            if (!context.collapseThinking) {
+                renderPlainAssistantThinking(context, formattedThinking);
+                return;
+            }
+            renderCollapsibleAssistantThinking(context, formattedThinking);
+        }
+
+        function renderPlainAssistantThinking(context, text) {
+            context.thinkingDiv.className = 'assistant-thinking';
+            context.thinkingDiv.textContent = text;
+            context.thinkingTextSpan = null;
+            context.thinkingToggle = null;
+        }
+
+        function renderCollapsibleAssistantThinking(context, text) {
+            ensureCollapsibleThinkingStructure(context);
+            context.thinkingTextSpan.textContent = text;
+            setThinkingExpanded(context, Boolean(context.thinkingExpanded));
+        }
+
+        function ensureCollapsibleThinkingStructure(context) {
+            if (context.thinkingToggle && context.thinkingTextSpan) {
+                return;
+            }
+
+            context.thinkingDiv.innerHTML = '';
+            context.thinkingDiv.className = 'assistant-thinking assistant-thinking-collapsible';
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'assistant-thinking-toggle';
+            toggle.title = 'Show thinking';
+
+            const chevron = document.createElement('span');
+            chevron.className = 'assistant-thinking-chevron';
+            chevron.setAttribute('aria-hidden', 'true');
+            chevron.textContent = '▸';
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'assistant-thinking-text';
+
+            toggle.appendChild(chevron);
+            toggle.appendChild(textSpan);
+            toggle.addEventListener('click', () => {
+                context.thinkingExpanded = !context.thinkingExpanded;
+                setThinkingExpanded(context, context.thinkingExpanded);
+            });
+
+            context.thinkingDiv.appendChild(toggle);
+            context.thinkingToggle = toggle;
+            context.thinkingTextSpan = textSpan;
+        }
+
+        function setThinkingExpanded(context, expanded) {
+            if (!context.thinkingDiv || !context.thinkingToggle) {
+                return;
+            }
+            context.thinkingDiv.classList.toggle('is-expanded', expanded);
+            context.thinkingDiv.classList.toggle('is-collapsed', !expanded);
+            context.thinkingToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            context.thinkingToggle.title = expanded ? 'Hide thinking' : 'Show thinking';
+            const chevron = context.thinkingToggle.querySelector('.assistant-thinking-chevron');
+            if (chevron) {
+                chevron.textContent = expanded ? '▾' : '▸';
+            }
+        }
+
+        function formatThinkingText(text) {
+            return String(text || '')
+                .replace(/([.!?]["')\]]?)(?=[A-Z])/g, '$1 ')
+                .replace(/[ \t]{2,}/g, ' ');
+        }
+
+        function promoteAssistantDraftToThinking(context) {
+            if (!context || !context.fullText) {
+                return;
+            }
+            context.draftText = context.draftText
+                ? `${context.draftText}\n\n${context.fullText}`
+                : context.fullText;
+            context.fullText = '';
+            renderAssistantMarkdown(context);
+        }
+
+        function promoteAssistantDraftToAnswer(context) {
+            if (!context || !context.draftText || context.hasTools) {
+                return;
+            }
+            context.fullText = context.fullText
+                ? `${context.fullText}\n\n${context.draftText}`
+                : context.draftText;
+            context.draftText = '';
         }
 
         function setAssistantStatus(context, label, state = 'thinking') {
@@ -727,9 +882,12 @@
             let entry = context.toolStatusMap.get(toolId);
 
             if (payload.event === 'tool_call_started' || !entry) {
+                if (payload.event === 'tool_call_started') {
+                    context.hasTools = true;
+                    promoteAssistantDraftToThinking(context);
+                }
                 ensureToolCallsSection(context);
                 entry = createToolStatusEntry(context, toolId, payload);
-                context.hasTools = true;
                 if (payload.event === 'tool_call_started') {
                     setAssistantStatus(context, 'Running tools', 'tools');
                 }
@@ -807,6 +965,7 @@
         }
 
         function finalizeAssistantMessage(context, metadata) {
+            promoteAssistantDraftToAnswer(context);
             renderAssistantMarkdown(context, { finalize: true });
 
             const hasError = context.errorMessages.length > 0;
@@ -1299,6 +1458,7 @@
             addLoadingMessage,
             removeLoadingMessage,
             createAssistantStreamingMessage,
+            appendAssistantDelta,
             renderAssistantMarkdown,
             setAssistantStatus,
             handleToolEvent,

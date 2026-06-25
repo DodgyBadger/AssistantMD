@@ -593,8 +593,8 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "default search mode should require a query",
         )
         self.soft_assert(
-            "Failed to index session summary fields" in indexing_failure_error,
-            "summarize_session should fail when vector indexing fails",
+            "requires a usable embedding model alias" in indexing_failure_error,
+            "summarize_session should fail before extraction when embeddings are unavailable",
         )
         self.soft_assert(
             index_failure_summary is None,

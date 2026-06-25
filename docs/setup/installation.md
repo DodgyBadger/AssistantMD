@@ -46,7 +46,7 @@ _Or alternate text editor if you don't have nano._
 **Verify Installation**
 `docker ps` should show assistantMD running. If you see "restarting", something is wrong. Run `docker logs assistantMD` to check for startup errors.
 
-Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file). Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required.
+Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file). Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required. If you plan to enable the built-in nightly session summarization workflow, also configure `OPENAI_API_KEY` for the default `embeddings` model alias.
 
 When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
 
@@ -56,6 +56,10 @@ When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault
 - `AssistantMD/Import/` — drop PDFs and images here to import to markdown
 
 The default setup also looks for optional files such as `AssistantMD/soul.md`, `AssistantMD/playbook.md`, and `AssistantMD/user.md`.
+
+See [How to Build with AssistantMD](../use/build-guide.md) for details on how
+these files, skills, workflows, context assembly, and session summaries fit
+together.
 
 ## Optional Setup
 
