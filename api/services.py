@@ -1258,6 +1258,17 @@ def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:
             accepted_user_sequence_index=int(value.get("accepted_user_sequence_index")),
             recorded_at=str(value.get("recorded_at") or ""),
             suggested_action=str(value.get("suggested_action") or ""),
+            manual_retry_count=max(int(value.get("manual_retry_count") or 0), 0),
+            last_manual_retry_task_id=(
+                None
+                if value.get("last_manual_retry_task_id") is None
+                else str(value.get("last_manual_retry_task_id"))
+            ),
+            last_manual_retry_started_at=(
+                None
+                if value.get("last_manual_retry_started_at") is None
+                else str(value.get("last_manual_retry_started_at"))
+            ),
         )
     except (TypeError, ValueError):
         return None

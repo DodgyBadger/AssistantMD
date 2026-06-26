@@ -192,6 +192,7 @@
 
             if (messages.length === 0) {
                 renderChatEmptyState('Selected session has no persisted messages.');
+                renderLatestFailureAction(payload?.latest_failure);
                 return;
             }
 
@@ -236,6 +237,54 @@
                     archivedToolEvents: true
                 });
             }
+
+            renderLatestFailureAction(payload?.latest_failure);
+        }
+
+        function renderLatestFailureAction(latestFailure) {
+            if (!latestFailure || latestFailure.status !== 'failed') {
+                return;
+            }
+
+            const row = document.createElement('div');
+            row.className = 'flex justify-start';
+
+            const panel = document.createElement('div');
+            panel.className = 'max-w-[80%] px-4 py-3 rounded-lg message-bubble message-error shadow-sm';
+
+            const title = document.createElement('div');
+            title.className = 'text-sm font-medium';
+            title.textContent = latestFailure.retryable
+                ? 'Response interrupted before it finished.'
+                : 'Response failed before it finished.';
+
+            const detail = document.createElement('div');
+            detail.className = 'mt-1 text-xs opacity-80';
+            detail.textContent = latestFailure.error_type || latestFailure.failure_kind || 'Chat task failed';
+
+            panel.appendChild(title);
+            panel.appendChild(detail);
+
+            if (latestFailure.retryable && callbacks.retryLatestFailure) {
+                const actions = document.createElement('div');
+                actions.className = 'mt-3 flex items-center gap-2';
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'ui-icon-button is-compact';
+                button.dataset.icon = 'refresh';
+                button.dataset.iconLabel = 'Retry interrupted turn';
+                button.title = 'Retry interrupted turn';
+                button.setAttribute('aria-label', 'Retry interrupted turn');
+                button.addEventListener('click', () => {
+                    callbacks.retryLatestFailure(button);
+                });
+                actions.appendChild(button);
+                panel.appendChild(actions);
+            }
+
+            row.appendChild(panel);
+            appendChatMessageNode(row, { forceScroll: false });
+            icons.hydrateIconButtons(row);
         }
 
         function groupToolEventsById(toolEvents) {

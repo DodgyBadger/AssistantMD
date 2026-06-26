@@ -526,6 +526,12 @@ class ChatSessionExportRequest(BaseModel):
     vault_name: str = Field(..., description="Owning vault name")
 
 
+class ChatSessionRetryRequest(BaseModel):
+    """Request to retry the latest unfinished chat turn."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+
+
 class ChatSessionMessageInfo(BaseModel):
     """Persisted normalized chat message for session rehydration."""
 
@@ -574,6 +580,9 @@ class ChatSessionFailureInfo(BaseModel):
     accepted_user_sequence_index: int = Field(..., description="Accepted user message sequence index")
     recorded_at: str = Field(..., description="Marker timestamp")
     suggested_action: str = Field("", description="Agent-safe recovery guidance")
+    manual_retry_count: int = Field(0, description="Manual retry attempts started for this marker")
+    last_manual_retry_task_id: Optional[str] = Field(None, description="Latest manual retry task id")
+    last_manual_retry_started_at: Optional[str] = Field(None, description="Latest manual retry start timestamp")
 
 
 class ChatSessionDetailResponse(BaseModel):

@@ -16,6 +16,7 @@ from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
+    start_chat_turn_retry_task,
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
@@ -78,6 +79,7 @@ from .models import (
     ChatSessionExportResponse,
     ChatSessionForkRequest,
     ChatSessionForkResponse,
+    ChatSessionRetryRequest,
     ChatHistoryCompactionRequest,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -1175,6 +1177,45 @@ async def fork_chat_session_endpoint(session_id: str, request: ChatSessionForkRe
             vault_name=request.vault_name,
             source_session_id=session_id,
             through_sequence_index=request.through_sequence_index,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/retry", response_model=ChatTaskStartResponse)
+async def retry_chat_session_turn_endpoint(session_id: str, request: ChatSessionRetryRequest):
+    """Retry the latest retryable unfinished chat turn for one session."""
+    try:
+        try:
+            await get_active_chat_task(session_id)
+        except APIException as exc:
+            if exc.error_type != "ExecutionTaskNotFound":
+                raise
+        else:
+            raise APIException(
+                status_code=409,
+                error_type="ChatTaskAlreadyActive",
+                message=f"Chat session already has an active task: {session_id}",
+                details={"session_id": session_id},
+            )
+
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        started = await start_chat_turn_retry_task(
+            vault_name=request.vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+        )
+        task = await get_execution_task(started.task.task_id)
+        return ChatTaskStartResponse(session_id=session_id, task=task)
+    except ValueError as exc:
+        return create_error_response(
+            APIException(
+                status_code=409,
+                error_type="ChatTurnRetryUnavailable",
+                message=str(exc),
+                details={"session_id": session_id, "vault_name": request.vault_name},
+            )
         )
     except Exception as e:
         return create_error_response(e)
