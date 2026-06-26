@@ -28,6 +28,7 @@ class ChatHistoryCompactionScenario(BaseScenario):
         await self.start_system()
 
         import core.chat.compaction as compaction
+        import core.llm.agents as llm_agents
         import core.tools.session_ops as session_ops
         from core.chat.chat_store import ChatStore
         from core.chat.history_service import ChatHistoryContext, ChatHistoryService
@@ -131,6 +132,46 @@ class ChatHistoryCompactionScenario(BaseScenario):
         )
         assert shaped_prompt.count("large successful result") == 100, (
             "Successful retained tool results should not be truncated by first-slice shaping"
+        )
+
+        class _StreamingSummaryResult:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def stream_text(self, *, delta=False, debounce_by=0.1):
+                assert delta is True, "Compaction summary generation should consume deltas"
+                assert debounce_by == 0.1, "Default stream debounce should be preserved"
+                yield "Streamed "
+                yield "compaction summary."
+
+        class _StreamingSummaryAgent:
+            async def run(self, *args, **kwargs):
+                raise AssertionError(
+                    "Compaction summary generation must use streaming model calls"
+                )
+
+            def run_stream(self, *args, **kwargs):
+                return _StreamingSummaryResult()
+
+        async def _create_streaming_summary_agent_stub(*args, **kwargs):
+            return _StreamingSummaryAgent()
+
+        original_create_agent = llm_agents.create_agent
+        llm_agents.create_agent = _create_streaming_summary_agent_stub
+        try:
+            streamed_summary = await compaction._generate_compaction_summary(
+                older_messages=older_messages,
+                recent_messages=recent_messages,
+                focus="Keep decisions and tool outcomes.",
+            )
+        finally:
+            llm_agents.create_agent = original_create_agent
+
+        assert streamed_summary == "Streamed compaction summary.", (
+            "Compaction summary generation should return aggregated streamed text"
         )
 
         original_keep_recent = compaction.get_compaction_keep_recent

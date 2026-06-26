@@ -438,8 +438,11 @@ async def _generate_compaction_summary(
         focus=focus,
     )
     agent = await create_agent()
-    result = await agent.run(prompt)
-    return str(result.output or "").strip()
+    chunks: list[str] = []
+    async with agent.run_stream(prompt) as result:
+        async for chunk in result.stream_text(delta=True):
+            chunks.append(chunk)
+    return "".join(chunks).strip()
 
 
 def _build_summary_prompt(
