@@ -104,7 +104,82 @@ class DelegateToolScenario(BaseScenario):
                 return None
 
             async def run(self, *_args, **_kwargs):
-                raise self.error
+                raise AssertionError("delegate child agents must use streaming model calls")
+
+            def run_stream(self, *_args, **_kwargs):
+                error = self.error
+
+                class _FailingStream:
+                    async def __aenter__(self):
+                        raise error
+
+                    async def __aexit__(self, exc_type, exc, tb):
+                        return False
+
+                return _FailingStream()
+
+        class _StreamingChildRun:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def stream_output(self, *, debounce_by=None):
+                yield "streamed delegate output"
+
+            async def get_output(self):
+                return "streamed delegate output"
+
+            def all_messages(self):
+                return []
+
+        class _StreamingChildAgent:
+            def instructions(self, *_args, **_kwargs):
+                return None
+
+            async def run(self, *_args, **_kwargs):
+                raise AssertionError("delegate child agents must use streaming model calls")
+
+            def run_stream(self, *_args, **_kwargs):
+                return _StreamingChildRun()
+
+        async def _streaming_create_agent(*_args, **_kwargs):
+            return _StreamingChildAgent()
+
+        async def _assert_delegate_uses_streaming() -> None:
+            from core.authoring.helpers.runtime_common import (
+                invoke_bound_tool,
+                normalize_tool_result,
+            )
+            from core.authoring.shared.tool_binding import resolve_tool_binding
+
+            binding = resolve_tool_binding(["delegate"], vault_path=str(vault))
+            delegate_module.create_agent = _streaming_create_agent
+            try:
+                result = await invoke_bound_tool(
+                    binding.tool_functions[0],
+                    tool_name="delegate",
+                    arguments={"prompt": "Stream child delegate.", "model": "test"},
+                    run_buffers={},
+                    session_buffers={},
+                    session_id="delegate_streaming_transport",
+                    vault_name=vault.name,
+                )
+            finally:
+                delegate_module.create_agent = original_create_agent
+            tool_result = normalize_tool_result(
+                "delegate",
+                result,
+                vault_path=str(vault),
+            )
+            self.soft_assert_equal(
+                tool_result.return_value,
+                "streamed delegate output",
+                "Delegate should collect streamed child-agent output",
+            )
+
+        await _assert_delegate_uses_streaming()
 
         async def _patched_create_agent(*args, **kwargs):
             if current_case["name"] == "limit_failure":

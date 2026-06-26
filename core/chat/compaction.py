@@ -430,7 +430,7 @@ async def _generate_compaction_summary(
     recent_messages: list[ModelMessage],
     focus: str | None,
 ) -> str:
-    from core.llm.agents import create_agent
+    from core.llm.agents import collect_response, create_agent
 
     prompt = _build_summary_prompt(
         older_messages=older_messages,
@@ -438,11 +438,8 @@ async def _generate_compaction_summary(
         focus=focus,
     )
     agent = await create_agent()
-    chunks: list[str] = []
-    async with agent.run_stream(prompt) as result:
-        async for chunk in result.stream_text(delta=True):
-            chunks.append(chunk)
-    return "".join(chunks).strip()
+    result = await collect_response(agent, prompt)
+    return str(result.output or "").strip()
 
 
 def _build_summary_prompt(

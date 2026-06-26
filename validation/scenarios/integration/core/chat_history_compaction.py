@@ -141,11 +141,16 @@ class ChatHistoryCompactionScenario(BaseScenario):
             async def __aexit__(self, exc_type, exc, tb):
                 return False
 
-            async def stream_text(self, *, delta=False, debounce_by=0.1):
-                assert delta is True, "Compaction summary generation should consume deltas"
-                assert debounce_by == 0.1, "Default stream debounce should be preserved"
+            async def stream_output(self, *, debounce_by=0.1):
+                assert debounce_by is None, "Background model runs should consume the stream fully"
                 yield "Streamed "
-                yield "compaction summary."
+                yield "Streamed compaction summary."
+
+            async def get_output(self):
+                return "Streamed compaction summary."
+
+            def all_messages(self):
+                return []
 
         class _StreamingSummaryAgent:
             async def run(self, *args, **kwargs):
