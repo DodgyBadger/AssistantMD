@@ -28,8 +28,10 @@ Sections:
 Provider wiring can include provider-specific auth metadata. The built-in
 `openai` provider supports `auth_mode` (`api_key` or `oauth`) and
 `oauth_api_key_fallback_enabled`. API-key mode is the stable default. OAuth mode
-is controlled by the global `openai_oauth_enabled` setting; when that setting is
-false, OpenAI resolves as API-key-only even if OAuth tokens are stored.
+is experimental and is controlled by the global `openai_oauth_enabled` setting;
+when that setting is false, OpenAI resolves as API-key-only even if OAuth tokens
+are stored. OAuth fallback to API-key auth is opt-in so runtime model requests
+do not silently switch billing paths.
 
 Runtime-relevant general settings include:
 
@@ -70,11 +72,12 @@ Key behavior:
 - Empty values are normalized consistently.
 - Helper APIs support list/get/set/remove/delete plus value-presence checks.
 
-OpenAI OAuth token state and pending PKCE state are persisted as internal secret
-entries in this store so they survive restarts. Those internal entries are not
-returned by the generic Secrets UI/API list and should only be accessed through
-`core/llm/openai_oauth.py`. Pending PKCE state has a short TTL and is lazily
-cleared when status or completion paths observe that it has expired.
+OpenAI OAuth token state, pending PKCE state, and pending device-code state are
+persisted as internal secret entries in this store so they survive restarts.
+Those internal entries are not returned by the generic Secrets UI/API list and
+should only be accessed through `core/llm/openai_oauth.py`. Pending auth state
+has a short TTL and is lazily cleared when status or completion paths observe
+that it has expired.
 
 ## Configuration Health and Availability
 

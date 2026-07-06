@@ -3,8 +3,6 @@
 
 ## 2026-07-06 - v0.6.10
 
-No breaking changes.
-
 ### OpenAI OAuth
 
 AssistantMD now includes an experimental OpenAI OAuth connection path for the
@@ -17,10 +15,6 @@ built-in OpenAI provider.
 - API-key auth remains the default and fully supported path for OpenAI.
 - OAuth can be globally disabled, and API-key fallback is opt-in so AssistantMD
   does not silently switch billing paths.
-- The provider panel now shows clearer OpenAI auth status, including whether
-  OAuth is connected, pending, disabled, expired, or needs reconnection.
-- Internal OAuth token state is hidden from the generic Secrets list; only
-  sanitized account/status metadata is shown in the UI.
 
 ### Misc
 
