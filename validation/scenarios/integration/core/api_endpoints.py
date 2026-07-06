@@ -5,12 +5,15 @@ validation harness' shared FastAPI TestClient.
 
 import base64
 import json
+import os
 import re
 
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -34,6 +37,20 @@ class ApiEndpointsScenario(BaseScenario):
     """Validate core REST endpoints end-to-end using real runtime context."""
 
     async def test_scenario(self):
+        original_secrets_path = os.environ.get("SECRETS_PATH")
+        os.environ["SECRETS_PATH"] = str(self.run_path / "system" / "secrets.yaml")
+        try:
+            await self._run_api_endpoint_checks()
+        finally:
+            set_openai_oauth_token_adapter(None)
+            if self._system_controller and self._system_controller.is_running:
+                await self.stop_system()
+            if original_secrets_path is None:
+                os.environ.pop("SECRETS_PATH", None)
+            else:
+                os.environ["SECRETS_PATH"] = original_secrets_path
+
+    async def _run_api_endpoint_checks(self):
         vault = self.create_vault("IntegrationApiVault")
 
         # Seed a minimal step workflow for execution and status checks
@@ -79,10 +96,33 @@ class ApiEndpointsScenario(BaseScenario):
         settings = self.call_api("/api/system/settings")
         assert settings.status_code == 200, "Settings fetch succeeds"
         settings_payload = settings.json()
+        settings_content = yaml.safe_load(settings_payload["content"]) or {}
+        settings_content.setdefault("settings", {}).setdefault(
+            "default_model",
+            {
+                "value": "test",
+                "description": "Validation default model.",
+                "category": "Models",
+                "restart_required": False,
+            },
+        )
+        settings_content["settings"]["default_model"]["value"] = "test"
+        settings_content.setdefault("models", {})["test"] = {
+            "provider": "test",
+            "model_string": "test",
+            "capabilities": ["text"],
+            "description": "Validation deterministic chat model",
+            "user_editable": True,
+        }
+        settings_content.setdefault("providers", {})["test"] = {
+            "api_key": None,
+            "base_url": None,
+            "user_editable": False,
+        }
         update_settings = self.call_api(
             "/api/system/settings",
             method="PUT",
-            data={"content": settings_payload["content"]},
+            data={"content": yaml.safe_dump(settings_content, sort_keys=False)},
         )
         assert update_settings.status_code == 200, "Settings update round-trips"
 

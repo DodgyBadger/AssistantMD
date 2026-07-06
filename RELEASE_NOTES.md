@@ -1,6 +1,41 @@
 # Release Notes
 
 
+## 2026-07-06 - v0.6.10
+
+No breaking changes.
+
+### OpenAI OAuth
+
+AssistantMD now includes an experimental OpenAI OAuth connection path for the
+built-in OpenAI provider.
+
+- OpenAI can be connected from System settings without storing a Platform API
+  key, using a Codex/ChatGPT-compatible OAuth flow.
+- Device-code login is supported, so remote or server-hosted installs can show a
+  short code that you enter in your local browser.
+- API-key auth remains the default and fully supported path for OpenAI.
+- OAuth can be globally disabled, and API-key fallback is opt-in so AssistantMD
+  does not silently switch billing paths.
+- The provider panel now shows clearer OpenAI auth status, including whether
+  OAuth is connected, pending, disabled, expired, or needs reconnection.
+- Internal OAuth token state is hidden from the generic Secrets list; only
+  sanitized account/status metadata is shown in the UI.
+
+### Misc
+
+- Interrupted chat turns can now be retried manually from the stored unfinished
+  turn state.
+- OpenAI-backed background model calls now stream through the task-owned chat
+  path more consistently.
+- Chat history compaction summaries now stream progress instead of waiting for a
+  single final response.
+- Workflow schedule docs now recommend weekday names such as `mon` and `tue`
+  because APScheduler 3.x numeric weekday values differ from standard cron.
+- Fixed chat rendering so simple dollar values are not accidentally formatted as
+  LaTeX.
+
+
 ## 2026-06-23 - v0.6.9
 
 - Provider thinking parts are no longer persisted in message history by default, reducing chat token usage and making it more reliable to switch the same session between model providers.
