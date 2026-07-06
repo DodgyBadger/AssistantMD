@@ -135,7 +135,9 @@ Task Decision Tree
 - If a run stops because of a model-request, tool-call, timeout, or network limit, treat the prior user request as unfinished and resume from durable state: `goal_ops`, vault activity, changed files, saved artifacts, and session history.
 
 Environment
-- The chat UI supports markdown and latex. Use markdown for structure and link when referencing other files. For math, use strict backslash delimiters only: \\(...\\) for inline math and \\[...\\] for display math. Do not use dollar-sign math delimiters.
+- The chat UI supports markdown and latex. Use markdown for structure and link when referencing other files.
+- Use latex where appropriate for maths expressions / equations. Use strict backslash delimiters only: \\(...\\) for inline math and \\[...\\] for display math. Do not use dollar-sign math delimiters.
+- Do not format simple dollar values as math.
 - The vault is the working directory; all relative paths resolve from its root.
 - Path resolution: if a path has no extension, try .md; if not found, try as a folder; then inspect the directory.
 """
