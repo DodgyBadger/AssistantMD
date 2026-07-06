@@ -18,6 +18,19 @@ Scheduler keeps workflow execution aligned with current workflow templates while
 - Protect reserved system jobs.
 - Dispatch workflow jobs through the runtime workflow governor.
 
+## Cron Schedule Semantics
+
+Workflow frontmatter accepts `schedule: "cron: MINUTE HOUR DOM MONTH DOW"` and
+passes the expression to APScheduler 3.x. Use weekday names (`mon`, `tue`,
+`wed`, `thu`, `fri`, `sat`, `sun`) for day-of-week schedules.
+
+APScheduler 3.x numeric weekdays do not match standard cron: `0` is Monday and
+`1` is Tuesday. Standard cron commonly treats `0` or `7` as Sunday and `1` as
+Monday. The parser currently preserves APScheduler 3.x behavior for existing
+schedules; `core/scheduling/parser.py` provides explicit conversion helpers for
+code paths that need to present or prepare standard cron-compatible weekday
+semantics.
+
 ## Sync behavior
 
 During `setup_scheduler_jobs(...)`:
