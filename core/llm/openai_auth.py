@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 
 OPENAI_AUTH_MODE_API_KEY = "api_key"
@@ -169,6 +170,55 @@ def resolve_openai_auth(
     )
     _maybe_log_openai_auth_resolution(resolution, emit_log=emit_log)
     return resolution
+
+
+def openai_oauth_enabled_from_settings(general_settings: Mapping[str, Any]) -> bool:
+    """Return the configured global OpenAI OAuth enablement flag."""
+
+    entry = general_settings.get("openai_oauth_enabled")
+    return bool(getattr(entry, "value", False))
+
+
+def openai_provider_api_key_available(
+    provider_config: Any,
+    *,
+    secret_has_value: Callable[[str], bool],
+) -> bool:
+    """Return True when the OpenAI provider api_key points to a populated secret."""
+
+    api_key_name = _provider_optional_string(provider_config, "api_key")
+    return bool(api_key_name and secret_has_value(api_key_name))
+
+
+def openai_provider_base_url_available(
+    provider_config: Any,
+    *,
+    get_secret_value: Callable[[str], str | None],
+) -> bool:
+    """Return True when base_url resolves as a secret value or literal URL."""
+
+    raw_base_url = _provider_optional_string(provider_config, "base_url")
+    if raw_base_url is None:
+        return False
+    if get_secret_value(raw_base_url):
+        return True
+    return "://" in raw_base_url
+
+
+def openai_oauth_token_connected(raw_state: str | None) -> bool:
+    """Return True when stored OAuth state contains a non-empty access token."""
+
+    if not raw_state:
+        return False
+    try:
+        token_state = json.loads(raw_state)
+    except json.JSONDecodeError:
+        return False
+    return bool(
+        isinstance(token_state, dict)
+        and isinstance(token_state.get("access_token"), str)
+        and token_state["access_token"].strip()
+    )
 
 
 def _api_key_resolution(

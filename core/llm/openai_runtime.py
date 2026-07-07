@@ -13,6 +13,9 @@ from core.llm.openai_auth import (
     OPENAI_AUTH_MODE_API_KEY,
     OPENAI_AUTH_MODE_OAUTH,
     OpenAIAuthResolution,
+    openai_oauth_enabled_from_settings,
+    openai_provider_api_key_available,
+    openai_provider_base_url_available,
     resolve_openai_auth,
 )
 from core.llm.openai_oauth import (
@@ -114,13 +117,19 @@ def build_openai_provider_with_resolution(
     """Build an OpenAI provider and return its auth resolution."""
 
     api_key = _resolve_config_value(provider_config.get("api_key"))
-    base_url = _resolve_config_value(provider_config.get("base_url"))
+    base_url = _resolve_base_url(provider_config.get("base_url"))
     resolution = resolve_openai_auth(
         provider_config,
         oauth_enabled=_openai_oauth_enabled(),
         oauth_connected=get_openai_oauth_status().connected,
-        api_key_available=_has_configured_api_key(provider_config),
-        base_url_available=bool(base_url),
+        api_key_available=openai_provider_api_key_available(
+            provider_config,
+            secret_has_value=secret_has_value,
+        ),
+        base_url_available=openai_provider_base_url_available(
+            provider_config,
+            get_secret_value=get_secret_value,
+        ),
     )
 
     if resolution.effective_auth_mode == OPENAI_AUTH_MODE_API_KEY:
@@ -150,18 +159,7 @@ def build_openai_provider_with_resolution(
 
 
 def _openai_oauth_enabled() -> bool:
-    entry = get_general_settings().get("openai_oauth_enabled")
-    return bool(getattr(entry, "value", False))
-
-
-def _has_configured_api_key(provider_config: dict[str, Any]) -> bool:
-    api_key_name = provider_config.get("api_key")
-    return bool(
-        isinstance(api_key_name, str)
-        and api_key_name
-        and api_key_name.lower() != "null"
-        and secret_has_value(api_key_name)
-    )
+    return openai_oauth_enabled_from_settings(get_general_settings())
 
 
 def _resolve_config_value(raw_value: str | None) -> str | None:
@@ -171,3 +169,17 @@ def _resolve_config_value(raw_value: str | None) -> str | None:
     if not value or value.lower() == "null":
         return None
     return get_secret_value(value) or value
+
+
+def _resolve_base_url(raw_value: str | None) -> str | None:
+    if raw_value is None:
+        return None
+    value = raw_value.strip()
+    if not value or value.lower() == "null":
+        return None
+    secret_value = get_secret_value(value)
+    if secret_value:
+        return secret_value
+    if "://" in value:
+        return value
+    return None

@@ -45,13 +45,19 @@ from core.settings.config_editor import (
 )
 from core.runtime.reload_service import reload_configuration
 from core.settings.secrets_store import (
+    get_secret_value,
     list_secret_entries,
     set_secret_value,
     remove_secret,
     delete_secret,
     secret_has_value,
 )
-from core.llm.openai_auth import resolve_openai_auth
+from core.llm.openai_auth import (
+    openai_oauth_enabled_from_settings,
+    openai_provider_api_key_available,
+    openai_provider_base_url_available,
+    resolve_openai_auth,
+)
 from core.llm.openai_oauth import (
     OpenAIOAuthStateError,
     clear_openai_oauth_state,
@@ -2512,7 +2518,7 @@ def _editable_builtin_providers() -> set[str]:
 
 
 def _openai_oauth_enabled() -> bool:
-    return bool(_general_setting_value("openai_oauth_enabled", False))
+    return openai_oauth_enabled_from_settings(list_general_settings())
 
 
 def _build_provider_info(name: str, config, restart_required: bool = False) -> ProviderInfo:
@@ -2533,12 +2539,14 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
     base_url_env = raw_base_url if raw_base_url else None
     user_editable = bool(stored_user_editable) or name in _editable_builtin_providers()
 
-    api_key_has_value = secret_has_value(api_key_env) if api_key_env else False
-
-    if base_url_env and "://" not in base_url_env:
-        base_url_has_value = secret_has_value(base_url_env)
-    else:
-        base_url_has_value = bool(base_url_env)
+    api_key_has_value = openai_provider_api_key_available(
+        config,
+        secret_has_value=secret_has_value,
+    )
+    base_url_has_value = openai_provider_base_url_available(
+        config,
+        get_secret_value=get_secret_value,
+    )
 
     provider_info = ProviderInfo(
         name=name,

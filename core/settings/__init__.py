@@ -5,7 +5,6 @@ Provides a single typed interface for environment-driven settings along with
 helpers to diagnose missing configuration required for runtime features.
 """
 
-import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -14,7 +13,14 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from core.llm.openai_auth import OPENAI_OAUTH_TOKEN_SECRET, resolve_openai_auth
+from core.llm.openai_auth import (
+    OPENAI_OAUTH_TOKEN_SECRET,
+    openai_oauth_enabled_from_settings,
+    openai_oauth_token_connected,
+    openai_provider_api_key_available,
+    openai_provider_base_url_available,
+    resolve_openai_auth,
+)
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.settings.store import (
     ModelConfig,
@@ -172,51 +178,6 @@ def validate_settings(
     providers = providers_config or get_providers_config()
     models = models_config or get_models_config()
 
-    def _openai_oauth_enabled_configured() -> bool:
-        entry = get_general_settings().get("openai_oauth_enabled")
-        return bool(getattr(entry, "value", False))
-
-    def _provider_base_url_configured(provider_cfg: Any) -> bool:
-        """Return True when provider base_url resolves from secret or literal URL."""
-        raw_base_url = getattr(provider_cfg, "base_url", None)
-        if raw_base_url is None and isinstance(provider_cfg, dict):
-            raw_base_url = provider_cfg.get("base_url")
-        if not isinstance(raw_base_url, str):
-            return False
-
-        base_url = raw_base_url.strip()
-        if not base_url or base_url.lower() == "null":
-            return False
-
-        if get_secret_value(base_url):
-            return True
-        return "://" in base_url
-
-    def _provider_api_key_available(provider_cfg: Any) -> bool:
-        api_key_name = getattr(provider_cfg, "api_key", None)
-        if api_key_name is None and isinstance(provider_cfg, dict):
-            api_key_name = provider_cfg.get("api_key")
-        return bool(
-            isinstance(api_key_name, str)
-            and api_key_name.lower() != "null"
-            and api_key_name
-            and secret_has_value(api_key_name)
-        )
-
-    def _openai_oauth_token_available() -> bool:
-        raw_state = get_secret_value(OPENAI_OAUTH_TOKEN_SECRET)
-        if not raw_state:
-            return False
-        try:
-            token_state = json.loads(raw_state)
-        except json.JSONDecodeError:
-            return False
-        return bool(
-            isinstance(token_state, dict)
-            and isinstance(token_state.get("access_token"), str)
-            and token_state["access_token"].strip()
-        )
-
     for model_name, model_config in models.items():
         provider_name = getattr(model_config, "provider", None) or (
             model_config.get("provider") if isinstance(model_config, dict) else None
@@ -237,10 +198,20 @@ def validate_settings(
         if provider_name == "openai":
             resolution = resolve_openai_auth(
                 provider_config,
-                oauth_enabled=_openai_oauth_enabled_configured(),
-                oauth_connected=_openai_oauth_token_available(),
-                api_key_available=_provider_api_key_available(provider_config),
-                base_url_available=_provider_base_url_configured(provider_config),
+                oauth_enabled=openai_oauth_enabled_from_settings(
+                    get_general_settings()
+                ),
+                oauth_connected=openai_oauth_token_connected(
+                    get_secret_value(OPENAI_OAUTH_TOKEN_SECRET)
+                ),
+                api_key_available=openai_provider_api_key_available(
+                    provider_config,
+                    secret_has_value=secret_has_value,
+                ),
+                base_url_available=openai_provider_base_url_available(
+                    provider_config,
+                    get_secret_value=get_secret_value,
+                ),
                 emit_log=False,
             )
             status.model_availability[model_name] = resolution.available
@@ -255,7 +226,10 @@ def validate_settings(
         api_key_name = getattr(provider_config, "api_key", None)
         if isinstance(api_key_name, str) and api_key_name.lower() != "null" and api_key_name:
             if not secret_has_value(api_key_name):
-                if _provider_base_url_configured(provider_config):
+                if openai_provider_base_url_available(
+                    provider_config,
+                    get_secret_value=get_secret_value,
+                ):
                     continue
                 status.model_availability[model_name] = False
                 status.add_issue(
