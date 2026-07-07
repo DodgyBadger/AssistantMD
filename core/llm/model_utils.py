@@ -10,7 +10,14 @@ from typing import Dict, Tuple, Any
 
 from core.logger import UnifiedLogger
 from core.llm.model_selection import resolve_model_execution_spec
-from core.settings.store import get_models_config, get_providers_config
+from core.llm.openai_auth import (
+    openai_oauth_enabled_from_settings,
+    openai_provider_api_key_available,
+    openai_provider_base_url_available,
+    resolve_openai_auth,
+)
+from core.llm.openai_oauth import get_openai_oauth_status
+from core.settings.store import get_general_settings, get_models_config, get_providers_config
 from core.settings.secrets_store import get_secret_value, secret_has_value, load_secrets
 
 # Create module logger
@@ -145,22 +152,8 @@ def get_provider_config(provider: str) -> Dict[str, Any]:
     return PROVIDER_CONFIGS.get(provider, {})
 
 
-def _has_resolved_base_url(provider_config: Dict[str, Any]) -> bool:
-    """Return True when provider base_url is configured as secret value or literal URL."""
-    raw_base_url = provider_config.get("base_url")
-    if not isinstance(raw_base_url, str):
-        return False
-
-    base_url = raw_base_url.strip()
-    if not base_url or base_url.lower() == "null":
-        return False
-
-    # Secret-backed base_url (preferred)
-    if get_secret_value(base_url):
-        return True
-
-    # Literal URLs are also valid configuration.
-    return "://" in base_url
+def _openai_oauth_enabled() -> bool:
+    return openai_oauth_enabled_from_settings(get_general_settings())
 
 
 def get_model_capabilities(model_name: str) -> set[str]:
@@ -201,6 +194,27 @@ def validate_api_keys(model_name: str) -> None:
     """
     provider, _ = resolve_model(model_name)
     provider_config = get_provider_config(provider)
+    if provider == "openai":
+        resolution = resolve_openai_auth(
+            provider_config,
+            oauth_enabled=_openai_oauth_enabled(),
+            oauth_connected=get_openai_oauth_status().connected,
+            api_key_available=openai_provider_api_key_available(
+                provider_config,
+                secret_has_value=secret_has_value,
+            ),
+            base_url_available=openai_provider_base_url_available(
+                provider_config,
+                get_secret_value=get_secret_value,
+            ),
+        )
+        if resolution.available:
+            return
+        raise ValueError(
+            resolution.message
+            or f"Model '{model_name}' requires usable OpenAI auth configuration."
+        )
+
     required_key = provider_config.get('api_key')
 
     # No API key required (test model, custom endpoints, etc.)
@@ -210,7 +224,10 @@ def validate_api_keys(model_name: str) -> None:
     if not secret_has_value(required_key):
         # OpenAI-compatible providers can run against local/remote endpoints
         # that don't require authentication when base_url is configured.
-        if _has_resolved_base_url(provider_config):
+        if openai_provider_base_url_available(
+            provider_config,
+            get_secret_value=get_secret_value,
+        ):
             return
         raise ValueError(
             f"Model '{model_name}' requires secret '{required_key}' to be configured. "

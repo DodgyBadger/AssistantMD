@@ -11,10 +11,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 
 from core.logger import UnifiedLogger
+from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
+    start_chat_turn_retry_task,
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
@@ -54,6 +56,11 @@ from .models import (
     SystemSettingsResponse,
     UpdateSettingsRequest,
     ModelConfigRequest,
+    OpenAIOAuthCompleteRequest,
+    OpenAIOAuthDeviceCheckResponse,
+    OpenAIOAuthDeviceStartResponse,
+    OpenAIOAuthStartRequest,
+    OpenAIOAuthStartResponse,
     ProviderConfigRequest,
     ModelInfo,
     ProviderInfo,
@@ -72,6 +79,7 @@ from .models import (
     ChatSessionExportResponse,
     ChatSessionForkRequest,
     ChatSessionForkResponse,
+    ChatSessionRetryRequest,
     ChatHistoryCompactionRequest,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -124,6 +132,12 @@ from .services import (
     upsert_configurable_model,
     delete_configurable_model,
     get_configurable_providers,
+    check_openai_oauth_device_connection,
+    start_openai_oauth_connection,
+    start_openai_oauth_device_connection,
+    complete_openai_oauth_callback,
+    complete_openai_oauth_manual,
+    disconnect_openai_oauth_connection,
     upsert_configurable_provider,
     delete_configurable_provider,
     list_secrets,
@@ -677,6 +691,85 @@ async def list_providers():
         return create_error_response(e)
 
 
+@router.post(
+    "/system/providers/openai/oauth/start",
+    response_model=OpenAIOAuthStartResponse,
+)
+async def start_openai_oauth(payload: OpenAIOAuthStartRequest):
+    """Start an OpenAI OAuth connection attempt."""
+    try:
+        return start_openai_oauth_connection(
+            payload,
+            default_redirect_uri=OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/providers/openai/oauth/device/start",
+    response_model=OpenAIOAuthDeviceStartResponse,
+)
+async def start_openai_oauth_device():
+    """Start an OpenAI OAuth device-code connection attempt."""
+    try:
+        return await start_openai_oauth_device_connection()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/providers/openai/oauth/device/check",
+    response_model=OpenAIOAuthDeviceCheckResponse,
+)
+async def check_openai_oauth_device():
+    """Check an OpenAI OAuth device-code connection attempt."""
+    try:
+        return await check_openai_oauth_device_connection()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/system/providers/openai/oauth/callback", response_model=ProviderInfo)
+async def complete_openai_oauth_callback_endpoint(code: str, state: str):
+    """Complete OpenAI OAuth from callback query parameters."""
+    try:
+        return await complete_openai_oauth_callback(code=code, state=state)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/providers/openai/oauth/complete", response_model=ProviderInfo)
+async def complete_openai_oauth_manual_endpoint(request: OpenAIOAuthCompleteRequest):
+    """Complete OpenAI OAuth from a pasted redirect URL or code/state pair."""
+    try:
+        return await complete_openai_oauth_manual(request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/system/providers/openai/oauth/status", response_model=ProviderInfo)
+async def get_openai_oauth_status_endpoint():
+    """Return OpenAI provider status including sanitized OAuth metadata."""
+    try:
+        return next(
+            provider
+            for provider in get_configurable_providers()
+            if provider.name == "openai"
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete("/system/providers/openai/oauth", response_model=OperationResult)
+async def disconnect_openai_oauth_endpoint():
+    """Disconnect OpenAI OAuth without changing provider auth mode."""
+    try:
+        return disconnect_openai_oauth_connection()
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.put("/system/providers/{provider_name}", response_model=ProviderInfo)
 async def upsert_provider(provider_name: str, request: ProviderConfigRequest):
     """Create or update a provider configuration."""
@@ -1084,6 +1177,45 @@ async def fork_chat_session_endpoint(session_id: str, request: ChatSessionForkRe
             vault_name=request.vault_name,
             source_session_id=session_id,
             through_sequence_index=request.through_sequence_index,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/chat/sessions/{session_id}/retry", response_model=ChatTaskStartResponse)
+async def retry_chat_session_turn_endpoint(session_id: str, request: ChatSessionRetryRequest):
+    """Retry the latest retryable unfinished chat turn for one session."""
+    try:
+        try:
+            await get_active_chat_task(session_id)
+        except APIException as exc:
+            if exc.error_type != "ExecutionTaskNotFound":
+                raise
+        else:
+            raise APIException(
+                status_code=409,
+                error_type="ChatTaskAlreadyActive",
+                message=f"Chat session already has an active task: {session_id}",
+                details={"session_id": session_id},
+            )
+
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / request.vault_name)
+        started = await start_chat_turn_retry_task(
+            vault_name=request.vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+        )
+        task = await get_execution_task(started.task.task_id)
+        return ChatTaskStartResponse(session_id=session_id, task=task)
+    except ValueError as exc:
+        return create_error_response(
+            APIException(
+                status_code=409,
+                error_type="ChatTurnRetryUnavailable",
+                message=str(exc),
+                details={"session_id": session_id, "vault_name": request.vault_name},
+            )
         )
     except Exception as e:
         return create_error_response(e)

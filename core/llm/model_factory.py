@@ -28,6 +28,8 @@ from tenacity import retry_if_exception, stop_after_attempt
 from core.llm.thinking import ThinkingValue
 from core.llm.model_utils import resolve_model, validate_api_keys, get_provider_config
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
+from core.llm.openai_auth import OPENAI_AUTH_MODE_OAUTH
+from core.llm.openai_runtime import build_openai_provider_with_resolution
 from core.settings import (
     get_default_api_timeout,
     get_default_max_output_tokens,
@@ -90,6 +92,12 @@ def _apply_openrouter_settings(
         provider_settings["ignore"] = merged_ignore
     if provider_settings:
         settings_kwargs["openrouter_provider"] = provider_settings
+
+
+def _apply_openai_oauth_responses_settings(settings_kwargs: dict[str, object]) -> None:
+    """Apply Codex/ChatGPT Responses constraints for OAuth-backed OpenAI."""
+    settings_kwargs["openai_store"] = False
+    settings_kwargs["openai_send_reasoning_ids"] = False
 
 
 def _is_retryable_model_http_exception(exc: BaseException) -> bool:
@@ -219,13 +227,17 @@ def build_model_instance(value: str, *, thinking: ThinkingValue = None) -> Model
     elif provider == "openai":
         settings_kwargs = _base_settings_kwargs(thinking)
         provider_config = get_provider_config(provider)
-        api_key = _resolve_config_value(provider_config.get("api_key"))
-        base_url = _resolve_config_value(provider_config.get("base_url"))
         http_client = _build_retrying_model_http_client()
+        openai_build = build_openai_provider_with_resolution(
+            provider_config=provider_config,
+            http_client=http_client,
+        )
+        if openai_build.resolution.effective_auth_mode == OPENAI_AUTH_MODE_OAUTH:
+            _apply_openai_oauth_responses_settings(settings_kwargs)
         return OpenAIResponsesModel(
             model_string,
             provider=_mark_provider_owns_http_client(
-                OpenAIProvider(api_key=api_key, base_url=base_url, http_client=http_client),
+                openai_build.provider,
                 http_client,
             ),
             settings=OpenAIResponsesModelSettings(**settings_kwargs),

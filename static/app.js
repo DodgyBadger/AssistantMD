@@ -148,6 +148,7 @@ const chatRendering = window.ChatRendering.create({
         loadSession,
         openWorkspacePicker: () => workspacePicker.openModal(),
         openChatSettings: () => sessionControls.openSessionBrowserModal(),
+        retryLatestFailure,
     },
 });
 
@@ -1461,6 +1462,91 @@ async function fetchTemplates(vault, preferredTemplate = '') {
     }
 }
 
+async function streamStartedChatTask(started, vault, abortController) {
+    if (started.session_id) {
+        state.sessionId = started.session_id;
+        syncChatControlLocks();
+        sessionControls.renderSelector();
+        sessionControls.updateTitleRow();
+        sessionControls.refreshCompactionProgress();
+    }
+    const taskId = started.task?.task_id;
+    if (!taskId) {
+        throw new Error('Chat task did not return a task id.');
+    }
+    state.activeChatTaskId = taskId;
+
+    const assistantMessage = createAssistantStreamingMessage();
+    const streamResult = await consumeChatTaskEvents(taskId, assistantMessage, abortController);
+
+    finalizeAssistantMessage(assistantMessage, {
+        sessionId: state.sessionId || 'unknown',
+        messageCount: Math.max(streamResult.messageCount, assistantMessage.fullText ? 1 : 0),
+        toolCount: assistantMessage.toolStatusMap.size,
+        status: streamResult.finished ? 'done' : 'incomplete'
+    });
+    if (vault) {
+        await fetchSessions(vault, state.sessionId || '');
+        if (state.sessionId) {
+            await loadSession(state.sessionId);
+        }
+    }
+}
+
+async function retryLatestFailure(button = null) {
+    const vault = chatElements.vaultSelector?.value || '';
+    const sessionId = state.sessionId;
+    if (!vault || !sessionId || state.isLoading) return;
+
+    state.isLoading = true;
+    state.activeChatSessionId = sessionId;
+    const abortController = new AbortController();
+    state.activeChatAbortController = abortController;
+    if (button) {
+        button.disabled = true;
+        window.AssistantMDIcons.setIconButtonLabel(button, 'Retrying interrupted turn...');
+    }
+    syncChatControlLocks();
+
+    const loadingMessage = addLoadingMessage();
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_name: vault }),
+            signal: abortController.signal
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+        removeLoadingMessage(loadingMessage);
+        const started = await response.json();
+        await streamStartedChatTask(started, vault, abortController);
+    } catch (error) {
+        console.error('Error retrying chat turn:', error);
+        removeLoadingMessage(loadingMessage);
+        if (state.isCancellingChat || error.name === 'AbortError') {
+            addMessage('assistant', 'Response stopped.');
+        } else {
+            addChatErrorMessage(error.message);
+        }
+    } finally {
+        state.isLoading = false;
+        state.isCancellingChat = false;
+        state.activeChatSessionId = null;
+        state.activeChatTaskId = null;
+        state.activeChatAbortController = null;
+        if (button) {
+            button.disabled = false;
+            window.AssistantMDIcons.setIconButtonLabel(button, 'Retry interrupted turn');
+        }
+        syncChatControlLocks();
+        chatElements.chatInput.focus();
+        sessionControls.refreshCompactionProgress();
+    }
+}
+
 // Send message handler with streaming response support
 async function sendMessage() {
     const message = chatElements.chatInput.value.trim();
@@ -1562,34 +1648,7 @@ async function sendMessage() {
         removeLoadingMessage(loadingMessage);
 
         const started = await startResponse.json();
-        if (started.session_id) {
-            state.sessionId = started.session_id;
-            syncChatControlLocks();
-            sessionControls.renderSelector();
-            sessionControls.updateTitleRow();
-            sessionControls.refreshCompactionProgress();
-        }
-        const taskId = started.task?.task_id;
-        if (!taskId) {
-            throw new Error('Chat task did not return a task id.');
-        }
-        state.activeChatTaskId = taskId;
-
-        const assistantMessage = createAssistantStreamingMessage();
-        const streamResult = await consumeChatTaskEvents(taskId, assistantMessage, abortController);
-
-        finalizeAssistantMessage(assistantMessage, {
-            sessionId: state.sessionId || 'unknown',
-            messageCount: Math.max(streamResult.messageCount, assistantMessage.fullText ? 1 : 0),
-            toolCount: assistantMessage.toolStatusMap.size,
-            status: streamResult.finished ? 'done' : 'incomplete'
-        });
-        if (vault) {
-            await fetchSessions(vault, state.sessionId || '');
-            if (state.sessionId) {
-                await loadSession(state.sessionId);
-            }
-        }
+        await streamStartedChatTask(started, vault, abortController);
 
     } catch (error) {
         console.error('Error sending message:', error);

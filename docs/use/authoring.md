@@ -52,7 +52,7 @@ A workflow script is an automation that runs Python code against your vault. Use
 ```yaml
 ---
 run_type: workflow
-schedule: "cron: 0 9 * * 1"   # optional — omit for manual-only
+schedule: "cron: 0 9 * * mon" # optional — omit for manual-only
 enabled: false                  # true to activate scheduled runs
 description: Weekly planning
 week_start_day: monday          # optional, default monday
@@ -60,6 +60,10 @@ week_start_day: monday          # optional, default monday
 ```
 
 - `schedule` supports `cron: MINUTE HOUR DOM MONTH DOW` or `once: YYYY-MM-DD HH:MM`
+- Use weekday names such as `mon`, `tue`, or `sun` in cron schedules. The
+  current scheduler uses APScheduler 3.x, whose numeric day-of-week values do
+  not match standard cron: `0` is Monday and `1` is Tuesday. Weekday names avoid
+  that ambiguity.
 - `enabled: false` pauses scheduled runs; manual runs always work
 - Rescan your vault after changing `enabled` or `schedule`
 - Manual workflow runs appear as managed tasks in the Dashboard. Long-running

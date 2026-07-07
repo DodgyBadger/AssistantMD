@@ -50,9 +50,34 @@ agent behavior toward Pydantic AI's composable capability model.
 - `resolve_tool_binding(...)` imports configured modules and finds `BaseTool` subclasses.
 - Chat, delegate child agents, and authored direct-tool calls attach tools through `core/llm/capabilities/assistant_tools.py`.
 - Pydantic AI model providers are constructed with retry-enabled HTTP clients using `pydantic_ai.retries.AsyncTenacityTransport` and `wait_retry_after(...)`. The transport retries provider rate limits, provider 5xx responses, and network request errors with bounded attempts; permanent 4xx responses are left for provider/model error handling. Tool execution is not automatically retried by infrastructure; tool failures should return structured, model-visible failure metadata so the model can decide the next action.
+- OpenAI provider construction goes through `core/llm/openai_runtime.py`, which resolves API-key versus experimental OAuth auth mode before creating the Pydantic AI provider. OAuth runtime construction is behind an explicit adapter boundary; without an adapter, OAuth mode fails clearly instead of treating OAuth tokens as API keys.
 - Tool result caching is handled by chat capabilities rather than tool-call routing parameters.
 - Oversized chat tool output is stored through the authoring cache layer, not the legacy in-memory buffer store.
 - `BufferStore` remains available on `RunContext.deps` for tool compatibility; the deprecated typed output-routing modules that wrote variable-style buffers have been removed.
+
+## OpenAI Auth Modes
+
+The built-in `openai` provider supports two auth modes:
+
+- `api_key`: the stable default. Runtime requests use the configured OpenAI API
+  key secret or compatible endpoint configuration.
+- `oauth`: an experimental Codex/ChatGPT-compatible OAuth path. It is available
+  only when the global `openai_oauth_enabled` setting is true and an OAuth token
+  is connected.
+
+OpenAI OAuth state is owned by `core/llm/openai_oauth.py`. Pending auth attempts
+and connected token state are stored as internal secrets, hidden from the
+generic Secrets UI/API, and exposed only through sanitized provider status
+fields. OAuth supports both PKCE callback/manual completion and device-code
+completion for remote deployments.
+
+Runtime auth resolution is centralized in `core/llm/openai_auth.py` and
+`core/llm/openai_runtime.py`. The global OAuth disable setting is authoritative:
+when disabled, OpenAI resolves as API-key-only even if OAuth token state exists.
+API-key fallback from OAuth mode is opt-in through
+`oauth_api_key_fallback_enabled`, so the runtime does not silently switch billing
+paths. If OAuth is selected but unavailable and fallback is not enabled, model
+construction fails with actionable reconnect/switch-auth guidance.
 
 ## Delegate and Code Execution
 

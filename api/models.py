@@ -4,7 +4,7 @@ Pydantic models for API request and response schemas.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -342,6 +342,71 @@ class ProviderInfo(BaseModel):
     user_editable: bool = Field(False, description="If the provider entry can be edited via UI")
     api_key_has_value: bool = Field(False, description="True if the API key secret currently has a value")
     base_url_has_value: bool = Field(False, description="True if the base URL secret or literal value is set")
+    status_message: Optional[str] = Field(None, description="Optional availability warning or guidance")
+    configured_auth_mode: Optional[str] = Field(
+        None,
+        description="Configured provider auth mode when the provider supports auth modes.",
+    )
+    effective_auth_mode: Optional[str] = Field(
+        None,
+        description="Runtime auth mode after global overrides are applied.",
+    )
+    oauth_enabled: bool = Field(
+        False,
+        description="True when OpenAI OAuth behavior is globally enabled.",
+    )
+    oauth_status: Optional[str] = Field(
+        None,
+        description="Sanitized OAuth connection status for providers that support OAuth.",
+    )
+    oauth_disabled_reason: Optional[str] = Field(
+        None,
+        description="Reason OAuth is unavailable or ignored, when applicable.",
+    )
+    oauth_api_key_fallback_enabled: bool = Field(
+        False,
+        description="True when OAuth failures may explicitly fall back to API-key auth.",
+    )
+    oauth_api_key_fallback_available: bool = Field(
+        False,
+        description="True when an API-key fallback secret is configured.",
+    )
+    oauth_account_id: Optional[str] = Field(
+        None,
+        description="Sanitized connected OpenAI account identifier, when available.",
+    )
+    oauth_expires_at: Optional[str] = Field(
+        None,
+        description="OAuth token expiry timestamp, when available.",
+    )
+    oauth_last_refresh_at: Optional[str] = Field(
+        None,
+        description="Last successful OAuth refresh timestamp, when available.",
+    )
+    oauth_last_refresh_error: Optional[str] = Field(
+        None,
+        description="Sanitized OAuth refresh failure category or message.",
+    )
+    oauth_pending_expires_at: Optional[str] = Field(
+        None,
+        description="Pending OAuth connection expiry timestamp, when available.",
+    )
+    oauth_pending_flow: Optional[str] = Field(
+        None,
+        description="Pending OAuth connection flow, when available.",
+    )
+    oauth_device_verification_url: Optional[str] = Field(
+        None,
+        description="Device-code verification URL for pending OpenAI OAuth.",
+    )
+    oauth_device_user_code: Optional[str] = Field(
+        None,
+        description="Device-code user code for pending OpenAI OAuth.",
+    )
+    oauth_device_poll_interval_seconds: Optional[int] = Field(
+        None,
+        description="Recommended device-code polling interval in seconds.",
+    )
     restart_required: bool = Field(
         False,
         description="True when recent edits require a full restart to take effect.",
@@ -461,6 +526,12 @@ class ChatSessionExportRequest(BaseModel):
     vault_name: str = Field(..., description="Owning vault name")
 
 
+class ChatSessionRetryRequest(BaseModel):
+    """Request to retry the latest unfinished chat turn."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+
+
 class ChatSessionMessageInfo(BaseModel):
     """Persisted normalized chat message for session rehydration."""
 
@@ -509,6 +580,9 @@ class ChatSessionFailureInfo(BaseModel):
     accepted_user_sequence_index: int = Field(..., description="Accepted user message sequence index")
     recorded_at: str = Field(..., description="Marker timestamp")
     suggested_action: str = Field("", description="Agent-safe recovery guidance")
+    manual_retry_count: int = Field(0, description="Manual retry attempts started for this marker")
+    last_manual_retry_task_id: Optional[str] = Field(None, description="Latest manual retry task id")
+    last_manual_retry_started_at: Optional[str] = Field(None, description="Latest manual retry start timestamp")
 
 
 class ChatSessionDetailResponse(BaseModel):
@@ -637,8 +711,64 @@ class ProviderConfigRequest(BaseModel):
 
     api_key: Optional[str] = Field(None, description="Secret name containing the provider API key")
     base_url: Optional[str] = Field(None, description="Either a direct URL or the name of a stored secret")
+    auth_mode: Optional[Literal["api_key", "oauth"]] = Field(
+        None,
+        description="OpenAI auth mode; only supported for the built-in openai provider",
+    )
+    oauth_api_key_fallback_enabled: Optional[bool] = Field(
+        None,
+        description="Allow OpenAI OAuth failures to fall back to API-key auth",
+    )
     api_key_value: Optional[str] = Field(None, description="Optional API key value to persist in the secrets store")
     base_url_value: Optional[str] = Field(None, description="Optional base URL value to persist in the secrets store")
+
+
+class OpenAIOAuthStartRequest(BaseModel):
+    """Payload for starting an OpenAI OAuth connection."""
+
+    redirect_uri: Optional[str] = Field(
+        None,
+        description="Optional callback URI; defaults to the Codex loopback callback",
+    )
+
+
+class OpenAIOAuthStartResponse(BaseModel):
+    """Bootstrap response for an OpenAI OAuth connection attempt."""
+
+    auth_url: str = Field(..., description="Authorization URL to open in a browser")
+    state: str = Field(..., description="Opaque OAuth state for this connection attempt")
+    redirect_uri: str = Field(..., description="Callback URI bound to this attempt")
+    expires_at: str = Field(..., description="Pending connection expiry timestamp")
+
+
+class OpenAIOAuthDeviceStartResponse(BaseModel):
+    """Bootstrap response for an OpenAI OAuth device-code connection attempt."""
+
+    verification_url: str = Field(..., description="URL where the user enters the code")
+    user_code: str = Field(..., description="Short device code to enter")
+    expires_at: str = Field(..., description="Pending connection expiry timestamp")
+    poll_interval_seconds: int = Field(
+        ...,
+        description="Recommended polling interval in seconds",
+    )
+
+
+class OpenAIOAuthCompleteRequest(BaseModel):
+    """Payload for completing OpenAI OAuth manually."""
+
+    redirect_url: Optional[str] = Field(
+        None,
+        description="Full pasted redirect URL containing code and state",
+    )
+    code: Optional[str] = Field(None, description="Authorization code")
+    state: Optional[str] = Field(None, description="OAuth state")
+
+
+class OpenAIOAuthDeviceCheckResponse(BaseModel):
+    """Response for checking an OpenAI OAuth device-code connection attempt."""
+
+    status: str = Field(..., description="Current device-code status")
+    provider: ProviderInfo = Field(..., description="Updated OpenAI provider status")
 
 
 class OperationResult(BaseModel):

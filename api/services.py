@@ -45,11 +45,29 @@ from core.settings.config_editor import (
 )
 from core.runtime.reload_service import reload_configuration
 from core.settings.secrets_store import (
+    get_secret_value,
     list_secret_entries,
     set_secret_value,
     remove_secret,
     delete_secret,
     secret_has_value,
+)
+from core.llm.openai_auth import (
+    openai_oauth_enabled_from_settings,
+    openai_provider_api_key_available,
+    openai_provider_base_url_available,
+    resolve_openai_auth,
+)
+from core.llm.openai_oauth import (
+    OpenAIOAuthStateError,
+    clear_openai_oauth_state,
+    complete_openai_oauth,
+    complete_openai_oauth_from_redirect,
+    get_openai_oauth_status,
+    is_openai_oauth_internal_secret,
+    poll_openai_oauth_device_code,
+    start_openai_oauth_device_code,
+    start_openai_oauth as start_openai_oauth_attempt,
 )
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
@@ -93,6 +111,11 @@ from .models import (
     ConfigurationIssueInfo,
     ProviderInfo,
     ModelConfigRequest,
+    OpenAIOAuthCompleteRequest,
+    OpenAIOAuthDeviceCheckResponse,
+    OpenAIOAuthDeviceStartResponse,
+    OpenAIOAuthStartRequest,
+    OpenAIOAuthStartResponse,
     ProviderConfigRequest,
     CachePurgeResponse,
     SystemTemplateSeedResponse,
@@ -1241,6 +1264,17 @@ def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:
             accepted_user_sequence_index=int(value.get("accepted_user_sequence_index")),
             recorded_at=str(value.get("recorded_at") or ""),
             suggested_action=str(value.get("suggested_action") or ""),
+            manual_retry_count=max(int(value.get("manual_retry_count") or 0), 0),
+            last_manual_retry_task_id=(
+                None
+                if value.get("last_manual_retry_task_id") is None
+                else str(value.get("last_manual_retry_task_id"))
+            ),
+            last_manual_retry_started_at=(
+                None
+                if value.get("last_manual_retry_started_at") is None
+                else str(value.get("last_manual_retry_started_at"))
+            ),
         )
     except (TypeError, ValueError):
         return None
@@ -2471,27 +2505,50 @@ def _build_model_info(
     )
 
 
+def _general_setting_value(name: str, default: Any) -> Any:
+    entry = list_general_settings().get(name)
+    return getattr(entry, "value", default) if entry is not None else default
+
+
+def _editable_builtin_providers() -> set[str]:
+    value = _general_setting_value("editable_builtin_providers", [])
+    if not isinstance(value, list):
+        return set()
+    return {str(item) for item in value}
+
+
+def _openai_oauth_enabled() -> bool:
+    return openai_oauth_enabled_from_settings(list_general_settings())
+
+
 def _build_provider_info(name: str, config, restart_required: bool = False) -> ProviderInfo:
     if hasattr(config, "api_key"):
         raw_api_key = config.api_key
         raw_base_url = getattr(config, "base_url", None)
-        user_editable = getattr(config, "user_editable", False)
+        stored_user_editable = getattr(config, "user_editable", False)
+        fallback_enabled = bool(
+            getattr(config, "oauth_api_key_fallback_enabled", False)
+        )
     else:
         raw_api_key = config.get('api_key')
         raw_base_url = config.get('base_url')
-        user_editable = config.get('user_editable', False)
+        stored_user_editable = config.get('user_editable', False)
+        fallback_enabled = bool(config.get("oauth_api_key_fallback_enabled", False))
 
     api_key_env = raw_api_key if raw_api_key else None
     base_url_env = raw_base_url if raw_base_url else None
+    user_editable = bool(stored_user_editable) or name in _editable_builtin_providers()
 
-    api_key_has_value = secret_has_value(api_key_env) if api_key_env else False
+    api_key_has_value = openai_provider_api_key_available(
+        config,
+        secret_has_value=secret_has_value,
+    )
+    base_url_has_value = openai_provider_base_url_available(
+        config,
+        get_secret_value=get_secret_value,
+    )
 
-    if base_url_env and "://" not in base_url_env:
-        base_url_has_value = secret_has_value(base_url_env)
-    else:
-        base_url_has_value = bool(base_url_env)
-
-    return ProviderInfo(
+    provider_info = ProviderInfo(
         name=name,
         api_key=api_key_env,
         base_url=base_url_env,
@@ -2500,6 +2557,46 @@ def _build_provider_info(name: str, config, restart_required: bool = False) -> P
         base_url_has_value=base_url_has_value,
         restart_required=restart_required,
     )
+
+    if name != "openai":
+        return provider_info
+
+    oauth_enabled = _openai_oauth_enabled()
+    oauth_connection = get_openai_oauth_status()
+    resolution = resolve_openai_auth(
+        config,
+        oauth_enabled=oauth_enabled,
+        oauth_connected=oauth_connection.connected,
+        api_key_available=api_key_has_value,
+        base_url_available=base_url_has_value,
+        emit_log=False,
+    )
+    configured_auth_mode = resolution.configured_auth_mode
+    effective_auth_mode = resolution.effective_auth_mode
+    oauth_status = "disabled" if not oauth_enabled else oauth_connection.status
+    oauth_disabled_reason = "global_setting" if not oauth_enabled else None
+
+    provider_info.configured_auth_mode = configured_auth_mode
+    provider_info.effective_auth_mode = effective_auth_mode
+    provider_info.oauth_enabled = oauth_enabled
+    provider_info.oauth_status = oauth_status
+    provider_info.oauth_disabled_reason = oauth_disabled_reason
+    provider_info.oauth_api_key_fallback_enabled = fallback_enabled
+    provider_info.oauth_api_key_fallback_available = resolution.fallback_available
+    provider_info.oauth_account_id = oauth_connection.account_id
+    provider_info.oauth_expires_at = oauth_connection.expires_at
+    provider_info.oauth_last_refresh_at = oauth_connection.last_refresh_at
+    provider_info.oauth_last_refresh_error = oauth_connection.last_refresh_error
+    provider_info.oauth_pending_expires_at = oauth_connection.pending_expires_at
+    provider_info.oauth_pending_flow = oauth_connection.pending_flow
+    provider_info.oauth_device_verification_url = (
+        oauth_connection.device_verification_url
+    )
+    provider_info.oauth_device_user_code = oauth_connection.device_user_code
+    provider_info.oauth_device_poll_interval_seconds = (
+        oauth_connection.device_poll_interval_seconds
+    )
+    return provider_info
 
 
 def _derive_secret_name(provider_name: str, suffix: str) -> str:
@@ -2591,6 +2688,119 @@ def get_configurable_providers() -> List[ProviderInfo]:
     ]
 
 
+def _openai_provider_info(restart_required: bool = False) -> ProviderInfo:
+    providers_config = get_providers_config()
+    config = providers_config.get("openai")
+    if config is None:
+        raise SystemConfigurationError("Built-in openai provider is not configured.")
+    return _build_provider_info("openai", config, restart_required=restart_required)
+
+
+def start_openai_oauth_connection(
+    payload: OpenAIOAuthStartRequest,
+    *,
+    default_redirect_uri: str,
+) -> OpenAIOAuthStartResponse:
+    """Start an OpenAI OAuth connection attempt."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    redirect_uri = payload.redirect_uri or default_redirect_uri
+    try:
+        result = start_openai_oauth_attempt(redirect_uri=redirect_uri)
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info(
+        "OpenAI OAuth start created",
+        data={"redirect_uri_configured": bool(payload.redirect_uri)},
+    )
+    return OpenAIOAuthStartResponse(
+        auth_url=result.auth_url,
+        state=result.state,
+        redirect_uri=result.redirect_uri,
+        expires_at=result.expires_at,
+    )
+
+
+async def start_openai_oauth_device_connection() -> OpenAIOAuthDeviceStartResponse:
+    """Start an OpenAI OAuth device-code connection attempt."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        result = await start_openai_oauth_device_code()
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info(
+        "OpenAI OAuth device-code start created",
+        data={"poll_interval_seconds": result.poll_interval_seconds},
+    )
+    return OpenAIOAuthDeviceStartResponse(
+        verification_url=result.verification_url,
+        user_code=result.user_code,
+        expires_at=result.expires_at,
+        poll_interval_seconds=result.poll_interval_seconds,
+    )
+
+
+async def check_openai_oauth_device_connection() -> OpenAIOAuthDeviceCheckResponse:
+    """Check an OpenAI OAuth device-code connection attempt."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        token_state = await poll_openai_oauth_device_code()
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+
+    status = "connected" if token_state is not None else "pending"
+    logger.info("OpenAI OAuth device-code checked", data={"status": status})
+    return OpenAIOAuthDeviceCheckResponse(
+        status=status,
+        provider=_openai_provider_info(),
+    )
+
+
+async def complete_openai_oauth_callback(code: str, state: str) -> ProviderInfo:
+    """Complete OpenAI OAuth from callback query parameters."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        await complete_openai_oauth(code=code, state=state)
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info("OpenAI OAuth callback completed", data={"manual": False})
+    return _openai_provider_info()
+
+
+async def complete_openai_oauth_manual(
+    payload: OpenAIOAuthCompleteRequest,
+) -> ProviderInfo:
+    """Complete OpenAI OAuth from a pasted redirect URL or code/state pair."""
+
+    if not _openai_oauth_enabled():
+        raise SystemConfigurationError("OpenAI OAuth is disabled by global setting.")
+    try:
+        await complete_openai_oauth_from_redirect(
+            redirect_url=payload.redirect_url,
+            code=payload.code,
+            state=payload.state,
+        )
+    except OpenAIOAuthStateError as exc:
+        raise SystemConfigurationError(str(exc)) from exc
+    logger.info("OpenAI OAuth manual completion finished", data={"manual": True})
+    return _openai_provider_info()
+
+
+def disconnect_openai_oauth_connection() -> OperationResult:
+    """Clear OpenAI OAuth token and pending state without changing provider mode."""
+
+    clear_openai_oauth_state()
+    logger.info("OpenAI OAuth disconnected", data={})
+    return OperationResult(success=True, message="OpenAI OAuth connection cleared.")
+
+
 def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequest) -> ProviderInfo:
     """Create or update a provider configuration entry."""
     providers_config = get_providers_config()
@@ -2599,15 +2809,30 @@ def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequ
     # Only reference existing secret names; actual secret values are managed via the Secrets form.
     existing_api_key = None
     existing_base_url = None
+    existing_auth_mode = "api_key"
+    existing_fallback_enabled = False
     if existing_config:
         if hasattr(existing_config, "api_key"):
             existing_api_key = existing_config.api_key
             existing_base_url = getattr(existing_config, "base_url", None)
+            existing_auth_mode = getattr(existing_config, "auth_mode", "api_key")
+            existing_fallback_enabled = bool(
+                getattr(existing_config, "oauth_api_key_fallback_enabled", False)
+            )
         else:
             existing_api_key = existing_config.get('api_key')
             existing_base_url = existing_config.get('base_url')
+            existing_auth_mode = existing_config.get("auth_mode", "api_key")
+            existing_fallback_enabled = bool(
+                existing_config.get("oauth_api_key_fallback_enabled", False)
+            )
 
     fields_set = getattr(payload, "model_fields_set", set())
+    openai_auth_fields = {"auth_mode", "oauth_api_key_fallback_enabled"}
+    if provider_name != "openai" and fields_set.intersection(openai_auth_fields):
+        raise SystemConfigurationError(
+            "OpenAI auth metadata can only be configured for the built-in openai provider."
+        )
 
     if "api_key" in fields_set:
         api_key = _normalize_secret_pointer(payload.api_key)
@@ -2619,11 +2844,23 @@ def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequ
     else:
         base_url = existing_base_url
 
+    if "auth_mode" in fields_set:
+        auth_mode = payload.auth_mode
+    else:
+        auth_mode = existing_auth_mode
+
+    if "oauth_api_key_fallback_enabled" in fields_set:
+        fallback_enabled = bool(payload.oauth_api_key_fallback_enabled)
+    else:
+        fallback_enabled = existing_fallback_enabled
+
     try:
         updated = upsert_provider_config(
             name=provider_name,
             api_key=api_key,
             base_url=base_url,
+            auth_mode=auth_mode,
+            oauth_api_key_fallback_enabled=fallback_enabled,
         )
     except SettingsError as exc:
         raise SystemConfigurationError(str(exc)) from exc
@@ -2636,6 +2873,10 @@ def upsert_configurable_provider(provider_name: str, payload: ProviderConfigRequ
             "alias": provider_name,
             "has_api_key": bool(api_key),
             "has_base_url": bool(base_url),
+            "auth_mode": auth_mode if provider_name == "openai" else None,
+            "oauth_api_key_fallback_enabled": (
+                fallback_enabled if provider_name == "openai" else None
+            ),
         },
     )
     return _build_provider_info(
@@ -2684,8 +2925,12 @@ def _collect_known_secret_names() -> set[str]:
 
 def list_secrets() -> List[SecretInfo]:
     entries = list_secret_entries()
-    recorded_entries = {entry.name: entry for entry in entries}
-    ordered_names: List[str] = [entry.name for entry in entries]
+    recorded_entries = {
+        entry.name: entry
+        for entry in entries
+        if not is_openai_oauth_internal_secret(entry.name)
+    }
+    ordered_names: List[str] = [entry.name for entry in entries if entry.name in recorded_entries]
 
     known_names = _collect_known_secret_names()
     seen = set(ordered_names)

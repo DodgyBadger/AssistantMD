@@ -7,6 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic_ai import (
@@ -29,6 +30,7 @@ from core.chat.compaction import chat_session_history_lock
 from core.chat.task_events import ChatTaskEventBuffer
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
+from core.runtime.buffers import get_session_buffer_store
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSnapshot,
@@ -63,6 +65,7 @@ async def start_prepared_chat_stream_task(
     vault_path: str,
     session_id: str,
     event_buffer: ChatTaskEventBuffer | None = None,
+    persist_user_request: bool = True,
 ) -> ChatStreamTaskStart:
     """Start a prepared streaming chat run in a background execution task."""
     runtime = get_runtime_context()
@@ -79,6 +82,7 @@ async def start_prepared_chat_stream_task(
                 "streaming": True,
                 "model": prepared.model,
                 "tools": list(prepared.tools),
+                "retry": not persist_user_request,
             },
         ),
         lambda task: _run_prepared_chat_stream_task(
@@ -88,12 +92,123 @@ async def start_prepared_chat_stream_task(
             vault_path=vault_path,
             session_id=session_id,
             event_buffer=buffer,
+            persist_user_request=persist_user_request,
         ),
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
         ),
     )
     return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def start_chat_turn_retry_task(
+    *,
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    event_buffer: ChatTaskEventBuffer | None = None,
+) -> ChatStreamTaskStart:
+    """Retry the latest retryable unfinished chat turn without duplicating the user request."""
+    metadata = _CHAT_STORE.get_session_metadata(session_id, vault_name)
+    marker = metadata.get(chat_executor._LATEST_TURN_FAILURE_METADATA_KEY)
+    if not isinstance(marker, dict) or marker.get("status") != "failed":
+        raise ValueError("Chat session has no unfinished turn to retry.")
+    if marker.get("retryable") is not True:
+        raise ValueError("The latest unfinished chat turn is not marked retryable.")
+
+    accepted_sequence_index = marker.get("accepted_user_sequence_index")
+    try:
+        accepted_sequence_index = int(accepted_sequence_index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The unfinished turn marker does not identify an accepted user message.") from exc
+
+    stored_messages = _CHAT_STORE.get_stored_messages(
+        session_id,
+        vault_name,
+        mode="effective",
+    )
+    accepted_message = next(
+        (
+            message
+            for message in stored_messages
+            if message.sequence_index == accepted_sequence_index
+        ),
+        None,
+    )
+    if accepted_message is None:
+        raise ValueError("The accepted user message for the unfinished turn was not found.")
+    prompt = chat_executor._user_prompt_text(accepted_message.message)
+    if not prompt:
+        raise ValueError("The accepted user message for the unfinished turn is not retryable.")
+
+    model = str(marker.get("model") or "").strip()
+    if not model:
+        raise ValueError("The unfinished turn marker does not include a model to retry.")
+    tools = [str(tool) for tool in marker.get("tools") or ()]
+    message_history = [
+        message.message
+        for message in stored_messages
+        if message.sequence_index < accepted_sequence_index
+    ]
+
+    retry_count = max(int(marker.get("manual_retry_count") or 0), 0) + 1
+    marker = {
+        **marker,
+        "manual_retry_count": retry_count,
+        "last_manual_retry_started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    _CHAT_STORE.update_session_metadata(
+        session_id=session_id,
+        vault_name=vault_name,
+        metadata_update={chat_executor._LATEST_TURN_FAILURE_METADATA_KEY: marker},
+        advance_history_revision=True,
+    )
+
+    prepared = await chat_executor._prepare_chat_execution(
+        vault_name=vault_name,
+        vault_path=vault_path,
+        prompt=prompt,
+        image_paths=[],
+        image_uploads=[],
+        session_id=session_id,
+        tools=tools,
+        model=model,
+        thinking=None,
+        context_template=None,
+        message_history_override=message_history,
+    )
+    started = await start_prepared_chat_stream_task(
+        prepared=prepared,
+        vault_name=vault_name,
+        vault_path=vault_path,
+        session_id=session_id,
+        event_buffer=event_buffer,
+        persist_user_request=False,
+    )
+    marker = {
+        **marker,
+        "last_manual_retry_task_id": started.task.task_id,
+    }
+    _CHAT_STORE.update_session_metadata(
+        session_id=session_id,
+        vault_name=vault_name,
+        metadata_update={chat_executor._LATEST_TURN_FAILURE_METADATA_KEY: marker},
+        advance_history_revision=False,
+    )
+    chat_executor.logger.info(
+        "Manual chat retry task started",
+        data={
+            "event": "chat_manual_retry_started",
+            "vault_name": vault_name,
+            "session_id": session_id,
+            "task_id": started.task.task_id,
+            "accepted_user_sequence_index": accepted_sequence_index,
+            "manual_retry_count": retry_count,
+            "model": model,
+            "tools": tools,
+        },
+    )
+    return started
 
 
 async def start_chat_stream_task(
@@ -347,6 +462,7 @@ async def _run_prepared_chat_stream_task(
     vault_path: str,
     session_id: str,
     event_buffer: ChatTaskEventBuffer,
+    persist_user_request: bool = True,
 ) -> None:
     """Run a prepared streaming chat task and publish buffered task events."""
     runtime = get_runtime_context()
@@ -361,7 +477,7 @@ async def _run_prepared_chat_stream_task(
     full_response = ""
     final_result = None
     tool_activity: dict[str, dict[str, Any]] = {}
-    session_buffer_store = chat_executor.get_session_buffer_store(session_id)
+    session_buffer_store = get_session_buffer_store(session_id)
     run_deps = chat_executor.ChatRunDeps(
         context_manager_now=chat_executor._resolve_context_manager_now(),
         buffer_store=session_buffer_store,
@@ -375,12 +491,13 @@ async def _run_prepared_chat_stream_task(
     async with task_context as task:
         if should_mark_started:
             await runtime.task_coordinator.mark_started(task.task_id)
-        async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
-            _CHAT_STORE.add_messages(
-                session_id,
-                vault_name,
-                [chat_executor._accepted_user_request(prepared)],
-            )
+        if persist_user_request:
+            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+                _CHAT_STORE.add_messages(
+                    session_id,
+                    vault_name,
+                    [chat_executor._accepted_user_request(prepared)],
+                )
 
         chat_executor._log_chat_lifecycle(
             "Streaming chat execution started",
@@ -398,6 +515,7 @@ async def _run_prepared_chat_stream_task(
                 "history_message_count": len(prepared.message_history or []),
                 "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
                 "task_id": task.task_id,
+                "retry": not persist_user_request,
             },
         )
 

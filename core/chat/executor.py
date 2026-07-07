@@ -21,13 +21,12 @@ from pydantic_ai.usage import UsageLimits
 from core.llm.agents import create_agent
 from core.chat.chat_store import ChatStore
 from core.chat.compaction import (
-    chat_session_history_lock,
     maybe_auto_compact_after_turn,
 )
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
-from core.llm.thinking import ThinkingValue, thinking_value_to_label
+from core.llm.thinking import ThinkingValue
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.llm.model_utils import (
     get_model_capabilities,
@@ -45,7 +44,7 @@ from core.settings import (
 )
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
-from core.runtime.buffers import BufferStore, get_session_buffer_store
+from core.runtime.buffers import BufferStore
 from core.tools.failures import classify_exception
 
 
@@ -121,6 +120,29 @@ def _accepted_user_request(prepared: PreparedChatExecution) -> ModelRequest:
     return ModelRequest(parts=[UserPromptPart(content=prepared.prompt_for_history)])
 
 
+def _user_prompt_text(message: ModelMessage) -> str | None:
+    """Return the first user prompt text from a persisted request message."""
+    if not isinstance(message, ModelRequest):
+        return None
+    text_parts: list[str] = []
+    for part in getattr(message, "parts", ()) or ():
+        if isinstance(part, UserPromptPart) and isinstance(part.content, str):
+            text_parts.append(part.content)
+    if not text_parts:
+        return None
+    return "\n\n".join(text_parts).strip()
+
+
+def _retry_metadata_from_marker(marker: dict[str, Any]) -> dict[str, Any]:
+    """Preserve bounded manual retry audit fields across marker rewrites."""
+    keys = (
+        "manual_retry_count",
+        "last_manual_retry_task_id",
+        "last_manual_retry_started_at",
+    )
+    return {key: marker[key] for key in keys if key in marker}
+
+
 def _messages_after_accepted_user_request(messages: list[ModelMessage]) -> list[ModelMessage]:
     """Drop the active user request that AssistantMD already persisted."""
     filtered: list[ModelMessage] = []
@@ -194,6 +216,9 @@ def _record_latest_turn_failure(
     tools: Sequence[str] | None,
 ) -> None:
     """Persist an internal failure marker for a user turn with no assistant outcome."""
+    existing = _CHAT_STORE.get_session_metadata(session_id, vault_name).get(
+        _LATEST_TURN_FAILURE_METADATA_KEY
+    )
     marker = _build_failure_recovery_marker(
         exc=exc,
         phase=phase,
@@ -202,6 +227,11 @@ def _record_latest_turn_failure(
         tools=tools,
         sequence_index=_CHAT_STORE.get_highest_message_sequence_index(session_id, vault_name),
     )
+    if (
+        isinstance(existing, dict)
+        and existing.get("accepted_user_sequence_index") == marker["accepted_user_sequence_index"]
+    ):
+        marker.update(_retry_metadata_from_marker(existing))
     _CHAT_STORE.update_session_metadata(
         session_id=session_id,
         vault_name=vault_name,
@@ -780,6 +810,7 @@ async def _prepare_chat_execution(
     model: str,
     thinking: ThinkingValue | None = None,
     context_template: Optional[str] = None,
+    message_history_override: Optional[List[ModelMessage]] = None,
 ) -> PreparedChatExecution:
     """Perform chat preflight before either sync or streaming execution begins."""
     _validate_image_capability(model, image_paths, image_uploads)
@@ -810,8 +841,13 @@ async def _prepare_chat_execution(
         if inst:
             agent.instructions(lambda _ctx, text=inst: text)
 
+    base_message_history = (
+        message_history_override
+        if message_history_override is not None
+        else _CHAT_STORE.get_history(session_id, vault_name)
+    )
     message_history = _with_failure_recovery_context(
-        _CHAT_STORE.get_history(session_id, vault_name),
+        base_message_history,
         session_id=session_id,
         vault_name=vault_name,
     )

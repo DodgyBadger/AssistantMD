@@ -34,6 +34,7 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - Ingestion and workflow manual runs are surfaced via API services.
 - The Dashboard tab hosts vault overview, workflow controls, import controls, and vault activity.
 - The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, system jobs, system authoring refresh, and database migration status/manual fallback.
+- OpenAI OAuth controls live in the System provider configuration surface and call the provider OAuth endpoints; API responses expose only sanitized OAuth status, not token material.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
 - `/api/chat/tasks` is the canonical chat execution entrypoint. It creates a task-owned streaming chat run; clients observe live events through `/api/chat/tasks/{task_id}/events`, task status through `/api/tasks/{task_id}`, or persisted history through session detail endpoints.

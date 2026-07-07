@@ -430,7 +430,7 @@ async def _generate_compaction_summary(
     recent_messages: list[ModelMessage],
     focus: str | None,
 ) -> str:
-    from core.llm.agents import create_agent
+    from core.llm.agents import collect_response, create_agent
 
     prompt = _build_summary_prompt(
         older_messages=older_messages,
@@ -438,7 +438,7 @@ async def _generate_compaction_summary(
         focus=focus,
     )
     agent = await create_agent()
-    result = await agent.run(prompt)
+    result = await collect_response(agent, prompt)
     return str(result.output or "").strip()
 
 

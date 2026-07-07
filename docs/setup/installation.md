@@ -46,7 +46,24 @@ _Or alternate text editor if you don't have nano._
 **Verify Installation**
 `docker ps` should show assistantMD running. If you see "restarting", something is wrong. Run `docker logs assistantMD` to check for startup errors.
 
-Access the web interface at `http://localhost:8000/` (or whichever host IP/port you configured in the compose file). Open the **Configuration** tab and add at least one LLM API key under **Secrets**. Changes apply immediately—no container restart required. If you plan to enable the built-in nightly session summarization workflow, also configure `OPENAI_API_KEY` for the default `embeddings` model alias.
+Access the web interface at `http://localhost:8000/` (or whichever host IP/port
+you configured in the compose file). Open the **System** tab and configure at
+least one model provider. Changes apply immediately—no container restart
+required.
+
+For OpenAI chat models, the stable setup is still to add `OPENAI_API_KEY` under
+**Secrets**. AssistantMD also includes an experimental OpenAI OAuth option for
+the built-in OpenAI provider. To use it, enable OpenAI OAuth in **System →
+Application Settings**, allow editing for the built-in `openai` provider if
+needed, then use the provider panel to connect with OAuth. Device-code login is
+available for remote/server installs where the browser is not running on the
+same machine as the container. API-key auth remains supported and is the
+recommended fallback if OAuth is unavailable.
+
+If you plan to enable the built-in nightly session summarization workflow,
+configure `OPENAI_API_KEY` for the default `embeddings` model alias. OAuth is
+for OpenAI chat model auth and does not replace the API key used by the current
+embeddings setup.
 
 When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
 

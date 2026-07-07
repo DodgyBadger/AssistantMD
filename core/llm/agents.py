@@ -1,9 +1,11 @@
-from typing import AsyncIterator, Optional, List, Any, Sequence
 import json
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, AsyncIterator, Optional, List, Sequence
 
 from pydantic_ai.agent import Agent
-from pydantic_ai.messages import UserContent
+from pydantic_ai.messages import ModelMessage, UserContent
+from pydantic_ai.usage import UsageLimits
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.llm.model_factory import build_model_instance
 from core.llm.thinking import ThinkingValue
@@ -14,6 +16,14 @@ from core.settings.store import get_general_settings
 _THINKING_UNSET = object()
 
 PromptInput = str | Sequence[UserContent]
+
+
+@dataclass(frozen=True)
+class CollectedAgentRun:
+    """Final output and messages from an internally streamed agent run."""
+
+    output: Any
+    messages: list[ModelMessage]
 
 async def create_agent(
     model=None,
@@ -124,16 +134,42 @@ async def generate_response(
     deps=None,
 ):
     try:
-        if message_history:
-            result = await agent.run(
-                prompt,
-                message_history=message_history,
-                deps=deps,
-            )
-        else:
-            result = await agent.run(prompt, deps=deps)
-            
+        result = await collect_response(
+            agent,
+            prompt,
+            message_history=message_history,
+            deps=deps,
+        )
         return result.output
 
     except Exception:
         raise
+
+
+async def collect_response(
+    agent: Agent,
+    prompt: PromptInput,
+    message_history=None,
+    deps=None,
+    usage_limits: UsageLimits | None = None,
+) -> CollectedAgentRun:
+    """Run an agent through the streaming transport and return one final result.
+
+    The ChatGPT/Codex OAuth backend requires streamed model requests. Background
+    tasks still need a single final value, so this helper consumes the stream
+    internally and preserves the old final-output contract.
+    """
+
+    kwargs: dict[str, Any] = {"deps": deps}
+    if message_history:
+        kwargs["message_history"] = message_history
+    if usage_limits is not None:
+        kwargs["usage_limits"] = usage_limits
+
+    async with agent.run_stream(prompt, **kwargs) as result:
+        async for _ in result.stream_output(debounce_by=None):
+            pass
+        return CollectedAgentRun(
+            output=await result.get_output(),
+            messages=list(result.all_messages()),
+        )

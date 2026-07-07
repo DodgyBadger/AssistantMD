@@ -8,9 +8,10 @@ Supports:
 Uses APScheduler's CronTrigger and explicit datetime parsing via python-dateutil.
 """
 
-from datetime import datetime
-from typing import Dict, Any
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
 from dateutil import parser as dateutil_parser
 from apscheduler.triggers.cron import CronTrigger
 
@@ -18,6 +19,27 @@ from core.logger import UnifiedLogger
 
 # Create module logger
 logger = UnifiedLogger(tag="schedule-parser")
+
+WEEKDAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+STANDARD_CRON_WEEKDAY_NAMES = {
+    "0": "sun",
+    "1": "mon",
+    "2": "tue",
+    "3": "wed",
+    "4": "thu",
+    "5": "fri",
+    "6": "sat",
+    "7": "sun",
+}
+APSCHEDULER_3_WEEKDAY_NAMES = {
+    "0": "mon",
+    "1": "tue",
+    "2": "wed",
+    "3": "thu",
+    "4": "fri",
+    "5": "sat",
+    "6": "sun",
+}
 
 
 #######################################################################
@@ -40,7 +62,7 @@ class ParsedSchedule:
     Contains the schedule type and parameters needed for trigger creation.
     """
     schedule_type: str              # 'cron' or 'date'
-    parameters: Dict[str, Any]      # Parameters for trigger creation
+    parameters: dict[str, Any]      # Parameters for trigger creation
 
     def is_cron(self) -> bool:
         """Check if this is a cron-based schedule."""
@@ -125,6 +147,28 @@ def parse_cron_schedule(cron_expr: str) -> ParsedSchedule:
         )
 
 
+def standard_cron_to_apscheduler_safe_cron(cron_expr: str) -> str:
+    """Return a cron expression whose weekday field is safe for APScheduler 3.x.
+
+    APScheduler 3.x treats numeric weekdays as 0=Monday, while standard cron
+    treats 0/7=Sunday and 1=Monday. This helper preserves standard cron
+    schedule meaning by converting numeric day-of-week values to weekday names.
+
+    The parser does not call this today; current behavior remains APScheduler's
+    native crontab behavior.
+    """
+    return _convert_cron_weekday_numbers(cron_expr, STANDARD_CRON_WEEKDAY_NAMES)
+
+
+def apscheduler_3_cron_to_standard_cron(cron_expr: str) -> str:
+    """Return a standard cron expression equivalent to APScheduler 3.x input.
+
+    Numeric day-of-week values are converted to weekday names so the resulting
+    expression keeps the same actual weekdays under standard cron semantics.
+    """
+    return _convert_cron_weekday_numbers(cron_expr, APSCHEDULER_3_WEEKDAY_NAMES)
+
+
 def parse_once_schedule(datetime_str: str) -> ParsedSchedule:
     """Parse explicit datetime for one-time schedule.
 
@@ -197,6 +241,83 @@ def _parse_explicit_datetime(datetime_str: str) -> datetime:
             f"Could not parse datetime: '{datetime_str}'\n"
             f"Use explicit formats like '2025-12-25 10:00' or 'December 25, 2025 at 10am'"
         )
+
+
+def _convert_cron_weekday_numbers(
+    cron_expr: str, weekday_name_by_number: dict[str, str]
+) -> str:
+    fields = cron_expr.split()
+    if len(fields) != 5:
+        raise ScheduleParsingError(
+            f"Invalid crontab expression: '{cron_expr}'\n"
+            f"Expected format: 'minute hour day month day_of_week'"
+        )
+
+    fields[4] = _convert_weekday_field_numbers(fields[4], weekday_name_by_number)
+    return " ".join(fields)
+
+
+def _convert_weekday_field_numbers(
+    field: str, weekday_name_by_number: dict[str, str]
+) -> str:
+    if field in {"*", "?"}:
+        return field
+
+    return ",".join(
+        _convert_weekday_part(part, weekday_name_by_number)
+        for part in field.split(",")
+    )
+
+
+def _convert_weekday_part(part: str, weekday_name_by_number: dict[str, str]) -> str:
+    base, separator, step = part.partition("/")
+    converted_base = _convert_weekday_base(base, weekday_name_by_number, step)
+    if separator:
+        if "," in converted_base:
+            return converted_base
+        return f"{converted_base}/{step}"
+    return converted_base
+
+
+def _convert_weekday_base(
+    base: str, weekday_name_by_number: dict[str, str], step: str = ""
+) -> str:
+    step_value = int(step) if step.isdigit() else 0
+    if base == "*" and step_value > 0:
+        return _convert_weekday_numbers_to_names(
+            range(0, 7, step_value), weekday_name_by_number
+        )
+
+    start, separator, end = base.partition("-")
+    if separator and start.isdigit() and end.isdigit():
+        range_start = int(start)
+        range_end = int(end)
+        if range_start <= range_end:
+            range_step = step_value if step_value > 0 else 1
+            return _convert_weekday_numbers_to_names(
+                range(range_start, range_end + 1, range_step), weekday_name_by_number
+            )
+
+    converted_start = _convert_weekday_token(start, weekday_name_by_number)
+    if separator:
+        converted_end = _convert_weekday_token(end, weekday_name_by_number)
+        return f"{converted_start}-{converted_end}"
+    return converted_start
+
+
+def _convert_weekday_numbers_to_names(
+    numbers: range, weekday_name_by_number: dict[str, str]
+) -> str:
+    return ",".join(
+        weekday_name_by_number.get(str(number), str(number)) for number in numbers
+    )
+
+
+def _convert_weekday_token(token: str, weekday_name_by_number: dict[str, str]) -> str:
+    normalized_token = token.lower()
+    if normalized_token in WEEKDAY_NAMES:
+        return normalized_token
+    return weekday_name_by_number.get(token, token)
 
 
 def _contains_time(s: str) -> bool:

@@ -116,6 +116,32 @@ def _coerce_setting_value(raw_value: str, current_value):
     return raw_value
 
 
+def _merged_general_settings(settings_file) -> dict[str, SettingsEntry]:
+    merged = dict(_template_general_settings())
+    merged.update(settings_file.settings)
+    return merged
+
+
+def _setting_list_value(settings_file, name: str) -> list[str]:
+    entry = _merged_general_settings(settings_file).get(name)
+    raw_value = getattr(entry, "value", []) if entry else []
+    if not isinstance(raw_value, list):
+        return []
+    return [str(item) for item in raw_value]
+
+
+def _provider_can_be_edited(
+    settings_file,
+    name: str,
+    existing: ProviderConfig | None,
+) -> bool:
+    if existing is None:
+        return True
+    if getattr(existing, "user_editable", False):
+        return True
+    return name in _setting_list_value(settings_file, "editable_builtin_providers")
+
+
 def upsert_model_mapping(
     name: str,
     provider: str,
@@ -190,6 +216,8 @@ def upsert_provider_config(
     name: str,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
+    auth_mode: str | None = None,
+    oauth_api_key_fallback_enabled: bool | None = None,
 ) -> ProviderConfig:
     """
     Create or update a provider configuration entry.
@@ -199,14 +227,32 @@ def upsert_provider_config(
     settings_file = load_settings()
     existing = settings_file.providers.get(name)
 
-    if existing and not getattr(existing, "user_editable", False):
+    if existing and not _provider_can_be_edited(settings_file, name, existing):
         raise SettingsError(f"Provider '{name}' is not user editable.")
 
     user_editable = getattr(existing, "user_editable", True) if existing else True
+    provider_metadata = getattr(existing, "provider", None) if existing else None
+    resolved_auth_mode = (
+        auth_mode
+        if auth_mode is not None
+        else getattr(existing, "auth_mode", "api_key") if existing else "api_key"
+    )
+    resolved_fallback = (
+        oauth_api_key_fallback_enabled
+        if oauth_api_key_fallback_enabled is not None
+        else (
+            getattr(existing, "oauth_api_key_fallback_enabled", False)
+            if existing
+            else False
+        )
+    )
 
     settings_file.providers[name] = ProviderConfig(
         api_key=api_key,
         base_url=base_url,
+        provider=provider_metadata,
+        auth_mode=resolved_auth_mode,
+        oauth_api_key_fallback_enabled=resolved_fallback,
         user_editable=user_editable,
     )
 

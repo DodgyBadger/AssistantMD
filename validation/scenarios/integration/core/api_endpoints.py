@@ -4,14 +4,32 @@ validation harness' shared FastAPI TestClient.
 """
 
 import base64
+import json
+import os
+import re
 
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
+from core.llm.openai_oauth import (
+    OPENAI_OAUTH_CLIENT_ID,
+    OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
+    OPENAI_OAUTH_ORIGINATOR,
+    OPENAI_OAUTH_SCOPE,
+    OpenAIOAuthDeviceCodeResult,
+    OpenAIOAuthDevicePollResult,
+    OpenAIOAuthTokenResult,
+    StaticOpenAIOAuthTokenAdapter,
+    set_openai_oauth_token_adapter,
+)
 from validation.core.base_scenario import BaseScenario
 
 
@@ -19,6 +37,20 @@ class ApiEndpointsScenario(BaseScenario):
     """Validate core REST endpoints end-to-end using real runtime context."""
 
     async def test_scenario(self):
+        original_secrets_path = os.environ.get("SECRETS_PATH")
+        os.environ["SECRETS_PATH"] = str(self.run_path / "system" / "secrets.yaml")
+        try:
+            await self._run_api_endpoint_checks()
+        finally:
+            set_openai_oauth_token_adapter(None)
+            if self._system_controller and self._system_controller.is_running:
+                await self.stop_system()
+            if original_secrets_path is None:
+                os.environ.pop("SECRETS_PATH", None)
+            else:
+                os.environ["SECRETS_PATH"] = original_secrets_path
+
+    async def _run_api_endpoint_checks(self):
         vault = self.create_vault("IntegrationApiVault")
 
         # Seed a minimal step workflow for execution and status checks
@@ -64,10 +96,33 @@ class ApiEndpointsScenario(BaseScenario):
         settings = self.call_api("/api/system/settings")
         assert settings.status_code == 200, "Settings fetch succeeds"
         settings_payload = settings.json()
+        settings_content = yaml.safe_load(settings_payload["content"]) or {}
+        settings_content.setdefault("settings", {}).setdefault(
+            "default_model",
+            {
+                "value": "test",
+                "description": "Validation default model.",
+                "category": "Models",
+                "restart_required": False,
+            },
+        )
+        settings_content["settings"]["default_model"]["value"] = "test"
+        settings_content.setdefault("models", {})["test"] = {
+            "provider": "test",
+            "model_string": "test",
+            "capabilities": ["text"],
+            "description": "Validation deterministic chat model",
+            "user_editable": True,
+        }
+        settings_content.setdefault("providers", {})["test"] = {
+            "api_key": None,
+            "base_url": None,
+            "user_editable": False,
+        }
         update_settings = self.call_api(
             "/api/system/settings",
             method="PUT",
-            data={"content": settings_payload["content"]},
+            data={"content": yaml.safe_dump(settings_content, sort_keys=False)},
         )
         assert update_settings.status_code == 200, "Settings update round-trips"
 
@@ -109,6 +164,282 @@ class ApiEndpointsScenario(BaseScenario):
         # Provider configuration lifecycle (create + delete)
         providers_resp = self.call_api("/api/system/providers")
         assert providers_resp.status_code == 200, "Provider listing succeeds"
+        providers_payload = providers_resp.json()
+        openai_provider = next(
+            provider for provider in providers_payload if provider["name"] == "openai"
+        )
+        assert openai_provider["user_editable"] is False, (
+            "Built-in OpenAI provider is protected by default"
+        )
+        assert openai_provider["configured_auth_mode"] == "api_key", (
+            "OpenAI provider defaults to API-key auth mode"
+        )
+        assert openai_provider["effective_auth_mode"] == "api_key", (
+            "OpenAI provider runs API-key auth while OAuth is disabled"
+        )
+        assert openai_provider["oauth_enabled"] is False, (
+            "OpenAI OAuth is globally disabled by default"
+        )
+        assert openai_provider["oauth_status"] == "disabled", (
+            "OpenAI OAuth status reports the global disable override"
+        )
+
+        allow_openai_edit = self.call_api(
+            "/api/system/settings/general/editable_builtin_providers",
+            method="PUT",
+            data={"value": '["openai"]'},
+        )
+        assert allow_openai_edit.status_code == 200, (
+            "Built-in provider edit allowlist can be updated"
+        )
+        updated_openai_provider = self.call_api(
+            "/api/system/providers/openai",
+            method="PUT",
+            data={
+                "auth_mode": "oauth",
+                "oauth_api_key_fallback_enabled": True,
+            },
+        )
+        assert updated_openai_provider.status_code == 200, (
+            "Allowlisted OpenAI provider accepts auth metadata updates"
+        )
+        updated_openai_payload = updated_openai_provider.json()
+        assert updated_openai_payload["configured_auth_mode"] == "oauth", (
+            "OpenAI provider records OAuth as the configured auth mode"
+        )
+        assert updated_openai_payload["effective_auth_mode"] == "api_key", (
+            "Global OAuth disable still forces API-key effective mode"
+        )
+        assert updated_openai_payload["oauth_api_key_fallback_enabled"] is True, (
+            "OpenAI provider records explicit API-key fallback opt-in"
+        )
+
+        oauth_enable = self.call_api(
+            "/api/system/settings/general/openai_oauth_enabled",
+            method="PUT",
+            data={"value": "true"},
+        )
+        assert oauth_enable.status_code == 200, "OpenAI OAuth can be enabled"
+        token_expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        set_openai_oauth_token_adapter(
+            StaticOpenAIOAuthTokenAdapter(
+                OpenAIOAuthTokenResult(
+                    access_token="validation-access-token",
+                    refresh_token="validation-refresh-token",
+                    expires_at=token_expiry,
+                    account_id="validation-account",
+                )
+            )
+        )
+        oauth_start = self.call_api(
+            "/api/system/providers/openai/oauth/start",
+            method="POST",
+            data={},
+        )
+        assert oauth_start.status_code == 200, "OpenAI OAuth start succeeds"
+        oauth_start_payload = oauth_start.json()
+        assert oauth_start_payload["auth_url"], "OAuth start returns auth URL"
+        assert re.fullmatch(r"[0-9a-f]{32}", oauth_start_payload["state"]), (
+            "OAuth start returns OpenClaw-compatible hex state"
+        )
+        assert oauth_start_payload["redirect_uri"] == OPENAI_OAUTH_LOOPBACK_REDIRECT_URI, (
+            "OAuth start defaults to the Codex loopback redirect URI"
+        )
+        auth_url = urlparse(oauth_start_payload["auth_url"])
+        auth_query = parse_qs(auth_url.query)
+        assert auth_query.get("client_id") == [OPENAI_OAUTH_CLIENT_ID], (
+            "OpenAI OAuth start uses Codex client id"
+        )
+        assert auth_query.get("scope") == [OPENAI_OAUTH_SCOPE], (
+            "OpenAI OAuth start uses Codex OAuth scope"
+        )
+        assert auth_query.get("originator") == [OPENAI_OAUTH_ORIGINATOR], (
+            "OpenAI OAuth start identifies the Codex originator"
+        )
+
+        pasted_redirect = (
+            f"{oauth_start_payload['redirect_uri']}?code=validation-code"
+            f"&state={oauth_start_payload['state']}"
+        )
+        oauth_complete = self.call_api(
+            "/api/system/providers/openai/oauth/complete",
+            method="POST",
+            data={"redirect_url": pasted_redirect},
+        )
+        assert oauth_complete.status_code == 200, (
+            "OpenAI OAuth manual completion succeeds with fake adapter"
+        )
+        oauth_complete_payload = oauth_complete.json()
+        assert oauth_complete_payload["oauth_status"] == "connected", (
+            "OpenAI OAuth status reports connected after completion"
+        )
+        assert oauth_complete_payload["oauth_account_id"] == "validation-account", (
+            "OpenAI OAuth status exposes sanitized account metadata"
+        )
+        oauth_models = self.call_api("/api/system/models")
+        assert oauth_models.status_code == 200, (
+            "Model listing succeeds after OAuth completion"
+        )
+        oauth_gpt = next(
+            model for model in oauth_models.json() if model["name"] == "gpt"
+        )
+        assert oauth_gpt["available"] is True, (
+            "OpenAI model is available while OAuth is connected"
+        )
+
+        oauth_disconnect = self.call_api(
+            "/api/system/providers/openai/oauth",
+            method="DELETE",
+        )
+        assert oauth_disconnect.status_code == 200, (
+            "OpenAI OAuth disconnect succeeds"
+        )
+        oauth_status = self.call_api("/api/system/providers/openai/oauth/status")
+        assert oauth_status.status_code == 200, "OpenAI OAuth status endpoint succeeds"
+        assert oauth_status.json()["oauth_status"] == "disconnected", (
+            "OpenAI OAuth status reports disconnected after disconnect"
+        )
+        disconnected_models = self.call_api("/api/system/models")
+        assert disconnected_models.status_code == 200, (
+            "Model listing succeeds after OAuth disconnect"
+        )
+        disconnected_gpt = next(
+            model for model in disconnected_models.json() if model["name"] == "gpt"
+        )
+        assert disconnected_gpt["available"] is False, (
+            "OpenAI model is unavailable after disconnect without API-key fallback"
+        )
+
+        set_openai_oauth_token_adapter(
+            StaticOpenAIOAuthTokenAdapter(
+                OpenAIOAuthTokenResult(
+                    access_token="validation-device-access-token",
+                    refresh_token="validation-device-refresh-token",
+                    expires_at=token_expiry,
+                    account_id="validation-device-account",
+                ),
+                device_code_result=OpenAIOAuthDeviceCodeResult(
+                    device_auth_id="validation-device-auth",
+                    user_code="VALIDATION-DEVICE",
+                    poll_interval_seconds=2,
+                ),
+                device_poll_result=OpenAIOAuthDevicePollResult(status="pending"),
+            )
+        )
+        device_start = self.call_api(
+            "/api/system/providers/openai/oauth/device/start",
+            method="POST",
+        )
+        assert device_start.status_code == 200, (
+            "OpenAI OAuth device-code start succeeds"
+        )
+        device_start_payload = device_start.json()
+        assert device_start_payload["user_code"] == "VALIDATION-DEVICE", (
+            "Device-code start returns the user code"
+        )
+        assert device_start_payload["poll_interval_seconds"] == 2, (
+            "Device-code start returns the polling interval"
+        )
+        device_status = self.call_api("/api/system/providers/openai/oauth/status")
+        assert device_status.status_code == 200, (
+            "OpenAI OAuth status succeeds after device-code start"
+        )
+        device_status_payload = device_status.json()
+        assert device_status_payload["oauth_status"] == "pending", (
+            "OpenAI OAuth status reports pending device-code auth"
+        )
+        assert device_status_payload["oauth_pending_flow"] == "device_code", (
+            "OpenAI OAuth status exposes the pending device-code flow"
+        )
+        assert device_status_payload["oauth_device_user_code"] == "VALIDATION-DEVICE", (
+            "OpenAI OAuth status exposes the device code for the provider panel"
+        )
+        pending_device_check = self.call_api(
+            "/api/system/providers/openai/oauth/device/check",
+            method="POST",
+        )
+        assert pending_device_check.status_code == 200, (
+            "OpenAI OAuth pending device-code check succeeds"
+        )
+        pending_device_payload = pending_device_check.json()
+        assert pending_device_payload["status"] == "pending", (
+            "Pending device-code check remains pending"
+        )
+        assert pending_device_payload["provider"]["oauth_status"] == "pending", (
+            "Pending device-code check does not persist a token"
+        )
+
+        set_openai_oauth_token_adapter(
+            StaticOpenAIOAuthTokenAdapter(
+                OpenAIOAuthTokenResult(
+                    access_token="validation-device-access-token",
+                    refresh_token="validation-device-refresh-token",
+                    expires_at=token_expiry,
+                    account_id="validation-device-account",
+                ),
+                device_poll_result=OpenAIOAuthDevicePollResult(
+                    status="authorized",
+                    authorization_code="validation-device-authorization-code",
+                    code_verifier="validation-device-code-verifier",
+                ),
+            )
+        )
+        authorized_device_check = self.call_api(
+            "/api/system/providers/openai/oauth/device/check",
+            method="POST",
+        )
+        assert authorized_device_check.status_code == 200, (
+            "OpenAI OAuth authorized device-code check succeeds"
+        )
+        authorized_device_payload = authorized_device_check.json()
+        assert authorized_device_payload["status"] == "connected", (
+            "Authorized device-code check reports connected"
+        )
+        assert authorized_device_payload["provider"]["oauth_status"] == "connected", (
+            "Authorized device-code check persists OAuth token state"
+        )
+        assert (
+            authorized_device_payload["provider"]["oauth_account_id"]
+            == "validation-device-account"
+        ), "Authorized device-code check exposes sanitized account metadata"
+        api_key_mode_with_oauth = self.call_api(
+            "/api/system/providers/openai",
+            method="PUT",
+            data={
+                "auth_mode": "api_key",
+                "oauth_api_key_fallback_enabled": False,
+            },
+        )
+        assert api_key_mode_with_oauth.status_code == 200, (
+            "OpenAI provider can switch back to API-key mode while OAuth is connected"
+        )
+        api_key_mode_payload = api_key_mode_with_oauth.json()
+        assert api_key_mode_payload["configured_auth_mode"] == "api_key", (
+            "OpenAI provider records API-key mode"
+        )
+        assert api_key_mode_payload["effective_auth_mode"] == "oauth", (
+            "OpenAI provider uses connected OAuth when API-key mode has no key"
+        )
+        api_key_mode_models = self.call_api("/api/system/models")
+        assert api_key_mode_models.status_code == 200, (
+            "Model listing succeeds with API-key mode and connected OAuth"
+        )
+        api_key_mode_gpt = next(
+            model for model in api_key_mode_models.json() if model["name"] == "gpt"
+        )
+        assert api_key_mode_gpt["available"] is True, (
+            "OpenAI model remains available when OAuth is connected but API key is absent"
+        )
+
+        oauth_disconnect = self.call_api(
+            "/api/system/providers/openai/oauth",
+            method="DELETE",
+        )
+        assert oauth_disconnect.status_code == 200, (
+            "OpenAI OAuth disconnect succeeds after device-code auth"
+        )
+        set_openai_oauth_token_adapter(None)
+
         provider_alias = "validation-provider"
         created_provider = self.call_api(
             f"/api/system/providers/{provider_alias}",
@@ -147,6 +478,35 @@ class ApiEndpointsScenario(BaseScenario):
             entry["name"] == "VALIDATION_TEMP_SECRET" and entry["has_value"]
             for entry in updated_secrets.json()
         ), "Updated secret reported with value"
+
+        internal_oauth_secret = self.call_api(
+            "/api/system/secrets",
+            method="PUT",
+            data={
+                "name": "OPENAI_OAUTH_TOKEN_STATE",
+                "value": json.dumps(
+                    {
+                        "access_token": "validation-token",
+                        "account_id": "validation-account",
+                    }
+                ),
+            },
+        )
+        assert internal_oauth_secret.status_code == 200, (
+            "Internal OAuth secret can be persisted by the secrets store"
+        )
+        oauth_hidden_secrets = self.call_api("/api/system/secrets")
+        assert oauth_hidden_secrets.status_code == 200, (
+            "Secrets list still succeeds with internal OAuth state"
+        )
+        assert not any(
+            entry["name"] == "OPENAI_OAUTH_TOKEN_STATE"
+            for entry in oauth_hidden_secrets.json()
+        ), "Internal OpenAI OAuth token state is hidden from generic secrets"
+        assert not any(
+            entry["name"] == "OPENAI_OAUTH_PENDING_STATE"
+            for entry in oauth_hidden_secrets.json()
+        ), "Internal OpenAI OAuth pending state is hidden from generic secrets"
 
         secret_clear = self.call_api(
             "/api/system/secrets",

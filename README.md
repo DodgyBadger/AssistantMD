@@ -14,6 +14,7 @@ https://github.com/user-attachments/assets/5504eff3-3c5b-4a6d-9482-d1d15a8d76e1
 
 - Mounted vaults are isolated from each other.
 - Compatible with all major LLM providers and local models.
+- Supports OpenAI API-key auth plus experimental OpenAI OAuth for chat models.
 - Tuned for long-running tasks, tool-heavy agents, and deep work sessions.
 - Image support.
 - Clean, minimal UI including an even more minimal focus mode. And of course dark-mode!
@@ -44,7 +45,7 @@ And last but not least, **composability**. AssistantMD gives you a set of buildi
 
 ## Roadmap
 
-Likely future work includes OpenAI subscription support, better import workflows, direct vault-file browsing in the UI, improved provider caching, and carefully scoped household/team deployment options that preserve AssistantMD's single-user vault model.
+Likely future work includes better import workflows, direct vault-file browsing in the UI, improved provider caching, and carefully scoped household/team deployment options that preserve AssistantMD's single-user vault model.
 
 Exploratory areas include richer chat-session retrieval, prompt/eval tools, provider batch processing for cheaper long-running workflows, and broader multimodal support.
 
