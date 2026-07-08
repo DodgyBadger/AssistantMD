@@ -415,7 +415,6 @@ def update_vault_file(
                 content=content,
                 fail_if_exists=True,
                 markdown_only=False,
-                warn_without_task=False,
             )
             return _vault_file_response(
                 vault_name=vault_name,
