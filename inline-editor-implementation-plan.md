@@ -322,8 +322,8 @@ Phase 2 validation targets:
    vault-wide search.
 5. Upgrade recognized vault file paths in assistant messages into openable file
    links.
-6. After Phase 1 is usable, design the edit proposal artifact contract and
-   implement Phase 2 on top of the same file modal/reference primitives.
+6. Continue Phase 2 hardening around proposal rendering, conflict display, and
+   richer edit operation shapes.
 
 ## Implementation Status
 
@@ -343,11 +343,18 @@ Current branch slice:
 - Wired the chat composer with an Add File Reference button.
 - Wired assistant markdown post-processing to upgrade recognized vault text paths
   and markdown file links into modal-opening controls.
+- Added the first Phase 2 collaborative edit proposal slice:
+  - `propose_file_edits` tool creates server-owned proposal artifacts;
+  - proposal artifacts are stored with the owning chat session;
+  - tool events expose `artifact_ref` for persisted and live rendering;
+  - `GET /api/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref}`
+    fetches proposal cards;
+  - `POST /api/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref}/apply`
+    applies selected existing-file text replacements with hash checks;
+  - `static/js/edit-proposals.js` renders selectable, editable proposal cards.
 
 Known Phase 1 follow-ups:
 
-- Add deterministic backend/API scenario coverage for read, traversal rejection,
-  stale hash rejection, and mutation recording.
 - Add `@path` autocomplete in the text input; the current slice has the modal
   picker and serialized `@path` references, but not inline autocomplete.
 - Consider extracting shared modal/editor helpers if workflow editing and vault
@@ -359,3 +366,28 @@ Known Phase 1 follow-ups:
   editor.
 - Add browser-level smoke coverage when a Playwright/browser test harness is
   available in the environment.
+
+Known Phase 2 follow-ups:
+
+- Extend edit proposal artifacts beyond existing-file text replacement with an
+  explicit operation field. Candidate operation kinds:
+  - `replace_text`: current implemented behavior; existing file, exact
+    `original_text` match, hash check, replacement text.
+  - `create_file`: proposed new vault path plus full initial content; apply
+    should fail if the file already exists unless the proposal explicitly
+    supports overwrite.
+  - `delete_file`: proposed existing vault path, captured hash, preview/snippet,
+    and apply-time hash check before deletion.
+  - `move_file`: proposed source and destination paths, source hash check,
+    destination existence check, and normal vault-state move recording.
+  Each operation should render with operation-specific UI while preserving the
+  same checkbox/select-all/deny/apply approval model.
+- Add browser-level coverage for proposal card rendering, edited replacement
+  text, conflict display, and reload behavior when a frontend harness is
+  available.
+- Support richer edit operation shapes after the exact replacement contract has
+  been exercised in real use.
+- Decide whether local existing `system/settings.yaml` files should be repaired
+  automatically to include newly registered default chat tools such as
+  `propose_file_edits`, or whether the settings repair action remains the
+  explicit upgrade path.

@@ -103,6 +103,28 @@ def ensure_chat_sessions_schema(
             ON chat_tool_events(session_id, vault_name, tool_call_id)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_edit_proposals (
+                artifact_ref TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                vault_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                proposal_json TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                applied_at DATETIME,
+                FOREIGN KEY (session_id, vault_name)
+                    REFERENCES chat_sessions(session_id, vault_name)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_edit_proposals_session
+            ON chat_edit_proposals(session_id, vault_name, created_at)
+            """
+        )
         _deduplicate_session_ids(conn)
         conn.execute(
             """

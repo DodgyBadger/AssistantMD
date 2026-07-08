@@ -74,6 +74,12 @@ from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.chat.edit_proposals import (
+    EditProposalError,
+    apply_edit_proposal,
+    deny_edit_proposal,
+    get_edit_proposal,
+)
 from core.chat.workspace import normalize_workspace_path
 from core.goals import GoalOpsStore
 from core.memory.session_summary import SessionSummaryStore
@@ -143,6 +149,9 @@ from .models import (
     VaultFileReferenceInfo,
     VaultFileReferenceListResponse,
     VaultFileResponse,
+    EditProposalApplyResponse,
+    EditProposalDenyResponse,
+    EditProposalResponse,
     ChatSessionExportResponse,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -465,6 +474,87 @@ def update_vault_file(
         full_path=full_path,
         content=content,
         message=f"Saved {normalized}.",
+    )
+
+
+def get_chat_edit_proposal(
+    *,
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+) -> EditProposalResponse:
+    """Return one chat edit proposal artifact."""
+    try:
+        proposal = get_edit_proposal(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+        )
+    except EditProposalError as exc:
+        raise _edit_proposal_api_error(exc) from exc
+    return EditProposalResponse(**proposal)
+
+
+def apply_chat_edit_proposal(
+    *,
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+    selected_edit_ids: list[str],
+    replacement_overrides: dict[str, str],
+) -> EditProposalApplyResponse:
+    """Apply selected edits from one chat edit proposal artifact."""
+    try:
+        vault_root = _resolve_vault_root(vault_name)
+        result = apply_edit_proposal(
+            vault_name=vault_name,
+            vault_path=vault_root,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+            selected_edit_ids=selected_edit_ids,
+            replacement_overrides=replacement_overrides,
+        )
+    except EditProposalError as exc:
+        raise _edit_proposal_api_error(exc) from exc
+    return EditProposalApplyResponse(**result)
+
+
+def deny_chat_edit_proposal(
+    *,
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+) -> EditProposalDenyResponse:
+    """Deny one chat edit proposal artifact without applying edits."""
+    try:
+        result = deny_edit_proposal(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+        )
+    except EditProposalError as exc:
+        raise _edit_proposal_api_error(exc) from exc
+    return EditProposalDenyResponse(**result)
+
+
+def _edit_proposal_api_error(exc: EditProposalError) -> APIException:
+    status_by_code = {
+        "EditProposalNotFound": 404,
+        "VaultFileNotFound": 404,
+        "VaultFileConflict": 409,
+        "EditTextMismatch": 409,
+        "ProposalAlreadyApplied": 409,
+        "ProposalDenied": 409,
+        "InvalidPath": 400,
+        "InvalidEdit": 400,
+        "NoSelectedEdits": 400,
+        "UnknownEdit": 400,
+    }
+    return APIException(
+        status_code=status_by_code.get(exc.code, 400),
+        error_type=exc.code,
+        message=str(exc),
+        details=exc.details,
     )
 
 

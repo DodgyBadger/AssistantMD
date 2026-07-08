@@ -30,6 +30,7 @@ settings:
       - chat_history_compact
       - session_ops
       - goal_ops
+      - propose_file_edits
     description: "List of tool names enabled by default in the chat UI."
     category: "Chat"
     restart_required: false
@@ -476,6 +477,12 @@ tools:
   goal_ops:
     module: core.tools.goal_ops
     description: "Track durable goals, ordered steps, events, and checkpoints"
+    requires_secrets: []
+    user_editable: false
+    chat_visible: true
+  propose_file_edits:
+    module: core.tools.propose_file_edits
+    description: "Create interactive chat artifacts for reviewing and applying proposed vault file edits"
     requires_secrets: []
     user_editable: false
     chat_visible: true

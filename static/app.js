@@ -132,6 +132,17 @@ const fileReferences = window.FileReferences.create({
     },
 });
 
+const editProposals = window.EditProposals.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        openFile: (path) => fileReferences.openFile(path),
+        enhanceFileLinks: (container) => fileReferences.enhanceFileLinks(container),
+    },
+});
+
 sessionControls = window.SessionControls.create({
     state,
     elements: chatElements,
@@ -161,6 +172,7 @@ const chatRendering = window.ChatRendering.create({
         openChatSettings: () => sessionControls.openSessionBrowserModal(),
         retryLatestFailure,
         enhanceFileLinks: (container) => fileReferences.enhanceFileLinks(container),
+        renderEditProposalArtifact: (container, artifactRef) => editProposals.renderArtifact(container, artifactRef),
     },
 });
 

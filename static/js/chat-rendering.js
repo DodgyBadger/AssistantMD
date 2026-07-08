@@ -417,6 +417,7 @@
                     }
                     entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
                     entry.detailResult = entry.result;
+                    entry.artifactRef = event.artifact_ref || resultPayload.metadata?.artifact_ref || entry.artifactRef || '';
                 }
 
                 updateToolDetail(entry);
@@ -699,8 +700,12 @@
             bodyDiv.className = 'message-body prose prose-sm max-w-none';
             bodyDiv.innerHTML = '';
 
+            const artifactList = document.createElement('div');
+            artifactList.className = 'message-artifact-list';
+
             contentDiv.appendChild(progressDiv);
             contentDiv.appendChild(bodyDiv);
+            contentDiv.appendChild(artifactList);
             messageDiv.appendChild(contentDiv);
 
             appendChatMessageNode(messageDiv, { forceScroll: true });
@@ -712,6 +717,7 @@
                 indicator,
                 statusText,
                 bodyDiv,
+                artifactList,
                 thinkingDiv: null,
                 thinkingTextSpan: null,
                 thinkingToggle: null,
@@ -952,6 +958,7 @@
                         ? payload.result_detail
                         : payload.result;
                 }
+                entry.artifactRef = payload.artifact_ref || artifactRefFromValue(entry.detailResult) || artifactRefFromValue(entry.result) || entry.artifactRef || '';
                 entry.events.push(payload);
                 updateToolDetail(entry);
 
@@ -993,8 +1000,12 @@
 
             context.toolList.classList.remove('hidden');
             context.toolList.appendChild(container);
+            const artifactContainer = document.createElement('div');
+            artifactContainer.className = 'tool-artifact-container';
+            context.artifactList.appendChild(artifactContainer);
             const entry = {
                 container,
+                artifactContainer,
                 summary,
                 line,
                 toolId,
@@ -1005,6 +1016,7 @@
                     : payload.arguments || null,
                 result: null,
                 detailResult: null,
+                artifactRef: payload.artifact_ref || '',
                 archived: Boolean(context.archivedToolEvents),
                 events: []
             };
@@ -1232,6 +1244,28 @@
                 entry.archived ? 'Archived by compaction.' : '',
                 hasArgs ? truncateToolTooltip(prunedArgs) : 'No args',
             ].filter(Boolean).join(' ');
+            if (
+                entry.toolName === 'propose_file_edits'
+                && entry.artifactRef
+                && entry.artifactContainer
+                && callbacks.renderEditProposalArtifact
+            ) {
+                callbacks.renderEditProposalArtifact(entry.artifactContainer, entry.artifactRef);
+            }
+        }
+
+        function artifactRefFromValue(value) {
+            if (!value) return '';
+            if (typeof value === 'object' && !Array.isArray(value)) {
+                return typeof value.artifact_ref === 'string' ? value.artifact_ref : '';
+            }
+            if (typeof value !== 'string') return '';
+            try {
+                const parsed = JSON.parse(value);
+                return parsed && typeof parsed.artifact_ref === 'string' ? parsed.artifact_ref : '';
+            } catch (error) {
+                return '';
+            }
         }
 
         function openToolCallDetails(entry) {

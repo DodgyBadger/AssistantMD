@@ -1163,6 +1163,15 @@ details summary::-webkit-details-marker {
 .message-body {
     position: relative;
 }
+.message-artifact-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+.message-artifact-list:empty {
+    display: none;
+}
 .message-footer {
     display: flex;
     align-items: center;
@@ -1500,6 +1509,9 @@ details summary::-webkit-details-marker {
     max-width: 100%;
     overflow: hidden;
     box-sizing: border-box;
+}
+.tool-artifact-container:empty {
+    display: none;
 }
 .tool-status {
     width: 100%;
@@ -2055,6 +2067,186 @@ details[open] summary.collapsible-summary .chevron {
 .vault-file-link-code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: 0.9em;
+}
+.edit-proposal-card {
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.5rem;
+    background: rgb(var(--bg-elevated));
+    padding: 0.65rem;
+}
+.edit-proposal-loading {
+    color: rgb(var(--text-secondary));
+    font-size: 0.875rem;
+}
+.edit-proposal-header,
+.edit-proposal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+.edit-proposal-toggle {
+    display: inline-flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 0.45rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-align: left;
+}
+.edit-proposal-toggle:hover .edit-proposal-title,
+.edit-proposal-toggle:focus-visible .edit-proposal-title {
+    color: rgb(var(--accent-primary));
+}
+.edit-proposal-toggle:focus-visible {
+    outline: 2px solid rgb(var(--accent-primary) / 0.35);
+    outline-offset: 2px;
+}
+.edit-proposal-chevron {
+    flex: 0 0 auto;
+    color: rgb(var(--text-secondary));
+    font-size: 0.8rem;
+    line-height: 1.35rem;
+}
+.edit-proposal-title-block {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.edit-proposal-title {
+    color: rgb(var(--text-primary));
+    font-size: 0.9rem;
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.edit-proposal-header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.55rem;
+}
+.edit-proposal-select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: rgb(var(--text-secondary));
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+.edit-proposal-summary,
+.edit-proposal-rationale,
+.edit-proposal-status,
+.edit-proposal-label,
+.edit-proposal-feedback {
+    color: rgb(var(--text-secondary));
+    font-size: 0.78rem;
+}
+.edit-proposal-status {
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 999px;
+    padding: 0.15rem 0.45rem;
+    white-space: nowrap;
+}
+.edit-proposal-edits {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+.edit-proposal-edit {
+    border-top: 1px solid rgb(var(--border-secondary));
+    padding-top: 0.45rem;
+}
+.edit-proposal-edit-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+}
+.edit-proposal-edit-top input {
+    margin-top: 0.28rem;
+}
+.edit-proposal-path-wrap {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.edit-proposal-diff {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.55rem;
+    margin-top: 0.35rem;
+}
+.edit-proposal-diff pre,
+.edit-proposal-diff textarea {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    min-height: 4.25rem;
+    max-height: 16.25rem;
+    margin: 0;
+    overflow: auto;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.4rem;
+    background: rgb(var(--bg-app));
+    color: rgb(var(--text-primary));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    padding: 0.45rem 0.5rem;
+    white-space: pre-wrap;
+}
+.edit-proposal-diff textarea {
+    resize: vertical;
+}
+.edit-proposal-diff textarea:focus {
+    border-color: rgb(var(--accent-primary));
+    outline: 2px solid rgb(var(--accent-primary) / 0.28);
+}
+.edit-proposal-footer {
+    margin-top: 0.45rem;
+}
+.edit-proposal-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.35rem;
+}
+@media (max-width: 720px) {
+    .edit-proposal-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .edit-proposal-footer {
+        align-items: center;
+        flex-direction: row;
+    }
+
+    .edit-proposal-diff {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .edit-proposal-actions {
+        align-self: flex-end;
+    }
+
+    .edit-proposal-header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .edit-proposal-title {
+        white-space: normal;
+    }
 }
 @media (max-width: 640px) {
     .file-reference-toolbar {

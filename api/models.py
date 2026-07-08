@@ -125,6 +125,50 @@ class VaultFileReferenceListResponse(BaseModel):
     items: List[VaultFileReferenceInfo] = Field(default_factory=list, description="Reference candidates")
 
 
+class EditProposalApplyRequest(BaseModel):
+    """Request to apply selected edits from a collaborative edit proposal."""
+
+    selected_edit_ids: List[str] = Field(..., description="Proposal edit ids selected by the user")
+    replacement_overrides: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional edited replacement text keyed by proposal edit id",
+    )
+
+
+class EditProposalResponse(BaseModel):
+    """Stored collaborative edit proposal artifact."""
+
+    artifact_ref: str = Field(..., description="Stable edit proposal artifact reference")
+    artifact_kind: str = Field("file_edit_proposal", description="Artifact kind")
+    vault_name: str = Field(..., description="Owning vault")
+    session_id: str = Field(..., description="Owning chat session")
+    title: str = Field(..., description="Proposal title")
+    summary: str = Field("", description="Proposal summary")
+    status: str = Field(..., description="Proposal status")
+    edits: List[Dict[str, Any]] = Field(default_factory=list, description="Proposed file edits")
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
+    applied_at: Optional[str] = Field(None, description="Applied timestamp")
+    applied_edit_ids: List[str] = Field(default_factory=list, description="Applied edit ids")
+
+
+class EditProposalApplyResponse(BaseModel):
+    """Result of applying selected collaborative edits."""
+
+    artifact_ref: str = Field(..., description="Applied edit proposal artifact reference")
+    status: str = Field(..., description="Updated proposal status")
+    applied_edit_ids: List[str] = Field(default_factory=list, description="Applied edit ids")
+    applied_paths: List[str] = Field(default_factory=list, description="Vault paths changed by the apply")
+    applied_at: str = Field(..., description="Apply timestamp")
+
+
+class EditProposalDenyResponse(BaseModel):
+    """Result of denying a collaborative edit proposal."""
+
+    artifact_ref: str = Field(..., description="Denied edit proposal artifact reference")
+    status: str = Field(..., description="Updated proposal status")
+    denied_at: str = Field(..., description="Deny timestamp")
+
+
 class ChatTaskRequest(BaseModel):
     """Request model for starting task-owned chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")

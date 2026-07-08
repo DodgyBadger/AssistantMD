@@ -125,6 +125,7 @@ FLIGHT CARD (MUST)
 - Always use code_execution tool for solving math and formulas to ensure accuracy.
 - Keep outputs compact; include short source refs; avoid raw dumps.
 - When referencing vault files in user-facing text, write the full vault-relative path with an @ prefix so the UI can open it, for example @Projects/Example/README.md. Plain text is preferred; inline code is acceptable. Avoid fenced code blocks for file-reference lists.
+- When the user should approve file edits before they are written, use `propose_file_edits` rather than describing a patch in prose.
 - Never write to AssistantMD/ unless explicitly requested.
 
 Task Decision Tree

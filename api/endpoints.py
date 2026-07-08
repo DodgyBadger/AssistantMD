@@ -46,6 +46,10 @@ from .models import (
     WorkflowEnabledResponse,
     WorkflowFileResponse,
     WorkflowFileUpdateRequest,
+    EditProposalApplyRequest,
+    EditProposalApplyResponse,
+    EditProposalDenyResponse,
+    EditProposalResponse,
     VaultFileReferenceListResponse,
     VaultFileResponse,
     VaultFileUpdateRequest,
@@ -127,6 +131,9 @@ from .services import (
     list_vault_file_references,
     get_vault_file,
     update_vault_file,
+    get_chat_edit_proposal,
+    apply_chat_edit_proposal,
+    deny_chat_edit_proposal,
     delete_chat_session,
     get_system_activity_log,
     get_system_settings,
@@ -1110,6 +1117,65 @@ async def save_vault_file(vault_name: str, path: str, request: VaultFileUpdateRe
             content=request.content,
             expected_sha256=request.expected_sha256,
             create_if_missing=request.create_if_missing,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}",
+    response_model=EditProposalResponse,
+)
+async def chat_edit_proposal(vault_name: str, session_id: str, artifact_ref: str):
+    """Return a chat edit proposal artifact."""
+    try:
+        return get_chat_edit_proposal(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/apply",
+    response_model=EditProposalApplyResponse,
+)
+async def apply_edit_proposal_artifact(
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+    request: EditProposalApplyRequest,
+):
+    """Apply selected edits from a chat edit proposal artifact."""
+    try:
+        return apply_chat_edit_proposal(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+            selected_edit_ids=request.selected_edit_ids,
+            replacement_overrides=request.replacement_overrides,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/deny",
+    response_model=EditProposalDenyResponse,
+)
+async def deny_edit_proposal_artifact(
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+):
+    """Deny a chat edit proposal artifact without applying edits."""
+    try:
+        return deny_chat_edit_proposal(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
         )
     except Exception as e:
         return create_error_response(e)
