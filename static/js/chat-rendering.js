@@ -542,6 +542,7 @@
             enforceExternalLinkBehavior(bodyDiv);
             renderAssistantMath(bodyDiv);
             attachCodeCopyButtons(bodyDiv);
+            callbacks.enhanceFileLinks?.(bodyDiv);
         }
 
         function renderAssistantMath(bodyDiv) {

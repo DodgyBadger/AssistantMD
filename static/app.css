@@ -1942,7 +1942,31 @@ details[open] summary.collapsible-summary .chevron {
     border-color: transparent;
     background: transparent;
 }
+.chat-file-reference-btn {
+    position: absolute;
+    right: 3.1rem;
+    bottom: 0.5rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: rgb(var(--text-secondary));
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.chat-file-reference-btn:hover,
+.chat-file-reference-btn:focus-visible {
+    color: rgb(var(--accent-primary));
+    outline: none;
+}
 .chat-attach-btn svg,
+.chat-file-reference-btn svg,
 .chat-focus-inline-btn svg {
     width: 1.1rem;
     height: 1.1rem;
@@ -1969,6 +1993,73 @@ details[open] summary.collapsible-summary .chevron {
 .chat-focus-inline-btn:hover,
 .chat-focus-inline-btn[aria-pressed="true"] {
     color: rgb(var(--accent-primary));
+}
+.file-reference-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+}
+.file-reference-search,
+.file-reference-scope {
+    min-height: 2.25rem;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-card));
+    color: rgb(var(--text-primary));
+    font-size: 0.875rem;
+    padding: 0.4rem 0.6rem;
+}
+.file-reference-search:focus,
+.file-reference-scope:focus {
+    border-color: rgb(var(--accent-primary));
+    box-shadow: 0 0 0 2px rgb(var(--accent-primary) / 0.25);
+    outline: none;
+}
+.file-reference-row-icon {
+    width: 1rem;
+    height: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--text-secondary));
+    flex-shrink: 0;
+}
+.file-reference-row-icon svg {
+    width: 1rem;
+    height: 1rem;
+}
+.file-reference-path {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    color: rgb(var(--text-secondary));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.vault-file-link {
+    color: rgb(var(--accent-primary));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+}
+.vault-file-link:hover,
+.vault-file-link:focus-visible {
+    color: rgb(var(--accent-hover));
+    outline: none;
+}
+.vault-file-link-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9em;
+}
+@media (max-width: 640px) {
+    .file-reference-toolbar {
+        grid-template-columns: 1fr;
+    }
 }
 .chat-stop-btn {
     background: rgb(var(--state-error)) !important;

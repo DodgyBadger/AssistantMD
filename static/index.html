@@ -166,13 +166,21 @@
                                     id="chat-input"
                                     rows="3"
                                     placeholder="Type your message (Ctrl+Enter or Cmd+Enter to send)..."
-                                    class="block w-full px-3 py-2 pr-12 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
+                                    class="block w-full px-3 py-2 pr-24 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent resize-y bg-app-bg text-txt-primary"
                                 ></textarea>
                                 <button id="attach-btn" type="button" class="chat-attach-btn" title="Attach image(s)" aria-label="Attach image(s)" aria-expanded="false" aria-controls="chat-attachment-popover">
                                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                         <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657L4.757 11.757a6 6 0 1 0 8.486 8.486L21.657 11.657" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                                     </svg>
                                     <span id="attach-count-badge" class="chat-attach-badge" style="display:none"></span>
+                                </button>
+                                <button id="file-reference-btn" type="button" class="chat-file-reference-btn" title="Add file reference" aria-label="Add file reference">
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M14 2v4a2 2 0 0 0 2 2h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M10 13h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                                        <path d="M10 17h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                                    </svg>
                                 </button>
                                 <button id="chat-focus-toggle-inline" type="button" class="chat-focus-inline-btn" title="Focus chat workspace" aria-label="Focus chat workspace" aria-pressed="false">
                                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -676,6 +684,7 @@
     <script src="static/js/utils.js"></script>
     <script src="static/js/session-summary.js"></script>
     <script src="static/js/workspace-picker.js"></script>
+    <script src="static/js/file-references.js"></script>
     <script src="static/js/session-controls.js"></script>
     <script src="static/js/chat-rendering.js"></script>
     <script src="static/js/vault-activity.js"></script>

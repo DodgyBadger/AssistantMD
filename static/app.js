@@ -67,6 +67,7 @@ const chatElements = {
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
     attachBtn: document.getElementById('attach-btn'),
+    fileReferenceBtn: document.getElementById('file-reference-btn'),
     attachInput: document.getElementById('attach-input'),
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
@@ -121,6 +122,16 @@ const workspacePicker = window.WorkspacePicker.create({
     },
 });
 
+const fileReferences = window.FileReferences.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        addChatErrorMessage,
+    },
+});
+
 sessionControls = window.SessionControls.create({
     state,
     elements: chatElements,
@@ -149,6 +160,7 @@ const chatRendering = window.ChatRendering.create({
         openWorkspacePicker: () => workspacePicker.openModal(),
         openChatSettings: () => sessionControls.openSessionBrowserModal(),
         retryLatestFailure,
+        enhanceFileLinks: (container) => fileReferences.enhanceFileLinks(container),
     },
 });
 
@@ -703,6 +715,9 @@ function syncChatControlLocks() {
     }
     if (chatElements.sessionBrowserTrigger) {
         chatElements.sessionBrowserTrigger.disabled = state.isLoading;
+    }
+    if (chatElements.fileReferenceBtn) {
+        chatElements.fileReferenceBtn.disabled = state.isLoading;
     }
     if (chatElements.newSessionTrigger) {
         chatElements.newSessionTrigger.disabled = state.isLoading;
@@ -1297,6 +1312,12 @@ function setupEventListeners() {
     if (chatElements.toolsCheckboxes) {
         chatElements.toolsCheckboxes.addEventListener('change', () => {
             updateToolDropdownSummary();
+        });
+    }
+
+    if (chatElements.fileReferenceBtn) {
+        chatElements.fileReferenceBtn.addEventListener('click', () => {
+            fileReferences.openPicker();
         });
     }
 

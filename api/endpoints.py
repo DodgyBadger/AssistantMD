@@ -46,6 +46,9 @@ from .models import (
     WorkflowEnabledResponse,
     WorkflowFileResponse,
     WorkflowFileUpdateRequest,
+    VaultFileReferenceListResponse,
+    VaultFileResponse,
+    VaultFileUpdateRequest,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
@@ -121,6 +124,9 @@ from .services import (
     set_chat_session_title,
     set_chat_session_workspace,
     list_vault_directories,
+    list_vault_file_references,
+    get_vault_file,
+    update_vault_file,
     delete_chat_session,
     get_system_activity_log,
     get_system_settings,
@@ -1058,6 +1064,53 @@ async def vault_directories(vault_name: str, path: str | None = None):
     """Return child directories for workspace selection."""
     try:
         return list_vault_directories(vault_name, path)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/vaults/{vault_name}/file-refs", response_model=VaultFileReferenceListResponse)
+async def vault_file_references(
+    vault_name: str,
+    path: str | None = None,
+    workspace_path: str | None = None,
+    query: str | None = None,
+    scope: str = "workspace",
+    limit: int = 100,
+):
+    """Return file and folder candidates for chat reference insertion."""
+    try:
+        return list_vault_file_references(
+            vault_name=vault_name,
+            path=path,
+            workspace_path=workspace_path,
+            query=query,
+            scope=scope,
+            limit=limit,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/vaults/{vault_name}/files", response_model=VaultFileResponse)
+async def vault_file(vault_name: str, path: str):
+    """Return editable vault file content."""
+    try:
+        return get_vault_file(vault_name, path)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put("/vaults/{vault_name}/files", response_model=VaultFileResponse)
+async def save_vault_file(vault_name: str, path: str, request: VaultFileUpdateRequest):
+    """Replace vault file content with optimistic concurrency checks."""
+    try:
+        return update_vault_file(
+            vault_name=vault_name,
+            path=path,
+            content=request.content,
+            expected_sha256=request.expected_sha256,
+            create_if_missing=request.create_if_missing,
+        )
     except Exception as e:
         return create_error_response(e)
 

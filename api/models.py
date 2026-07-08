@@ -74,6 +74,57 @@ class WorkflowFileResponse(BaseModel):
     message: Optional[str] = Field(None, description="Human-readable update summary")
 
 
+class VaultFileUpdateRequest(BaseModel):
+    """Request model for replacing a vault text file."""
+
+    content: str = Field(..., description="Complete file content")
+    expected_sha256: Optional[str] = Field(
+        None,
+        description="Optional hash from the last read response; rejects stale saves when provided.",
+    )
+    create_if_missing: bool = Field(
+        False,
+        description="Create the file when it does not exist yet.",
+    )
+
+
+class VaultFileResponse(BaseModel):
+    """Response model for editable vault text file content."""
+
+    vault_name: str = Field(..., description="Vault name")
+    path: str = Field(..., description="Vault-relative file path")
+    name: str = Field(..., description="File basename")
+    content: str = Field(..., description="Complete text content")
+    sha256: str = Field(..., description="SHA-256 hash of the returned content")
+    size_bytes: int = Field(..., description="UTF-8 content size in bytes")
+    modified_at: Optional[datetime] = Field(None, description="Filesystem modification timestamp")
+    media_type: str = Field(..., description="Detected media type")
+    message: Optional[str] = Field(None, description="Human-readable update summary")
+
+
+class VaultFileReferenceInfo(BaseModel):
+    """One file or folder candidate for chat reference insertion."""
+
+    name: str = Field(..., description="Path basename")
+    path: str = Field(..., description="Vault-relative path")
+    kind: Literal["file", "directory"] = Field(..., description="Reference kind")
+    size_bytes: Optional[int] = Field(None, description="File size in bytes")
+    modified_at: Optional[datetime] = Field(None, description="Filesystem modification timestamp")
+    has_children: bool = Field(False, description="Whether a directory has child entries")
+    in_workspace: bool = Field(False, description="Whether the path is under the requested workspace")
+
+
+class VaultFileReferenceListResponse(BaseModel):
+    """File/folder reference candidates for the chat composer."""
+
+    vault_name: str = Field(..., description="Vault name")
+    path: str = Field("", description="Listed vault-relative directory path")
+    workspace_path: str = Field("", description="Active workspace path used for ranking/filtering")
+    query: str = Field("", description="Search query")
+    scope: Literal["workspace", "vault"] = Field("workspace", description="Search/listing scope")
+    items: List[VaultFileReferenceInfo] = Field(default_factory=list, description="Reference candidates")
+
+
 class ChatTaskRequest(BaseModel):
     """Request model for starting task-owned chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")

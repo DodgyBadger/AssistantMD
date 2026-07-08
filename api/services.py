@@ -92,8 +92,9 @@ from core.runtime.execution_tasks import (
 from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
-from core.vault_state.file_mutations import replace_vault_file_content
+from core.vault_state.file_mutations import replace_vault_file_content, write_vault_file
 from core.vault_state.models import VaultFile, VaultFileEvent
+from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
 from .models import (
     VaultInfo,
     SchedulerInfo,
@@ -139,6 +140,9 @@ from .models import (
     ChatSessionToolEventInfo,
     VaultDirectoryInfo,
     VaultDirectoryListResponse,
+    VaultFileReferenceInfo,
+    VaultFileReferenceListResponse,
+    VaultFileResponse,
     ChatSessionExportResponse,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -171,6 +175,8 @@ from core.utils.frontmatter import upsert_frontmatter_key
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
 _chat_store = ChatStore()
+_VAULT_FILE_REFERENCE_LIMIT = 100
+_VAULT_FILE_READ_MAX_BYTES = 2 * 1024 * 1024
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
@@ -261,9 +267,8 @@ def _normalize_workspace_path(path: str | None) -> str:
         ) from exc
 
 
-def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> tuple[str, Path]:
-    """Return a normalized path and existing directory for picker browsing."""
-    normalized_path = _normalize_workspace_path(path)
+def _resolve_vault_root(vault_name: str) -> Path:
+    """Return an existing vault root for API file operations."""
     runtime = get_runtime_context()
     vault_root = (runtime.config.data_root / vault_name).resolve()
     if not vault_root.is_dir():
@@ -273,6 +278,201 @@ def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> t
             message=f"Vault not found: {vault_name}",
             details={"vault_name": vault_name},
         )
+    return vault_root
+
+
+def _normalize_vault_file_path(path: str | None) -> str:
+    normalized = normalize_vault_relative_path(path or "")
+    if not normalized:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultFilePath",
+            message="Vault file path is required.",
+            details={"path": path},
+        )
+    return normalized
+
+
+def _resolve_vault_file_path(vault_name: str, path: str | None) -> tuple[Path, str, Path]:
+    """Resolve a vault-relative file path under an existing vault."""
+    vault_root = _resolve_vault_root(vault_name)
+    normalized = _normalize_vault_file_path(path)
+    try:
+        resolved = resolve_vault_relative_path(
+            vault_path=vault_root,
+            path=normalized,
+            markdown_only=False,
+        )
+    except ValueError as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultFilePath",
+            message=str(exc),
+            details={"path": path, "vault_name": vault_name},
+        ) from exc
+    return vault_root, normalized, resolved
+
+
+def _datetime_from_mtime(path: Path) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    except OSError:
+        return None
+
+
+def _vault_file_response(
+    *,
+    vault_name: str,
+    path: str,
+    full_path: Path,
+    content: str,
+    message: str | None = None,
+) -> VaultFileResponse:
+    encoded = content.encode("utf-8")
+    return VaultFileResponse(
+        vault_name=vault_name,
+        path=path,
+        name=full_path.name,
+        content=content,
+        sha256=_sha256_text(content),
+        size_bytes=len(encoded),
+        modified_at=_datetime_from_mtime(full_path),
+        media_type=mimetypes.guess_type(path)[0] or "text/plain",
+        message=message,
+    )
+
+
+def get_vault_file(vault_name: str, path: str) -> VaultFileResponse:
+    """Return editable text content for one vault file."""
+    _, normalized, full_path = _resolve_vault_file_path(vault_name, path)
+    if not full_path.exists():
+        raise APIException(
+            status_code=404,
+            error_type="VaultFileNotFound",
+            message=f"Vault file not found: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        )
+    if not full_path.is_file():
+        raise APIException(
+            status_code=400,
+            error_type="VaultPathNotFile",
+            message=f"Vault path is not a file: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        )
+    try:
+        size_bytes = full_path.stat().st_size
+    except OSError as exc:
+        raise APIException(
+            status_code=500,
+            error_type="VaultFileStatFailed",
+            message=f"Failed to inspect vault file: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        ) from exc
+    if size_bytes > _VAULT_FILE_READ_MAX_BYTES:
+        raise APIException(
+            status_code=413,
+            error_type="VaultFileTooLarge",
+            message=f"Vault file is too large for inline editing: {normalized}",
+            details={
+                "path": normalized,
+                "vault_name": vault_name,
+                "size_bytes": size_bytes,
+                "max_bytes": _VAULT_FILE_READ_MAX_BYTES,
+            },
+        )
+    try:
+        content = full_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise APIException(
+            status_code=415,
+            error_type="VaultFileNotText",
+            message=f"Vault file is not UTF-8 text: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        ) from exc
+    return _vault_file_response(
+        vault_name=vault_name,
+        path=normalized,
+        full_path=full_path,
+        content=content,
+    )
+
+
+def update_vault_file(
+    *,
+    vault_name: str,
+    path: str,
+    content: str,
+    expected_sha256: str | None = None,
+    create_if_missing: bool = False,
+) -> VaultFileResponse:
+    """Replace one vault text file after an optional content-hash check."""
+    vault_root, normalized, full_path = _resolve_vault_file_path(vault_name, path)
+    if not full_path.exists() or not full_path.is_file():
+        if create_if_missing and not full_path.exists():
+            write_vault_file(
+                vault_path=vault_root,
+                path=normalized,
+                content=content,
+                fail_if_exists=True,
+                markdown_only=False,
+                warn_without_task=False,
+            )
+            return _vault_file_response(
+                vault_name=vault_name,
+                path=normalized,
+                full_path=full_path,
+                content=content,
+                message=f"Created {normalized}.",
+            )
+        raise APIException(
+            status_code=404,
+            error_type="VaultFileNotFound",
+            message=f"Vault file not found: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        )
+    try:
+        current_content = full_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise APIException(
+            status_code=415,
+            error_type="VaultFileNotText",
+            message=f"Vault file is not UTF-8 text: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        ) from exc
+    current_sha256 = _sha256_text(current_content)
+    if expected_sha256 and expected_sha256 != current_sha256:
+        raise APIException(
+            status_code=409,
+            error_type="VaultFileConflict",
+            message="Vault file changed since it was opened. Refresh and retry.",
+            details={
+                "path": normalized,
+                "vault_name": vault_name,
+                "expected_sha256": expected_sha256,
+                "current_sha256": current_sha256,
+            },
+        )
+
+    replace_vault_file_content(
+        vault_path=vault_root,
+        path=normalized,
+        content=content,
+        operation="update_vault_file",
+        markdown_only=False,
+    )
+    return _vault_file_response(
+        vault_name=vault_name,
+        path=normalized,
+        full_path=full_path,
+        content=content,
+        message=f"Saved {normalized}.",
+    )
+
+
+def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> tuple[str, Path]:
+    """Return a normalized path and existing directory for picker browsing."""
+    normalized_path = _normalize_workspace_path(path)
+    vault_root = _resolve_vault_root(vault_name)
     resolved = (vault_root / normalized_path).resolve() if normalized_path else vault_root
     try:
         resolved.relative_to(vault_root)
@@ -327,6 +527,157 @@ def list_vault_directories(vault_name: str, path: str | None = None) -> VaultDir
 def _is_workspace_picker_directory(path: Path) -> bool:
     """Return whether a directory should appear in the workspace picker."""
     return path.is_dir() and not path.name.startswith(".") and path.name != ASSISTANTMD_ROOT_DIR
+
+
+def list_vault_file_references(
+    *,
+    vault_name: str,
+    path: str | None = None,
+    workspace_path: str | None = None,
+    query: str | None = None,
+    scope: str = "workspace",
+    limit: int = _VAULT_FILE_REFERENCE_LIMIT,
+) -> VaultFileReferenceListResponse:
+    """Return file/folder candidates for chat reference insertion."""
+    vault_root = _resolve_vault_root(vault_name)
+    normalized_workspace = _normalize_workspace_path(workspace_path)
+    normalized_scope = scope if scope in {"workspace", "vault"} else "workspace"
+    normalized_query = (query or "").strip().lower()
+    bounded_limit = min(max(int(limit or _VAULT_FILE_REFERENCE_LIMIT), 1), _VAULT_FILE_REFERENCE_LIMIT)
+
+    if normalized_query:
+        base_relative = normalized_workspace if normalized_scope == "workspace" else ""
+        base_dir = resolve_vault_relative_path(vault_path=vault_root, path=base_relative)
+        if not base_dir.exists() or not base_dir.is_dir():
+            base_relative = ""
+            base_dir = vault_root
+        items = _search_vault_file_references(
+            vault_root=vault_root,
+            base_dir=base_dir,
+            workspace_path=normalized_workspace,
+            query=normalized_query,
+            limit=bounded_limit,
+        )
+        return VaultFileReferenceListResponse(
+            vault_name=vault_name,
+            path=base_relative,
+            workspace_path=normalized_workspace,
+            query=normalized_query,
+            scope=normalized_scope,
+            items=items,
+        )
+
+    base_relative = _normalize_workspace_path(path)
+    if not base_relative and normalized_scope == "workspace":
+        base_relative = normalized_workspace
+    base_path, base_dir = _resolve_existing_vault_directory(vault_name=vault_name, path=base_relative)
+    items = _list_vault_file_reference_children(
+        vault_root=vault_root,
+        base_dir=base_dir,
+        workspace_path=normalized_workspace,
+        limit=bounded_limit,
+    )
+    return VaultFileReferenceListResponse(
+        vault_name=vault_name,
+        path=base_path,
+        workspace_path=normalized_workspace,
+        query="",
+        scope=normalized_scope,
+        items=items,
+    )
+
+
+def _list_vault_file_reference_children(
+    *,
+    vault_root: Path,
+    base_dir: Path,
+    workspace_path: str,
+    limit: int,
+) -> list[VaultFileReferenceInfo]:
+    items: list[VaultFileReferenceInfo] = []
+    for child in sorted(base_dir.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+        if not _is_file_reference_path(child):
+            continue
+        info = _vault_file_reference_info(
+            vault_root=vault_root,
+            path=child,
+            workspace_path=workspace_path,
+        )
+        if info is not None:
+            items.append(info)
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _search_vault_file_references(
+    *,
+    vault_root: Path,
+    base_dir: Path,
+    workspace_path: str,
+    query: str,
+    limit: int,
+) -> list[VaultFileReferenceInfo]:
+    matches: list[VaultFileReferenceInfo] = []
+    for child in base_dir.rglob("*"):
+        if len(matches) >= limit:
+            break
+        if not _is_file_reference_path(child):
+            continue
+        try:
+            relative = child.resolve().relative_to(vault_root).as_posix()
+        except ValueError:
+            continue
+        haystack = f"{child.name.lower()} {relative.lower()}"
+        if query not in haystack:
+            continue
+        info = _vault_file_reference_info(
+            vault_root=vault_root,
+            path=child,
+            workspace_path=workspace_path,
+        )
+        if info is not None:
+            matches.append(info)
+    return sorted(matches, key=lambda item: (not item.in_workspace, item.kind != "directory", item.path.lower()))
+
+
+def _is_file_reference_path(path: Path) -> bool:
+    """Return whether a filesystem path should be shown in the reference picker."""
+    return not any(part.startswith(".") for part in path.parts)
+
+
+def _vault_file_reference_info(
+    *,
+    vault_root: Path,
+    path: Path,
+    workspace_path: str,
+) -> VaultFileReferenceInfo | None:
+    try:
+        relative = path.resolve().relative_to(vault_root).as_posix()
+    except ValueError:
+        return None
+    is_directory = path.is_dir()
+    try:
+        stat_result = path.stat()
+    except OSError:
+        stat_result = None
+    workspace_prefix = f"{workspace_path.rstrip('/')}/" if workspace_path else ""
+    in_workspace = not workspace_path or relative == workspace_path or relative.startswith(workspace_prefix)
+    has_children = False
+    if is_directory:
+        try:
+            has_children = any(_is_file_reference_path(child) for child in path.iterdir())
+        except OSError:
+            has_children = False
+    return VaultFileReferenceInfo(
+        name=path.name or relative,
+        path=relative,
+        kind="directory" if is_directory else "file",
+        size_bytes=None if is_directory or stat_result is None else stat_result.st_size,
+        modified_at=None if stat_result is None else datetime.fromtimestamp(stat_result.st_mtime, tz=UTC),
+        has_children=has_children,
+        in_workspace=in_workspace,
+    )
 
 
 def set_chat_session_workspace(vault_name: str, session_id: str, path: str | None) -> ChatWorkspaceInfo | None:
