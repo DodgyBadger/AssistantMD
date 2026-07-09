@@ -124,6 +124,9 @@ EDIT_PROPOSAL_REVIEW_APPLIED_SECTION = "Already applied edits:"
 EDIT_PROPOSAL_REVIEW_UNRESOLVED_SECTION = "Unresolved review decisions:"
 EDIT_PROPOSAL_REVIEW_COMMENT_LABEL = "Comment"
 EDIT_PROPOSAL_REVIEW_DENIED_MARKER = "Decision: denied"
+EDIT_PROPOSAL_APPLY_HISTORY_PREFIX = "Approved and applied edit proposal"
+EDIT_PROPOSAL_APPLY_HISTORY_SECTION = "Applied edits:"
+EDIT_PROPOSAL_APPLY_ASSISTANT_CONFIRMATION = "Applied the approved edits."
 
 
 # ==============================================================================

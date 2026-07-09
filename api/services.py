@@ -14,10 +14,16 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import yaml
-from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, UserPromptPart
 from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
+from core.chat.chat_store import ChatStore
+from core.constants import (
+    EDIT_PROPOSAL_APPLY_ASSISTANT_CONFIRMATION,
+    EDIT_PROPOSAL_APPLY_HISTORY_PREFIX,
+    EDIT_PROPOSAL_APPLY_HISTORY_SECTION,
+)
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.scheduling.job_history import get_scheduler_job_history
@@ -502,9 +508,19 @@ def apply_chat_edit_proposal(
     artifact_ref: str,
     selected_edit_ids: list[str],
     replacement_overrides: dict[str, str],
+    record_history: bool = True,
 ) -> EditProposalApplyResponse:
     """Apply selected edits from one chat edit proposal artifact."""
     try:
+        proposal = (
+            get_edit_proposal(
+                vault_name=vault_name,
+                session_id=session_id,
+                artifact_ref=artifact_ref,
+            )
+            if record_history
+            else None
+        )
         vault_root = _resolve_vault_root(vault_name)
         result = apply_edit_proposal(
             vault_name=vault_name,
@@ -516,6 +532,13 @@ def apply_chat_edit_proposal(
         )
     except EditProposalError as exc:
         raise _edit_proposal_api_error(exc) from exc
+    if record_history and proposal is not None:
+        _append_edit_proposal_apply_history(
+            vault_name=vault_name,
+            session_id=session_id,
+            proposal=proposal,
+            applied_edit_ids=result.get("applied_edit_ids", []),
+        )
     return EditProposalApplyResponse(**result)
 
 
@@ -535,6 +558,35 @@ def deny_chat_edit_proposal(
     except EditProposalError as exc:
         raise _edit_proposal_api_error(exc) from exc
     return EditProposalDenyResponse(**result)
+
+
+def _append_edit_proposal_apply_history(
+    *,
+    vault_name: str,
+    session_id: str,
+    proposal: dict[str, Any],
+    applied_edit_ids: list[str],
+) -> None:
+    """Append a portable chat-history record for approve-only proposal applies."""
+    applied = {str(edit_id) for edit_id in applied_edit_ids}
+    lines = [
+        f"{EDIT_PROPOSAL_APPLY_HISTORY_PREFIX} `{proposal.get('artifact_ref') or ''}`.",
+        "",
+        EDIT_PROPOSAL_APPLY_HISTORY_SECTION,
+    ]
+    for edit in proposal.get("edits", []):
+        edit_id = str(edit.get("edit_id") or "")
+        if edit_id not in applied:
+            continue
+        lines.append(f"- Edit `{edit_id}` in @{edit.get('path') or ''}")
+    ChatStore().add_messages(
+        session_id,
+        vault_name,
+        [
+            ModelRequest(parts=[UserPromptPart(content="\n".join(lines))]),
+            ModelResponse(parts=[TextPart(content=EDIT_PROPOSAL_APPLY_ASSISTANT_CONFIRMATION)]),
+        ],
+    )
 
 
 def _edit_proposal_api_error(exc: EditProposalError) -> APIException:

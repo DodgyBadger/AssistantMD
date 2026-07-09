@@ -1244,6 +1244,7 @@ async def review_edit_proposal_artifact(
                     decision["edit_id"]: decision.get("replacement_text", "")
                     for decision in approved_decisions
                 },
+                record_history=False,
             )
             applied_edit_ids = list(applied.applied_edit_ids)
             applied_paths = list(applied.applied_paths)

@@ -107,7 +107,7 @@
                         </div>
                     </div>
                     <div class="edit-proposal-comment-block hidden" data-edit-proposal-comment-block>
-                        <label class="edit-proposal-label" for="edit-proposal-comment-${escapeHtml(editId)}">Comment or reason</label>
+                        <label class="edit-proposal-label" data-edit-proposal-comment-label for="edit-proposal-comment-${escapeHtml(editId)}">Comment</label>
                         <textarea id="edit-proposal-comment-${escapeHtml(editId)}" class="edit-proposal-comment" data-edit-proposal-comment="${escapeHtml(editId)}" spellcheck="true" ${applied ? 'disabled' : ''}></textarea>
                     </div>
                 </article>
@@ -250,6 +250,7 @@
             if (commentBlock instanceof HTMLElement) {
                 commentBlock.classList.toggle('hidden', !['comment', 'deny'].includes(decision));
             }
+            updateCommentLabel(row, decision);
             updateSubmitButton(container);
         }
 
@@ -267,6 +268,7 @@
                 if (commentBlock instanceof HTMLElement) {
                     commentBlock.classList.toggle('hidden', decision !== 'deny');
                 }
+                updateCommentLabel(row, decision);
             });
             updateSubmitButton(container);
         }
@@ -345,6 +347,13 @@
             if (decision === 'comment') return 'Comment';
             if (decision === 'deny') return 'Denied';
             return 'Pending';
+        }
+
+        function updateCommentLabel(row, decision) {
+            const label = row.querySelector('[data-edit-proposal-comment-label]');
+            if (label) {
+                label.textContent = decision === 'deny' ? 'Reason (optional)' : 'Comment';
+            }
         }
 
         function cssEscape(value) {

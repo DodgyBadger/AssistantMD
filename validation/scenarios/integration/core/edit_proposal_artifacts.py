@@ -82,6 +82,18 @@ class EditProposalArtifactsScenario(BaseScenario):
         assert (vault / "Projects/Alpha/README.md").read_text(encoding="utf-8") == (
             "# Alpha\n\nStatus: Approved\n\nNext: Write summary.\n"
         ), "Apply should write the user-edited replacement text"
+        applied_history = store.get_stored_messages(session_id, vault.name)
+        assert applied_history[-2].role == "user", "Apply should append a user-readable approval record"
+        assert applied_history[-1].role == "assistant", "Apply should append a paired assistant confirmation"
+        assert "Approved and applied edit proposal" in applied_history[-2].content_text, (
+            "Apply history should record that the proposal was accepted"
+        )
+        assert f"Edit `{proposal['edits'][0]['edit_id']}`" in applied_history[-2].content_text, (
+            "Apply history should list applied edit ids"
+        )
+        assert "Applied the approved edits." in applied_history[-1].content_text, (
+            "Apply history should include a completed assistant turn"
+        )
 
         self.assert_event_contains(
             self.events_since(apply_checkpoint),
