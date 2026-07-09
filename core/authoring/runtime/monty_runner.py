@@ -24,14 +24,14 @@ from core.authoring.helpers.runtime_common import (
 from core.authoring.registry import AuthoringCapabilityRegistry
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.logger import UnifiedLogger
-from core.settings.store import get_tools_config
+from core.settings.store import get_enabled_tools_config
 
 
 logger = UnifiedLogger(tag="authoring-monty")
 
 _STUBS_PATH = Path(__file__).parent.parent / "stubs.pyi"
 _INVALID_IDENTIFIER_CHARS = re.compile(r"[^a-zA-Z0-9_]")
-_EXCLUDED_DIRECT_TOOL_NAMES = frozenset({"code_execution"})
+_EXCLUDED_DIRECT_TOOL_NAMES = frozenset({"code_execution", "review_create_file"})
 
 
 class AuthoringMontyExecutionError(RuntimeError):
@@ -165,7 +165,7 @@ def _build_direct_tool_functions(
     host = context.host
     tool_names = [
         name
-        for name in sorted(get_tools_config())
+        for name in sorted(get_enabled_tools_config())
         if name not in _EXCLUDED_DIRECT_TOOL_NAMES
     ]
     if not tool_names:

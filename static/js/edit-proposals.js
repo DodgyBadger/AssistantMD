@@ -84,10 +84,12 @@
             return `
                 <article class="edit-proposal-edit" data-edit-proposal-edit="${escapeHtml(editId)}" data-review-decision="pending">
                     <div class="edit-proposal-path-wrap">
-                        <span class="edit-proposal-operation-label">${escapeHtml(operationLabel(operation))}</span>
-                        ${canOpenSource
-                            ? `<button type="button" class="vault-file-link" data-edit-proposal-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>`
-                            : `<span class="edit-proposal-new-path">@${escapeHtml(path)}</span>`}
+                        <div class="edit-proposal-path-line">
+                            <span class="edit-proposal-operation-label">${escapeHtml(operationLabel(operation))}</span>
+                            ${canOpenSource
+                                ? `<button type="button" class="vault-file-link" data-edit-proposal-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>`
+                                : `<span class="edit-proposal-new-path">@${escapeHtml(path)}</span>`}
+                        </div>
                         ${edit.rationale ? `<span class="edit-proposal-rationale">${escapeHtml(edit.rationale)}</span>` : ''}
                     </div>
                     <div class="edit-proposal-row-actions">
@@ -114,11 +116,7 @@
             const operation = editOperation(edit);
             if (operation === 'create_file') {
                 return `
-                    <div class="edit-proposal-diff">
-                        <div>
-                            <div class="edit-proposal-label">New file</div>
-                            <pre>${escapeHtml(edit.path || '')}</pre>
-                        </div>
+                    <div class="edit-proposal-diff is-single">
                         <div>
                             <div class="edit-proposal-label">Content</div>
                             <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.replacement_text || '')}</textarea>
@@ -128,39 +126,35 @@
             }
             if (operation === 'delete_file') {
                 return `
-                    <div class="edit-proposal-diff is-single">
-                        <div>
-                            <div class="edit-proposal-label">Delete file</div>
-                            <pre>${escapeHtml(edit.original_text || edit.path || '')}</pre>
-                        </div>
-                    </div>
+                    <div class="edit-proposal-delete-note">This will delete the selected file.</div>
                 `;
             }
             if (operation === 'move_file') {
                 return `
-                    <div class="edit-proposal-diff">
+                    <div class="edit-proposal-diff is-single">
                         <div>
-                            <div class="edit-proposal-label">Source</div>
-                            <pre>${escapeHtml(edit.path || '')}</pre>
-                        </div>
-                        <div>
-                            <div class="edit-proposal-label">Destination</div>
-                            <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.destination || edit.replacement_text || '')}</textarea>
+                            <div class="edit-proposal-field-header">
+                                <div class="edit-proposal-label">Destination</div>
+                            </div>
+                            <div class="edit-proposal-path-field">
+                                <input type="text" class="edit-proposal-path-input" data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" value="${escapeHtml(edit.destination || edit.replacement_text || '')}" ${applied ? 'disabled' : ''} />
+                                <button type="button" class="workspace-icon-button edit-proposal-path-picker-button" data-edit-proposal-pick-destination="${escapeHtml(editId)}" aria-label="Choose destination path" title="Choose destination path" ${applied ? 'disabled' : ''}>${icons.FOLDER_ICON_SVG || ''}</button>
+                            </div>
                         </div>
                     </div>
                 `;
             }
             return `
-                <div class="edit-proposal-diff">
-                    <div>
-                        <div class="edit-proposal-label">Original</div>
-                        <pre>${escapeHtml(edit.original_text || '')}</pre>
-                    </div>
+                <div class="edit-proposal-diff is-single">
                     <div>
                         <div class="edit-proposal-label">Replacement</div>
                         <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.replacement_text || '')}</textarea>
                     </div>
                 </div>
+                <details class="edit-proposal-original">
+                    <summary>Original</summary>
+                    <pre>${escapeHtml(edit.original_text || '')}</pre>
+                </details>
             `;
         }
 
@@ -175,6 +169,45 @@
             return 'Edit';
         }
 
+        function pickMoveDestination(container, button) {
+            if (typeof callbacks.openPathPicker !== 'function') return;
+            const row = button.closest('[data-edit-proposal-edit]');
+            if (!(row instanceof HTMLElement)) return;
+            const editId = row.getAttribute('data-edit-proposal-edit') || '';
+            const textarea = row.querySelector(`[data-edit-proposal-replacement="${cssEscape(editId)}"]`);
+            const sourcePath = row.querySelector('[data-edit-proposal-open-file]')?.getAttribute('data-edit-proposal-open-file') || '';
+            callbacks.openPathPicker({
+                id: 'edit-proposal-destination-picker-modal',
+                title: 'Move Destination',
+                mode: 'files',
+                subtitle: sourcePath ? `Move ${sourcePath}` : 'Choose destination',
+                searchPlaceholder: 'Search destination folders or files...',
+                initialScope: 'vault',
+                onSelect: ({ path, kind }) => {
+                    if (!(textarea instanceof HTMLTextAreaElement || textarea instanceof HTMLInputElement)) return;
+                    textarea.value = kind === 'directory'
+                        ? joinVaultPath(path, basename(sourcePath))
+                        : path;
+                    if (textarea instanceof HTMLTextAreaElement) {
+                        autosizeTextarea(textarea);
+                    }
+                    updateSubmitButton(container);
+                },
+            });
+        }
+
+        function basename(path) {
+            return String(path || '').split('/').filter(Boolean).pop() || '';
+        }
+
+        function joinVaultPath(directory, name) {
+            const cleanDirectory = String(directory || '').replace(/\/+$/, '');
+            const cleanName = String(name || '').replace(/^\/+/, '');
+            if (!cleanDirectory) return cleanName;
+            if (!cleanName) return cleanDirectory;
+            return `${cleanDirectory}/${cleanName}`;
+        }
+
         function bindProposalCard(container, proposal) {
             container.addEventListener('click', async (event) => {
                 const target = event.target;
@@ -182,6 +215,11 @@
                 const fileButton = target.closest('[data-edit-proposal-open-file]');
                 if (fileButton instanceof HTMLElement) {
                     callbacks.openFile?.(fileButton.getAttribute('data-edit-proposal-open-file') || '');
+                    return;
+                }
+                const destinationButton = target.closest('[data-edit-proposal-pick-destination]');
+                if (destinationButton instanceof HTMLButtonElement) {
+                    pickMoveDestination(container, destinationButton);
                     return;
                 }
                 const toggleButton = target.closest('[data-edit-proposal-toggle]');
@@ -208,6 +246,8 @@
                 const target = event.target;
                 if (target instanceof HTMLTextAreaElement && target.matches('[data-edit-proposal-replacement], [data-edit-proposal-comment]')) {
                     autosizeTextarea(target);
+                    updateSubmitButton(container);
+                } else if (target instanceof HTMLInputElement && target.matches('[data-edit-proposal-replacement]')) {
                     updateSubmitButton(container);
                 }
             });
@@ -290,7 +330,7 @@
             const status = container.querySelector('.edit-proposal-status');
             if (status) status.textContent = statusLabel;
             setProposalCollapsed(container, true);
-            container.querySelectorAll('textarea, [data-edit-proposal-bulk-decision], [data-edit-proposal-decision], [data-edit-proposal-submit]').forEach((item) => {
+            container.querySelectorAll('textarea, input[data-edit-proposal-replacement], [data-edit-proposal-bulk-decision], [data-edit-proposal-decision], [data-edit-proposal-submit]').forEach((item) => {
                 item.disabled = true;
             });
         }
@@ -381,7 +421,7 @@
                         editId,
                         decision,
                         edit: editsById.get(editId) || {},
-                        replacementText: replacement instanceof HTMLTextAreaElement ? replacement.value : '',
+                        replacementText: replacement instanceof HTMLTextAreaElement || replacement instanceof HTMLInputElement ? replacement.value : '',
                         comment: comment instanceof HTMLTextAreaElement ? comment.value.trim() : '',
                     };
                 })

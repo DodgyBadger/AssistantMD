@@ -128,8 +128,8 @@ Each edit item supports:
 - `path`: vault-relative file path.
 - `rationale`: optional short reason shown in the proposal card.
 
-For `replace_text`, include `original_text` and `replacement_text`. The original
-text must match exactly once.
+For `replace_text`, include `original_text` and the proposed replacement as
+`replacement_text` or `content`. The original text must match exactly once.
 
 For `create_file`, include `replacement_text`, `content`, or `initial_content`
 with the proposed full file content. The path must not already exist.

@@ -7,13 +7,21 @@ write/delete/move recording still belongs to ``core.vault_state.file_mutations``
 from __future__ import annotations
 
 from dataclasses import dataclass
+import glob
+import os
 from pathlib import Path
+import subprocess
 from typing import Any
 
 from core.constants import VIRTUAL_MOUNTS
+from core.settings import get_file_ops_safe_list_max_results, get_file_search_timeout_seconds
 from core.utils.hash import hash_file_bytes, hash_file_content
 from core.vault_state.file_mutations import (
+    DirectoryCleanupResult,
     RecordedMutationResult,
+    VaultMutationRejected,
+    append_vault_file,
+    delete_empty_vault_directory_tree,
     delete_vault_file,
     move_vault_file,
     replace_vault_file_content,
@@ -35,6 +43,15 @@ class VaultFileOperationRejected(Exception):
         super().__init__(message)
         self.code = code
         self.details = details or {}
+
+
+@dataclass(frozen=True)
+class VaultFileOperationResult:
+    """Result envelope for user-facing vault file operations."""
+
+    return_value: Any
+    metadata: dict[str, Any]
+    content: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +131,524 @@ class PreparedMoveFile:
 
     path: str
     destination: str
+
+
+def read_vault_file_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    start_line: int = 0,
+    line_count: int = 0,
+) -> VaultFileOperationResult:
+    """Read a vault markdown/text file, optionally returning a line slice."""
+    if _virtual_mount_key(path):
+        return _read_virtual_file_operation(path=path, start_line=start_line, line_count=line_count)
+    target = resolve_text_target(
+        vault_path=vault_path,
+        path=path,
+        markdown_only=False,
+        prefer_markdown_extension=True,
+    )
+    if target.full_path.is_dir():
+        return _operation_result(
+            f"Cannot read '{target.path}' - this is a directory, not a file.",
+            operation="read",
+            path=target.path,
+            status="invalid_target",
+            exists=True,
+            error_type="is_directory",
+            metadata=target.requested_path_metadata,
+        )
+    try:
+        content = _read_existing_text_file(target)
+    except VaultFileOperationRejected as exc:
+        return _rejected_result(exc, operation="read", fallback_path=path)
+
+    lines = content.splitlines()
+    metadata: dict[str, Any] = {
+        "media_mode": "text",
+        "content_chars": len(content),
+        **target.requested_path_metadata,
+    }
+    return_value = content
+    if start_line > 0 or line_count > 0:
+        start = max(start_line, 1) if start_line else 1
+        count = line_count if line_count > 0 else len(lines) - start + 1
+        selected = lines[start - 1:start - 1 + count]
+        return_value = "\n".join(selected)
+        metadata.update(
+            {
+                "start_line": start,
+                "line_count": count,
+                "lines_returned": len(selected),
+                "total_lines": len(lines),
+            }
+        )
+    return _operation_result(
+        return_value,
+        operation="read",
+        path=target.path,
+        status="completed",
+        exists=True,
+        metadata=metadata,
+    )
+
+
+def list_vault_paths_operation(
+    *,
+    vault_path: str | Path,
+    path: str = "",
+    recursive: bool = False,
+    max_results: int | None = None,
+) -> VaultFileOperationResult:
+    """List vault files and directories matching a path or glob."""
+    if _virtual_mount_key(path):
+        return _list_virtual_paths_operation(
+            path=path,
+            recursive=recursive,
+            max_results=_default_list_max_results() if max_results is None else max_results,
+        )
+    vault_root = Path(vault_path).resolve()
+    max_count = _default_list_max_results() if max_results is None else max_results
+    raw_path = path.strip()
+    scope_relative_path: str | None = None
+    pattern_path = raw_path
+    if not pattern_path or pattern_path == ".":
+        pattern_path = "**/*" if recursive else "*"
+    _reject_virtual_mount_path(pattern_path)
+    if ".." in pattern_path or pattern_path.startswith("/"):
+        raise VaultFileOperationRejected(
+            "invalid_path",
+            "Path cannot contain '..' or start with '/'.",
+            details={"path": raw_path},
+        )
+
+    is_glob = any(ch in pattern_path for ch in "*?[")
+    if not is_glob:
+        candidate = (vault_root / pattern_path).resolve()
+        _ensure_within_root(vault_root, candidate)
+        if candidate.is_dir():
+            scope_relative_path = _relative_to_root(vault_root, candidate)
+            pattern_path = str(Path(pattern_path) / ("**/*" if recursive else "*"))
+
+    files, directories, file_count, directory_count = _collect_limited_matches(
+        pattern=vault_root / pattern_path,
+        recursive=recursive or "**" in pattern_path,
+        root_path=vault_root,
+        max_results=max_count,
+    )
+    truncated = max_count > 0 and file_count + directory_count > max_count
+    empty_candidates = _empty_directory_candidates(
+        vault_path=vault_root,
+        directories=directories,
+        scope_relative_path=scope_relative_path,
+        include_scope_when_empty=file_count == 0 and directory_count == 0,
+    )
+
+    if file_count == 0 and directory_count == 0:
+        message = f"No files or directories found for path '{pattern_path}'"
+    else:
+        parts = []
+        if directories:
+            parts.append(
+                f"Directories ({len(directories)}):\n"
+                + "\n".join(f"  {directory}/" for directory in directories)
+            )
+        if files:
+            parts.append(
+                f"Files ({len(files)}):\n"
+                + "\n".join(f"  {file_path}" for file_path in files)
+            )
+        if truncated:
+            parts.append(f"... truncated to {max_count} results. Narrow your path or disable recursion.")
+        message = "\n\n".join(parts)
+
+    return _operation_result(
+        message,
+        operation="list",
+        path=pattern_path,
+        status="completed",
+        exists=True,
+        metadata={
+            "directory_count": len(directories),
+            "file_count": len(files),
+            "directories": directories,
+            "files": files,
+            "empty_directory_candidates": empty_candidates,
+            "empty_directory_candidate_count": len(empty_candidates),
+            "truncated": truncated,
+        },
+    )
+
+
+def search_vault_files_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    search_term: str,
+) -> VaultFileOperationResult:
+    """Search text files within the vault using ripgrep."""
+    query = search_term.strip()
+    if not query:
+        return _operation_result(
+            "Search requires a search pattern in 'search_term'.",
+            operation="search",
+            path=path,
+            search_term=query,
+            status="error",
+            error_type="missing_query",
+        )
+
+    vault_root = Path(vault_path).resolve()
+    search_path = path.strip()
+    if search_path:
+        mount_key = _virtual_mount_key(search_path)
+        if mount_key:
+            root, result_prefix = _resolve_virtual_search_scope(search_path, mount_key)
+            vault_root = root
+        elif ".." in search_path or search_path.startswith("/"):
+            return _operation_result(
+                "Path cannot contain '..' or start with '/'.",
+                operation="search",
+                path=search_path,
+                search_term=query,
+                status="invalid_target",
+                error_type="invalid_path",
+            )
+        else:
+            root = (vault_root / search_path).resolve()
+            result_prefix = ""
+            _ensure_within_root(vault_root, root)
+    else:
+        root = vault_root
+        result_prefix = ""
+
+    command = [
+        "rg",
+        "--no-heading",
+        "--with-filename",
+        "--line-number",
+        "--color",
+        "never",
+        "--ignore-case",
+        query,
+        str(root),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=_default_search_timeout_seconds(),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return _operation_result(
+            f"Search timed out for '{query}'.",
+            operation="search",
+            path=search_path,
+            search_term=query,
+            status="error",
+            error_type="timeout",
+        )
+    if completed.returncode not in {0, 1}:
+        return _operation_result(
+            completed.stderr.strip() or f"Search failed for '{query}'.",
+            operation="search",
+            path=search_path,
+            search_term=query,
+            status="error",
+            error_type="search_failed",
+        )
+
+    matches = _format_rg_matches(completed.stdout, vault_root, result_prefix=result_prefix)
+    if not matches:
+        return _operation_result(
+            f"No matches found for '{query}' in text files",
+            operation="search",
+            path=search_path,
+            search_term=query,
+            status="completed",
+            metadata={"match_count": 0, "matches": []},
+        )
+    return _operation_result(
+        "\n".join(matches),
+        operation="search",
+        path=search_path,
+        search_term=query,
+        status="completed",
+        metadata={"match_count": len(matches), "matches": matches},
+    )
+
+
+def write_vault_file_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: str,
+    overwrite: bool = False,
+) -> VaultFileOperationResult:
+    """Create a markdown file, or replace full content when overwrite is true."""
+    if overwrite:
+        return overwrite_vault_file_operation(vault_path=vault_path, path=path, content=content)
+    try:
+        mutation = write_vault_file(
+            vault_path=vault_path,
+            path=path,
+            content=content,
+            fail_if_exists=True,
+            markdown_only=True,
+        )
+    except VaultMutationRejected as exc:
+        if exc.code != "file_exists":
+            raise
+        return _operation_result(
+            f"Cannot write to '{path}' - file already exists.",
+            operation="write",
+            path=path,
+            status="already_exists",
+            exists=True,
+            error_type="file_exists",
+        )
+    return _mutation_result(
+        f"Successfully created new file '{path}' with {len(content)} characters",
+        operation="write",
+        path=path,
+        mutation=mutation,
+        exists=True,
+        metadata={"content_chars": len(content), "overwrote": False},
+    )
+
+
+def overwrite_vault_file_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: str,
+) -> VaultFileOperationResult:
+    """Create or overwrite a markdown file with full content."""
+    if not path.strip():
+        return _operation_result(
+            "Path is required for write.",
+            operation="write",
+            path=path,
+            status="error",
+            error_type="invalid_path",
+        )
+    target = resolve_text_target(vault_path=vault_path, path=path, markdown_only=True)
+    existed_before = target.full_path.exists()
+    if existed_before:
+        mutation = replace_vault_file_content(
+            vault_path=vault_path,
+            path=target.path,
+            content=content,
+            operation="write",
+            markdown_only=True,
+        )
+    else:
+        mutation = write_vault_file(
+            vault_path=vault_path,
+            path=target.path,
+            content=content,
+            fail_if_exists=False,
+            markdown_only=True,
+        )
+    return _mutation_result(
+        (
+            f"Successfully overwrote '{target.path}' with {len(content)} characters"
+            if existed_before
+            else f"Successfully created new file '{target.path}' with {len(content)} characters"
+        ),
+        operation="write",
+        path=target.path,
+        mutation=mutation,
+        exists=True,
+        metadata={
+            "content_chars": len(content),
+            "overwrote": existed_before,
+            **target.requested_path_metadata,
+        },
+    )
+
+
+def append_vault_file_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: str,
+) -> VaultFileOperationResult:
+    """Append text to an existing markdown file."""
+    try:
+        mutation = append_vault_file(
+            vault_path=vault_path,
+            path=path,
+            content=content,
+            markdown_only=True,
+        )
+    except VaultMutationRejected as exc:
+        if exc.code != "file_not_found":
+            raise
+        return _operation_result(
+            f"Cannot append to '{path}' - file does not exist.",
+            operation="append",
+            path=path,
+            status="not_found",
+            exists=False,
+            error_type="file_not_found",
+        )
+    return _mutation_result(
+        f"Successfully appended {len(content)} characters to '{path}'",
+        operation="append",
+        path=path,
+        mutation=mutation,
+        exists=True,
+        metadata={"content_chars": len(content)},
+    )
+
+
+def replace_text_vault_file_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    old_text: str,
+    new_text: str,
+    count: int,
+) -> VaultFileOperationResult:
+    """Replace exact text in an existing markdown file."""
+    try:
+        result = replace_text(
+            vault_path=vault_path,
+            path=path,
+            old_text=old_text,
+            new_text=new_text,
+            count=count,
+            operation="replace_text",
+            markdown_only=True,
+            prefer_markdown_extension=True,
+        )
+    except VaultFileOperationRejected as exc:
+        return _rejected_result(exc, operation="replace_text", fallback_path=path)
+    return _mutation_result(
+        f"Successfully replaced {result.replacement_count} occurrence(s) in '{result.path}'",
+        operation="replace_text",
+        path=result.path,
+        mutation=result.mutation,
+        exists=True,
+        metadata={
+            "replacement_count": result.replacement_count,
+            **result.requested_path_metadata,
+        },
+    )
+
+
+def move_vault_path_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    destination: str,
+) -> VaultFileOperationResult:
+    """Move a vault file without overwriting an existing destination."""
+    try:
+        source_mutation, destination_mutation = move_vault_file(
+            vault_path=vault_path,
+            path=path,
+            destination=destination,
+            overwrite=False,
+        )
+    except VaultMutationRejected as exc:
+        status = "not_found" if exc.code == "source_not_found" else "already_exists"
+        if exc.code not in {"source_not_found", "destination_exists"}:
+            raise
+        return _operation_result(
+            str(exc),
+            operation="move",
+            path=path,
+            destination=destination,
+            status=status,
+            exists=exc.code != "source_not_found",
+            error_type=exc.code,
+        )
+    return _operation_result(
+        f"Successfully moved '{path}' to '{destination}'",
+        operation="move",
+        path=path,
+        destination=destination,
+        status="completed",
+        exists=True,
+        metadata={
+            "task_id": source_mutation.task_id or destination_mutation.task_id,
+            "vault_id": source_mutation.vault_id,
+        },
+    )
+
+
+def delete_vault_path_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    confirm_path: str,
+) -> VaultFileOperationResult:
+    """Delete a vault file or empty directory tree after path confirmation."""
+    if path != confirm_path:
+        return _operation_result(
+            f"Path confirmation failed - path '{path}' does not match confirm_path '{confirm_path}'",
+            operation="delete",
+            path=path,
+            status="error",
+            error_type="confirmation_failed",
+        )
+    target = resolve_text_target(vault_path=vault_path, path=path, markdown_only=False)
+    if not target.full_path.exists():
+        return _operation_result(
+            f"Cannot delete '{target.path}' - file does not exist",
+            operation="delete",
+            path=target.path,
+            status="not_found",
+            exists=False,
+            error_type="file_not_found",
+            metadata=target.requested_path_metadata,
+        )
+    if target.full_path.is_dir():
+        return _delete_empty_directory_operation(vault_path=vault_path, path=target.path)
+    try:
+        mutation = delete_vault_file(vault_path=vault_path, path=target.path)
+    except VaultMutationRejected as exc:
+        if exc.code != "file_not_found":
+            raise
+        return _operation_result(
+            f"Cannot delete '{target.path}' - file does not exist",
+            operation="delete",
+            path=target.path,
+            status="not_found",
+            exists=False,
+            error_type="file_not_found",
+        )
+    return _mutation_result(
+        f"Successfully deleted '{target.path}'",
+        operation="delete",
+        path=target.path,
+        mutation=mutation,
+        exists=False,
+        metadata={"target_type": "file"},
+    )
+
+
+def make_vault_directory_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+) -> VaultFileOperationResult:
+    """Create a directory within the vault."""
+    target = resolve_text_target(vault_path=vault_path, path=path, markdown_only=False)
+    target.full_path.mkdir(parents=True, exist_ok=True)
+    return _operation_result(
+        f"Successfully created directory '{target.path}'",
+        operation="mkdir",
+        path=target.path,
+        status="completed",
+        exists=True,
+        metadata=target.requested_path_metadata,
+    )
 
 
 def resolve_text_target(
@@ -593,12 +1128,469 @@ def _sha256_file(path: Path) -> str:
     return hash_file_bytes(path, length=None)
 
 
+def _operation_result(
+    return_value: Any,
+    *,
+    operation: str,
+    path: str = "",
+    destination: str = "",
+    search_term: str = "",
+    status: str = "completed",
+    exists: bool | None = None,
+    error_type: str | None = None,
+    content: Any | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> VaultFileOperationResult:
+    payload: dict[str, Any] = {
+        "status": status,
+        "operation": operation,
+    }
+    if path:
+        payload["path"] = path
+    if destination:
+        payload["destination"] = destination
+    if search_term:
+        payload["search_term"] = search_term
+    if exists is not None:
+        payload["exists"] = exists
+    if error_type:
+        payload["error_type"] = error_type
+    if metadata:
+        payload.update(metadata)
+    return VaultFileOperationResult(return_value=return_value, content=content, metadata=payload)
+
+
+def _default_list_max_results() -> int:
+    try:
+        return get_file_ops_safe_list_max_results()
+    except Exception:
+        return 200
+
+
+def _default_search_timeout_seconds() -> int:
+    try:
+        return get_file_search_timeout_seconds()
+    except Exception:
+        return 10
+
+
+def _mutation_result(
+    return_value: str,
+    *,
+    operation: str,
+    path: str,
+    mutation: RecordedMutationResult,
+    exists: bool,
+    metadata: dict[str, Any] | None = None,
+) -> VaultFileOperationResult:
+    return _operation_result(
+        return_value,
+        operation=operation,
+        path=path,
+        status="completed",
+        exists=exists,
+        metadata={
+            "task_id": mutation.task_id,
+            "vault_id": mutation.vault_id,
+            **(metadata or {}),
+        },
+    )
+
+
+def _rejected_result(
+    exc: VaultFileOperationRejected,
+    *,
+    operation: str,
+    fallback_path: str,
+) -> VaultFileOperationResult:
+    path = str(exc.details.get("path") or normalize_vault_relative_path(fallback_path))
+    status_by_code = {
+        "file_not_found": "not_found",
+        "not_file": "invalid_target",
+        "file_not_text": "unsupported",
+        "text_not_found": "invalid_target",
+        "invalid_count": "error",
+    }
+    return _operation_result(
+        str(exc),
+        operation=operation,
+        path=path,
+        status=status_by_code.get(exc.code, "error"),
+        exists=False if exc.code == "file_not_found" else None,
+        error_type=exc.code,
+        metadata=exc.details,
+    )
+
+
+def _delete_empty_directory_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+) -> VaultFileOperationResult:
+    try:
+        cleanup = delete_empty_vault_directory_tree(vault_path=vault_path, path=path)
+    except VaultMutationRejected as exc:
+        status = "not_found" if exc.code == "directory_not_found" else "invalid_target"
+        return _operation_result(
+            str(exc),
+            operation="delete",
+            path=path,
+            status=status,
+            exists=exc.code != "directory_not_found",
+            error_type=exc.code,
+        )
+    return _directory_cleanup_result(path=path, cleanup=cleanup)
+
+
+def _directory_cleanup_result(
+    *,
+    path: str,
+    cleanup: DirectoryCleanupResult,
+) -> VaultFileOperationResult:
+    removed = list(cleanup.removed_paths)
+    skipped = list(cleanup.skipped_paths)
+    blockers = list(cleanup.blocker_paths)
+    if skipped:
+        message = (
+            f"Removed {len(removed)} empty directories under '{path}'. "
+            f"Skipped {len(skipped)} non-empty directories: "
+            + ", ".join(skipped)
+        )
+        status = "partial"
+    elif removed:
+        message = f"Removed {len(removed)} empty directories under '{path}'"
+        status = "completed"
+    else:
+        message = f"No empty directories were removed under '{path}'"
+        status = "partial"
+    return _operation_result(
+        message,
+        operation="delete",
+        path=path,
+        status=status,
+        exists=cleanup.after_exists,
+        metadata={
+            "target_type": "directory",
+            "removed_directories": removed,
+            "skipped_non_empty_directories": skipped,
+            "remaining_directory_contents": blockers,
+            "removed_count": len(removed),
+            "skipped_count": len(skipped),
+            "remaining_content_count": len(blockers),
+            "task_id": cleanup.task_id,
+            "vault_id": cleanup.vault_id,
+            "event_sequence": cleanup.event_sequence,
+        },
+    )
+
+
+def _collect_limited_matches(
+    *,
+    pattern: Path,
+    recursive: bool,
+    root_path: Path,
+    max_results: int,
+) -> tuple[list[str], list[str], int, int]:
+    selected_files: list[str] = []
+    selected_directories: list[str] = []
+    total_files = 0
+    total_directories = 0
+    root = root_path.resolve()
+    for match in glob.iglob(str(pattern), recursive=recursive):
+        candidate = Path(match)
+        try:
+            resolved = candidate.resolve()
+            _ensure_within_root(root, resolved)
+        except (OSError, VaultFileOperationRejected):
+            continue
+        relative = _relative_to_root(root, resolved)
+        if not relative or any(part.startswith(".") for part in relative.split("/")):
+            continue
+        if resolved.is_dir():
+            total_directories += 1
+            _keep_sorted_candidate(selected_directories, relative, max_results)
+        else:
+            total_files += 1
+            _keep_sorted_candidate(selected_files, relative, max_results)
+    if max_results > 0 and total_files + total_directories > max_results:
+        directories = selected_directories[:max_results]
+        file_slots = max(0, max_results - min(total_directories, max_results))
+        return selected_files[:file_slots], directories, total_files, total_directories
+    return selected_files, selected_directories, total_files, total_directories
+
+
+def _keep_sorted_candidate(candidates: list[str], value: str, max_results: int) -> None:
+    candidates.append(value)
+    candidates.sort()
+    if max_results > 0 and len(candidates) > max_results:
+        candidates.pop()
+
+
+def _empty_directory_candidates(
+    *,
+    vault_path: Path,
+    directories: list[str],
+    scope_relative_path: str | None,
+    include_scope_when_empty: bool,
+) -> list[str]:
+    candidate_paths: list[str] = []
+    if include_scope_when_empty and scope_relative_path:
+        candidate_paths.append(scope_relative_path)
+    candidate_paths.extend(directories)
+    empty_paths = [
+        candidate
+        for candidate in candidate_paths
+        if candidate and _directory_tree_has_no_files(vault_path, candidate)
+    ]
+    selected: list[str] = []
+    for candidate in sorted(empty_paths, key=lambda item: (item.count("/"), item)):
+        if any(candidate == parent or candidate.startswith(f"{parent}/") for parent in selected):
+            continue
+        selected.append(candidate)
+    return sorted(selected)
+
+
+def _directory_tree_has_no_files(vault_path: Path, relative_path: str) -> bool:
+    full_path = vault_path / relative_path
+    if not full_path.is_dir():
+        return False
+    for _root, _dirs, files in os.walk(full_path):
+        if files:
+            return False
+    return True
+
+
+def _read_virtual_file_operation(
+    *,
+    path: str,
+    start_line: int,
+    line_count: int,
+) -> VaultFileOperationResult:
+    mount_key = _virtual_mount_key(path) or ""
+    root = _virtual_mount_root(mount_key)
+    rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+    if not rel:
+        return _operation_result(
+            f"Cannot read '{path}' - this is a directory, not a file.",
+            operation="read",
+            path=path,
+            status="invalid_target",
+            exists=True,
+            error_type="is_directory",
+        )
+    if "." in Path(rel).name and not rel.endswith(".md"):
+        return _operation_result(
+            "Only .md files are allowed in virtual mounts.",
+            operation="read",
+            path=path,
+            status="unsupported",
+            error_type="unsupported_file_type",
+        )
+    if "." not in Path(rel).name:
+        rel = f"{rel}.md"
+    full_path = (root / rel).resolve()
+    try:
+        _ensure_within_root(root, full_path)
+    except VaultFileOperationRejected as exc:
+        return _rejected_result(exc, operation="read", fallback_path=path)
+    if full_path.is_dir():
+        return _operation_result(
+            f"Cannot read '{path}' - this is a directory, not a file.",
+            operation="read",
+            path=path,
+            status="invalid_target",
+            exists=True,
+            error_type="is_directory",
+        )
+    if not full_path.exists():
+        return _operation_result(
+            f"Cannot read '{path}' - file does not exist.",
+            operation="read",
+            path=path,
+            status="not_found",
+            exists=False,
+            error_type="file_not_found",
+        )
+    content = full_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    metadata: dict[str, Any] = {
+        "media_mode": "markdown",
+        "content_chars": len(content),
+        "virtual_mount": mount_key,
+    }
+    return_value = content
+    if start_line > 0 or line_count > 0:
+        start = max(start_line, 1) if start_line else 1
+        count = line_count if line_count > 0 else len(lines) - start + 1
+        selected = lines[start - 1:start - 1 + count]
+        return_value = "\n".join(selected)
+        metadata.update(
+            {
+                "start_line": start,
+                "line_count": count,
+                "lines_returned": len(selected),
+                "total_lines": len(lines),
+            }
+        )
+    return _operation_result(
+        return_value,
+        operation="read",
+        path=path,
+        status="completed",
+        exists=True,
+        metadata=metadata,
+    )
+
+
+def _list_virtual_paths_operation(
+    *,
+    path: str,
+    recursive: bool,
+    max_results: int,
+) -> VaultFileOperationResult:
+    mount_key = _virtual_mount_key(path) or ""
+    root = _virtual_mount_root(mount_key)
+    rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+    if ".." in rel.split("/"):
+        raise VaultFileOperationRejected(
+            "invalid_path",
+            "Path cannot contain '..' for virtual mounts.",
+            details={"path": path},
+        )
+    pattern_path = rel
+    if not pattern_path:
+        pattern_path = "**/*" if recursive else "*"
+    elif not any(ch in pattern_path for ch in "*?["):
+        candidate = (root / pattern_path).resolve()
+        _ensure_within_root(root, candidate)
+        if candidate.is_dir():
+            pattern_path = str(Path(pattern_path) / ("**/*" if recursive else "*"))
+    files, directories, file_count, directory_count = _collect_limited_matches(
+        pattern=root / pattern_path,
+        recursive=recursive or "**" in pattern_path,
+        root_path=root,
+        max_results=max_results,
+    )
+    truncated = max_results > 0 and file_count + directory_count > max_results
+    prefixed_files = [f"{mount_key}/{item}" for item in files]
+    prefixed_directories = [f"{mount_key}/{item}" for item in directories]
+    if file_count == 0 and directory_count == 0:
+        message = f"No files or directories found for path '{path}'"
+    else:
+        parts = []
+        if prefixed_directories:
+            parts.append(
+                f"Directories ({len(prefixed_directories)}):\n"
+                + "\n".join(f"  {directory}/" for directory in prefixed_directories)
+            )
+        if prefixed_files:
+            parts.append(
+                f"Files ({len(prefixed_files)}):\n"
+                + "\n".join(f"  {file_path}" for file_path in prefixed_files)
+            )
+        if truncated:
+            parts.append(f"... truncated to {max_results} results. Narrow your path or disable recursion.")
+        message = "\n\n".join(parts)
+    return _operation_result(
+        message,
+        operation="list",
+        path=path or mount_key,
+        status="completed",
+        exists=True,
+        metadata={
+            "directory_count": len(prefixed_directories),
+            "file_count": len(prefixed_files),
+            "directories": prefixed_directories,
+            "files": prefixed_files,
+            "empty_directory_candidates": [],
+            "empty_directory_candidate_count": 0,
+            "truncated": truncated,
+            "virtual_mount": mount_key,
+        },
+    )
+
+
+def _resolve_virtual_search_scope(path: str, mount_key: str) -> tuple[Path, str]:
+    root = _virtual_mount_root(mount_key)
+    rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+    if ".." in rel.split("/"):
+        raise VaultFileOperationRejected(
+            "invalid_path",
+            "Path cannot contain '..' for virtual mounts.",
+            details={"path": path},
+        )
+    if rel:
+        scoped = (root / rel).resolve()
+        _ensure_within_root(root, scoped)
+        return scoped, mount_key
+    return root, mount_key
+
+
+def _format_rg_matches(output: str, vault_root: Path, *, result_prefix: str = "") -> list[str]:
+    matches: list[str] = []
+    for line in output.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) < 3:
+            continue
+        file_path, line_number, text = parts
+        try:
+            relative = _relative_to_root(vault_root, Path(file_path).resolve())
+        except VaultFileOperationRejected:
+            continue
+        if result_prefix:
+            relative = f"{result_prefix}/{relative}"
+        matches.append(f"{relative}:{line_number}: {text}")
+    return matches
+
+
+def _virtual_mount_key(path: str) -> str | None:
+    if not path:
+        return None
+    mount_key = path.strip().lstrip("./").split("/", 1)[0]
+    return mount_key if mount_key in VIRTUAL_MOUNTS else None
+
+
+def _virtual_mount_root(mount_key: str) -> Path:
+    mount = VIRTUAL_MOUNTS.get(mount_key)
+    if not mount:
+        raise VaultFileOperationRejected(
+            "invalid_virtual_mount",
+            f"Unknown virtual mount: {mount_key}",
+            details={"path": mount_key},
+        )
+    return Path(str(mount["root"])).resolve()
+
+
+def _relative_to_root(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise VaultFileOperationRejected(
+            "path_escapes_vault",
+            "Path escapes vault boundaries.",
+        ) from exc
+
+
+def _ensure_within_root(root: Path, path: Path) -> None:
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise VaultFileOperationRejected(
+            "path_escapes_vault",
+            "Path escapes vault boundaries.",
+        ) from exc
+
+
 def _reject_virtual_mount_path(path: str) -> None:
     if not path:
         return
     mount_key = path.strip().lstrip("./").split("/", 1)[0]
     if mount_key in VIRTUAL_MOUNTS:
-        raise ValueError(f"'{mount_key}' is reserved for a virtual mount")
+        raise VaultFileOperationRejected(
+            "virtual_mount_read_only",
+            f"'{mount_key}' is reserved for a virtual mount",
+            details={"path": path},
+        )
 
 
 def _should_try_markdown_file(path: str) -> bool:

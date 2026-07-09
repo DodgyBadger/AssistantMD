@@ -24,6 +24,7 @@ class EditProposalArtifactsScenario(BaseScenario):
         )
         self.create_file(vault, "Projects/Alpha/DeleteMe.md", "Remove this note.\n")
         self.create_file(vault, "Projects/Alpha/MoveMe.md", "Move this note.\n")
+        self.create_file(vault, "Projects/Alpha/ContentAlias.md", "Line one\nLine two old\n")
 
         await self.start_system()
 
@@ -96,6 +97,39 @@ class EditProposalArtifactsScenario(BaseScenario):
         assert "Applied the approved edits." in applied_history[-1].content_text, (
             "Apply history should include a completed assistant turn"
         )
+
+        content_alias_result = await tool.function(
+            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+            edits=[
+                {
+                    "operation": "replace_text",
+                    "path": "Projects/Alpha/ContentAlias.md",
+                    "original_text": "Line one\nLine two old\n",
+                    "content": "Line one\nLine two new\n",
+                    "rationale": "Use content as replacement text.",
+                }
+            ],
+            title="Content alias replacement",
+        )
+        content_alias_ref = content_alias_result.metadata["artifact_ref"]
+        content_alias_proposal = self.call_api(
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{content_alias_ref}"
+        ).json()
+        content_alias_edit = content_alias_proposal["edits"][0]
+        assert content_alias_edit["replacement_text"] == "Line one\nLine two new\n", (
+            "replace_text proposals should accept content as replacement_text"
+        )
+        content_alias_apply = self.call_api(
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{content_alias_ref}/apply",
+            method="POST",
+            data={"selected_edit_ids": [content_alias_edit["edit_id"]]},
+        )
+        assert content_alias_apply.status_code == 200, (
+            "replace_text proposal using content should apply"
+        )
+        assert (vault / "Projects/Alpha/ContentAlias.md").read_text(encoding="utf-8") == (
+            "Line one\nLine two new\n"
+        ), "content alias should be written as replacement text"
 
         self.assert_event_contains(
             self.events_since(apply_checkpoint),

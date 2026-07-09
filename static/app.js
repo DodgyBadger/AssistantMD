@@ -56,14 +56,10 @@ const chatElements = {
     workspaceUnlockBtn: document.getElementById('workspace-unlock-btn'),
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
+    chatModeSelector: document.getElementById('chat-mode-selector'),
     thinkingSelector: document.getElementById('thinking-selector'),
     newSessionTrigger: document.getElementById('new-session-trigger'),
     sessionBrowserTrigger: document.getElementById('session-browser-trigger'),
-    toolDropdown: document.getElementById('tool-dropdown'),
-    toolDropdownTrigger: document.getElementById('tool-dropdown-trigger'),
-    toolDropdownMenu: document.getElementById('tool-dropdown-menu'),
-    toolDropdownSummary: document.getElementById('tool-dropdown-summary'),
-    toolsCheckboxes: document.getElementById('tools-checkboxes'),
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
     attachBtn: document.getElementById('attach-btn'),
@@ -112,6 +108,12 @@ const sessionSummary = window.SessionSummary.create({
     },
 });
 
+const vaultPathPicker = window.VaultPathPicker.create({
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+});
+
 const workspacePicker = window.WorkspacePicker.create({
     state,
     elements: chatElements,
@@ -119,6 +121,8 @@ const workspacePicker = window.WorkspacePicker.create({
     callbacks: {
         fetchSessions,
         addChatErrorMessage,
+        openPathPicker: (options) => vaultPathPicker.open(options),
+        closePathPicker: () => vaultPathPicker.close(),
     },
 });
 
@@ -129,6 +133,8 @@ const fileReferences = window.FileReferences.create({
     utils: window.AssistantMDUtils,
     callbacks: {
         addChatErrorMessage,
+        openPathPicker: (options) => vaultPathPicker.open(options),
+        closePathPicker: () => vaultPathPicker.close(),
     },
 });
 
@@ -139,8 +145,19 @@ const editProposals = window.EditProposals.create({
     utils: window.AssistantMDUtils,
     callbacks: {
         openFile: (path) => fileReferences.openFile(path),
+        openPathPicker: (options) => vaultPathPicker.open(options),
         enhanceFileLinks: (container) => fileReferences.enhanceFileLinks(container),
         submitReview: (payload) => submitEditProposalReview(payload),
+    },
+});
+
+const deferredReviews = window.DeferredReviews.create({
+    state,
+    elements: chatElements,
+    icons: window.AssistantMDIcons,
+    utils: window.AssistantMDUtils,
+    callbacks: {
+        streamStartedTask: (started) => streamDeferredReviewTask(started),
     },
 });
 
@@ -611,8 +628,18 @@ function applyChatStreamPayload(payload, assistantMessage) {
         return { finished: false, messageCount: 0 };
     }
 
+    if (eventType === 'review_required') {
+        handleDeferredReviewEvent(assistantMessage, payload);
+        setAssistantStatus(assistantMessage, 'Waiting for review', 'tools');
+        return { finished: false, messageCount: 0 };
+    }
+
     if (eventType === 'done') {
-        return { finished: true, messageCount: 1 };
+        return {
+            finished: true,
+            messageCount: 1,
+            finishReason: payload.choices?.[0]?.finish_reason || 'stop',
+        };
     }
 
     if (eventType === 'cancelled') {
@@ -640,6 +667,7 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
     let lastSequence = 0;
     let messageCount = 0;
     let finished = false;
+    let finishReason = '';
 
     while (!finished) {
         const streamUrl = `api/chat/tasks/${encodeURIComponent(taskId)}/events?after_sequence=${lastSequence}`;
@@ -676,6 +704,7 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
                 }
                 const result = applyChatStreamPayload(payload, assistantMessage);
                 messageCount = Math.max(messageCount, result.messageCount);
+                finishReason = result.finishReason || finishReason;
                 if (result.finished) {
                     finished = true;
                     break;
@@ -692,6 +721,7 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
                 }
                 const result = applyChatStreamPayload(payload, assistantMessage);
                 messageCount = Math.max(messageCount, result.messageCount);
+                finishReason = result.finishReason || finishReason;
                 finished = result.finished;
             }
         }
@@ -708,7 +738,7 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
         }
     }
 
-    return { finished, messageCount };
+    return { finished, messageCount, finishReason };
 }
 
 function syncChatControlLocks() {
@@ -720,9 +750,6 @@ function syncChatControlLocks() {
         ? 'Vault is locked while a response is running.'
         : '';
 
-    if (chatElements.toolDropdownTrigger) {
-        chatElements.toolDropdownTrigger.disabled = state.isLoading;
-    }
     if (chatElements.thinkingSelector) {
         chatElements.thinkingSelector.disabled = state.isLoading;
     }
@@ -745,36 +772,6 @@ function populateThinkingSelector() {
     const allowed = new Set(Array.from(chatElements.thinkingSelector.options).map((option) => option.value));
     const selected = allowed.has(defaultThinking) ? defaultThinking : 'default';
     chatElements.thinkingSelector.value = selected;
-}
-
-function getSelectedToolNames() {
-    return Array.from(chatElements.toolsCheckboxes?.querySelectorAll('input:checked') || [])
-        .map((input) => input.value);
-}
-
-function updateToolDropdownSummary() {
-    if (!chatElements.toolDropdownSummary) return;
-
-    const selectedTools = getSelectedToolNames();
-    if (selectedTools.length === 0) {
-        chatElements.toolDropdownSummary.textContent = '(none selected)';
-        return;
-    }
-
-    chatElements.toolDropdownSummary.textContent = `(${selectedTools.length} selected)`;
-}
-
-function setToolMenuOpen(open) {
-    chatComposeState.toolMenuOpen = Boolean(open);
-    if (chatElements.toolDropdown) {
-        chatElements.toolDropdown.classList.toggle('open', chatComposeState.toolMenuOpen);
-    }
-    if (chatElements.toolDropdownMenu) {
-        chatElements.toolDropdownMenu.classList.toggle('hidden', !chatComposeState.toolMenuOpen);
-    }
-    if (chatElements.toolDropdownTrigger) {
-        chatElements.toolDropdownTrigger.setAttribute('aria-expanded', chatComposeState.toolMenuOpen ? 'true' : 'false');
-    }
 }
 
 async function fetchSessions(vault, preferredSessionId = '') {
@@ -1032,16 +1029,9 @@ function populateSelectors() {
     const previousVault = chatElements.vaultSelector?.value || '';
     const previousModel = chatElements.modelSelector?.value || '';
     const previousTemplate = chatElements.templateSelector?.value || '';
-    const previousTools = new Set(getSelectedToolNames());
-    const configuredDefaultTools = new Set(
-        Array.isArray(state.metadata?.settings?.default_chat_tools)
-            ? state.metadata.settings.default_chat_tools
-            : []
-    );
 
     chatElements.vaultSelector.innerHTML = '<option value="">Select vault...</option>';
     chatElements.modelSelector.innerHTML = '<option value="">Select model...</option>';
-    chatElements.toolsCheckboxes.innerHTML = '';
     if (chatElements.templateSelector) {
         chatElements.templateSelector.innerHTML = '<option value="">No context script</option>';
         chatElements.templateSelector.disabled = true;
@@ -1096,67 +1086,6 @@ function populateSelectors() {
         fetchSessions(chatElements.vaultSelector.value, state.sessionId || '');
     }
 
-    const toolMap = new Map(state.metadata.tools.map(tool => [tool.name, tool]));
-    const handledTools = new Set();
-
-    const createToolElement = (tool) => {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'tool-checkbox-wrapper';
-
-        const label = document.createElement('label');
-        label.htmlFor = `tool-${tool.name}`;
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `tool-${tool.name}`;
-        checkbox.value = tool.name;
-        checkbox.disabled = tool.available === false;
-
-        if (!checkbox.disabled) {
-            if (previousTools.size > 0) {
-                checkbox.checked = previousTools.has(tool.name);
-            } else {
-                checkbox.checked = configuredDefaultTools.has(tool.name);
-            }
-        }
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'tool-checkbox-name';
-        nameSpan.textContent = `${tool.name}${checkbox.disabled ? ' (unavailable)' : ''}`;
-        label.appendChild(checkbox);
-        label.appendChild(nameSpan);
-
-        wrapper.appendChild(label);
-        return wrapper;
-    };
-
-    const toolOrder = [
-        'web_search_duckduckgo',
-        'web_search_tavily',
-        'browser',
-        'session_ops',
-        'file_ops_safe',
-        'file_ops_unsafe',
-        'tavily_extract',
-        'tavily_crawl',
-        'code_execution'
-    ];
-
-    toolOrder.forEach(name => {
-        const tool = toolMap.get(name);
-        if (!tool) return;
-        chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
-        handledTools.add(name);
-    });
-
-    state.metadata.tools.forEach(tool => {
-        if (handledTools.has(tool.name)) {
-            return;
-        }
-        chatElements.toolsCheckboxes.appendChild(createToolElement(tool));
-    });
-
-    updateToolDropdownSummary();
     sessionControls.renderSelector();
     syncChatControlLocks();
 }
@@ -1312,22 +1241,6 @@ function setupEventListeners() {
         chatElements.workspaceUnlockBtn.addEventListener('click', workspacePicker.unlockPath);
     }
 
-    if (chatElements.toolDropdownTrigger) {
-        chatElements.toolDropdownTrigger.addEventListener('click', (event) => {
-            event.stopPropagation();
-            if (chatElements.toolDropdownTrigger.disabled) {
-                return;
-            }
-            setToolMenuOpen(!chatComposeState.toolMenuOpen);
-        });
-    }
-
-    if (chatElements.toolsCheckboxes) {
-        chatElements.toolsCheckboxes.addEventListener('change', () => {
-            updateToolDropdownSummary();
-        });
-    }
-
     if (chatElements.fileReferenceBtn) {
         chatElements.fileReferenceBtn.addEventListener('click', () => {
             fileReferences.openPicker();
@@ -1401,13 +1314,6 @@ function setupEventListeners() {
             const clickedPopover = chatElements.attachmentPopover && chatElements.attachmentPopover.contains(target);
             if (!clickedAttachBtn && !clickedPopover) {
                 setAttachmentPopoverOpen(false);
-            }
-        }
-
-        if (chatComposeState.toolMenuOpen) {
-            const clickedToolDropdown = chatElements.toolDropdown && chatElements.toolDropdown.contains(target);
-            if (!clickedToolDropdown) {
-                setToolMenuOpen(false);
             }
         }
 
@@ -1496,6 +1402,15 @@ async function fetchTemplates(vault, preferredTemplate = '') {
     }
 }
 
+function handleDeferredReviewEvent(assistantMessage, payload) {
+    if (!assistantMessage?.artifactList || !payload?.artifact_ref) return;
+    const container = document.createElement('div');
+    container.className = 'message-artifact-item';
+    assistantMessage.artifactList.appendChild(container);
+    deferredReviews.renderReviewEvent(container, payload);
+    scrollChatToBottom();
+}
+
 async function streamStartedChatTask(started, vault, abortController) {
     if (started.session_id) {
         state.sessionId = started.session_id;
@@ -1519,11 +1434,53 @@ async function streamStartedChatTask(started, vault, abortController) {
         toolCount: assistantMessage.toolStatusMap.size,
         status: streamResult.finished ? 'done' : 'incomplete'
     });
-    if (vault) {
+    if (vault && streamResult.finishReason !== 'tool_review_required') {
         await fetchSessions(vault, state.sessionId || '');
         if (state.sessionId) {
             await loadSession(state.sessionId);
         }
+    }
+}
+
+async function streamDeferredReviewTask(started) {
+    if (state.isLoading) {
+        addChatErrorMessage('Review submitted, but the follow-up response could not start because chat is busy.');
+        return false;
+    }
+    const vault = chatElements.vaultSelector?.value || '';
+    if (!vault) {
+        addChatErrorMessage('Review submitted, but the follow-up response could not start because no vault is selected.');
+        return false;
+    }
+    state.isLoading = true;
+    state.isCancellingChat = false;
+    state.activeChatSessionId = started.session_id || state.sessionId || null;
+    const abortController = new AbortController();
+    state.activeChatAbortController = abortController;
+    chatElements.sendBtn.disabled = true;
+    syncChatControlLocks();
+
+    try {
+        await streamStartedChatTask(started, vault, abortController);
+        return true;
+    } catch (error) {
+        console.error('Error streaming deferred review task:', error);
+        if (state.isCancellingChat || error.name === 'AbortError') {
+            addMessage('assistant', 'Response stopped.');
+        } else {
+            addChatErrorMessage(error.message);
+        }
+        return false;
+    } finally {
+        state.isLoading = false;
+        state.isCancellingChat = false;
+        state.activeChatSessionId = null;
+        state.activeChatTaskId = null;
+        state.activeChatAbortController = null;
+        chatElements.sendBtn.disabled = false;
+        syncChatControlLocks();
+        chatElements.chatInput.focus();
+        sessionControls.refreshCompactionProgress();
     }
 }
 
@@ -1599,9 +1556,8 @@ async function submitEditProposalReview(payload) {
         return false;
     }
 
-    const selectedTools = Array.from(chatElements.toolsCheckboxes.querySelectorAll('input:checked'))
-        .map(cb => cb.value);
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
+    const chatModeValue = chatElements.chatModeSelector ? chatElements.chatModeSelector.value || 'normal' : 'normal';
     const workspacePathValue = workspacePicker.currentPath() || null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
     state.sessionId = requestSessionId;
@@ -1644,7 +1600,6 @@ async function submitEditProposalReview(payload) {
                         replacement_text: decision.replacementText || '',
                         comment: decision.comment || '',
                     })),
-                    tools: selectedTools,
                     model,
                     thinking,
                     context_template: contextTemplateValue,
@@ -1718,9 +1673,6 @@ async function sendMessage(promptOverride = null) {
     chatElements.sendBtn.disabled = true;
     syncChatControlLocks();
 
-    const selectedTools = Array.from(chatElements.toolsCheckboxes.querySelectorAll('input:checked'))
-        .map(cb => cb.value);
-
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
     const workspacePathValue = workspacePicker.currentPath() || null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
@@ -1744,13 +1696,13 @@ async function sendMessage(promptOverride = null) {
             formData.append('prompt', effectivePrompt);
             formData.append('model', model);
             formData.append('thinking', thinking);
+            formData.append('chat_mode', chatModeValue);
             if (contextTemplateValue) {
                 formData.append('context_template', contextTemplateValue);
             }
             if (workspacePathValue) {
                 formData.append('workspace_path', workspacePathValue);
             }
-            selectedTools.forEach((toolName) => formData.append('tools', toolName));
             formData.append('session_id', requestSessionId);
             pendingUploads.forEach((item) => {
                 formData.append('images', item.file, item.file.name);
@@ -1764,9 +1716,9 @@ async function sendMessage(promptOverride = null) {
             const requestData = {
                 vault_name: vault,
                 prompt: effectivePrompt,
-                tools: selectedTools,
                 model: model,
                 thinking: thinking,
+                chat_mode: chatModeValue,
                 context_template: contextTemplateValue,
                 workspace_path: workspacePathValue,
                 session_id: requestSessionId

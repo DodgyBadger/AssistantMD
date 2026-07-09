@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import yaml
+from pydantic_ai import DeferredToolResults, ToolApproved, ToolDenied
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, UserPromptPart
 from sqlalchemy import func, select
 
@@ -29,12 +30,14 @@ from core.scheduling.jobs import setup_scheduler_jobs
 from core.scheduling.job_history import get_scheduler_job_history
 from core.scheduling.system_jobs import SYSTEM_JOB_IDS
 from core.settings.store import (
-    get_models_config,
-    get_tools_config,
-    get_providers_config,
-    get_active_settings_path,
     SETTINGS_TEMPLATE,
+    get_active_settings_path,
+    get_enabled_tool_names,
+    get_enabled_tools_config,
     get_general_settings,
+    get_models_config,
+    get_providers_config,
+    get_tools_config,
 )
 from core.runtime.paths import set_bootstrap_roots, resolve_bootstrap_data_root, resolve_bootstrap_system_root
 from core.settings import (
@@ -64,6 +67,7 @@ from core.llm.openai_auth import (
     openai_provider_base_url_available,
     resolve_openai_auth,
 )
+from core.llm.thinking import normalize_thinking_value
 from core.llm.openai_oauth import (
     OpenAIOAuthStateError,
     clear_openai_oauth_state,
@@ -80,12 +84,18 @@ from core.authoring.cache import purge_expired_cache_artifacts
 from core.chat import export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.chat.deferred_reviews import (
+    DeferredReviewError,
+    get_deferred_review,
+    mark_deferred_review_submitted,
+)
 from core.chat.edit_proposals import (
     EditProposalError,
     apply_edit_proposal,
     deny_edit_proposal,
     get_edit_proposal,
 )
+from core.chat.task_execution import start_deferred_review_resume_task
 from core.chat.workspace import normalize_workspace_path
 from core.goals import GoalOpsStore
 from core.memory.session_summary import SessionSummaryStore
@@ -162,6 +172,9 @@ from .models import (
     EditProposalApplyResponse,
     EditProposalDenyResponse,
     EditProposalResponse,
+    DeferredReviewCallInfo,
+    DeferredReviewResponse,
+    DeferredReviewSubmitResponse,
     ChatSessionExportResponse,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -196,6 +209,17 @@ logger = UnifiedLogger(tag="api-services")
 _chat_store = ChatStore()
 _VAULT_FILE_REFERENCE_LIMIT = 100
 _VAULT_FILE_READ_MAX_BYTES = 2 * 1024 * 1024
+
+
+def get_enabled_chat_tool_names() -> list[str]:
+    """Return app-wide enabled tools that may be exposed to chat agents."""
+    configs = get_enabled_tools_config()
+    return [
+        name
+        for name in get_enabled_tool_names()
+        if name in configs and getattr(configs[name], "chat_visible", True)
+    ]
+
 
 # Global variable to track system startup time
 _system_startup_time: Optional[datetime] = None
@@ -510,6 +534,206 @@ def get_chat_edit_proposal(
     return EditProposalResponse(**proposal)
 
 
+def get_chat_deferred_review(
+    *,
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+) -> DeferredReviewResponse:
+    """Return one deferred inline review request."""
+    review = get_deferred_review(
+        vault_name=vault_name,
+        session_id=session_id,
+        artifact_ref=artifact_ref,
+    )
+    if review is None:
+        raise APIException(
+            status_code=404,
+            error_type="DeferredReviewNotFound",
+            message="Deferred review request was not found for this chat session.",
+            details={
+                "artifact_ref": artifact_ref,
+                "session_id": session_id,
+                "vault_name": vault_name,
+            },
+        )
+    return DeferredReviewResponse(
+        artifact_ref=review.artifact_ref,
+        vault_name=review.vault_name,
+        session_id=review.session_id,
+        originating_task_id=review.originating_task_id,
+        status=review.status,
+        approvals=[
+            DeferredReviewCallInfo(
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                args=call.args,
+            )
+            for call in review.requests.approvals
+        ],
+        calls=[
+            DeferredReviewCallInfo(
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                args=call.args,
+            )
+            for call in review.requests.calls
+        ],
+        created_at=review.created_at,
+        submitted_at=review.submitted_at,
+        resumed_task_id=review.resumed_task_id,
+    )
+
+
+async def submit_chat_deferred_review(
+    *,
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+    decisions: list[dict[str, Any]],
+) -> DeferredReviewSubmitResponse:
+    """Submit deferred inline review decisions and start a resume task."""
+    review = get_deferred_review(
+        vault_name=vault_name,
+        session_id=session_id,
+        artifact_ref=artifact_ref,
+    )
+    if review is None:
+        raise APIException(
+            status_code=404,
+            error_type="DeferredReviewNotFound",
+            message="Deferred review request was not found for this chat session.",
+            details={
+                "artifact_ref": artifact_ref,
+                "session_id": session_id,
+                "vault_name": vault_name,
+            },
+        )
+    if review.status != "pending":
+        raise APIException(
+            status_code=409,
+            error_type="DeferredReviewAlreadySubmitted",
+            message="Deferred review request has already been submitted.",
+            details={
+                "artifact_ref": artifact_ref,
+                "status": review.status,
+                "resumed_task_id": review.resumed_task_id,
+            },
+        )
+    if review.requests.calls:
+        raise APIException(
+            status_code=400,
+            error_type="UnsupportedDeferredCallReview",
+            message="Deferred external call review is not supported yet.",
+            details={"artifact_ref": artifact_ref},
+        )
+    if not decisions:
+        raise APIException(
+            status_code=400,
+            error_type="NoDeferredReviewDecisions",
+            message="Choose at least one review decision.",
+            details={"artifact_ref": artifact_ref},
+        )
+
+    known_call_ids = {
+        str(call.tool_call_id)
+        for call in review.requests.approvals
+        if str(call.tool_call_id)
+    }
+    submitted_call_ids = [str(decision.get("tool_call_id") or "") for decision in decisions]
+    unknown_call_ids = sorted(
+        call_id for call_id in submitted_call_ids
+        if call_id not in known_call_ids
+    )
+    missing_call_ids = sorted(known_call_ids - set(submitted_call_ids))
+    if unknown_call_ids or missing_call_ids:
+        raise APIException(
+            status_code=400,
+            error_type="DeferredReviewDecisionMismatch",
+            message="Review decisions must cover the pending deferred tool calls.",
+            details={
+                "artifact_ref": artifact_ref,
+                "unknown_tool_call_ids": unknown_call_ids,
+                "missing_tool_call_ids": missing_call_ids,
+            },
+        )
+
+    approvals: dict[str, bool | ToolApproved | ToolDenied] = {}
+    for decision in decisions:
+        tool_call_id = str(decision.get("tool_call_id") or "")
+        decision_value = str(decision.get("decision") or "")
+        if decision_value == "approve":
+            override_args = decision.get("override_args") or {}
+            approvals[tool_call_id] = (
+                ToolApproved(override_args=dict(override_args))
+                if isinstance(override_args, dict) and override_args
+                else True
+            )
+        elif decision_value == "deny":
+            approvals[tool_call_id] = ToolDenied(str(decision.get("message") or "").strip())
+        else:
+            raise APIException(
+                status_code=400,
+                error_type="InvalidDeferredReviewDecision",
+                message="Deferred review decision must be approve or deny.",
+                details={"tool_call_id": tool_call_id, "decision": decision_value},
+            )
+
+    results = DeferredToolResults(approvals=approvals)
+    resume_config = review.resume_config
+    model = str(resume_config.get("model") or "").strip()
+    if not model:
+        raise APIException(
+            status_code=500,
+            error_type="DeferredReviewResumeConfigMissing",
+            message="Deferred review request is missing the model needed to resume.",
+            details={"artifact_ref": artifact_ref},
+        )
+    tools = [
+        str(tool)
+        for tool in resume_config.get("tools") or []
+        if str(tool).strip()
+    ]
+    thinking = normalize_thinking_value(
+        resume_config.get("thinking"),
+        source_name="stored deferred review thinking",
+    )
+    context_template = resume_config.get("context_template")
+    context_template = str(context_template).strip() or None
+    chat_mode = str(resume_config.get("chat_mode") or "normal").strip() or "normal"
+    runtime = get_runtime_context()
+    vault_path = str(runtime.config.data_root / vault_name)
+    started = await start_deferred_review_resume_task(
+        vault_name=vault_name,
+        vault_path=vault_path,
+        session_id=session_id,
+        review=review,
+        deferred_tool_results=results,
+        tools=tools,
+        model=model,
+        thinking=thinking,
+        context_template=context_template,
+        chat_mode=chat_mode,
+    )
+    try:
+        updated = mark_deferred_review_submitted(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+            results=results,
+            resumed_task_id=started.task.task_id,
+        )
+    except DeferredReviewError as exc:
+        raise _deferred_review_api_error(exc) from exc
+    task = await get_execution_task(started.task.task_id)
+    return DeferredReviewSubmitResponse(
+        artifact_ref=updated.artifact_ref,
+        status=updated.status,
+        session_id=session_id,
+        task=task,
+    )
+
+
 def apply_chat_edit_proposal(
     *,
     vault_name: str,
@@ -614,6 +838,19 @@ def _edit_proposal_api_error(exc: EditProposalError) -> APIException:
         "InvalidEdit": 400,
         "NoSelectedEdits": 400,
         "UnknownEdit": 400,
+    }
+    return APIException(
+        status_code=status_by_code.get(exc.code, 400),
+        error_type=exc.code,
+        message=str(exc),
+        details=exc.details,
+    )
+
+
+def _deferred_review_api_error(exc: DeferredReviewError) -> APIException:
+    status_by_code = {
+        "DeferredReviewNotFound": 404,
+        "DeferredReviewAlreadySubmitted": 409,
     }
     return APIException(
         status_code=status_by_code.get(exc.code, 400),
@@ -3707,25 +3944,25 @@ async def get_metadata() -> MetadataResponse:
     except Exception:
         default_context_script = None
 
-    default_chat_tools: list[str] = []
+    enabled_tools: list[str] = []
     try:
-        default_tools_entry = get_general_settings().get("default_chat_tools")
-        raw_default_tools = getattr(default_tools_entry, "value", [])
-        if isinstance(raw_default_tools, list):
-            default_chat_tools = [
+        enabled_tools_entry = get_general_settings().get("enabled_tools")
+        raw_enabled_tools = getattr(enabled_tools_entry, "value", [])
+        if isinstance(raw_enabled_tools, list):
+            enabled_tools = [
                 str(tool_name).strip()
-                for tool_name in raw_default_tools
+                for tool_name in raw_enabled_tools
                 if str(tool_name).strip()
             ]
     except Exception:
-        default_chat_tools = []
+        enabled_tools = []
 
     return MetadataResponse(
         vaults=vaults,
         models=models,
         tools=tools,
         settings={
-            "default_chat_tools": default_chat_tools,
+            "enabled_tools": enabled_tools,
             "default_model_thinking": getattr(
                 get_general_settings().get("default_model_thinking"), "value", "default"
             ),

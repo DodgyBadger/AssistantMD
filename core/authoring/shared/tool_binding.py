@@ -12,7 +12,11 @@ from pydantic_ai.messages import ToolReturn
 
 from core.logger import UnifiedLogger
 from core.settings.secrets_store import secret_has_value
-from core.settings.store import ToolConfig, get_tools_config
+from core.settings.store import (
+    ToolConfig,
+    get_enabled_tool_names,
+    get_enabled_tools_config,
+)
 from core.tools.base import BaseTool
 from core.tools.utils import get_tool_instructions
 from core.tools.web_security import wrap_web_tool_result
@@ -59,7 +63,7 @@ def validate_tool_binding_value(value: Any) -> bool:
     items = _parse_tools(normalized)
     if not items:
         return False
-    available_tools = set(get_tools_config().keys())
+    available_tools = set(get_enabled_tool_names())
     return all(item[0] in available_tools for item in items)
 
 
@@ -68,6 +72,7 @@ def resolve_tool_binding(
     *,
     vault_path: str,
     week_start_day: int = 0,
+    approval_tool_names: set[str] | None = None,
 ) -> ToolBindingResult:
     """Resolve workflow tools from DSL text or SDK literals."""
     normalized_value = _normalize_tool_value(value, allow_empty=False)
@@ -76,7 +81,7 @@ def resolve_tool_binding(
 
     normalized = DirectiveValueParser.normalize_string(normalized_value, to_lower=True)
     if normalized in ["true", "yes", "1", "on", "all"]:
-        tool_names = list(get_tools_config().keys())
+        tool_names = list(get_enabled_tool_names())
     elif normalized in ["false", "no", "0", "off", "none"]:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
     else:
@@ -86,7 +91,15 @@ def resolve_tool_binding(
             if name not in tool_names:
                 tool_names.append(name)
 
-    configs = get_tools_config()
+    configs = get_enabled_tools_config()
+    disabled_or_unknown = [tool_name for tool_name in tool_names if tool_name not in configs]
+    if disabled_or_unknown:
+        available_tools = ", ".join(configs.keys())
+        requested = ", ".join(disabled_or_unknown)
+        raise ValueError(
+            f"Tool(s) unavailable or disabled: {requested}. Available enabled tools: {available_tools}"
+        )
+
     tool_classes: list[Type] = []
     tool_functions: list[object] = []
     tool_specs: list[ToolSpec] = []
@@ -115,6 +128,7 @@ def resolve_tool_binding(
                 tool_function,
                 tool_name=tool_name,
                 tool_instructions=tool_class.get_instructions(),
+                requires_approval=True if tool_name in (approval_tool_names or set()) else None,
             )
             tool_functions.append(wrapped_tool)
             tool_specs.append(
@@ -235,7 +249,7 @@ def _normalize_tool_value(value: Any, *, allow_empty: bool) -> str:
 
 
 def _get_tool_configs() -> Dict[str, ToolConfig]:
-    return get_tools_config()
+    return get_enabled_tools_config()
 
 
 def _load_tool_class(tool_name: str) -> Type:
@@ -299,6 +313,7 @@ def _wrap_tool_function(
     *,
     tool_name: str,
     tool_instructions: str | None = None,
+    requires_approval: bool | None = None,
 ):
     original_func = tool.function
     original_takes_ctx = getattr(tool, "takes_ctx", False)
@@ -370,6 +385,11 @@ def _wrap_tool_function(
         takes_ctx=True,
         name=getattr(tool, "name", None) or tool_name,
         description=getattr(tool, "description", None),
+        requires_approval=(
+            bool(requires_approval)
+            if requires_approval is not None
+            else getattr(tool, "requires_approval", False)
+        ),
     )
 
 

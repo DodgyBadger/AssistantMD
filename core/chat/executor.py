@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import List, Optional, Any, Sequence
 from pathlib import Path
 
-from pydantic_ai import BinaryContent
+from pydantic_ai import BinaryContent, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, UserPromptPart
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import UserContent
@@ -27,6 +27,7 @@ from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.llm.thinking import ThinkingValue
+from core.llm.thinking import thinking_value_to_label
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.llm.model_utils import (
     get_model_capabilities,
@@ -51,7 +52,10 @@ from core.tools.failures import classify_exception
 logger = UnifiedLogger(tag="chat-executor")
 
 
-PromptInput = str | Sequence[UserContent]
+PromptInput = str | Sequence[UserContent] | None
+ChatMode = str
+NORMAL_CHAT_MODE = "normal"
+COLLABORATIVE_CHAT_MODE = "collaborative"
 
 
 _CHAT_STORE = ChatStore()
@@ -111,8 +115,35 @@ class PreparedChatExecution:
     attached_image_count: int
     model: str
     tools: List[str]
+    thinking: ThinkingValue | None = None
     context_template: Optional[str] = None
     workspace_path: str = ""
+    chat_mode: ChatMode = NORMAL_CHAT_MODE
+    deferred_tool_results: DeferredToolResults | None = None
+
+    def resume_config(self) -> dict[str, Any]:
+        """Return JSON-safe config needed to resume a deferred review."""
+        return {
+            "model": self.model,
+            "tools": list(self.tools),
+            "thinking": thinking_value_to_label(self.thinking),
+            "context_template": self.context_template,
+            "workspace_path": self.workspace_path,
+            "chat_mode": normalize_chat_mode(self.chat_mode),
+        }
+
+
+def normalize_chat_mode(value: str | None) -> ChatMode:
+    """Normalize chat mode values accepted by the API and persisted resume config."""
+    normalized = str(value or NORMAL_CHAT_MODE).strip().lower()
+    return COLLABORATIVE_CHAT_MODE if normalized == COLLABORATIVE_CHAT_MODE else NORMAL_CHAT_MODE
+
+
+def approval_tools_for_chat_mode(chat_mode: ChatMode) -> set[str]:
+    """Return tool names that require deferred review in the given chat mode."""
+    if normalize_chat_mode(chat_mode) == COLLABORATIVE_CHAT_MODE:
+        return {"file_write"}
+    return set()
 
 
 def _accepted_user_request(prepared: PreparedChatExecution) -> ModelRequest:
@@ -179,6 +210,7 @@ def _build_failure_recovery_marker(
     streaming: bool,
     model: str | None,
     tools: Sequence[str] | None,
+    chat_mode: ChatMode = NORMAL_CHAT_MODE,
     sequence_index: int,
 ) -> dict[str, Any]:
     """Build session metadata that lets the next turn recover from a failed run."""
@@ -196,6 +228,7 @@ def _build_failure_recovery_marker(
         "retry_after": classification.retry_after,
         "model": model,
         "tools": list(tools or []),
+        "chat_mode": normalize_chat_mode(chat_mode),
         "accepted_user_sequence_index": sequence_index,
         "recorded_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "suggested_action": (
@@ -214,6 +247,7 @@ def _record_latest_turn_failure(
     streaming: bool,
     model: str | None,
     tools: Sequence[str] | None,
+    chat_mode: ChatMode = NORMAL_CHAT_MODE,
 ) -> None:
     """Persist an internal failure marker for a user turn with no assistant outcome."""
     existing = _CHAT_STORE.get_session_metadata(session_id, vault_name).get(
@@ -225,6 +259,7 @@ def _record_latest_turn_failure(
         streaming=streaming,
         model=model,
         tools=tools,
+        chat_mode=chat_mode,
         sequence_index=_CHAT_STORE.get_highest_message_sequence_index(session_id, vault_name),
     )
     if (
@@ -812,6 +847,7 @@ async def _prepare_chat_execution(
     model: str,
     thinking: ThinkingValue | None = None,
     context_template: Optional[str] = None,
+    chat_mode: ChatMode = NORMAL_CHAT_MODE,
     message_history_override: Optional[List[ModelMessage]] = None,
     display_prompt: str | None = None,
 ) -> PreparedChatExecution:
@@ -819,7 +855,12 @@ async def _prepare_chat_execution(
     _validate_image_capability(model, image_paths, image_uploads)
     workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
     base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name, vault_path, tools, model, thinking
+        vault_name,
+        vault_path,
+        tools,
+        model,
+        thinking,
+        chat_mode=chat_mode,
     )
 
     capabilities = build_chat_capabilities(
@@ -838,6 +879,7 @@ async def _prepare_chat_execution(
 
     agent = await create_agent(
         model=model_instance,
+        output_type=[str, DeferredToolRequests],
         capabilities=capabilities,
     )
     for inst in [base_instructions, tool_instructions]:
@@ -869,8 +911,73 @@ async def _prepare_chat_execution(
         attached_image_count=attached_image_count,
         model=model,
         tools=list(tools),
+        thinking=thinking,
         context_template=context_template,
         workspace_path=workspace_path,
+        chat_mode=normalize_chat_mode(chat_mode),
+    )
+
+
+async def _prepare_deferred_review_resume_execution(
+    *,
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    tools: List[str],
+    model: str,
+    message_history: List[ModelMessage],
+    deferred_tool_results: DeferredToolResults,
+    thinking: ThinkingValue | None = None,
+    context_template: Optional[str] = None,
+    chat_mode: ChatMode = NORMAL_CHAT_MODE,
+) -> PreparedChatExecution:
+    """Prepare a chat execution that resumes deferred tool review results."""
+    workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
+    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
+        vault_name,
+        vault_path,
+        tools,
+        model,
+        thinking,
+        chat_mode=chat_mode,
+    )
+
+    capabilities = build_chat_capabilities(
+        vault_name=vault_name,
+        vault_path=vault_path,
+        session_id=session_id,
+        model_alias=model,
+        context_template=context_template,
+        now=_resolve_context_manager_now(),
+        workspace_path=workspace_path,
+        event_sink=_CHAT_STORE,
+        tools=tool_functions,
+        tool_instructions="",
+        history_processor_factory=build_context_manager_history_processor,
+    )
+
+    agent = await create_agent(
+        model=model_instance,
+        output_type=[str, DeferredToolRequests],
+        capabilities=capabilities,
+    )
+    for inst in [base_instructions, tool_instructions]:
+        if inst:
+            agent.instructions(lambda _ctx, text=inst: text)
+
+    return PreparedChatExecution(
+        agent=agent,
+        message_history=list(message_history),
+        prompt_for_history="",
+        user_prompt=None,
+        attached_image_count=0,
+        model=model,
+        tools=list(tools),
+        thinking=thinking,
+        context_template=context_template,
+        workspace_path=workspace_path,
+        chat_mode=normalize_chat_mode(chat_mode),
+        deferred_tool_results=deferred_tool_results,
     )
 
 
@@ -880,6 +987,7 @@ def _prepare_agent_config(
     tools: List[str],
     model: str,
     thinking: ThinkingValue | None = None,
+    chat_mode: ChatMode = NORMAL_CHAT_MODE,
 ) -> tuple:
     """
     Prepare agent configuration (shared between streaming and non-streaming).
@@ -895,7 +1003,11 @@ def _prepare_agent_config(
 
     if tools:  # Only process if tools list is not empty
         tools_value = ", ".join(tools)  # Convert list to comma-separated string
-        binding = resolve_tool_binding(tools_value, vault_path=vault_path)
+        binding = resolve_tool_binding(
+            tools_value,
+            vault_path=vault_path,
+            approval_tool_names=approval_tools_for_chat_mode(chat_mode),
+        )
         tool_functions = binding.tool_functions
         tool_instructions = binding.tool_instructions
 

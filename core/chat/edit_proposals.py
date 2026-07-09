@@ -541,12 +541,7 @@ def _prepare_edit(*, vault_root: Path, raw_edit: dict[str, Any], index: int) -> 
                 f"Vault file already exists: {path}",
                 details={"path": path},
             )
-        content = str(
-            raw_edit.get("content")
-            or raw_edit.get("initial_content")
-            or raw_edit.get("replacement_text")
-            or ""
-        )
+        content = _replacement_text_from_raw(raw_edit)
         return PreparedEdit(
             edit_id=str(raw_edit.get("edit_id") or f"edit-{index}"),
             operation=operation,
@@ -607,7 +602,7 @@ def _prepare_edit(*, vault_root: Path, raw_edit: dict[str, Any], index: int) -> 
 
     content = full_path.read_text(encoding="utf-8")
     original = str(raw_edit.get("original_text") or "")
-    replacement = str(raw_edit.get("replacement_text") or "")
+    replacement = _replacement_text_from_raw(raw_edit)
     if not original:
         raise EditProposalError("InvalidEdit", f"Edit {index} is missing original_text.")
     if content.count(original) != 1:
@@ -673,6 +668,15 @@ def _group_edits_by_path(edits: list[dict[str, Any]]) -> dict[str, list[dict[str
 
 def _edit_operation(edit: dict[str, Any]) -> str:
     return str(edit.get("operation") or REPLACE_TEXT_OPERATION).strip() or REPLACE_TEXT_OPERATION
+
+
+def _replacement_text_from_raw(edit: dict[str, Any]) -> str:
+    return str(
+        edit.get("replacement_text")
+        or edit.get("content")
+        or edit.get("initial_content")
+        or ""
+    )
 
 
 def _raise_operation_error(

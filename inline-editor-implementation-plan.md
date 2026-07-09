@@ -405,10 +405,32 @@ Known Phase 1 follow-ups:
 
 Known Phase 2 follow-ups:
 
+- Revisit the approval architecture before adding more custom workflow behavior:
+  - The current proposal flow is useful for final review, but it is not a true
+    paused tool call. `propose_file_edits` creates an artifact, the original
+    agent run completes, and apply-only approvals write files without resuming
+    the agent. This blocks multi-step agentic tasks until the user manually
+    prompts again.
+  - Pydantic AI 1.85.1 supports deferred tool approval with
+    `requires_approval=True`, `ApprovalRequired`, `DeferredToolRequests`,
+    `DeferredToolResults`, `ToolApproved(override_args=...)`, and
+    `ToolDenied(message=...)`. Inspect whether mutating vault tools should use
+    that layer so approval resumes the same logical run.
+  - Keep the existing proposal card renderer as the likely UI for approval
+    requests, but move source-of-truth semantics toward deferred tool call ids,
+    validated args, approval results, and optional argument overrides instead of
+    an independent prompt-building review protocol.
+  - Add a paused/waiting task lifecycle if needed: persist the deferred request,
+    stream an approval-required event, lock the task until review arrives, then
+    resume with `DeferredToolResults` and prior message history.
+  - Preserve canonical chat history for apply-only approvals and nightly
+    summarization. Approved tool calls must be visible as normal tool
+    request/result history, not just browser-side artifact state.
 - Continue expanding the unified internal vault file operations layer:
-  - Keep `propose_file_edits` as the artifact/UI creation tool. Do not make
-    `file_ops` render proposal cards, and do not have the proposal API call
-    Pydantic tool wrappers directly.
+  - Keep final writes behind shared vault file operation helpers. Whether the
+    external adapter is `file_ops_unsafe`, a future unified `file_ops`, or a
+    deferred approval wrapper, UI approvals must not bypass the same validation
+    and mutation path used by direct tool writes.
   - Keep final writes routed through `core.vault_state.file_mutations` so audit
     rows, snapshots, manifest refresh, and rollback compatibility remain
     consistent.

@@ -156,6 +156,10 @@ class EditProposalReviewRequest(BaseModel):
     )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     workspace_path: Optional[str] = Field(None, description="Optional vault-relative workspace directory path")
+    chat_mode: Literal["normal", "collaborative"] = Field(
+        "normal",
+        description="Chat interaction mode. Collaborative mode routes supported file operations through inline review.",
+    )
 
 
 class EditProposalResponse(BaseModel):
@@ -204,6 +208,63 @@ class EditProposalReviewResponse(BaseModel):
     task: "ExecutionTaskInfo" = Field(..., description="Execution task created for the follow-up chat run")
 
 
+class DeferredReviewCallInfo(BaseModel):
+    """One deferred tool call awaiting inline review."""
+
+    tool_call_id: str = Field(..., description="Provider tool call id")
+    tool_name: str = Field(..., description="Tool name")
+    args: Any = Field(None, description="Validated tool arguments")
+
+
+class DeferredReviewResponse(BaseModel):
+    """Stored deferred inline review request."""
+
+    artifact_ref: str = Field(..., description="Stable deferred review artifact reference")
+    artifact_kind: str = Field("deferred_tool_review", description="Artifact kind")
+    vault_name: str = Field(..., description="Owning vault")
+    session_id: str = Field(..., description="Owning chat session")
+    originating_task_id: str = Field(..., description="Task that produced the review request")
+    status: str = Field(..., description="Review status")
+    approvals: List[DeferredReviewCallInfo] = Field(
+        default_factory=list,
+        description="Deferred approval calls to render for inline review",
+    )
+    calls: List[DeferredReviewCallInfo] = Field(
+        default_factory=list,
+        description="Deferred external calls, reserved for future use",
+    )
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
+    submitted_at: Optional[str] = Field(None, description="Submission timestamp")
+    resumed_task_id: Optional[str] = Field(None, description="Task created to resume the run")
+
+
+class DeferredReviewDecision(BaseModel):
+    """One inline review decision for a deferred tool call."""
+
+    tool_call_id: str = Field(..., description="Provider tool call id being reviewed")
+    decision: Literal["approve", "deny"] = Field(..., description="Review decision")
+    override_args: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional edited tool arguments for approved calls",
+    )
+    message: str = Field("", description="Optional denial reason or review note")
+
+
+class DeferredReviewSubmitRequest(BaseModel):
+    """Submit decisions for a deferred inline review request."""
+
+    decisions: List[DeferredReviewDecision] = Field(..., description="Per-call review decisions")
+
+
+class DeferredReviewSubmitResponse(BaseModel):
+    """Result of submitting a deferred inline review."""
+
+    artifact_ref: str = Field(..., description="Submitted deferred review artifact reference")
+    status: str = Field(..., description="Updated review status")
+    session_id: str = Field(..., description="Session identifier")
+    task: "ExecutionTaskInfo" = Field(..., description="Execution task created to resume the run")
+
+
 class ChatTaskRequest(BaseModel):
     """Request model for starting task-owned chat execution."""
     vault_name: str = Field(..., description="Vault context for execution")
@@ -213,7 +274,10 @@ class ChatTaskRequest(BaseModel):
         description="Optional image file paths (relative to vault or absolute within vault) to attach",
     )
     session_id: Optional[str] = Field(None, description="Session ID (generated if not provided)")
-    tools: List[str] = Field(..., description="List of tool names to enable")
+    tools: List[str] = Field(
+        default_factory=list,
+        description="Deprecated: chat uses app-wide enabled tools resolved server-side.",
+    )
     model: str = Field(..., description="Model name to use")
     thinking: Optional[str] = Field(
         None,

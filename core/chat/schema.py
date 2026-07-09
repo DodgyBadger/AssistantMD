@@ -125,6 +125,40 @@ def ensure_chat_sessions_schema(
             ON chat_edit_proposals(session_id, vault_name, created_at)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_deferred_reviews (
+                artifact_ref TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                vault_name TEXT NOT NULL,
+                originating_task_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                requests_json TEXT NOT NULL,
+                resume_messages_json TEXT NOT NULL,
+                resume_config_json TEXT,
+                result_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                submitted_at DATETIME,
+                resumed_task_id TEXT,
+                error_json TEXT,
+                FOREIGN KEY (session_id, vault_name)
+                    REFERENCES chat_sessions(session_id, vault_name)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_deferred_reviews_session
+            ON chat_deferred_reviews(session_id, vault_name, created_at)
+            """
+        )
+        _ensure_column(
+            conn,
+            "chat_deferred_reviews",
+            "resume_config_json",
+            "TEXT",
+        )
         _deduplicate_session_ids(conn)
         conn.execute(
             """
@@ -176,6 +210,14 @@ def _migrate_compaction_checkpoints(conn) -> None:
         ON chat_compaction_checkpoints(session_id, vault_name, last_message_sequence_index)
         """
     )
+
+
+def _ensure_column(conn, table_name: str, column_name: str, definition: str) -> None:
+    """Add a column to an existing SQLite table when it is missing."""
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {str(row[1]) for row in rows}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def _deduplicate_session_ids(conn) -> None:

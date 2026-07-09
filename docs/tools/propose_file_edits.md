@@ -23,7 +23,7 @@ Each edit supports:
 For `replace_text`, include:
 
 - `original_text`: exact current text to replace. It must match exactly once.
-- `replacement_text`: proposed replacement text.
+- `replacement_text` or `content`: proposed replacement text.
 
 For `create_file`, include `replacement_text`, `content`, or `initial_content`
 with the proposed full file content. The path must not already exist.

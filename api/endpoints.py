@@ -2,8 +2,6 @@
 API endpoint implementations for the AssistantMD system.
 """
 
-
-import json
 from typing import List
 
 from fastapi import APIRouter, Request
@@ -53,6 +51,9 @@ from .models import (
     EditProposalReviewRequest,
     EditProposalReviewResponse,
     EditProposalResponse,
+    DeferredReviewResponse,
+    DeferredReviewSubmitRequest,
+    DeferredReviewSubmitResponse,
     VaultFileReferenceListResponse,
     VaultFileResponse,
     VaultFileUpdateRequest,
@@ -116,6 +117,7 @@ from .services import (
     get_workflow_file,
     update_workflow_file,
     get_metadata,
+    get_enabled_chat_tool_names,
     list_context_templates,
     list_chat_sessions,
     get_chat_session_summary,
@@ -135,6 +137,8 @@ from .services import (
     get_vault_file,
     update_vault_file,
     get_chat_edit_proposal,
+    get_chat_deferred_review,
+    submit_chat_deferred_review,
     apply_chat_edit_proposal,
     deny_chat_edit_proposal,
     delete_chat_session,
@@ -192,19 +196,6 @@ _CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
 _CHAT_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
 
 
-def _parse_form_tools(raw_tools: list[object]) -> list[str]:
-    """Normalize repeated tools fields from multipart form data."""
-    values = [str(item).strip() for item in raw_tools if str(item).strip()]
-    if len(values) == 1 and values[0].startswith("["):
-        try:
-            parsed = json.loads(values[0])
-        except json.JSONDecodeError:
-            return values
-        if isinstance(parsed, list):
-            return [str(item).strip() for item in parsed if str(item).strip()]
-    return values
-
-
 def _looks_like_workflow_path(value: str) -> bool:
     """Return True when a workflow identifier looks like a file path instead of a workflow name."""
     normalized = value.strip().replace("\\", "/")
@@ -222,7 +213,6 @@ async def _parse_chat_task_payload(
 
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
-        tools = _parse_form_tools(form.getlist("tools"))
         image_paths = [str(item).strip() for item in form.getlist("image_paths") if str(item).strip()]
         payload = ChatTaskRequest.model_validate(
             {
@@ -230,11 +220,11 @@ async def _parse_chat_task_payload(
                 "prompt": str(form.get("prompt") or "").strip(),
                 "image_paths": image_paths,
                 "session_id": str(form.get("session_id") or "").strip() or None,
-                "tools": tools,
                 "model": str(form.get("model") or "").strip(),
                 "thinking": str(form.get("thinking") or "").strip() or None,
                 "context_template": str(form.get("context_template") or "").strip() or None,
                 "workspace_path": str(form.get("workspace_path") or "").strip() or None,
+                "chat_mode": str(form.get("chat_mode") or "normal").strip() or "normal",
             }
         )
         uploads: list[UploadedImageAttachment] = []
@@ -330,6 +320,7 @@ async def _start_chat_task_request(
     """Start task-owned streaming chat execution."""
     runtime = get_runtime_context()
     vault_path = str(runtime.config.data_root / chat_request.vault_name)
+    enabled_tools = get_enabled_chat_tool_names()
     try:
         session_id = resolve_chat_session_for_request(
             requested_session_id=chat_request.session_id,
@@ -357,13 +348,14 @@ async def _start_chat_task_request(
             "streaming": True,
             "model": chat_request.model,
             "thinking": thinking_value_to_label(resolved_thinking),
-            "tools": list(chat_request.tools),
-            "tools_count": len(chat_request.tools),
+            "tools": list(enabled_tools),
+            "tools_count": len(enabled_tools),
             "prompt_length": len(chat_request.prompt),
             "image_path_count": len(chat_request.image_paths),
             "image_upload_count": len(image_uploads),
             "context_template": chat_request.context_template,
             "workspace_path": chat_request.workspace_path,
+            "chat_mode": chat_request.chat_mode,
         },
     )
     started = await start_queued_chat_stream_task(
@@ -373,10 +365,11 @@ async def _start_chat_task_request(
         image_paths=chat_request.image_paths,
         image_uploads=image_uploads,
         session_id=session_id,
-        tools=chat_request.tools,
+        tools=enabled_tools,
         model=chat_request.model,
         thinking=resolved_thinking,
         context_template=chat_request.context_template,
+        chat_mode=chat_request.chat_mode,
     )
     task = await get_execution_task(started.task.task_id)
     return ChatTaskStartResponse(session_id=session_id, task=task)
@@ -1141,6 +1134,56 @@ async def chat_edit_proposal(vault_name: str, session_id: str, artifact_ref: str
         return create_error_response(e)
 
 
+@router.get(
+    "/vaults/{vault_name}/chat/{session_id}/deferred-reviews/{artifact_ref:path}",
+    response_model=DeferredReviewResponse,
+)
+async def chat_deferred_review(vault_name: str, session_id: str, artifact_ref: str):
+    """Return a deferred inline review request."""
+    try:
+        return get_chat_deferred_review(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/vaults/{vault_name}/chat/{session_id}/deferred-reviews/{artifact_ref:path}/submit",
+    response_model=DeferredReviewSubmitResponse,
+)
+async def submit_deferred_review_artifact(
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+    request: DeferredReviewSubmitRequest,
+):
+    """Submit deferred inline review decisions and resume the chat run."""
+    try:
+        resolved_session_id = resolve_chat_session_for_request(
+            requested_session_id=session_id,
+            vault_name=vault_name,
+        )
+        return await submit_chat_deferred_review(
+            vault_name=vault_name,
+            session_id=resolved_session_id,
+            artifact_ref=artifact_ref,
+            decisions=[decision.model_dump() for decision in request.decisions],
+        )
+    except ChatSessionVaultMismatch as exc:
+        return create_error_response(
+            ChatSessionVaultMismatchError(
+                session_id=exc.session_id,
+                requested_vault=exc.requested_vault,
+                actual_vault=exc.actual_vault,
+            )
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.post(
     "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/apply",
     response_model=EditProposalApplyResponse,
@@ -1263,7 +1306,7 @@ async def review_edit_proposal_artifact(
             image_paths=[],
             image_uploads=[],
             session_id=resolved_session_id,
-            tools=request.tools,
+            tools=get_enabled_chat_tool_names(),
             model=request.model,
             thinking=resolved_thinking,
             context_template=request.context_template,

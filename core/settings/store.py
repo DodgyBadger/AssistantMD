@@ -189,6 +189,38 @@ def get_tools_config() -> Dict[str, ToolConfig]:
     return load_settings().tools
 
 
+def get_enabled_tool_names() -> list[str]:
+    """Return app-wide enabled tool names from settings, preserving configured order."""
+    settings = load_settings()
+    tools = settings.tools
+    enabled_entry = settings.settings.get("enabled_tools") or settings.settings.get("default_chat_tools")
+    raw_enabled = getattr(enabled_entry, "value", None)
+    if raw_enabled is None:
+        return list(tools.keys())
+    if not isinstance(raw_enabled, list):
+        return []
+
+    enabled: list[str] = []
+    seen: set[str] = set()
+    for item in raw_enabled:
+        name = str(item).strip()
+        if not name or name in seen or name not in tools:
+            continue
+        seen.add(name)
+        enabled.append(name)
+    return enabled
+
+
+def get_enabled_tools_config() -> Dict[str, ToolConfig]:
+    """Return configured tools filtered by the app-wide enabled tool list."""
+    tools = get_tools_config()
+    return {
+        name: tools[name]
+        for name in get_enabled_tool_names()
+        if name in tools
+    }
+
+
 def get_models_config() -> Dict[str, ModelConfig]:
     """Get models configuration section from settings."""
     return load_settings().models
