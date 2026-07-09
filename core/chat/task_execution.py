@@ -221,11 +221,13 @@ async def start_chat_stream_task(
     session_id: str,
     tools: list[str],
     model: str,
+    display_prompt: str | None = None,
     thinking: chat_executor.ThinkingValue | None = None,
     context_template: str | None = None,
     event_buffer: ChatTaskEventBuffer | None = None,
 ) -> ChatStreamTaskStart:
     """Preflight and start a streaming chat run in a background execution task."""
+    display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
     prepared = await chat_executor._prepare_chat_execution(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -237,6 +239,7 @@ async def start_chat_stream_task(
         model=model,
         thinking=thinking,
         context_template=context_template,
+        **display_prompt_kwargs,
     )
     return await start_prepared_chat_stream_task(
         prepared=prepared,
@@ -257,6 +260,7 @@ async def start_queued_chat_stream_task(
     session_id: str,
     tools: list[str],
     model: str,
+    display_prompt: str | None = None,
     thinking: chat_executor.ThinkingValue | None = None,
     context_template: str | None = None,
     event_buffer: ChatTaskEventBuffer | None = None,
@@ -268,6 +272,7 @@ async def start_queued_chat_stream_task(
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         async def _run_in_session_gate() -> None:
             try:
+                display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
                 prepared = await chat_executor._prepare_chat_execution(
                     vault_name=vault_name,
                     vault_path=vault_path,
@@ -279,6 +284,7 @@ async def start_queued_chat_stream_task(
                     model=model,
                     thinking=thinking,
                     context_template=context_template,
+                    **display_prompt_kwargs,
                 )
             except asyncio.CancelledError:
                 raise

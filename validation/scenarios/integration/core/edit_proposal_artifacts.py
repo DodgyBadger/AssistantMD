@@ -1,5 +1,6 @@
 """Integration scenario for collaborative edit proposal artifacts."""
 
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -174,3 +175,74 @@ class EditProposalArtifactsScenario(BaseScenario):
         assert denied_apply.json().get("error") == "ProposalDenied", (
             "Denied proposal apply should use a stable conflict error"
         )
+
+        review_result = await tool.function(
+            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+            edits=[
+                {
+                    "path": "Projects/Alpha/README.md",
+                    "original_text": "Status: Approved",
+                    "replacement_text": "Status: Final",
+                },
+                {
+                    "path": "Projects/Alpha/README.md",
+                    "original_text": "Next: Changed elsewhere.",
+                    "replacement_text": "Next: Publish final summary.",
+                },
+            ],
+        )
+        review_ref = review_result.metadata["artifact_ref"]
+        review_proposal = self.call_api(
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{review_ref}"
+        ).json()
+        first_edit = review_proposal["edits"][0]
+        second_edit = review_proposal["edits"][1]
+        review_response = self.call_api(
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{review_ref}/review",
+            method="POST",
+            data={
+                "decisions": [
+                    {
+                        "edit_id": first_edit["edit_id"],
+                        "decision": "approve",
+                        "replacement_text": "Status: Final",
+                    },
+                    {
+                        "edit_id": second_edit["edit_id"],
+                        "decision": "comment",
+                        "comment": "Use a less committal next step.",
+                    },
+                ],
+                "tools": [],
+                "model": "test",
+            },
+        )
+        assert review_response.status_code == 200, "Mixed review should start a follow-up chat task"
+        review_payload = review_response.json()
+        assert first_edit["edit_id"] in review_payload["applied_edit_ids"], (
+            "Mixed review should apply approved rows before starting the chat task"
+        )
+        assert "Already applied edits:" in review_payload["display_prompt"], (
+            "Review endpoint should return a concise display prompt"
+        )
+        assert "Please revise" not in review_payload["display_prompt"], (
+            "Agent-facing review instructions should not be exposed as display prompt"
+        )
+        assert (vault / "Projects/Alpha/README.md").read_text(encoding="utf-8") == (
+            "# Alpha\n\nStatus: Final\n\nNext: Changed elsewhere.\n"
+        ), "Mixed review should write approved edits and leave commented edits unchanged"
+
+        from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER
+
+        task_id = review_payload.get("task", {}).get("task_id")
+        assert task_id, "Mixed review response should include a task id"
+        cursor = 0
+        for _ in range(1000):
+            events = await CHAT_TASK_EVENT_BUFFER.events_after(task_id, cursor)
+            for buffered_event in events:
+                cursor = buffered_event.sequence
+                if buffered_event.is_terminal:
+                    assert buffered_event.event == "done", "Mixed review chat task should complete"
+                    return
+            await asyncio.sleep(0.01)
+        raise AssertionError("Mixed review chat task did not complete")

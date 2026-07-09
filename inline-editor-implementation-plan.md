@@ -119,7 +119,7 @@ Build on Phase 1 by making proposed edits interactive chat artifacts.
 
 ### Architecture
 
-Do not introduce a custom assistant-authored DSL for checkboxes, buttons, or
+Do not introduce a custom assistant-authored DSL for review controls, buttons, or
 editable blocks. The assistant should not be responsible for rendering
 interactive HTML. Instead, introduce server-owned UI artifacts:
 
@@ -129,10 +129,14 @@ interactive HTML. Instead, introduce server-owned UI artifacts:
    hashes/snippets, and stores an edit-proposal artifact.
 3. The chat stream or persisted tool event exposes an `artifact_ref` and compact
    metadata.
-4. The UI artifact renderer fetches the artifact and renders checkboxes,
-   editable blocks, diffs, and apply buttons.
+4. The UI artifact renderer fetches the artifact and renders per-row review
+   decisions, editable blocks, diffs, comments, and submit/apply controls.
 5. Applying edits calls an API endpoint that validates selected operations and
    current file hashes before writing through vault-state mutation helpers.
+6. Agent-facing review instructions live in `core/constants.py`. The UI sends
+   structured review decisions to a backend review endpoint; the backend applies
+   approved rows, builds the follow-up prompt, and starts the chat task while
+   preserving a separate user-visible display prompt for chat history.
 
 This keeps the LLM interface on well-supported ground: function/tool calling and
 JSON Schema. The browser owns rendering, and the server owns validation.
@@ -141,12 +145,22 @@ JSON Schema. The browser owns rendering, and the server owns validation.
 
 - The assistant can present a proposal card containing one or more file edits.
 - Each edit has:
-  - a checkbox for inclusion;
+  - an explicit review decision: approve, comment, deny, or pending;
   - a vault file link;
   - a short purpose/rationale;
   - a before/after snippet or compact diff;
   - optional live-editable replacement text where practical.
-- The user can apply selected edits with a single action.
+- The user submits review choices with one action. Approved rows are written
+  through the proposal apply endpoint, including mixed reviews.
+- Commented or denied rows are sent as a normal chat review prompt asking the
+  assistant to revise only the unresolved proposal items.
+- Denied rows mean "reject this change"; the generated review prompt should
+  instruct the assistant not to apply or re-propose them unless the user asks
+  for an alternative.
+- Review instruction snippets are backend-owned constants, not frontend string
+  literals.
+- Submitted proposal cards become historical context: they lock review controls
+  and collapse to the header after a successful apply or review submission.
 - Applied edits should produce normal vault mutation activity and openable file
   references in the chat result.
 
@@ -350,8 +364,12 @@ Current branch slice:
   - `GET /api/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref}`
     fetches proposal cards;
   - `POST /api/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref}/apply`
-    applies selected existing-file text replacements with hash checks;
-  - `static/js/edit-proposals.js` renders selectable, editable proposal cards.
+    applies approved existing-file text replacements with hash checks;
+  - `static/js/edit-proposals.js` renders collapsible review cards with
+    approve/comment/deny row decisions, comment prompts, and editable replacement
+    text.
+  - review prompt instructions are built from `core/constants.py` by the backend
+    review endpoint; `display_prompt` keeps chat history concise.
 
 Known Phase 1 follow-ups:
 
@@ -381,7 +399,7 @@ Known Phase 2 follow-ups:
   - `move_file`: proposed source and destination paths, source hash check,
     destination existence check, and normal vault-state move recording.
   Each operation should render with operation-specific UI while preserving the
-  same checkbox/select-all/deny/apply approval model.
+  same per-row approve/comment/deny review model.
 - Add browser-level coverage for proposal card rendering, edited replacement
   text, conflict display, and reload behavior when a frontend harness is
   available.

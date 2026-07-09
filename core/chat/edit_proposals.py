@@ -11,6 +11,15 @@ from typing import Any
 from uuid import uuid4
 
 from core.chat.schema import DB_NAME, ensure_chat_sessions_schema
+from core.constants import (
+    EDIT_PROPOSAL_REVIEW_APPLIED_SECTION,
+    EDIT_PROPOSAL_REVIEW_ARTIFACT_LABEL,
+    EDIT_PROPOSAL_REVIEW_COMMENT_LABEL,
+    EDIT_PROPOSAL_REVIEW_DENIED_MARKER,
+    EDIT_PROPOSAL_REVIEW_DISPLAY_PREFIX,
+    EDIT_PROPOSAL_REVIEW_PROMPT_PREAMBLE,
+    EDIT_PROPOSAL_REVIEW_UNRESOLVED_SECTION,
+)
 from core.database import connect_sqlite_from_system_db
 from core.logger import UnifiedLogger
 from core.vault_state.file_mutations import replace_vault_file_content
@@ -50,6 +59,60 @@ class PreparedEdit:
             "replacement_text": self.replacement_text,
             "before_sha256": self.before_sha256,
         }
+
+
+def build_edit_proposal_review_prompts(
+    *,
+    proposal: dict[str, Any],
+    review_decisions: list[dict[str, Any]],
+    applied_decisions: list[dict[str, Any]],
+) -> tuple[str, str]:
+    """Build server-owned model and display prompts for edit proposal review."""
+    edits_by_id = {
+        str(edit.get("edit_id") or ""): edit
+        for edit in proposal.get("edits", [])
+        if str(edit.get("edit_id") or "")
+    }
+    artifact_ref = str(proposal.get("artifact_ref") or "")
+    model_lines = [
+        EDIT_PROPOSAL_REVIEW_PROMPT_PREAMBLE,
+        "",
+        f"{EDIT_PROPOSAL_REVIEW_ARTIFACT_LABEL}: `{artifact_ref}`",
+        "",
+    ]
+    display_lines = [
+        f"{EDIT_PROPOSAL_REVIEW_DISPLAY_PREFIX} from artifact `{artifact_ref}`.",
+        "",
+    ]
+    if applied_decisions:
+        model_lines.append(EDIT_PROPOSAL_REVIEW_APPLIED_SECTION)
+        display_lines.append(EDIT_PROPOSAL_REVIEW_APPLIED_SECTION)
+        for decision in applied_decisions:
+            edit = edits_by_id.get(str(decision.get("edit_id") or ""), {})
+            line = f"- Edit `{decision.get('edit_id') or ''}` in @{edit.get('path') or ''}"
+            model_lines.append(line)
+            display_lines.append(line)
+        model_lines.append("")
+        display_lines.append("")
+
+    model_lines.extend([EDIT_PROPOSAL_REVIEW_UNRESOLVED_SECTION, ""])
+    display_lines.extend([EDIT_PROPOSAL_REVIEW_UNRESOLVED_SECTION, ""])
+    for decision in review_decisions:
+        edit_id = str(decision.get("edit_id") or "")
+        edit = edits_by_id.get(edit_id, {})
+        decision_label = _review_decision_label(str(decision.get("decision") or ""))
+        line = f"- Edit `{edit_id}` in @{edit.get('path') or ''}: {decision_label}"
+        model_lines.append(line)
+        display_lines.append(line)
+        comment = str(decision.get("comment") or "").strip()
+        if comment:
+            comment_line = f"  {EDIT_PROPOSAL_REVIEW_COMMENT_LABEL}: {comment}"
+            model_lines.append(comment_line)
+            display_lines.append(comment_line)
+        if str(decision.get("decision") or "") == "deny":
+            model_lines.append(f"  {EDIT_PROPOSAL_REVIEW_DENIED_MARKER}")
+
+    return "\n".join(model_lines), "\n".join(display_lines)
 
 
 def create_edit_proposal(
@@ -409,6 +472,16 @@ def _group_edits_by_path(edits: list[dict[str, Any]]) -> dict[str, list[dict[str
         path = normalize_vault_relative_path(str(edit.get("path") or ""))
         grouped.setdefault(path, []).append(edit)
     return grouped
+
+
+def _review_decision_label(decision: str) -> str:
+    if decision == "approve":
+        return "Approved"
+    if decision == "comment":
+        return "Comment"
+    if decision == "deny":
+        return "Denied"
+    return "Pending"
 
 
 def _sha256_text(content: str) -> str:

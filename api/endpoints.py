@@ -20,6 +20,7 @@ from core.chat.task_execution import (
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
+from core.chat.edit_proposals import build_edit_proposal_review_prompts
 from core.chat.executor import UploadedImageAttachment
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.settings import (
@@ -49,6 +50,8 @@ from .models import (
     EditProposalApplyRequest,
     EditProposalApplyResponse,
     EditProposalDenyResponse,
+    EditProposalReviewRequest,
+    EditProposalReviewResponse,
     EditProposalResponse,
     VaultFileReferenceListResponse,
     VaultFileResponse,
@@ -1156,6 +1159,131 @@ async def apply_edit_proposal_artifact(
             artifact_ref=artifact_ref,
             selected_edit_ids=request.selected_edit_ids,
             replacement_overrides=request.replacement_overrides,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/review",
+    response_model=EditProposalReviewResponse,
+)
+async def review_edit_proposal_artifact(
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+    request: EditProposalReviewRequest,
+):
+    """Apply approved rows and start a follow-up chat turn for unresolved review decisions."""
+    try:
+        if not request.decisions:
+            raise APIException(
+                status_code=400,
+                error_type="NoReviewDecisions",
+                message="Choose at least one review decision.",
+            )
+        resolved_session_id = resolve_chat_session_for_request(
+            requested_session_id=session_id,
+            vault_name=vault_name,
+        )
+        if request.workspace_path is not None:
+            set_chat_session_workspace(vault_name, resolved_session_id, request.workspace_path)
+
+        proposal_model = get_chat_edit_proposal(
+            vault_name=vault_name,
+            session_id=resolved_session_id,
+            artifact_ref=artifact_ref,
+        )
+        proposal = proposal_model.model_dump()
+        decisions = [decision.model_dump() for decision in request.decisions]
+        known_edit_ids = {
+            str(edit.get("edit_id") or "")
+            for edit in proposal.get("edits", [])
+            if str(edit.get("edit_id") or "")
+        }
+        unknown_edit_ids = sorted(
+            str(decision.get("edit_id") or "")
+            for decision in decisions
+            if str(decision.get("edit_id") or "") not in known_edit_ids
+        )
+        if unknown_edit_ids:
+            raise APIException(
+                status_code=400,
+                error_type="UnknownReviewEdit",
+                message="One or more reviewed edits are not part of this proposal.",
+                details={"edit_ids": unknown_edit_ids},
+            )
+        approved_decisions = [
+            decision for decision in decisions
+            if decision["decision"] == "approve"
+        ]
+        review_decisions = [
+            decision for decision in decisions
+            if decision["decision"] != "approve"
+        ]
+        if not review_decisions:
+            raise APIException(
+                status_code=400,
+                error_type="NoUnresolvedReviewDecisions",
+                message="Use the apply endpoint when every selected edit is approved.",
+            )
+        runtime = get_runtime_context()
+        vault_path = str(runtime.config.data_root / vault_name)
+        resolved_thinking = normalize_thinking_value(request.thinking, source_name="chat thinking")
+
+        applied_edit_ids: list[str] = []
+        applied_paths: list[str] = []
+        status = proposal.get("status", "pending")
+        if approved_decisions:
+            applied = apply_chat_edit_proposal(
+                vault_name=vault_name,
+                session_id=resolved_session_id,
+                artifact_ref=artifact_ref,
+                selected_edit_ids=[decision["edit_id"] for decision in approved_decisions],
+                replacement_overrides={
+                    decision["edit_id"]: decision.get("replacement_text", "")
+                    for decision in approved_decisions
+                },
+            )
+            applied_edit_ids = list(applied.applied_edit_ids)
+            applied_paths = list(applied.applied_paths)
+            status = applied.status
+
+        prompt, display_prompt = build_edit_proposal_review_prompts(
+            proposal=proposal,
+            review_decisions=review_decisions,
+            applied_decisions=approved_decisions,
+        )
+        started = await start_queued_chat_stream_task(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            prompt=prompt,
+            display_prompt=display_prompt,
+            image_paths=[],
+            image_uploads=[],
+            session_id=resolved_session_id,
+            tools=request.tools,
+            model=request.model,
+            thinking=resolved_thinking,
+            context_template=request.context_template,
+        )
+        task = await get_execution_task(started.task.task_id)
+        return EditProposalReviewResponse(
+            artifact_ref=artifact_ref,
+            status=status,
+            applied_edit_ids=applied_edit_ids,
+            applied_paths=applied_paths,
+            display_prompt=display_prompt,
+            session_id=resolved_session_id,
+            task=task,
+        )
+    except ChatSessionVaultMismatch as exc:
+        return create_error_response(
+            ChatSessionVaultMismatchError(
+                session_id=exc.session_id,
+                requested_vault=exc.requested_vault,
+                bound_vault=exc.bound_vault,
+            )
         )
     except Exception as e:
         return create_error_response(e)

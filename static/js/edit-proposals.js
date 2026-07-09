@@ -40,36 +40,34 @@
             const applied = proposal.status === 'applied';
             const denied = proposal.status === 'denied';
             const locked = applied || denied;
+            const expanded = !locked;
             return `
                 <section class="edit-proposal-card" data-edit-proposal-card="${escapeHtml(proposal.artifact_ref || '')}">
                     <div class="edit-proposal-header">
-                        <button type="button" class="edit-proposal-toggle" data-edit-proposal-toggle aria-expanded="true">
-                            <span class="edit-proposal-chevron" aria-hidden="true">▾</span>
+                        <button type="button" class="edit-proposal-toggle" data-edit-proposal-toggle aria-expanded="${expanded ? 'true' : 'false'}">
+                            <span class="edit-proposal-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+                        </button>
+                        <span class="edit-proposal-status">${escapeHtml(proposalStatusLabel(proposal.status))}</span>
+                        <button type="button" class="edit-proposal-title-toggle" data-edit-proposal-toggle aria-expanded="${expanded ? 'true' : 'false'}">
                             <span class="edit-proposal-title-block">
                                 <span class="edit-proposal-title">${escapeHtml(proposal.title || 'Proposed file edits')}</span>
                                 ${proposal.summary ? `<span class="edit-proposal-summary">${escapeHtml(proposal.summary)}</span>` : ''}
                             </span>
                         </button>
                         <div class="edit-proposal-header-actions">
-                            <label class="edit-proposal-select-all">
-                                <input type="checkbox" data-edit-proposal-select-all ${locked ? 'disabled' : ''} />
-                                <span>Select all</span>
-                            </label>
-                            <span class="edit-proposal-status">${escapeHtml(proposalStatusLabel(proposal.status))}</span>
+                            <button type="button" class="edit-proposal-bulk-action is-approve" data-edit-proposal-bulk-decision="approve" ${locked ? 'disabled' : ''}>Approve all</button>
+                            <button type="button" class="edit-proposal-bulk-action is-deny" data-edit-proposal-bulk-decision="deny" ${locked ? 'disabled' : ''}>Deny all</button>
                         </div>
                     </div>
-                    <div class="edit-proposal-body" data-edit-proposal-body>
+                    <div class="edit-proposal-body" data-edit-proposal-body ${expanded ? '' : 'hidden'}>
                         <div class="edit-proposal-edits">
                             ${edits.map((edit, index) => renderEdit(edit, index, locked)).join('')}
                         </div>
                         <div class="edit-proposal-footer">
                             <div class="edit-proposal-feedback" data-edit-proposal-feedback></div>
                             <div class="edit-proposal-actions">
-                                <button type="button" class="ui-icon-button is-primary is-compact" data-edit-proposal-apply aria-label="Apply selected edits" title="Apply selected edits" ${locked ? 'disabled' : ''}>
-                                    ${icons.CHECK_ICON_SVG || ''}
-                                </button>
-                                <button type="button" class="ui-icon-button is-compact" data-edit-proposal-deny aria-label="Deny proposal" title="Deny proposal" ${locked ? 'disabled' : ''}>
-                                    ${icons.CIRCLE_X_ICON_SVG || icons.X_ICON_SVG || ''}
+                                <button type="button" class="ui-text-button is-primary edit-proposal-submit" data-edit-proposal-submit disabled>
+                                    <span>Choose decisions</span>
                                 </button>
                             </div>
                         </div>
@@ -82,14 +80,22 @@
             const editId = String(edit.edit_id || `edit-${index + 1}`);
             const path = String(edit.path || '');
             return `
-                <article class="edit-proposal-edit" data-edit-proposal-edit="${escapeHtml(editId)}">
-                    <label class="edit-proposal-edit-top">
-                        <input type="checkbox" data-edit-proposal-checkbox value="${escapeHtml(editId)}" ${applied ? 'disabled' : ''} />
-                        <span class="edit-proposal-path-wrap">
-                            <button type="button" class="vault-file-link" data-edit-proposal-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>
-                            ${edit.rationale ? `<span class="edit-proposal-rationale">${escapeHtml(edit.rationale)}</span>` : ''}
-                        </span>
-                    </label>
+                <article class="edit-proposal-edit" data-edit-proposal-edit="${escapeHtml(editId)}" data-review-decision="pending">
+                    <div class="edit-proposal-path-wrap">
+                        <button type="button" class="vault-file-link" data-edit-proposal-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>
+                        ${edit.rationale ? `<span class="edit-proposal-rationale">${escapeHtml(edit.rationale)}</span>` : ''}
+                    </div>
+                    <div class="edit-proposal-row-actions">
+                        <button type="button" class="edit-proposal-decision-button is-approve" data-edit-proposal-decision="approve" ${applied ? 'disabled' : ''}>
+                            ${icons.CHECK_ICON_SVG || ''}<span>Approve</span>
+                        </button>
+                        <button type="button" class="edit-proposal-decision-button is-comment" data-edit-proposal-decision="comment" ${applied ? 'disabled' : ''}>
+                            <span>Comment</span>
+                        </button>
+                        <button type="button" class="edit-proposal-decision-button is-deny" data-edit-proposal-decision="deny" ${applied ? 'disabled' : ''}>
+                            ${icons.CIRCLE_X_ICON_SVG || icons.X_ICON_SVG || ''}<span>Deny</span>
+                        </button>
+                    </div>
                     <div class="edit-proposal-diff">
                         <div>
                             <div class="edit-proposal-label">Original</div>
@@ -99,6 +105,10 @@
                             <div class="edit-proposal-label">Replacement</div>
                             <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.replacement_text || '')}</textarea>
                         </div>
+                    </div>
+                    <div class="edit-proposal-comment-block hidden" data-edit-proposal-comment-block>
+                        <label class="edit-proposal-label" for="edit-proposal-comment-${escapeHtml(editId)}">Comment or reason</label>
+                        <textarea id="edit-proposal-comment-${escapeHtml(editId)}" class="edit-proposal-comment" data-edit-proposal-comment="${escapeHtml(editId)}" spellcheck="true" ${applied ? 'disabled' : ''}></textarea>
                     </div>
                 </article>
             `;
@@ -118,72 +128,63 @@
                     toggleProposalBody(container, toggleButton);
                     return;
                 }
-                const applyButton = target.closest('[data-edit-proposal-apply]');
-                if (applyButton instanceof HTMLButtonElement) {
-                    await applySelected(container, proposal, applyButton);
+                const decisionButton = target.closest('[data-edit-proposal-decision]');
+                if (decisionButton instanceof HTMLButtonElement) {
+                    setRowDecision(container, decisionButton);
                     return;
                 }
-                const denyButton = target.closest('[data-edit-proposal-deny]');
-                if (denyButton instanceof HTMLButtonElement) {
-                    await denyProposal(container, proposal, denyButton);
-                }
-            });
-            container.addEventListener('change', (event) => {
-                const target = event.target;
-                if (!(target instanceof HTMLInputElement)) return;
-                if (target.matches('[data-edit-proposal-select-all]')) {
-                    setAllSelected(container, target.checked);
+                const bulkDecisionButton = target.closest('[data-edit-proposal-bulk-decision]');
+                if (bulkDecisionButton instanceof HTMLButtonElement) {
+                    setAllDecisions(container, bulkDecisionButton.getAttribute('data-edit-proposal-bulk-decision') || 'pending');
                     return;
                 }
-                if (target.matches('[data-edit-proposal-checkbox]')) {
-                    syncSelectAll(container);
+                const submitButton = target.closest('[data-edit-proposal-submit]');
+                if (submitButton instanceof HTMLButtonElement) {
+                    await submitReview(container, proposal, submitButton);
                 }
             });
             container.addEventListener('input', (event) => {
                 const target = event.target;
-                if (target instanceof HTMLTextAreaElement && target.matches('[data-edit-proposal-replacement]')) {
+                if (target instanceof HTMLTextAreaElement && target.matches('[data-edit-proposal-replacement], [data-edit-proposal-comment]')) {
                     autosizeTextarea(target);
+                    updateSubmitButton(container);
                 }
             });
+            updateSubmitButton(container);
         }
 
-        async function applySelected(container, proposal, button) {
-            const feedback = container.querySelector('[data-edit-proposal-feedback]');
-            const selected = Array.from(container.querySelectorAll('[data-edit-proposal-checkbox]'))
-                .filter((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)
-                .map((checkbox) => checkbox.value);
+        async function postApprovedEdits(proposal, decisions) {
+            const approved = decisions.filter((decision) => decision.decision === 'approve');
+            const selected = approved.map((decision) => decision.editId);
             const overrides = {};
-            Array.from(container.querySelectorAll('[data-edit-proposal-replacement]')).forEach((textarea) => {
-                if (!(textarea instanceof HTMLTextAreaElement)) return;
-                const editId = textarea.getAttribute('data-edit-proposal-replacement') || '';
-                if (editId && selected.includes(editId)) {
-                    overrides[editId] = textarea.value;
-                }
+            approved.forEach((decision) => {
+                overrides[decision.editId] = decision.replacementText;
             });
-            if (!selected.length) {
-                setFeedback(feedback, 'Select at least one edit.', 'error');
-                return;
-            }
-            button.disabled = true;
-            setFeedback(feedback, 'Applying selected edits...', 'info');
-            try {
-                const response = await fetch(
-                    `api/vaults/${encodeURIComponent(selectedVault())}/chat/${encodeURIComponent(state.sessionId || '')}/edit-proposals/${encodePathArtifactRef(proposal.artifact_ref || '')}/apply`,
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            selected_edit_ids: selected,
-                            replacement_overrides: overrides,
-                        }),
-                    }
-                );
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.message || `HTTP ${response.status}`);
+            const response = await fetch(
+                `api/vaults/${encodeURIComponent(selectedVault())}/chat/${encodeURIComponent(state.sessionId || '')}/edit-proposals/${encodePathArtifactRef(proposal.artifact_ref || '')}/apply`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_edit_ids: selected,
+                        replacement_overrides: overrides,
+                    }),
                 }
-                await response.json();
-                setFeedback(feedback, 'Applied selected edits.', 'success');
+            );
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        async function applyApproved(container, proposal, decisions, button) {
+            const feedback = container.querySelector('[data-edit-proposal-feedback]');
+            button.disabled = true;
+            setFeedback(feedback, 'Applying approved edits...', 'info');
+            try {
+                await postApprovedEdits(proposal, decisions);
+                setFeedback(feedback, 'Applied approved edits.', 'success');
                 setProposalLocked(container, 'Applied');
                 callbacks.enhanceFileLinks?.(container);
             } catch (error) {
@@ -192,67 +193,106 @@
             }
         }
 
-        async function denyProposal(container, proposal, button) {
+        async function submitReview(container, proposal, button) {
             const feedback = container.querySelector('[data-edit-proposal-feedback]');
+            const decisions = collectDecisions(container, proposal);
+            if (!decisions.length) {
+                setFeedback(feedback, 'Choose at least one review action.', 'error');
+                return;
+            }
+            const approvedDecisions = decisions.filter((decision) => decision.decision === 'approve');
+            const reviewDecisions = decisions.filter((decision) => decision.decision !== 'approve');
+            if (decisions.every((decision) => decision.decision === 'approve')) {
+                await applyApproved(container, proposal, decisions, button);
+                return;
+            }
+            if (typeof callbacks.submitReview !== 'function' || state.isLoading) {
+                setFeedback(feedback, 'Wait for the current response to finish, then submit your choices.', 'error');
+                return;
+            }
             button.disabled = true;
-            setFeedback(feedback, 'Denying proposal...', 'info');
             try {
-                const response = await fetch(
-                    `api/vaults/${encodeURIComponent(selectedVault())}/chat/${encodeURIComponent(state.sessionId || '')}/edit-proposals/${encodePathArtifactRef(proposal.artifact_ref || '')}/deny`,
-                    { method: 'POST' }
-                );
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.message || `HTTP ${response.status}`);
+                setFeedback(feedback, approvedDecisions.length ? 'Applying approved edits and sending review...' : 'Sending review...', 'info');
+                const result = await callbacks.submitReview({ proposal, decisions });
+                if (!result) {
+                    throw new Error('Review could not be sent because chat is busy or unavailable.');
                 }
-                await response.json();
-                setFeedback(feedback, 'Denied proposal.', 'info');
-                setProposalLocked(container, 'Denied');
+                setFeedback(feedback, result.applied_edit_ids?.length ? 'Approved edits applied. Review sent.' : 'Review sent.', 'success');
+                setProposalLocked(container, 'Reviewed');
             } catch (error) {
                 button.disabled = false;
-                setFeedback(feedback, error.message, 'error');
+                setFeedback(feedback, error.message || 'Unable to send review.', 'error');
             }
         }
 
         function setProposalLocked(container, statusLabel) {
             const status = container.querySelector('.edit-proposal-status');
             if (status) status.textContent = statusLabel;
-            container.querySelectorAll('input, textarea, [data-edit-proposal-apply], [data-edit-proposal-deny]').forEach((item) => {
+            setProposalCollapsed(container, true);
+            container.querySelectorAll('textarea, [data-edit-proposal-bulk-decision], [data-edit-proposal-decision], [data-edit-proposal-submit]').forEach((item) => {
                 item.disabled = true;
             });
         }
 
-        function setAllSelected(container, checked) {
-            container.querySelectorAll('[data-edit-proposal-checkbox]').forEach((checkbox) => {
-                if (checkbox instanceof HTMLInputElement && !checkbox.disabled) {
-                    checkbox.checked = checked;
+        function setRowDecision(container, button) {
+            const row = button.closest('[data-edit-proposal-edit]');
+            if (!(row instanceof HTMLElement)) return;
+            const requested = button.getAttribute('data-edit-proposal-decision') || 'pending';
+            const current = row.getAttribute('data-review-decision') || 'pending';
+            const decision = current === requested ? 'pending' : requested;
+            row.setAttribute('data-review-decision', decision);
+            row.querySelectorAll('[data-edit-proposal-decision]').forEach((item) => {
+                if (item instanceof HTMLElement) {
+                    item.classList.toggle('is-active', item.getAttribute('data-edit-proposal-decision') === decision);
                 }
             });
+            const commentBlock = row.querySelector('[data-edit-proposal-comment-block]');
+            if (commentBlock instanceof HTMLElement) {
+                commentBlock.classList.toggle('hidden', !['comment', 'deny'].includes(decision));
+            }
+            updateSubmitButton(container);
         }
 
-        function syncSelectAll(container) {
-            const selectAll = container.querySelector('[data-edit-proposal-select-all]');
-            if (!(selectAll instanceof HTMLInputElement)) return;
-            const checkboxes = Array.from(container.querySelectorAll('[data-edit-proposal-checkbox]'))
-                .filter((checkbox) => checkbox instanceof HTMLInputElement && !checkbox.disabled);
-            const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-            selectAll.checked = checkboxes.length > 0 && checkedCount === checkboxes.length;
-            selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+        function setAllDecisions(container, decision) {
+            if (!['approve', 'deny'].includes(decision)) return;
+            container.querySelectorAll('[data-edit-proposal-edit]').forEach((row) => {
+                if (!(row instanceof HTMLElement)) return;
+                row.setAttribute('data-review-decision', decision);
+                row.querySelectorAll('[data-edit-proposal-decision]').forEach((item) => {
+                    if (item instanceof HTMLElement) {
+                        item.classList.toggle('is-active', item.getAttribute('data-edit-proposal-decision') === decision);
+                    }
+                });
+                const commentBlock = row.querySelector('[data-edit-proposal-comment-block]');
+                if (commentBlock instanceof HTMLElement) {
+                    commentBlock.classList.toggle('hidden', decision !== 'deny');
+                }
+            });
+            updateSubmitButton(container);
         }
 
         function toggleProposalBody(container, toggleButton) {
             const body = container.querySelector('[data-edit-proposal-body]');
             if (!(body instanceof HTMLElement)) return;
             const expanded = toggleButton.getAttribute('aria-expanded') !== 'false';
-            const nextExpanded = !expanded;
-            toggleButton.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
-            body.hidden = !nextExpanded;
-            const chevron = toggleButton.querySelector('.edit-proposal-chevron');
-            if (chevron) chevron.textContent = nextExpanded ? '▾' : '▸';
+            setProposalCollapsed(container, expanded);
+        }
+
+        function setProposalCollapsed(container, collapsed) {
+            const body = container.querySelector('[data-edit-proposal-body]');
+            if (body instanceof HTMLElement) {
+                body.hidden = collapsed;
+            }
+            container.querySelectorAll('[data-edit-proposal-toggle]').forEach((toggle) => {
+                if (!(toggle instanceof HTMLButtonElement)) return;
+                toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                const chevron = toggle.querySelector('.edit-proposal-chevron');
+                if (chevron) chevron.textContent = collapsed ? '▸' : '▾';
+            });
         }
 
         function autosizeReplacementTextareas(container) {
-            container.querySelectorAll('[data-edit-proposal-replacement]').forEach((textarea) => {
+            container.querySelectorAll('[data-edit-proposal-replacement], [data-edit-proposal-comment]').forEach((textarea) => {
                 if (textarea instanceof HTMLTextAreaElement) {
                     autosizeTextarea(textarea);
                 }
@@ -262,6 +302,56 @@
         function autosizeTextarea(textarea) {
             textarea.style.height = 'auto';
             textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 68), 260)}px`;
+        }
+
+        function collectDecisions(container, proposal) {
+            const editsById = new Map((proposal.edits || []).map((edit) => [String(edit.edit_id || ''), edit]));
+            return Array.from(container.querySelectorAll('[data-edit-proposal-edit]'))
+                .map((row) => {
+                    if (!(row instanceof HTMLElement)) return null;
+                    const editId = row.getAttribute('data-edit-proposal-edit') || '';
+                    const decision = row.getAttribute('data-review-decision') || 'pending';
+                    if (decision === 'pending') return null;
+                    const replacement = row.querySelector(`[data-edit-proposal-replacement="${cssEscape(editId)}"]`);
+                    const comment = row.querySelector(`[data-edit-proposal-comment="${cssEscape(editId)}"]`);
+                    return {
+                        editId,
+                        decision,
+                        edit: editsById.get(editId) || {},
+                        replacementText: replacement instanceof HTMLTextAreaElement ? replacement.value : '',
+                        comment: comment instanceof HTMLTextAreaElement ? comment.value.trim() : '',
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        function updateSubmitButton(container) {
+            const button = container.querySelector('[data-edit-proposal-submit]');
+            if (!(button instanceof HTMLButtonElement)) return;
+            const decisions = Array.from(container.querySelectorAll('[data-edit-proposal-edit]'))
+                .map((row) => row instanceof HTMLElement ? row.getAttribute('data-review-decision') || 'pending' : 'pending')
+                .filter((decision) => decision !== 'pending');
+            button.disabled = decisions.length === 0;
+            const label = button.querySelector('span') || button;
+            if (!decisions.length) {
+                label.textContent = 'Choose decisions';
+            } else {
+                label.textContent = 'Submit choices';
+            }
+        }
+
+        function rowDecisionLabel(decision) {
+            if (decision === 'approve') return 'Approved';
+            if (decision === 'comment') return 'Comment';
+            if (decision === 'deny') return 'Denied';
+            return 'Pending';
+        }
+
+        function cssEscape(value) {
+            if (window.CSS && typeof window.CSS.escape === 'function') {
+                return window.CSS.escape(value);
+            }
+            return String(value || '').replace(/["\\]/g, '\\$&');
         }
 
         function setFeedback(element, message, kind) {

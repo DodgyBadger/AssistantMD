@@ -135,6 +135,29 @@ class EditProposalApplyRequest(BaseModel):
     )
 
 
+class EditProposalReviewDecision(BaseModel):
+    """One user review decision for a collaborative edit proposal row."""
+
+    edit_id: str = Field(..., description="Proposal edit id being reviewed")
+    decision: Literal["approve", "comment", "deny"] = Field(..., description="Review decision")
+    replacement_text: str = Field("", description="User-edited replacement text for approved rows")
+    comment: str = Field("", description="User comment or denial reason")
+
+
+class EditProposalReviewRequest(BaseModel):
+    """Submit mixed review decisions for a collaborative edit proposal."""
+
+    decisions: List[EditProposalReviewDecision] = Field(..., description="Per-row review decisions")
+    tools: List[str] = Field(default_factory=list, description="Tool names to enable for the follow-up chat turn")
+    model: str = Field(..., description="Model name to use for the follow-up chat turn")
+    thinking: Optional[str] = Field(
+        None,
+        description="Optional per-request thinking override: default, on, off, minimal, low, medium, high, xhigh",
+    )
+    context_template: Optional[str] = Field(None, description="Optional context manager template name")
+    workspace_path: Optional[str] = Field(None, description="Optional vault-relative workspace directory path")
+
+
 class EditProposalResponse(BaseModel):
     """Stored collaborative edit proposal artifact."""
 
@@ -167,6 +190,18 @@ class EditProposalDenyResponse(BaseModel):
     artifact_ref: str = Field(..., description="Denied edit proposal artifact reference")
     status: str = Field(..., description="Updated proposal status")
     denied_at: str = Field(..., description="Deny timestamp")
+
+
+class EditProposalReviewResponse(BaseModel):
+    """Result of submitting edit proposal review decisions."""
+
+    artifact_ref: str = Field(..., description="Reviewed edit proposal artifact reference")
+    status: str = Field(..., description="Updated proposal status")
+    applied_edit_ids: List[str] = Field(default_factory=list, description="Applied edit ids")
+    applied_paths: List[str] = Field(default_factory=list, description="Vault paths changed by approved decisions")
+    display_prompt: str = Field(..., description="User-visible review prompt persisted in chat history")
+    session_id: str = Field(..., description="Session identifier")
+    task: "ExecutionTaskInfo" = Field(..., description="Execution task created for the follow-up chat run")
 
 
 class ChatTaskRequest(BaseModel):

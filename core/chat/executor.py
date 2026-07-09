@@ -700,13 +700,15 @@ def _check_image_size(display_name: str, size_bytes: int) -> None:
 def _resolve_image_prompt(
     *,
     prompt_text: str,
+    history_prompt_text: str | None = None,
     image_paths: Optional[List[str]],
     image_uploads: Optional[List[UploadedImageAttachment]],
     vault_path: str,
 ) -> tuple[PromptInput, str, int]:
     """Build prompt payload and history-safe text from optional image attachments."""
+    history_text = history_prompt_text if history_prompt_text is not None else prompt_text
     if not image_paths and not image_uploads:
-        return prompt_text, prompt_text, 0
+        return prompt_text, history_text, 0
 
     vault_root = Path(vault_path).resolve()
     prompt_content: List[UserContent] = [prompt_text]
@@ -756,11 +758,11 @@ def _resolve_image_prompt(
         history_lines.append(f"- [upload] {display_name}")
 
     if len(prompt_content) == 1:
-        return prompt_text, prompt_text, 0
+        return prompt_text, history_text, 0
 
     prompt_for_history = "\n".join(
         [
-            prompt_text,
+            history_text,
             "",
             "[Attached images]",
             *history_lines,
@@ -811,6 +813,7 @@ async def _prepare_chat_execution(
     thinking: ThinkingValue | None = None,
     context_template: Optional[str] = None,
     message_history_override: Optional[List[ModelMessage]] = None,
+    display_prompt: str | None = None,
 ) -> PreparedChatExecution:
     """Perform chat preflight before either sync or streaming execution begins."""
     _validate_image_capability(model, image_paths, image_uploads)
@@ -853,6 +856,7 @@ async def _prepare_chat_execution(
     )
     user_prompt, prompt_for_history, attached_image_count = _resolve_image_prompt(
         prompt_text=prompt,
+        history_prompt_text=display_prompt,
         image_paths=image_paths,
         image_uploads=image_uploads,
         vault_path=vault_path,
