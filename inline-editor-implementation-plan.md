@@ -323,6 +323,8 @@ Phase 1 validation targets:
 Phase 2 validation targets:
 
 - API/service scenario for applying selected edit proposals with hash checks.
+- Service-level coverage for shared exact text replacement helpers used by both
+  `file_ops_unsafe` and edit proposal approval.
 - UI smoke/manual check for proposal card selection, apply, conflict, and reload
   behavior.
 
@@ -336,7 +338,10 @@ Phase 2 validation targets:
    vault-wide search.
 5. Upgrade recognized vault file paths in assistant messages into openable file
    links.
-6. Continue Phase 2 hardening around proposal rendering, conflict display, and
+6. Refactor approved edit proposal writes and `file_ops` text mutations onto a
+   unified vault file operations service before adding more proposal operation
+   kinds.
+7. Continue Phase 2 hardening around proposal rendering, conflict display, and
    richer edit operation shapes.
 
 ## Implementation Status
@@ -366,10 +371,23 @@ Current branch slice:
   - `POST /api/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref}/apply`
     applies approved existing-file text replacements with hash checks;
   - `static/js/edit-proposals.js` renders collapsible review cards with
-    approve/comment/deny row decisions, comment prompts, and editable replacement
-    text.
+    approve/comment/deny row decisions, comment prompts, operation-specific
+    create/delete/move/replace previews, and editable replacement/content/
+    destination fields where applicable.
   - review prompt instructions are built from `core/constants.py` by the backend
     review endpoint; `display_prompt` keeps chat history concise.
+- Started the unified vault file operations service:
+  - `core.vault_state.file_operations` owns text target resolution, expected-hash
+    checks, exact text replacement preparation, create/delete/move preparation,
+    and full-content text replacement helpers.
+  - `file_ops_unsafe(replace_text)`, approved edit proposal writes, and generic
+    inline vault file saves now route through this service while final writes
+    still use `core.vault_state.file_mutations` for audit/snapshot/refresh.
+  - Edit proposal artifacts support explicit `operation` values:
+    `replace_text`, `create_file`, `delete_file`, and `move_file`.
+  - Approved create/delete/move proposal rows use the same review/apply flow as
+    text replacements, including user-edited create content and move destination
+    overrides.
 
 Known Phase 1 follow-ups:
 
@@ -387,19 +405,29 @@ Known Phase 1 follow-ups:
 
 Known Phase 2 follow-ups:
 
-- Extend edit proposal artifacts beyond existing-file text replacement with an
-  explicit operation field. Candidate operation kinds:
-  - `replace_text`: current implemented behavior; existing file, exact
-    `original_text` match, hash check, replacement text.
-  - `create_file`: proposed new vault path plus full initial content; apply
-    should fail if the file already exists unless the proposal explicitly
-    supports overwrite.
-  - `delete_file`: proposed existing vault path, captured hash, preview/snippet,
-    and apply-time hash check before deletion.
-  - `move_file`: proposed source and destination paths, source hash check,
-    destination existence check, and normal vault-state move recording.
-  Each operation should render with operation-specific UI while preserving the
-  same per-row approve/comment/deny review model.
+- Continue expanding the unified internal vault file operations layer:
+  - Keep `propose_file_edits` as the artifact/UI creation tool. Do not make
+    `file_ops` render proposal cards, and do not have the proposal API call
+    Pydantic tool wrappers directly.
+  - Keep final writes routed through `core.vault_state.file_mutations` so audit
+    rows, snapshots, manifest refresh, and rollback compatibility remain
+    consistent.
+  - Continue using operation options rather than separate "safe" and "unsafe"
+    helper families. Examples: `overwrite=False`, `markdown_only=True`,
+    `expected_sha256=...`, `replacement_count=1`, and `create_parent=True`.
+  - Keep destructive-operation policy at the adapter boundary. For example,
+    `file_ops_unsafe(delete)` can continue requiring `confirm_path`, while the
+    lower service exposes a validated `delete_file(...)` operation with stable
+    rejection codes.
+  - Move more operation-level behavior into `core.vault_state.file_operations`:
+    append, truncate, and any listing/search support that would otherwise drift
+    across API and tool adapters.
+  - Keep API/tool adapters responsible for translating core rejections into
+    user-facing `ToolReturn` metadata or API errors. Core helpers should not
+    import chat artifact storage, FastAPI models, or Pydantic tool classes.
+  - Add focused service checks as this layer grows, especially for stale hash
+    rejection, zero/multiple match rejection, batched same-file edits, and
+    unchanged public tool/API metadata.
 - Add browser-level coverage for proposal card rendering, edited replacement
   text, conflict display, and reload behavior when a frontend harness is
   available.

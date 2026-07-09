@@ -20,6 +20,11 @@ from core.vault_state.file_mutations import (
     move_vault_file,
     replace_vault_file_content,
 )
+from core.vault_state.file_operations import (
+    VaultFileOperationRejected,
+    replace_text,
+    resolve_markdown_text_target,
+)
 from .base import BaseTool
 from .utils import validate_and_resolve_path
 
@@ -385,70 +390,71 @@ Full documentation:
     @classmethod
     def _replace_text(cls, path: str, old_text: str, new_text: str, count: int, vault_path: str) -> ToolReturn:
         """Replace text in file with limited count."""
-        effective_path, full_path = cls._resolve_markdown_text_target(path, vault_path)
-
-        if not os.path.exists(full_path):
-            return cls._result(
-                message=f"Cannot replace text in '{effective_path}' - file does not exist",
+        try:
+            result = replace_text(
+                vault_path=vault_path,
+                path=path,
+                old_text=old_text,
+                new_text=new_text,
+                count=count,
                 operation="replace_text",
-                path=effective_path,
-                status="not_found",
-                exists=False,
-                error_type="file_not_found",
-                metadata=cls._requested_path_metadata(path, effective_path),
+                markdown_only=True,
+                prefer_markdown_extension=True,
             )
-
-        if count < 1:
+        except VaultFileOperationRejected as exc:
+            effective_path = str(exc.details.get("path") or path.strip())
+            metadata = cls._requested_path_metadata(path, effective_path)
+            if exc.code == "file_not_found":
+                return cls._result(
+                    message=f"Cannot replace text in '{effective_path}' - file does not exist",
+                    operation="replace_text",
+                    path=effective_path,
+                    status="not_found",
+                    exists=False,
+                    error_type="file_not_found",
+                    metadata=metadata,
+                )
+            if exc.code == "invalid_count":
+                return cls._result(
+                    message=str(exc),
+                    operation="replace_text",
+                    path=effective_path,
+                    status="error",
+                    exists=True,
+                    error_type="invalid_count",
+                    metadata=metadata,
+                )
+            if exc.code == "text_not_found":
+                return cls._result(
+                    message=str(exc),
+                    operation="replace_text",
+                    path=effective_path,
+                    status="invalid_target",
+                    exists=True,
+                    error_type="text_not_found",
+                    metadata=metadata,
+                )
             return cls._result(
-                message=f"Invalid count {count} - must be >= 1",
+                message=str(exc),
                 operation="replace_text",
                 path=effective_path,
                 status="error",
                 exists=True,
-                error_type="invalid_count",
-                metadata=cls._requested_path_metadata(path, effective_path),
+                error_type=exc.code,
+                metadata=metadata,
             )
-
-        # Read file
-        with open(full_path, 'r', encoding='utf-8') as file:
-            content = file.read()
-
-        # Check if old_text exists
-        if old_text not in content:
-            return cls._result(
-                message=f"Text not found in '{effective_path}': '{old_text}'",
-                operation="replace_text",
-                path=effective_path,
-                status="invalid_target",
-                exists=True,
-                error_type="text_not_found",
-                metadata=cls._requested_path_metadata(path, effective_path),
-            )
-
-        # Replace with count limit
-        new_content = content.replace(old_text, new_text, count)
-
-        # Count actual replacements
-        replacements = content.count(old_text) if count >= content.count(old_text) else count
-
-        mutation = replace_vault_file_content(
-            vault_path=vault_path,
-            path=effective_path,
-            content=new_content,
-            operation="replace_text",
-        )
 
         return cls._result(
-            message=f"Successfully replaced {replacements} occurrence(s) in '{effective_path}'",
+            message=f"Successfully replaced {result.replacement_count} occurrence(s) in '{result.path}'",
             operation="replace_text",
-            path=effective_path,
+            path=result.path,
             status="completed",
             exists=True,
             metadata={
-                "replacement_count": replacements,
-                "task_id": mutation.task_id,
-                "vault_id": mutation.vault_id,
-                **cls._requested_path_metadata(path, effective_path),
+                "replacement_count": result.replacement_count,
+                "task_id": result.mutation.task_id,
+                "vault_id": result.mutation.vault_id,
+                **result.requested_path_metadata,
             },
         )
 
@@ -565,13 +571,8 @@ Full documentation:
     @classmethod
     def _resolve_markdown_text_target(cls, path: str, vault_path: str) -> tuple[str, str]:
         """Resolve markdown text mutation targets with the same extensionless preference as reads."""
-        requested_path = path.strip()
-        if cls._should_try_markdown_file(requested_path):
-            markdown_path = f"{requested_path}.md"
-            markdown_full_path = validate_and_resolve_path(markdown_path, vault_path)
-            if os.path.isfile(markdown_full_path):
-                return markdown_path, markdown_full_path
-        return requested_path, validate_and_resolve_path(requested_path, vault_path)
+        target = resolve_markdown_text_target(vault_path=vault_path, path=path)
+        return target.path, str(target.full_path)
 
     @staticmethod
     def _should_try_markdown_file(path: str) -> bool:

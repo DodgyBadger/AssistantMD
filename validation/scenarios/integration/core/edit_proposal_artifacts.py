@@ -22,6 +22,8 @@ class EditProposalArtifactsScenario(BaseScenario):
             "Projects/Alpha/README.md",
             "# Alpha\n\nStatus: Draft\n\nNext: Write summary.\n",
         )
+        self.create_file(vault, "Projects/Alpha/DeleteMe.md", "Remove this note.\n")
+        self.create_file(vault, "Projects/Alpha/MoveMe.md", "Move this note.\n")
 
         await self.start_system()
 
@@ -143,6 +145,59 @@ class EditProposalArtifactsScenario(BaseScenario):
         assert conflict.json().get("error") == "VaultFileConflict", (
             "Stale proposal apply should use the vault conflict error"
         )
+
+        operation_result = await tool.function(
+            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+            edits=[
+                {
+                    "operation": "create_file",
+                    "path": "Projects/Alpha/NewProposal.md",
+                    "replacement_text": "# Created\n\nFrom proposal.\n",
+                    "rationale": "Create a new note.",
+                },
+                {
+                    "operation": "delete_file",
+                    "path": "Projects/Alpha/DeleteMe.md",
+                    "rationale": "Remove the stale note.",
+                },
+                {
+                    "operation": "move_file",
+                    "path": "Projects/Alpha/MoveMe.md",
+                    "destination": "Projects/Alpha/Moved.md",
+                    "rationale": "Rename the note.",
+                },
+            ],
+            title="Create delete move",
+        )
+        operation_ref = operation_result.metadata["artifact_ref"]
+        operation_proposal = self.call_api(
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{operation_ref}"
+        ).json()
+        operation_ids = [edit["edit_id"] for edit in operation_proposal["edits"]]
+        operation_apply = self.call_api(
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{operation_ref}/apply",
+            method="POST",
+            data={
+                "selected_edit_ids": operation_ids,
+                "replacement_overrides": {
+                    operation_ids[0]: "# Created\n\nEdited before approval.\n",
+                    operation_ids[2]: "Projects/Alpha/MovedAndEdited.md",
+                },
+            },
+        )
+        assert operation_apply.status_code == 200, "Create/delete/move proposal should apply"
+        assert (vault / "Projects/Alpha/NewProposal.md").read_text(encoding="utf-8") == (
+            "# Created\n\nEdited before approval.\n"
+        ), "Create proposal should write approved user-edited content"
+        assert not (vault / "Projects/Alpha/DeleteMe.md").exists(), (
+            "Delete proposal should remove the approved file"
+        )
+        assert not (vault / "Projects/Alpha/MoveMe.md").exists(), (
+            "Move proposal should remove the source file"
+        )
+        assert (vault / "Projects/Alpha/MovedAndEdited.md").read_text(encoding="utf-8") == (
+            "Move this note.\n"
+        ), "Move proposal should use the approved destination override"
 
         deny_result = await tool.function(
             SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),

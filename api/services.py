@@ -77,7 +77,7 @@ from core.llm.openai_oauth import (
 )
 from core.runtime.paths import get_system_root
 from core.authoring.cache import purge_expired_cache_artifacts
-from core.chat import ChatStore, export_chat_transcript, remove_chat_transcript_exports
+from core.chat import export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.chat.edit_proposals import (
@@ -105,6 +105,10 @@ from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import replace_vault_file_content, write_vault_file
+from core.vault_state.file_operations import (
+    VaultFileOperationRejected,
+    replace_full_text_content,
+)
 from core.vault_state.models import VaultFile, VaultFileEvent
 from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
 from .models import (
@@ -445,35 +449,40 @@ def update_vault_file(
             details={"path": normalized, "vault_name": vault_name},
         )
     try:
-        current_content = full_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise APIException(
-            status_code=415,
-            error_type="VaultFileNotText",
-            message=f"Vault file is not UTF-8 text: {normalized}",
-            details={"path": normalized, "vault_name": vault_name},
-        ) from exc
-    current_sha256 = _sha256_text(current_content)
-    if expected_sha256 and expected_sha256 != current_sha256:
-        raise APIException(
-            status_code=409,
-            error_type="VaultFileConflict",
-            message="Vault file changed since it was opened. Refresh and retry.",
-            details={
-                "path": normalized,
-                "vault_name": vault_name,
-                "expected_sha256": expected_sha256,
-                "current_sha256": current_sha256,
-            },
+        replace_full_text_content(
+            vault_path=vault_root,
+            path=normalized,
+            content=content,
+            operation="update_vault_file",
+            expected_sha256=expected_sha256,
+            markdown_only=False,
         )
-
-    replace_vault_file_content(
-        vault_path=vault_root,
-        path=normalized,
-        content=content,
-        operation="update_vault_file",
-        markdown_only=False,
-    )
+    except VaultFileOperationRejected as exc:
+        if exc.code == "file_not_text":
+            raise APIException(
+                status_code=415,
+                error_type="VaultFileNotText",
+                message=f"Vault file is not UTF-8 text: {normalized}",
+                details={"path": normalized, "vault_name": vault_name},
+            ) from exc
+        if exc.code == "file_conflict":
+            raise APIException(
+                status_code=409,
+                error_type="VaultFileConflict",
+                message="Vault file changed since it was opened. Refresh and retry.",
+                details={
+                    "path": normalized,
+                    "vault_name": vault_name,
+                    "expected_sha256": exc.details.get("expected_sha256"),
+                    "current_sha256": exc.details.get("actual_sha256"),
+                },
+            ) from exc
+        raise APIException(
+            status_code=400,
+            error_type=exc.code,
+            message=str(exc),
+            details={"path": normalized, "vault_name": vault_name, **exc.details},
+        ) from exc
     return _vault_file_response(
         vault_name=vault_name,
         path=normalized,
@@ -597,7 +606,11 @@ def _edit_proposal_api_error(exc: EditProposalError) -> APIException:
         "EditTextMismatch": 409,
         "ProposalAlreadyApplied": 409,
         "ProposalDenied": 409,
+        "VaultFileExists": 409,
+        "VaultDestinationExists": 409,
         "InvalidPath": 400,
+        "InvalidDestination": 400,
+        "InvalidOperation": 400,
         "InvalidEdit": 400,
         "NoSelectedEdits": 400,
         "UnknownEdit": 400,

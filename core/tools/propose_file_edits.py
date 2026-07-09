@@ -35,8 +35,8 @@ class ProposeFileEditsTool(BaseTool):
         ) -> ToolReturn:
             """Create an interactive file edit proposal artifact.
 
-            :param edits: Proposed edits. Each item requires path, original_text,
-                and replacement_text, with optional edit_id and rationale.
+            :param edits: Proposed edits. Each item has an operation and
+                operation-specific fields, with optional edit_id and rationale.
             :param title: Short title for the proposal card.
             :param summary: Optional summary of the proposed changes.
             """
@@ -110,7 +110,8 @@ class ProposeFileEditsTool(BaseTool):
             name="propose_file_edits",
             description=(
                 "Create an interactive chat artifact that lets the user review, "
-                "edit, select, and apply proposed changes to existing vault files."
+                "edit, select, and apply proposed vault file replacements, "
+                "creations, deletions, and moves."
             ),
         )
 
@@ -121,12 +122,23 @@ class ProposeFileEditsTool(BaseTool):
 Use `propose_file_edits` when you want the user to approve file changes before
 they are written.
 
-Each edit item requires:
+Each edit item supports:
+- `operation`: `replace_text`, `create_file`, `delete_file`, or `move_file`.
+  Omit it for `replace_text`.
 - `path`: vault-relative file path.
-- `original_text`: exact text currently present in that file.
-- `replacement_text`: proposed replacement text.
 - `rationale`: optional short reason shown in the proposal card.
 
-Only propose focused replacements that match exactly once. Read the file first
-with `file_ops_safe` when you are not certain of the exact current text.
+For `replace_text`, include `original_text` and `replacement_text`. The original
+text must match exactly once.
+
+For `create_file`, include `replacement_text`, `content`, or `initial_content`
+with the proposed full file content. The path must not already exist.
+
+For `delete_file`, include the existing `path`.
+
+For `move_file`, include the existing source `path` and a `destination` path
+that does not already exist.
+
+Read existing files first with `file_ops_safe` when you are not certain of the
+current text or target paths.
 """

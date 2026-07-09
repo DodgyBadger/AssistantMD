@@ -79,10 +79,15 @@
         function renderEdit(edit, index, applied) {
             const editId = String(edit.edit_id || `edit-${index + 1}`);
             const path = String(edit.path || '');
+            const operation = editOperation(edit);
+            const canOpenSource = operation !== 'create_file';
             return `
                 <article class="edit-proposal-edit" data-edit-proposal-edit="${escapeHtml(editId)}" data-review-decision="pending">
                     <div class="edit-proposal-path-wrap">
-                        <button type="button" class="vault-file-link" data-edit-proposal-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>
+                        <span class="edit-proposal-operation-label">${escapeHtml(operationLabel(operation))}</span>
+                        ${canOpenSource
+                            ? `<button type="button" class="vault-file-link" data-edit-proposal-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>`
+                            : `<span class="edit-proposal-new-path">@${escapeHtml(path)}</span>`}
                         ${edit.rationale ? `<span class="edit-proposal-rationale">${escapeHtml(edit.rationale)}</span>` : ''}
                     </div>
                     <div class="edit-proposal-row-actions">
@@ -96,22 +101,78 @@
                             ${icons.CIRCLE_X_ICON_SVG || icons.X_ICON_SVG || ''}<span>Deny</span>
                         </button>
                     </div>
-                    <div class="edit-proposal-diff">
-                        <div>
-                            <div class="edit-proposal-label">Original</div>
-                            <pre>${escapeHtml(edit.original_text || '')}</pre>
-                        </div>
-                        <div>
-                            <div class="edit-proposal-label">Replacement</div>
-                            <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.replacement_text || '')}</textarea>
-                        </div>
-                    </div>
+                    ${renderOperationDetails(edit, editId, applied)}
                     <div class="edit-proposal-comment-block hidden" data-edit-proposal-comment-block>
                         <label class="edit-proposal-label" data-edit-proposal-comment-label for="edit-proposal-comment-${escapeHtml(editId)}">Comment</label>
                         <textarea id="edit-proposal-comment-${escapeHtml(editId)}" class="edit-proposal-comment" data-edit-proposal-comment="${escapeHtml(editId)}" spellcheck="true" ${applied ? 'disabled' : ''}></textarea>
                     </div>
                 </article>
             `;
+        }
+
+        function renderOperationDetails(edit, editId, applied) {
+            const operation = editOperation(edit);
+            if (operation === 'create_file') {
+                return `
+                    <div class="edit-proposal-diff">
+                        <div>
+                            <div class="edit-proposal-label">New file</div>
+                            <pre>${escapeHtml(edit.path || '')}</pre>
+                        </div>
+                        <div>
+                            <div class="edit-proposal-label">Content</div>
+                            <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.replacement_text || '')}</textarea>
+                        </div>
+                    </div>
+                `;
+            }
+            if (operation === 'delete_file') {
+                return `
+                    <div class="edit-proposal-diff is-single">
+                        <div>
+                            <div class="edit-proposal-label">Delete file</div>
+                            <pre>${escapeHtml(edit.original_text || edit.path || '')}</pre>
+                        </div>
+                    </div>
+                `;
+            }
+            if (operation === 'move_file') {
+                return `
+                    <div class="edit-proposal-diff">
+                        <div>
+                            <div class="edit-proposal-label">Source</div>
+                            <pre>${escapeHtml(edit.path || '')}</pre>
+                        </div>
+                        <div>
+                            <div class="edit-proposal-label">Destination</div>
+                            <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.destination || edit.replacement_text || '')}</textarea>
+                        </div>
+                    </div>
+                `;
+            }
+            return `
+                <div class="edit-proposal-diff">
+                    <div>
+                        <div class="edit-proposal-label">Original</div>
+                        <pre>${escapeHtml(edit.original_text || '')}</pre>
+                    </div>
+                    <div>
+                        <div class="edit-proposal-label">Replacement</div>
+                        <textarea data-edit-proposal-replacement="${escapeHtml(editId)}" spellcheck="false" ${applied ? 'disabled' : ''}>${escapeHtml(edit.replacement_text || '')}</textarea>
+                    </div>
+                </div>
+            `;
+        }
+
+        function editOperation(edit) {
+            return String(edit.operation || 'replace_text');
+        }
+
+        function operationLabel(operation) {
+            if (operation === 'create_file') return 'Create';
+            if (operation === 'delete_file') return 'Delete';
+            if (operation === 'move_file') return 'Move';
+            return 'Edit';
         }
 
         function bindProposalCard(container, proposal) {

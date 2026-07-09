@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,12 +21,38 @@ from core.constants import (
 )
 from core.database import connect_sqlite_from_system_db
 from core.logger import UnifiedLogger
-from core.vault_state.file_mutations import replace_vault_file_content
+from core.utils.hash import hash_file_bytes, hash_file_content
+from core.vault_state.file_operations import (
+    PreparedCreateFile,
+    PreparedDeleteFile,
+    PreparedMoveFile,
+    PreparedTextMutation,
+    TextReplacement,
+    VaultFileOperationRejected,
+    prepare_create_file,
+    prepare_delete_file,
+    prepare_move_file,
+    prepare_text_replacements_once,
+    write_prepared_create_file,
+    write_prepared_delete_file,
+    write_prepared_move_file,
+    write_prepared_text_mutation,
+)
 from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
 
 
 logger = UnifiedLogger(tag="edit-proposals")
 MAX_PROPOSAL_EDITS = 20
+REPLACE_TEXT_OPERATION = "replace_text"
+CREATE_FILE_OPERATION = "create_file"
+DELETE_FILE_OPERATION = "delete_file"
+MOVE_FILE_OPERATION = "move_file"
+SUPPORTED_EDIT_OPERATIONS = {
+    REPLACE_TEXT_OPERATION,
+    CREATE_FILE_OPERATION,
+    DELETE_FILE_OPERATION,
+    MOVE_FILE_OPERATION,
+}
 
 
 class EditProposalError(ValueError):
@@ -44,20 +69,24 @@ class PreparedEdit:
     """One validated proposal edit."""
 
     edit_id: str
+    operation: str
     path: str
     rationale: str
     original_text: str
     replacement_text: str
     before_sha256: str
+    destination: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "edit_id": self.edit_id,
+            "operation": self.operation,
             "path": self.path,
             "rationale": self.rationale,
             "original_text": self.original_text,
             "replacement_text": self.replacement_text,
             "before_sha256": self.before_sha256,
+            "destination": self.destination,
         }
 
 
@@ -245,54 +274,149 @@ def apply_edit_proposal(
         )
 
     vault_root = Path(vault_path).resolve()
-    updated_content_by_path: dict[str, str] = {}
-    for path, path_edits in _group_edits_by_path(edits).items():
-        full_path = resolve_vault_relative_path(
-            vault_path=vault_root,
-            path=path,
-            markdown_only=False,
-        )
-        if not full_path.is_file():
-            raise EditProposalError(
-                "VaultFileNotFound",
-                f"Vault file not found: {path}",
-                details={"path": path},
-            )
-        current = full_path.read_text(encoding="utf-8")
+    prepared_mutations: list[
+        PreparedTextMutation | PreparedCreateFile | PreparedDeleteFile | PreparedMoveFile
+    ] = []
+    replace_edits = [
+        edit for edit in edits
+        if _edit_operation(edit) == REPLACE_TEXT_OPERATION
+    ]
+    for path, path_edits in _group_edits_by_path(replace_edits).items():
         expected_hash = str(path_edits[0].get("before_sha256") or "")
-        current_hash = _sha256_text(current)
-        if expected_hash and current_hash != expected_hash:
-            raise EditProposalError(
-                "VaultFileConflict",
-                f"File changed since proposal was created: {path}",
-                details={"path": path, "expected_sha256": expected_hash, "actual_sha256": current_hash},
-            )
-        updated = current
+        replacements: list[TextReplacement] = []
         for edit in path_edits:
             edit_id = str(edit.get("edit_id") or "")
             original = str(edit.get("original_text") or "")
             replacement = str(overrides.get(edit_id, edit.get("replacement_text") or ""))
-            if not original:
-                raise EditProposalError("InvalidEdit", f"Edit {edit_id} has empty original text.")
-            if updated.count(original) != 1:
+            replacements.append(
+                TextReplacement(
+                    edit_id=edit_id,
+                    original_text=original,
+                    replacement_text=replacement,
+                )
+            )
+        try:
+            prepared = prepare_text_replacements_once(
+                vault_path=vault_root,
+                path=path,
+                replacements=replacements,
+                expected_sha256=expected_hash,
+                markdown_only=False,
+            )
+        except VaultFileOperationRejected as exc:
+            details = dict(exc.details)
+            if exc.code == "file_not_found":
+                raise EditProposalError(
+                    "VaultFileNotFound",
+                    f"Vault file not found: {path}",
+                    details={"path": path, **details},
+                ) from exc
+            if exc.code == "file_conflict":
+                raise EditProposalError(
+                    "VaultFileConflict",
+                    f"File changed since proposal was created: {path}",
+                    details={
+                        "path": path,
+                        "expected_sha256": details.get("expected_sha256"),
+                        "actual_sha256": details.get("actual_sha256"),
+                    },
+                ) from exc
+            if exc.code == "invalid_edit":
+                edit_id = str(details.get("edit_id") or "")
+                raise EditProposalError(
+                    "InvalidEdit",
+                    f"Edit {edit_id} has empty original text.",
+                    details={"path": path, **details},
+                ) from exc
+            if exc.code == "text_match_count_mismatch":
                 raise EditProposalError(
                     "EditTextMismatch",
                     f"Original text no longer matches exactly once in {path}.",
-                    details={"path": path, "edit_id": edit_id},
+                    details={"path": path, **details},
+                ) from exc
+            raise EditProposalError(
+                exc.code,
+                str(exc),
+                details={"path": path, **details},
+            ) from exc
+        prepared_mutations.append(prepared)
+
+    for edit in edits:
+        operation = _edit_operation(edit)
+        if operation == REPLACE_TEXT_OPERATION:
+            continue
+        edit_id = str(edit.get("edit_id") or "")
+        path = str(edit.get("path") or "")
+        expected_hash = str(edit.get("before_sha256") or "")
+        try:
+            if operation == CREATE_FILE_OPERATION:
+                prepared_mutations.append(
+                    prepare_create_file(
+                        vault_path=vault_root,
+                        path=path,
+                        content=str(overrides.get(edit_id, edit.get("replacement_text") or "")),
+                        markdown_only=False,
+                    )
                 )
-            updated = updated.replace(original, replacement, 1)
-        updated_content_by_path[path] = updated
+            elif operation == DELETE_FILE_OPERATION:
+                prepared_mutations.append(
+                    prepare_delete_file(
+                        vault_path=vault_root,
+                        path=path,
+                        expected_sha256=expected_hash,
+                        markdown_only=False,
+                    )
+                )
+            elif operation == MOVE_FILE_OPERATION:
+                destination = str(overrides.get(edit_id, edit.get("destination") or ""))
+                prepared_mutations.append(
+                    prepare_move_file(
+                        vault_path=vault_root,
+                        path=path,
+                        destination=destination,
+                        expected_sha256=expected_hash,
+                        markdown_only=False,
+                    )
+                )
+        except VaultFileOperationRejected as exc:
+            _raise_operation_error(
+                exc=exc,
+                path=path,
+                edit_id=edit_id,
+                operation=operation,
+            )
 
     applied_paths: list[str] = []
-    for path, content in updated_content_by_path.items():
-        replace_vault_file_content(
-            vault_path=vault_root,
-            path=path,
-            content=content,
-            operation="apply_edit_proposal",
-            markdown_only=False,
-        )
-        applied_paths.append(path)
+    for prepared in prepared_mutations:
+        if isinstance(prepared, PreparedTextMutation):
+            result = write_prepared_text_mutation(
+                vault_path=vault_root,
+                prepared=prepared,
+                operation="apply_edit_proposal",
+                markdown_only=False,
+            )
+            applied_paths.append(result.path)
+        elif isinstance(prepared, PreparedCreateFile):
+            result = write_prepared_create_file(
+                vault_path=vault_root,
+                prepared=prepared,
+                markdown_only=False,
+            )
+            applied_paths.append(result.path)
+        elif isinstance(prepared, PreparedDeleteFile):
+            result = write_prepared_delete_file(
+                vault_path=vault_root,
+                prepared=prepared,
+                markdown_only=False,
+            )
+            applied_paths.append(result.path)
+        elif isinstance(prepared, PreparedMoveFile):
+            source_result, destination_result = write_prepared_move_file(
+                vault_path=vault_root,
+                prepared=prepared,
+                markdown_only=False,
+            )
+            applied_paths.extend([source_result.path, destination_result.path])
 
     applied_at = datetime.now(UTC).isoformat()
     proposal["status"] = "applied"
@@ -395,6 +519,13 @@ def deny_edit_proposal(
 
 
 def _prepare_edit(*, vault_root: Path, raw_edit: dict[str, Any], index: int) -> PreparedEdit:
+    operation = _edit_operation(raw_edit)
+    if operation not in SUPPORTED_EDIT_OPERATIONS:
+        raise EditProposalError(
+            "InvalidOperation",
+            f"Edit {index} has unsupported operation '{operation}'.",
+            details={"operation": operation, "supported_operations": sorted(SUPPORTED_EDIT_OPERATIONS)},
+        )
     path = normalize_vault_relative_path(str(raw_edit.get("path") or ""))
     if not path:
         raise EditProposalError("InvalidPath", f"Edit {index} is missing a vault file path.")
@@ -403,12 +534,77 @@ def _prepare_edit(*, vault_root: Path, raw_edit: dict[str, Any], index: int) -> 
         path=path,
         markdown_only=False,
     )
+    if operation == CREATE_FILE_OPERATION:
+        if full_path.exists():
+            raise EditProposalError(
+                "VaultFileExists",
+                f"Vault file already exists: {path}",
+                details={"path": path},
+            )
+        content = str(
+            raw_edit.get("content")
+            or raw_edit.get("initial_content")
+            or raw_edit.get("replacement_text")
+            or ""
+        )
+        return PreparedEdit(
+            edit_id=str(raw_edit.get("edit_id") or f"edit-{index}"),
+            operation=operation,
+            path=path,
+            rationale=str(raw_edit.get("rationale") or "").strip(),
+            original_text="",
+            replacement_text=content,
+            before_sha256="",
+        )
+
     if not full_path.is_file():
         raise EditProposalError(
             "VaultFileNotFound",
             f"Vault file not found: {path}",
             details={"path": path},
         )
+
+    if operation == DELETE_FILE_OPERATION:
+        return PreparedEdit(
+            edit_id=str(raw_edit.get("edit_id") or f"edit-{index}"),
+            operation=operation,
+            path=path,
+            rationale=str(raw_edit.get("rationale") or "").strip(),
+            original_text=str(raw_edit.get("original_text") or ""),
+            replacement_text="",
+            before_sha256=hash_file_bytes(full_path, length=None),
+        )
+
+    if operation == MOVE_FILE_OPERATION:
+        destination = normalize_vault_relative_path(str(raw_edit.get("destination") or ""))
+        if not destination:
+            raise EditProposalError(
+                "InvalidDestination",
+                f"Edit {index} is missing a destination path.",
+                details={"path": path},
+            )
+        destination_path = resolve_vault_relative_path(
+            vault_path=vault_root,
+            path=destination,
+            markdown_only=False,
+        )
+        if destination_path.exists():
+            raise EditProposalError(
+                "VaultDestinationExists",
+                f"Vault destination already exists: {destination}",
+                details={"path": path, "destination": destination},
+            )
+        return PreparedEdit(
+            edit_id=str(raw_edit.get("edit_id") or f"edit-{index}"),
+            operation=operation,
+            path=path,
+            rationale=str(raw_edit.get("rationale") or "").strip(),
+            original_text=str(raw_edit.get("original_text") or ""),
+            replacement_text=destination,
+            before_sha256=hash_file_bytes(full_path, length=None),
+            destination=destination,
+        )
+
     content = full_path.read_text(encoding="utf-8")
     original = str(raw_edit.get("original_text") or "")
     replacement = str(raw_edit.get("replacement_text") or "")
@@ -422,6 +618,7 @@ def _prepare_edit(*, vault_root: Path, raw_edit: dict[str, Any], index: int) -> 
         )
     return PreparedEdit(
         edit_id=str(raw_edit.get("edit_id") or f"edit-{index}"),
+        operation=operation,
         path=path,
         rationale=str(raw_edit.get("rationale") or "").strip(),
         original_text=original,
@@ -474,6 +671,61 @@ def _group_edits_by_path(edits: list[dict[str, Any]]) -> dict[str, list[dict[str
     return grouped
 
 
+def _edit_operation(edit: dict[str, Any]) -> str:
+    return str(edit.get("operation") or REPLACE_TEXT_OPERATION).strip() or REPLACE_TEXT_OPERATION
+
+
+def _raise_operation_error(
+    *,
+    exc: VaultFileOperationRejected,
+    path: str,
+    edit_id: str,
+    operation: str,
+) -> None:
+    details = dict(exc.details)
+    if exc.code == "file_not_found":
+        raise EditProposalError(
+            "VaultFileNotFound",
+            f"Vault file not found: {path}",
+            details={"path": path, "edit_id": edit_id, "operation": operation, **details},
+        ) from exc
+    if exc.code == "file_exists":
+        raise EditProposalError(
+            "VaultFileExists",
+            f"Vault file already exists: {path}",
+            details={"path": path, "edit_id": edit_id, "operation": operation, **details},
+        ) from exc
+    if exc.code == "destination_exists":
+        raise EditProposalError(
+            "VaultDestinationExists",
+            f"Vault destination already exists: {details.get('destination') or ''}",
+            details={"path": path, "edit_id": edit_id, "operation": operation, **details},
+        ) from exc
+    if exc.code == "invalid_destination":
+        raise EditProposalError(
+            "InvalidDestination",
+            "Move destination is required.",
+            details={"path": path, "edit_id": edit_id, "operation": operation, **details},
+        ) from exc
+    if exc.code == "file_conflict":
+        raise EditProposalError(
+            "VaultFileConflict",
+            f"File changed since proposal was created: {path}",
+            details={
+                "path": path,
+                "edit_id": edit_id,
+                "operation": operation,
+                "expected_sha256": details.get("expected_sha256"),
+                "actual_sha256": details.get("actual_sha256"),
+            },
+        ) from exc
+    raise EditProposalError(
+        exc.code,
+        str(exc),
+        details={"path": path, "edit_id": edit_id, "operation": operation, **details},
+    ) from exc
+
+
 def _review_decision_label(decision: str) -> str:
     if decision == "approve":
         return "Approved"
@@ -485,4 +737,4 @@ def _review_decision_label(decision: str) -> str:
 
 
 def _sha256_text(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return hash_file_content(content, length=None)

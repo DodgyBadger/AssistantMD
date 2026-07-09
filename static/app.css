@@ -2208,6 +2208,26 @@ details[open] summary.collapsible-summary .chevron {
     flex-direction: column;
     gap: 0.15rem;
 }
+.edit-proposal-operation-label {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 999px;
+    background: rgb(var(--bg-app));
+    color: rgb(var(--text-secondary));
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.18rem 0.42rem;
+    text-transform: uppercase;
+}
+.edit-proposal-new-path {
+    color: rgb(var(--text-primary));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+}
 .edit-proposal-row-actions {
     display: flex;
     flex-wrap: wrap;
@@ -2265,6 +2285,9 @@ details[open] summary.collapsible-summary .chevron {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0.55rem;
     margin-top: 0.35rem;
+}
+.edit-proposal-diff.is-single {
+    grid-template-columns: minmax(0, 1fr);
 }
 .edit-proposal-diff pre,
 .edit-proposal-diff textarea {
