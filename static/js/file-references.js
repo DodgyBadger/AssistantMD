@@ -30,23 +30,35 @@
             input.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
-        function openPicker() {
+        function openExplorer({ revealPath = '' } = {}) {
             pickerOpen = true;
             callbacks.openPathPicker?.({
-                id: 'file-reference-picker-modal',
-                title: 'Add File Reference',
+                id: 'vault-explorer-modal',
+                title: 'Vault Explorer',
                 mode: 'files',
                 subtitle: selectedVault(),
-                missingVaultMessage: 'Select a vault before adding file references.',
-                initialScope: workspacePath() ? 'workspace' : 'vault',
-                onSelect: ({ path }) => {
-                    insertReference(path);
-                    pickerOpen = false;
+                missingVaultMessage: 'Select a vault before opening the explorer.',
+                initialScope: revealPath ? 'vault' : (workspacePath() ? 'workspace' : 'vault'),
+                revealInitialPath: revealPath,
+                explorer: true,
+                showPath: true,
+                expandDirectoriesOnSelect: true,
+                closeOnSelect: false,
+                onSelect: ({ path, kind }) => {
+                    if (kind === 'file') openFile(path, { onBack: () => {} });
                 },
+                onOpenFile: (path) => openFile(path, { onBack: () => {} }),
+                onAddReference: insertReference,
+                onSetWorkspace: (path) => callbacks.setWorkspace?.(path),
+                onMutate: mutatePath,
                 onClose: () => {
                     pickerOpen = false;
                 },
             });
+        }
+
+        function openPicker() {
+            openExplorer();
         }
 
         function closePicker() {
@@ -150,6 +162,10 @@
                     }
                     return;
                 }
+                if (error.errorType === 'VaultFileNotText') {
+                    if (statusLabel) statusLabel.textContent = 'This file is not editable as plain text.';
+                    return;
+                }
                 if (statusLabel) {
                     statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
                 }
@@ -158,23 +174,20 @@
 
         function openDirectory(path) {
             if (!path) return;
-            callbacks.openPathPicker?.({
-                id: 'vault-directory-browser-modal',
-                title: 'Vault Browser',
-                subtitle: path,
-                mode: 'files',
-                revealInitialPath: path,
-                initialScope: 'vault',
-                showPath: true,
-                emptyText: 'This folder is empty.',
-                expandDirectoriesOnSelect: true,
-                closeOnSelect: false,
-                onSelect: ({ path: selectedPath, kind }) => {
-                    if (kind === 'file') {
-                        openFile(selectedPath, { onBack: () => {} });
-                    }
-                },
+            openExplorer({ revealPath: path });
+        }
+
+        async function mutatePath(payload) {
+            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/paths/mutate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.detail || `HTTP ${response.status}`);
+            }
+            return response.json();
         }
 
         async function fetchVaultFile(path) {
@@ -460,6 +473,7 @@
 
         return Object.freeze({
             openPicker,
+            openExplorer,
             closePicker,
             insertReference,
             openFile,

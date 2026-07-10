@@ -67,6 +67,13 @@
                 <path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
             </svg>
         `.trim(),
+        MORE_HORIZONTAL_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.5" fill="currentColor"></circle>
+                <circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>
+                <circle cx="19" cy="12" r="1.5" fill="currentColor"></circle>
+            </svg>
+        `.trim(),
         EDIT_ICON_SVG: `
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M12 20h9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -227,6 +234,7 @@
         folder: icons.FOLDER_ICON_SVG,
         import: icons.IMPORT_ICON_SVG,
         link: icons.LINK_ICON_SVG,
+        more: icons.MORE_HORIZONTAL_ICON_SVG,
         play: icons.PLAY_ICON_SVG,
         plus: icons.PLUS_ICON_SVG,
         refresh: icons.REFRESH_ICON_SVG,

@@ -115,9 +115,17 @@ from core.runtime.execution_tasks import (
 from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
 from core.vault_state.cleanup import cleanup_expired_vault_state
-from core.vault_state.file_mutations import replace_vault_file_content, write_vault_file
+from core.vault_state.file_mutations import (
+    VaultMutationRejected,
+    replace_vault_file_content,
+    write_vault_file,
+)
 from core.vault_state.file_operations import (
     VaultFileOperationRejected,
+    VaultFileOperationResult,
+    delete_vault_path_operation,
+    make_vault_directory_operation,
+    move_vault_path_operation,
     replace_full_text_content,
 )
 from core.vault_state.models import VaultFile, VaultFileEvent
@@ -170,6 +178,7 @@ from .models import (
     VaultFileReferenceInfo,
     VaultFileReferenceListResponse,
     VaultPathResolutionInfo,
+    VaultPathMutationResponse,
     VaultPathResolveResponse,
     VaultFileResponse,
     EditProposalApplyResponse,
@@ -212,6 +221,28 @@ logger = UnifiedLogger(tag="api-services")
 _chat_store = ChatStore()
 _VAULT_FILE_REFERENCE_LIMIT = 100
 _VAULT_FILE_READ_MAX_BYTES = 2 * 1024 * 1024
+_NON_TEXT_MEDIA_TYPE_PREFIXES = (
+    "application/vnd.ms-",
+    "application/vnd.openxmlformats-officedocument.",
+    "audio/",
+    "font/",
+    "image/",
+    "video/",
+)
+_NON_TEXT_MEDIA_TYPES = {
+    "application/epub+zip",
+    "application/gzip",
+    "application/octet-stream",
+    "application/pdf",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.text",
+    "application/x-7z-compressed",
+    "application/x-bzip2",
+    "application/x-rar-compressed",
+    "application/x-tar",
+    "application/zip",
+}
 
 
 def get_enabled_chat_tool_names() -> list[str]:
@@ -405,36 +436,11 @@ def get_vault_file(vault_name: str, path: str) -> VaultFileResponse:
             message=f"Vault path is not a file: {normalized}",
             details={"path": normalized, "vault_name": vault_name},
         )
-    try:
-        size_bytes = full_path.stat().st_size
-    except OSError as exc:
-        raise APIException(
-            status_code=500,
-            error_type="VaultFileStatFailed",
-            message=f"Failed to inspect vault file: {normalized}",
-            details={"path": normalized, "vault_name": vault_name},
-        ) from exc
-    if size_bytes > _VAULT_FILE_READ_MAX_BYTES:
-        raise APIException(
-            status_code=413,
-            error_type="VaultFileTooLarge",
-            message=f"Vault file is too large for inline editing: {normalized}",
-            details={
-                "path": normalized,
-                "vault_name": vault_name,
-                "size_bytes": size_bytes,
-                "max_bytes": _VAULT_FILE_READ_MAX_BYTES,
-            },
-        )
-    try:
-        content = full_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise APIException(
-            status_code=415,
-            error_type="VaultFileNotText",
-            message=f"Vault file is not UTF-8 text: {normalized}",
-            details={"path": normalized, "vault_name": vault_name},
-        ) from exc
+    content = _read_editable_vault_text(
+        full_path=full_path,
+        path=normalized,
+        vault_name=vault_name,
+    )
     return _vault_file_response(
         vault_name=vault_name,
         path=normalized,
@@ -475,6 +481,11 @@ def update_vault_file(
             message=f"Vault file not found: {normalized}",
             details={"path": normalized, "vault_name": vault_name},
         )
+    _read_editable_vault_text(
+        full_path=full_path,
+        path=normalized,
+        vault_name=vault_name,
+    )
     try:
         replace_full_text_content(
             vault_path=vault_root,
@@ -516,6 +527,51 @@ def update_vault_file(
         full_path=full_path,
         content=content,
         message=f"Saved {normalized}.",
+    )
+
+
+def _read_editable_vault_text(*, full_path: Path, path: str, vault_name: str) -> str:
+    """Return UTF-8 text or reject content that should not enter the inline editor."""
+    try:
+        size_bytes = full_path.stat().st_size
+    except OSError as exc:
+        raise APIException(
+            status_code=500,
+            error_type="VaultFileStatFailed",
+            message=f"Failed to inspect vault file: {path}",
+            details={"path": path, "vault_name": vault_name},
+        ) from exc
+    if size_bytes > _VAULT_FILE_READ_MAX_BYTES:
+        raise APIException(
+            status_code=413,
+            error_type="VaultFileTooLarge",
+            message=f"Vault file is too large for inline editing: {path}",
+            details={
+                "path": path,
+                "vault_name": vault_name,
+                "size_bytes": size_bytes,
+                "max_bytes": _VAULT_FILE_READ_MAX_BYTES,
+            },
+        )
+    media_type = (mimetypes.guess_type(path)[0] or "").lower()
+    if media_type in _NON_TEXT_MEDIA_TYPES or media_type.startswith(_NON_TEXT_MEDIA_TYPE_PREFIXES):
+        raise _vault_file_not_text_error(path=path, vault_name=vault_name, media_type=media_type)
+    try:
+        raw = full_path.read_bytes()
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _vault_file_not_text_error(path=path, vault_name=vault_name, media_type=media_type) from exc
+    if b"\x00" in raw or any(byte < 32 and byte not in {8, 9, 10, 12, 13} for byte in raw):
+        raise _vault_file_not_text_error(path=path, vault_name=vault_name, media_type=media_type)
+    return content
+
+
+def _vault_file_not_text_error(*, path: str, vault_name: str, media_type: str) -> APIException:
+    return APIException(
+        status_code=415,
+        error_type="VaultFileNotText",
+        message=f"Vault file is not editable as plain text: {path}",
+        details={"path": path, "vault_name": vault_name, "media_type": media_type},
     )
 
 
@@ -1053,6 +1109,168 @@ def resolve_vault_path_references(
         vault_name=vault_name,
         workspace_path=normalized_workspace,
         items=items,
+    )
+
+
+def mutate_vault_path(
+    *,
+    vault_name: str,
+    operation: str,
+    path: str,
+    destination: str = "",
+    content: str = "",
+) -> VaultPathMutationResponse:
+    """Apply one direct explorer mutation through shared vault operations."""
+    vault_root, normalized, full_path = _resolve_vault_file_path(vault_name, path)
+    if operation == "create_file":
+        if full_path.exists():
+            raise APIException(
+                status_code=409,
+                error_type="VaultPathExists",
+                message=f"Vault path already exists: {normalized}",
+                details={"path": normalized, "vault_name": vault_name},
+            )
+        try:
+            mutation = write_vault_file(
+                vault_path=vault_root,
+                path=normalized,
+                content=content,
+                fail_if_exists=True,
+                markdown_only=False,
+            )
+        except VaultMutationRejected as exc:
+            raise _vault_path_mutation_error(exc, vault_name=vault_name, path=normalized) from exc
+        return VaultPathMutationResponse(
+            operation=operation,
+            path=normalized,
+            kind="file",
+            message=f"Created {normalized}.",
+            metadata={
+                "task_id": mutation.task_id,
+                "vault_id": mutation.vault_id,
+                "event_sequence": mutation.event_sequence,
+            },
+        )
+
+    if operation == "create_directory":
+        if full_path.exists():
+            raise APIException(
+                status_code=409,
+                error_type="VaultPathExists",
+                message=f"Vault path already exists: {normalized}",
+                details={"path": normalized, "vault_name": vault_name},
+            )
+        result = make_vault_directory_operation(vault_path=vault_root, path=normalized)
+        return _vault_path_operation_response(
+            operation=operation,
+            path=normalized,
+            kind="directory",
+            result=result,
+        )
+
+    if not full_path.exists():
+        raise APIException(
+            status_code=404,
+            error_type="VaultPathNotFound",
+            message=f"Vault path not found: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        )
+
+    if operation == "move":
+        if full_path.is_dir():
+            raise APIException(
+                status_code=400,
+                error_type="VaultDirectoryMoveUnsupported",
+                message="Moving directories is not supported by the vault explorer yet.",
+                details={"path": normalized, "vault_name": vault_name},
+            )
+        normalized_destination = _normalize_vault_file_path(destination)
+        result = move_vault_path_operation(
+            vault_path=vault_root,
+            path=normalized,
+            destination=normalized_destination,
+            overwrite=False,
+        )
+        return _vault_path_operation_response(
+            operation=operation,
+            path=normalized,
+            destination=normalized_destination,
+            kind="file",
+            result=result,
+        )
+
+    if operation == "delete":
+        kind = "directory" if full_path.is_dir() else "file"
+        if kind == "directory" and any(full_path.iterdir()):
+            raise APIException(
+                status_code=409,
+                error_type="VaultDirectoryNotEmpty",
+                message=f"Cannot delete non-empty directory: {normalized}",
+                details={"path": normalized, "vault_name": vault_name},
+            )
+        result = delete_vault_path_operation(
+            vault_path=vault_root,
+            path=normalized,
+            confirm_path=normalized,
+        )
+        return _vault_path_operation_response(
+            operation=operation,
+            path=normalized,
+            kind=kind,
+            result=result,
+        )
+
+    raise APIException(
+        status_code=400,
+        error_type="InvalidVaultPathMutation",
+        message=f"Unsupported vault path mutation: {operation}",
+        details={"operation": operation, "path": normalized},
+    )
+
+
+def _vault_path_operation_response(
+    *,
+    operation: str,
+    path: str,
+    kind: Literal["file", "directory"],
+    result: VaultFileOperationResult,
+    destination: str = "",
+) -> VaultPathMutationResponse:
+    status = str(result.metadata.get("status") or "error")
+    if status != "completed":
+        status_code = 404 if status == "not_found" else 409 if status == "already_exists" else 400
+        raise APIException(
+            status_code=status_code,
+            error_type=str(result.metadata.get("error_type") or "VaultPathMutationFailed"),
+            message=str(result.return_value),
+            details={"path": path, "destination": destination, **result.metadata},
+        )
+    return VaultPathMutationResponse(
+        operation=operation,
+        path=path,
+        destination=destination,
+        kind=kind,
+        message=str(result.return_value),
+        metadata=dict(result.metadata),
+    )
+
+
+def _vault_path_mutation_error(
+    exc: VaultMutationRejected,
+    *,
+    vault_name: str,
+    path: str,
+) -> APIException:
+    status_by_code = {
+        "file_exists": 409,
+        "file_not_found": 404,
+        "invalid_path": 400,
+    }
+    return APIException(
+        status_code=status_by_code.get(exc.code, 400),
+        error_type=exc.code,
+        message=str(exc),
+        details={"path": path, "vault_name": vault_name},
     )
 
 

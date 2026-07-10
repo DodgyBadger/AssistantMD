@@ -121,8 +121,8 @@ const workspacePicker = window.WorkspacePicker.create({
     callbacks: {
         fetchSessions,
         addChatErrorMessage,
-        openPathPicker: (options) => vaultPathPicker.open(options),
         closePathPicker: () => vaultPathPicker.close(),
+        openVaultExplorer: (options) => fileReferences.openExplorer(options),
     },
 });
 
@@ -135,6 +135,7 @@ const fileReferences = window.FileReferences.create({
         addChatErrorMessage,
         openPathPicker: (options) => vaultPathPicker.open(options),
         closePathPicker: () => vaultPathPicker.close(),
+        setWorkspace: (path) => workspacePicker.setPath(path),
     },
 });
 

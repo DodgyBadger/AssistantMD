@@ -57,6 +57,8 @@ from .models import (
     VaultFileReferenceListResponse,
     VaultPathResolveRequest,
     VaultPathResolveResponse,
+    VaultPathMutationRequest,
+    VaultPathMutationResponse,
     VaultFileResponse,
     VaultFileUpdateRequest,
     ExecutionTaskCancelResponse,
@@ -137,6 +139,7 @@ from .services import (
     list_vault_directories,
     list_vault_file_references,
     resolve_vault_path_references,
+    mutate_vault_path,
     get_vault_file,
     update_vault_file,
     get_chat_edit_proposal,
@@ -1108,6 +1111,24 @@ async def resolve_vault_file_references(
             vault_name=vault_name,
             paths=request.paths,
             workspace_path=request.workspace_path,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/vaults/{vault_name}/paths/mutate", response_model=VaultPathMutationResponse)
+async def mutate_vault_explorer_path(
+    vault_name: str,
+    request: VaultPathMutationRequest,
+):
+    """Apply one direct user mutation from the vault explorer."""
+    try:
+        return mutate_vault_path(
+            vault_name=vault_name,
+            operation=request.operation,
+            path=request.path,
+            destination=request.destination,
+            content=request.content,
         )
     except Exception as e:
         return create_error_response(e)

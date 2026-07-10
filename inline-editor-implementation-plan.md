@@ -2,10 +2,11 @@
 
 ## Goal
 
-Make vault file interaction part of the chat workflow without recreating a full
-markdown editor or vault explorer. The chat remains the primary surface; file
-selection, inspection, and edit approval appear only when they help a concrete
-conversation.
+Make vault file interaction part of the chat workflow without recreating an
+Obsidian-style knowledge environment. The chat remains the primary surface. A
+shared vault explorer provides basic navigation and deterministic file control,
+while file references and collaborative editing connect those files directly to
+the conversation.
 
 ## Product Direction
 
@@ -25,7 +26,8 @@ agent-side discovery remain the default workflow.
 
 ## Non-Goals
 
-- No persistent full-vault tree sidebar.
+- No persistent full-vault tree sidebar; the vault explorer remains an
+  on-demand modal.
 - No Obsidian-style workspace, backlinks, graph, panes, or tabbed editor.
 - No requirement that users explicitly reference files for normal chat tasks.
 - No hidden database ownership of user content; vault files remain canonical.
@@ -91,6 +93,9 @@ among similarly named files.
 ### File Modal Contract
 
 - Resolve only vault-relative paths under the selected vault.
+- Display every non-hidden file in the explorer, but open only bounded UTF-8
+  plain-text content in the inline editor. Reject known binary media types,
+  invalid UTF-8, NUL/control-byte content, and oversized files on the backend.
 - Default to read/preview mode.
 - Offer edit mode for supported text/markdown files.
 - Save with optimistic concurrency using a content hash from open time.
@@ -275,6 +280,35 @@ domain actions, not raw buttons:
   workspace metadata for debugging.
 - Prompt payloads should remain readable in the chat transcript after use.
 
+## Vault Explorer Extension
+
+The composer file-reference control, workspace selector, and chat directory
+links use one shared Vault Explorer modal. It always permits navigation across
+the selected vault; an entry point may reveal a workspace, directory, or file
+without restricting the tree to that location.
+
+The explorer owns only basic vault operations:
+
+- expand folders in place and open text files in the existing hash-checked
+  editor;
+- copy any file or folder path and add it to the current prompt;
+- set a folder as the chat workspace;
+- create an empty file or folder;
+- move or rename files;
+- delete files and empty folders.
+
+Direct explorer actions are explicit user commands and do not enter the
+collaborative tool-review flow. They route through shared vault-state mutation
+helpers so audit, snapshot, refresh, and path-boundary behavior does not drift
+from agent tool operations. Directory moves and recursive deletion of non-empty
+directories remain unsupported until their rollback and confirmation contracts
+are defined.
+
+The frontend implementation stays consolidated in `vault-path-picker.js` for
+tree state and explorer actions, `file-references.js` for prompt insertion and
+file editing, and `workspace-picker.js` for session workspace persistence. The
+mutation API is a thin adapter over the shared vault operations.
+
 ## Relevant Existing Contracts
 
 - `docs/architecture/api-ui.md`: API endpoints should stay thin and service-led.
@@ -364,6 +398,13 @@ Phase 2 validation targets:
 
 Current branch slice:
 
+- Unified the composer reference picker, workspace selector, and linked-directory
+  browser into one on-demand Vault Explorer modal.
+- Added direct explorer controls for copy path, add to prompt, set workspace,
+  create file/folder, move or rename files, and constrained deletion.
+- Added `POST /api/vaults/{vault_name}/paths/mutate` as a thin API over shared
+  vault-state create, move, and delete operations. Directory moves and non-empty
+  directory deletion return explicit rejections.
 - Added generic vault file read/write API models and routes:
   - `GET /api/vaults/{vault_name}/files?path=...`
   - `PUT /api/vaults/{vault_name}/files?path=...`

@@ -55,6 +55,15 @@
             }
         }
 
+        async function setPath(path) {
+            if (!elements.workspacePathInput) return;
+            elements.workspacePathInput.value = path || '';
+            elements.workspacePathInput.dispatchEvent(new Event('input', { bubbles: true }));
+            state.isWorkspaceUnlocked = true;
+            syncControls();
+            await savePath();
+        }
+
         function unlockPath() {
             if (!elements.workspacePathInput || state.isLoading) return;
             const confirmed = window.confirm(
@@ -73,22 +82,9 @@
                 alert('Select a vault before choosing a workspace.');
                 return;
             }
-            callbacks.openPathPicker?.({
-                id: 'workspace-picker-modal',
-                title: 'Workspace',
-                mode: 'directories',
+            callbacks.openVaultExplorer?.({
+                revealPath: currentPath(),
                 subtitle: vault,
-                selectedLabel: 'Selected workspace',
-                selectedPath: currentPath() || 'No workspace',
-                showPath: false,
-                missingVaultMessage: 'Select a vault before choosing a workspace.',
-                onSelect: async ({ path }) => {
-                    elements.workspacePathInput.value = path;
-                    elements.workspacePathInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    state.isWorkspaceUnlocked = true;
-                    syncControls();
-                    await savePath();
-                },
             });
         }
 
@@ -100,6 +96,7 @@
             syncControls,
             currentPath,
             savePath,
+            setPath,
             unlockPath,
             openModal,
             closeModal,

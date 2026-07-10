@@ -19,7 +19,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         self.create_file(vault, "Projects/Alpha/Nested/plan.md", "# Plan\n")
         self.create_file(vault, "README.md", "# Vault root\n")
         self.create_file(vault, "root-note.md", "root note\n")
+        self.create_file(vault, "script.py", "print('editable')\n")
         self.create_file(vault, ".hidden/secret.md", "hidden\n")
+        (vault / "binary.docx").write_bytes(b"PK\x03\x04\x00\x00not plain text")
 
         await self.start_system()
 
@@ -101,6 +103,20 @@ class VaultFileReferenceApiScenario(BaseScenario):
         read_payload = read.json()
         assert read_payload["content"] == "# Alpha\n\nStart here.\n", "Read returns exact content"
         assert read_payload["sha256"], "Read returns a content hash"
+
+        source_read = self.call_api(
+            f"/api/vaults/{vault.name}/files",
+            params={"path": "script.py"},
+        )
+        assert source_read.status_code == 200, "UTF-8 source files should be editable"
+        assert source_read.json()["content"] == "print('editable')\n"
+
+        binary_read = self.call_api(
+            f"/api/vaults/{vault.name}/files",
+            params={"path": "binary.docx"},
+        )
+        assert binary_read.status_code == 415, "Binary files should not open in the text editor"
+        assert binary_read.json().get("error") == "VaultFileNotText"
 
         traversal = self.call_api(
             f"/api/vaults/{vault.name}/files",
@@ -188,6 +204,75 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert ("created", "Projects/README.md") in event_pairs, (
             "Create-if-missing should refresh vault-state creation events"
         )
+
+        create_directory = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={"operation": "create_directory", "path": "Explorer"},
+        )
+        assert create_directory.status_code == 200
+        assert (vault / "Explorer").is_dir()
+
+        create_file = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={
+                "operation": "create_file",
+                "path": "Explorer/draft.md",
+                "content": "# Draft\n",
+            },
+        )
+        assert create_file.status_code == 200
+        assert (vault / "Explorer/draft.md").read_text(encoding="utf-8") == "# Draft\n"
+
+        move_file = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={
+                "operation": "move",
+                "path": "Explorer/draft.md",
+                "destination": "Explorer/renamed.md",
+            },
+        )
+        assert move_file.status_code == 200
+        assert not (vault / "Explorer/draft.md").exists()
+        assert (vault / "Explorer/renamed.md").is_file()
+
+        move_directory = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={
+                "operation": "move",
+                "path": "Explorer",
+                "destination": "MovedExplorer",
+            },
+        )
+        assert move_directory.status_code == 400
+        assert move_directory.json().get("error") == "VaultDirectoryMoveUnsupported"
+
+        non_empty_delete = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={"operation": "delete", "path": "Explorer"},
+        )
+        assert non_empty_delete.status_code == 409
+        assert non_empty_delete.json().get("error") == "VaultDirectoryNotEmpty"
+
+        delete_file = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={"operation": "delete", "path": "Explorer/renamed.md"},
+        )
+        assert delete_file.status_code == 200
+        assert not (vault / "Explorer/renamed.md").exists()
+
+        delete_directory = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={"operation": "delete", "path": "Explorer"},
+        )
+        assert delete_directory.status_code == 200
+        assert not (vault / "Explorer").exists()
 
     def _vault_file_events(self) -> list[sqlite3.Row]:
         db_path = self.run_path / "system" / "vault_state.db"

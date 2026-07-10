@@ -163,6 +163,29 @@ class VaultPathResolveResponse(BaseModel):
     )
 
 
+class VaultPathMutationRequest(BaseModel):
+    """One direct user mutation requested from the vault explorer."""
+
+    operation: Literal["create_file", "create_directory", "move", "delete"] = Field(
+        ...,
+        description="Explorer mutation operation",
+    )
+    path: str = Field(..., min_length=1, description="Vault-relative source or target path")
+    destination: str = Field("", description="Vault-relative move destination")
+    content: str = Field("", description="Initial text content for create_file")
+
+
+class VaultPathMutationResponse(BaseModel):
+    """Result of one direct vault explorer mutation."""
+
+    operation: str = Field(..., description="Completed mutation operation")
+    path: str = Field(..., description="Vault-relative source or target path")
+    destination: str = Field("", description="Vault-relative destination when moved")
+    kind: Literal["file", "directory"] = Field(..., description="Mutated path kind")
+    message: str = Field(..., description="Human-readable mutation result")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Mutation audit metadata")
+
+
 class EditProposalApplyRequest(BaseModel):
     """Request to apply selected edits from a collaborative edit proposal."""
 
