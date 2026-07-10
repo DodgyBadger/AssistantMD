@@ -11,6 +11,7 @@ from core.logger import UnifiedLogger
 from core.vault_state.file_operations import (
     VaultFileOperationRejected,
     VaultFileOperationResult,
+    frontmatter_vault_files_operation,
     list_vault_paths_operation,
     read_vault_file_operation,
     search_vault_files_operation,
@@ -35,15 +36,17 @@ class FileRead(BaseTool):
             path: str = "",
             recursive: bool = False,
             search_term: str = "",
+            keys: str = "",
             start_line: int = 0,
             line_count: int = 0,
         ) -> ToolReturn:
             """Read, list, or search vault files.
 
-            :param operation: One of read, list, search.
+            :param operation: One of read, list, search, frontmatter.
             :param path: Vault-relative file or directory path.
             :param recursive: Recurse through subdirectories for list.
             :param search_term: Text to search for.
+            :param keys: Optional comma-separated frontmatter keys to return.
             :param start_line: Optional 1-indexed first line for read.
             :param line_count: Optional number of lines for read.
             """
@@ -84,8 +87,16 @@ class FileRead(BaseTool):
                             search_term=search_term,
                         )
                     )
+                if normalized == "frontmatter":
+                    return _to_tool_return(
+                        frontmatter_vault_files_operation(
+                            vault_path=vault_path,
+                            path=path,
+                            keys=keys,
+                        )
+                    )
                 return _error_result(
-                    f"Unknown operation '{operation}'. Available: read, list, search",
+                    f"Unknown operation '{operation}'. Available: read, list, search, frontmatter",
                     operation=operation,
                     path=path,
                     error_type="unknown_operation",
@@ -109,7 +120,7 @@ class FileRead(BaseTool):
         return Tool(
             file_read,
             name="file_read",
-            description="Read, list, and search files within the current vault.",
+            description="Read, list, search, and inspect frontmatter within the current vault.",
         )
 
     @classmethod

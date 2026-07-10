@@ -95,13 +95,13 @@ description: Pending diff metadata validation
 ## Run
 
 ```python
-listed = await file_ops_safe(operation="list", path="meetings")
+listed = await file_read(operation="list", path="meetings")
 pending = await pending_files(operation="get", items=listed)
 if pending.items:
     first = pending.items[0]
     diff = first.metadata.get("pending_diff", {})
     if diff.get("available"):
-        await file_ops_safe(
+        await file_write(
             operation="write",
             path="outputs/pending-diff.md",
             content=(

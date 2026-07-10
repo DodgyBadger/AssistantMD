@@ -1,19 +1,19 @@
-"""Integration scenario for file_ops_safe search across normal text files."""
+"""Integration scenario for file_read search across normal text files."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.tools.file_ops_safe import FileOpsSafe
+from core.vault_state.file_operations import search_vault_files_operation
 from validation.core.base_scenario import BaseScenario
 
 
-class FileOpsSafeSearchTextFilesScenario(BaseScenario):
+class FileReadSearchTextFilesScenario(BaseScenario):
     """Validate search is not limited to markdown after all-file listing support."""
 
     async def test_scenario(self):
-        vault = self.create_vault("FileOpsSafeSearchTextFilesVault")
+        vault = self.create_vault("FileReadSearchTextFilesVault")
         self.create_file(vault, "notes/alpha.md", "needle in markdown\n")
         self.create_file(vault, "notes/bravo.txt", "needle in text\n")
         self.create_file(vault, "notes/charlie.json", '{"value": "needle in json"}\n')
@@ -22,7 +22,11 @@ class FileOpsSafeSearchTextFilesScenario(BaseScenario):
 
         await self.start_system()
 
-        broad = FileOpsSafe._search_files("notes", "needle", str(vault))
+        broad = search_vault_files_operation(
+            vault_path=str(vault),
+            path="notes",
+            search_term="needle",
+        )
         broad_matches = set(broad.metadata.get("matches") or [])
         self.soft_assert_equal(
             broad.metadata.get("status"),
@@ -46,7 +50,11 @@ class FileOpsSafeSearchTextFilesScenario(BaseScenario):
             "Search should continue to exclude hidden files by default",
         )
 
-        explicit_file = FileOpsSafe._search_files("notes/bravo.txt", "needle", str(vault))
+        explicit_file = search_vault_files_operation(
+            vault_path=str(vault),
+            path="notes/bravo.txt",
+            search_term="needle",
+        )
         self.soft_assert(
             any(
                 match.startswith("notes/bravo.txt:")
@@ -55,7 +63,11 @@ class FileOpsSafeSearchTextFilesScenario(BaseScenario):
             "Search should work when scoped to an explicit non-markdown file",
         )
 
-        explicit_glob = FileOpsSafe._search_files("notes/*.txt", "needle", str(vault))
+        explicit_glob = search_vault_files_operation(
+            vault_path=str(vault),
+            path="notes/*.txt",
+            search_term="needle",
+        )
         glob_matches = set(explicit_glob.metadata.get("matches") or [])
         self.soft_assert(
             any(match.startswith("notes/bravo.txt:") for match in glob_matches),
@@ -66,7 +78,11 @@ class FileOpsSafeSearchTextFilesScenario(BaseScenario):
             "Explicit glob search should respect the caller's file pattern",
         )
 
-        miss = FileOpsSafe._search_files("notes", "absent", str(vault))
+        miss = search_vault_files_operation(
+            vault_path=str(vault),
+            path="notes",
+            search_term="absent",
+        )
         self.soft_assert_equal(
             miss.return_value,
             "No matches found for 'absent' in text files",

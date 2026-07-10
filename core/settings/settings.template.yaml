@@ -25,14 +25,11 @@ settings:
       - browser
       - file_read
       - file_write
-      - file_ops_safe
-      - file_ops_unsafe
       - code_execution
       - delegate
       - chat_history_compact
       - session_ops
       - goal_ops
-      - propose_file_edits
     description: "App-wide enabled tool names. Disabled tools are unavailable to chat, delegates, workflows, and scripts."
     category: "Chat"
     restart_required: false
@@ -134,12 +131,12 @@ settings:
     restart_required: false
   file_search_timeout_seconds:
     value: 10
-    description: "Timeout in seconds for file_ops_safe search operations."
+    description: "Timeout in seconds for file_read search operations."
     category: "Files"
     restart_required: false
-  file_ops_safe_list_max_results:
+  file_list_max_results:
     value: 200
-    description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
+    description: "Maximum number of results returned by file_read list operations. 0 = disabled."
     category: "Files"
     restart_required: false
   vault_state_enabled:
@@ -422,22 +419,12 @@ tools:
     user_editable: false
   file_read:
     module: core.tools.file_read
-    description: "Read, list, and search files in the current vault"
+    description: "Read, list, search, and inspect frontmatter in the current vault"
     requires_secrets: []
     user_editable: false
   file_write:
     module: core.tools.file_write
-    description: "Create, append, replace text, move, delete, create folders, and batch mutate files in the current vault"
-    requires_secrets: []
-    user_editable: false
-  file_ops_safe:
-    module: core.tools.file_ops_safe
-    description: "Read, write, append, list, search"
-    requires_secrets: []
-    user_editable: false
-  file_ops_unsafe:
-    module: core.tools.file_ops_unsafe
-    description: "Edit, delete, move/overwrite (use with caution)"
+    description: "Create, append, edit lines, replace text, move, delete, create folders, and batch mutate files in the current vault"
     requires_secrets: []
     user_editable: false
   tavily_extract:
@@ -489,18 +476,6 @@ tools:
   goal_ops:
     module: core.tools.goal_ops
     description: "Track durable goals, ordered steps, events, and checkpoints"
-    requires_secrets: []
-    user_editable: false
-    chat_visible: true
-  propose_file_edits:
-    module: core.tools.propose_file_edits
-    description: "Create interactive chat artifacts for reviewing and applying proposed vault file edits"
-    requires_secrets: []
-    user_editable: false
-    chat_visible: true
-  review_create_file:
-    module: core.tools.review_create_file
-    description: "Create one vault file through the deferred inline review workflow"
     requires_secrets: []
     user_editable: false
     chat_visible: true

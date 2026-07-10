@@ -21,7 +21,11 @@ class EnabledToolsRegistryScenario(BaseScenario):
             update_response = self.call_api(
                 "/api/system/settings/general/enabled_tools",
                 method="PUT",
-                data={"value": json.dumps(["session_ops"])},
+                data={
+                    "value": json.dumps(
+                        ["propose_file_edits", "review_create_file", "session_ops"]
+                    )
+                },
             )
             assert update_response.status_code == 200, "enabled_tools setting should update"
 
@@ -30,7 +34,7 @@ class EnabledToolsRegistryScenario(BaseScenario):
             metadata = metadata_response.json()
             assert metadata.get("settings", {}).get("enabled_tools") == [
                 "session_ops"
-            ], "Metadata should expose enabled_tools, not per-chat defaults"
+            ], "Metadata should expose only resolved, non-retired enabled tools"
             assert (
                 "default_chat_tools" not in metadata.get("settings", {})
             ), "Metadata should not expose removed default_chat_tools setting"
@@ -53,7 +57,7 @@ class EnabledToolsRegistryScenario(BaseScenario):
             ], "Binding all should resolve only app-wide enabled tools"
 
             try:
-                resolve_tool_binding(["file_ops_safe"], vault_path=str(vault))
+                resolve_tool_binding(["file_read"], vault_path=str(vault))
             except ValueError as exc:
                 assert "unavailable or disabled" in str(exc)
             else:

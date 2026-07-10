@@ -1,20 +1,22 @@
-"""Integration scenario for unsafe cleanup of empty vault directories."""
+"""Integration scenario for cleanup of empty vault directories."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.tools.file_ops_safe import FileOpsSafe
-from core.tools.file_ops_unsafe import FileOpsUnsafe
+from core.vault_state.file_operations import (
+    delete_vault_path_operation,
+    list_vault_paths_operation,
+)
 from validation.core.base_scenario import BaseScenario
 
 
-class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
+class FileWriteDirectoryDeleteScenario(BaseScenario):
     """Validate directory delete removes only empty dirs and reports leftovers."""
 
     async def test_scenario(self):
-        vault = self.create_vault("FileOpsUnsafeDirectoryDeleteVault")
+        vault = self.create_vault("FileWriteDirectoryDeleteVault")
         self.create_file(vault, "cleanup/mixed/keep.md", "keep\n")
         self.create_file(vault, "cleanup/mixed/nonempty-child/keep.txt", "keep\n")
         self.create_file(vault, "cleanup/hidden-only/.keep", "hidden\n")
@@ -24,9 +26,9 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
 
         await self.start_system()
 
-        discovery = FileOpsSafe._list_files(
-            "cleanup",
-            str(vault),
+        discovery = list_vault_paths_operation(
+            path="cleanup",
+            vault_path=str(vault),
             recursive=True,
             max_results=200,
         )
@@ -51,9 +53,9 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
             not in set(discovery_metadata.get("empty_directory_candidates") or []),
             "Directory with only hidden files should not be reported as an empty cleanup candidate",
         )
-        truncated_discovery = FileOpsSafe._list_files(
-            "cleanup",
-            str(vault),
+        truncated_discovery = list_vault_paths_operation(
+            path="cleanup",
+            vault_path=str(vault),
             recursive=True,
             max_results=2,
         )
@@ -74,7 +76,11 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
             "Directory-first truncation should omit files when directories fill the cap",
         )
 
-        first = FileOpsUnsafe._delete_path("cleanup", "cleanup", str(vault))
+        first = delete_vault_path_operation(
+            vault_path=str(vault),
+            path="cleanup",
+            confirm_path="cleanup",
+        )
         first_metadata = first.metadata
         self.soft_assert_equal(
             first_metadata.get("status"),
@@ -128,27 +134,31 @@ class FileOpsUnsafeDirectoryDeleteScenario(BaseScenario):
             "Partial cleanup should report remaining files, including hidden files",
         )
 
-        FileOpsUnsafe._delete_path(
-            "cleanup/mixed/keep.md",
-            "cleanup/mixed/keep.md",
-            str(vault),
+        delete_vault_path_operation(
+            vault_path=str(vault),
+            path="cleanup/mixed/keep.md",
+            confirm_path="cleanup/mixed/keep.md",
         )
-        FileOpsUnsafe._delete_path(
-            "cleanup/mixed/nonempty-child/keep.txt",
-            "cleanup/mixed/nonempty-child/keep.txt",
-            str(vault),
+        delete_vault_path_operation(
+            vault_path=str(vault),
+            path="cleanup/mixed/nonempty-child/keep.txt",
+            confirm_path="cleanup/mixed/nonempty-child/keep.txt",
         )
-        FileOpsUnsafe._delete_path(
-            "cleanup/png-only/image.png",
-            "cleanup/png-only/image.png",
-            str(vault),
+        delete_vault_path_operation(
+            vault_path=str(vault),
+            path="cleanup/png-only/image.png",
+            confirm_path="cleanup/png-only/image.png",
         )
-        FileOpsUnsafe._delete_path(
-            "cleanup/hidden-only/.keep",
-            "cleanup/hidden-only/.keep",
-            str(vault),
+        delete_vault_path_operation(
+            vault_path=str(vault),
+            path="cleanup/hidden-only/.keep",
+            confirm_path="cleanup/hidden-only/.keep",
         )
-        second = FileOpsUnsafe._delete_path("cleanup", "cleanup", str(vault))
+        second = delete_vault_path_operation(
+            vault_path=str(vault),
+            path="cleanup",
+            confirm_path="cleanup",
+        )
         second_metadata = second.metadata
         self.soft_assert_equal(
             second_metadata.get("status"),

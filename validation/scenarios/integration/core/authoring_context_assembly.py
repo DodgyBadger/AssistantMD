@@ -48,7 +48,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"path": "notes/trig.md"},
                         tool_call_id="call-read-trig",
                     )
@@ -58,7 +58,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content="Trig notes file contents",
                         tool_call_id="call-read-trig",
                     )
@@ -175,7 +175,7 @@ for message in assembled.messages:
         for item in history_payload.items
     ),
     "tool_exchange_rendered": any(
-        "tool_exchange: file_ops_safe" in item.text
+        "tool_exchange: file_read" in item.text
         and "Trig notes file contents" in item.text
         for item in history_payload.items
     ),

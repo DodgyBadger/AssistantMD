@@ -62,8 +62,8 @@ FROM records
 WHERE trace_id = 'TRACE_ID_HERE'
   AND (
     span_name LIKE 'running tool:%'
-    OR attributes->'input_data'->>'name' IN ('delegate', 'file_ops_safe')
-    OR attributes->'result'->>'name' IN ('delegate', 'file_ops_safe')
+    OR attributes->'input_data'->>'name' IN ('delegate', 'file_read', 'file_write')
+    OR attributes->'result'->>'name' IN ('delegate', 'file_read', 'file_write')
   )
 ORDER BY start_timestamp ASC
 LIMIT 200

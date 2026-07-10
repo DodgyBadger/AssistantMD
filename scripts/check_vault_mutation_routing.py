@@ -29,7 +29,6 @@ ALLOWED_DIRECT_MUTATION_CALLS = {
     (Path("api/services.py"), "update_system_settings", "path.write_text"),
     (Path("api/services.py"), "repair_settings_from_template", "active_path.write_text"),
     (Path("api/services.py"), "_write_system_workflow_file_content", "temp_path.write_text"),
-    (Path("core/tools/file_ops_safe.py"), "_make_directory", "os.makedirs"),
     (Path("core/ingestion/service.py"), "process_job", "import_root.mkdir"),
 }
 

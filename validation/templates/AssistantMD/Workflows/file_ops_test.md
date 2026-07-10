@@ -11,7 +11,7 @@ You are a helpful workflow that tests file operations tools. Use lots of emojis!
 
 ## STEP1
 @model sonnet
-@tools file_ops_safe
+@tools file_read, file_write
 @output file: test-results/step1
 
 Test the file operations capabilities by:
@@ -25,7 +25,7 @@ Use the file_operations tool to perform these tasks and document what you did.
 
 ## STEP2
 @model sonnet
-@tools file_ops_safe
+@tools file_read, file_write
 @output file: test-results/step2
 
 Now test the safety features by attempting unsafe operations:
@@ -38,7 +38,7 @@ Use the file_operations tool to test these safety boundaries and report the resu
 
 ## STEP3
 @model sonnet
-@tools file_ops_safe, file_ops_unsafe
+@tools file_read, file_write
 @output file: test-results/step3
 
 Test the unsafe file operations tool by performing these operations:
@@ -48,10 +48,10 @@ Test the unsafe file operations tool by performing these operations:
    Project: [INSERT NAME]
    Budget: [INSERT AMOUNT]
 
-2. Use file_ops_unsafe to EDIT_LINE on template.md:
+2. Use file_write to EDIT_LINE on template.md:
    - Edit line 2, replacing "Project: [INSERT NAME]" with "Project: AI Research"
 
-3. Use file_ops_unsafe to REPLACE_TEXT on template.md:
+3. Use file_write to REPLACE_TEXT on template.md:
    - Replace "[INSERT AMOUNT]" with "$50,000"
 
 4. Create a separate file 'delete-test.md' with some content

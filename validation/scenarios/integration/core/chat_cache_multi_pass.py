@@ -46,7 +46,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 if call_index["value"] == 2:
                     return {
                         "code": (
-                            'artifact = await file_ops_safe(operation="read", path="notes/repeated.md")\n'
+                            'artifact = await file_read(operation="read", path="notes/repeated.md")\n'
                             'text = artifact.return_value\n'
                             "text[:80]"
                         )
@@ -54,14 +54,14 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 if call_index["value"] == 3:
                     return {
                         "code": (
-                            'artifact = await file_ops_safe(operation="read", path="notes/repeated.md")\n'
+                            'artifact = await file_read(operation="read", path="notes/repeated.md")\n'
                             'text = artifact.return_value\n'
                             'str(text.count("OVERFLOW_SEGMENT"))'
                         )
                     }
                 raise AssertionError("Unexpected code_execution phase")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
             del vault_name, tools, model, thinking
             call_index["value"] += 1
             binding = resolve_tool_binding(
@@ -124,7 +124,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Inspect the repeated note and show the beginning.",
                     "session_id": session_id,
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
@@ -143,7 +143,7 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Inspect the same repeated note again and count the repeated token.",
                     "session_id": session_id,
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )

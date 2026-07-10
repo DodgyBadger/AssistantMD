@@ -13,8 +13,24 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from core.constants import VIRTUAL_MOUNTS
-from core.settings import get_file_ops_safe_list_max_results, get_file_search_timeout_seconds
+import yaml
+from pydantic_ai.messages import BinaryContent
+
+from core.chunking import (
+    build_input_files_prompt,
+    default_chunking_policy,
+    evaluate_markdown_image_policy,
+    parse_markdown_chunks,
+)
+from core.constants import SUPPORTED_READ_FILE_TYPES, VIRTUAL_MOUNTS
+from core.settings import (
+    get_auto_cache_max_tokens,
+    get_chunking_max_image_bytes_per_image,
+    get_chunking_max_image_mb_per_image,
+    get_file_list_max_results,
+    get_file_search_timeout_seconds,
+)
+from core.utils.image_inputs import build_image_tool_payload
 from core.utils.hash import hash_file_bytes, hash_file_content
 from core.vault_state.file_mutations import (
     DirectoryCleanupResult,
@@ -140,7 +156,7 @@ def read_vault_file_operation(
     start_line: int = 0,
     line_count: int = 0,
 ) -> VaultFileOperationResult:
-    """Read a vault markdown/text file, optionally returning a line slice."""
+    """Read a vault text or image file, optionally returning a text line slice."""
     if _virtual_mount_key(path):
         return _read_virtual_file_operation(path=path, start_line=start_line, line_count=line_count)
     target = resolve_text_target(
@@ -150,6 +166,12 @@ def read_vault_file_operation(
         prefer_markdown_extension=True,
     )
     if target.full_path.is_dir():
+        if _should_try_markdown_file(target.requested_path):
+            return list_vault_paths_operation(
+                vault_path=vault_path,
+                path=target.requested_path,
+                recursive=False,
+            )
         return _operation_result(
             f"Cannot read '{target.path}' - this is a directory, not a file.",
             operation="read",
@@ -159,38 +181,78 @@ def read_vault_file_operation(
             error_type="is_directory",
             metadata=target.requested_path_metadata,
         )
-    try:
-        content = _read_existing_text_file(target)
-    except VaultFileOperationRejected as exc:
-        return _rejected_result(exc, operation="read", fallback_path=path)
+    return _read_existing_vault_file_operation(
+        target=target,
+        vault_path=Path(vault_path),
+        start_line=start_line,
+        line_count=line_count,
+    )
 
-    lines = content.splitlines()
-    metadata: dict[str, Any] = {
-        "media_mode": "text",
-        "content_chars": len(content),
-        **target.requested_path_metadata,
-    }
-    return_value = content
-    if start_line > 0 or line_count > 0:
-        start = max(start_line, 1) if start_line else 1
-        count = line_count if line_count > 0 else len(lines) - start + 1
-        selected = lines[start - 1:start - 1 + count]
-        return_value = "\n".join(selected)
-        metadata.update(
-            {
-                "start_line": start,
-                "line_count": count,
-                "lines_returned": len(selected),
-                "total_lines": len(lines),
-            }
+
+def frontmatter_vault_files_operation(
+    *,
+    vault_path: str | Path,
+    path: str = "",
+    keys: str = "",
+) -> VaultFileOperationResult:
+    """Extract YAML frontmatter from matching vault markdown files."""
+    raw_path = path.strip()
+    pattern_path = raw_path or "*"
+    _reject_virtual_mount_path(pattern_path)
+    if ".." in pattern_path or pattern_path.startswith("/"):
+        return _operation_result(
+            "Path cannot contain '..' or start with '/'.",
+            operation="frontmatter",
+            path=raw_path,
+            status="invalid_target",
+            error_type="invalid_path",
         )
+
+    vault_root = Path(vault_path).resolve()
+    candidate = (vault_root / pattern_path).resolve()
+    _ensure_within_root(vault_root, candidate)
+    if candidate.is_dir():
+        pattern_path = str(Path(pattern_path) / "*")
+
+    filter_keys = [key.strip() for key in keys.split(",") if key.strip()]
+    items: list[dict[str, Any]] = []
+    for match in sorted(glob.glob(str(vault_root / pattern_path), recursive=False)):
+        full_path = Path(match).resolve()
+        if full_path.suffix.lower() not in {".md", ".markdown"} or not full_path.is_file():
+            continue
+        _ensure_within_root(vault_root, full_path)
+        relative_path = _relative_to_root(vault_root, full_path)
+        if any(part.startswith(".") for part in Path(relative_path).parts):
+            continue
+        try:
+            frontmatter = _parse_markdown_frontmatter(full_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            frontmatter = {}
+        if filter_keys:
+            frontmatter = {
+                key: frontmatter[key]
+                for key in filter_keys
+                if key in frontmatter
+            }
+        items.append({"path": relative_path, "frontmatter": frontmatter})
+
+    if not items:
+        message = f"No markdown files found for path '{pattern_path}'"
+    else:
+        lines = []
+        for item in items:
+            values = ", ".join(
+                f"{key}: {value}"
+                for key, value in item["frontmatter"].items()
+            )
+            lines.append(f"  {item['path']}: {{{values}}}")
+        message = f"Frontmatter ({len(items)} files):\n" + "\n".join(lines)
     return _operation_result(
-        return_value,
-        operation="read",
-        path=target.path,
+        message,
+        operation="frontmatter",
+        path=pattern_path,
         status="completed",
-        exists=True,
-        metadata=metadata,
+        metadata={"file_count": len(items), "items": items},
     )
 
 
@@ -300,12 +362,24 @@ def search_vault_files_operation(
         )
 
     vault_root = Path(vault_path).resolve()
+    result_root = vault_root
     search_path = path.strip()
     if search_path:
         mount_key = _virtual_mount_key(search_path)
         if mount_key:
-            root, result_prefix = _resolve_virtual_search_scope(search_path, mount_key)
-            vault_root = root
+            result_root = _virtual_mount_root(mount_key)
+            relative_scope = search_path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+            if ".." in relative_scope.split("/"):
+                return _operation_result(
+                    "Path cannot contain '..' for virtual mounts.",
+                    operation="search",
+                    path=search_path,
+                    search_term=query,
+                    status="invalid_target",
+                    error_type="invalid_path",
+                )
+            search_roots = _resolve_search_roots(result_root, relative_scope)
+            result_prefix = mount_key
         elif ".." in search_path or search_path.startswith("/"):
             return _operation_result(
                 "Path cannot contain '..' or start with '/'.",
@@ -316,12 +390,22 @@ def search_vault_files_operation(
                 error_type="invalid_path",
             )
         else:
-            root = (vault_root / search_path).resolve()
+            search_roots = _resolve_search_roots(vault_root, search_path)
             result_prefix = ""
-            _ensure_within_root(vault_root, root)
     else:
-        root = vault_root
+        search_roots = [vault_root]
         result_prefix = ""
+
+    if not search_roots:
+        return _operation_result(
+            f"No matches found for '{query}' in text files",
+            operation="search",
+            path=search_path,
+            search_term=query,
+            status="completed",
+            exists=True,
+            metadata={"match_count": 0, "matches": []},
+        )
 
     command = [
         "rg",
@@ -332,7 +416,7 @@ def search_vault_files_operation(
         "never",
         "--ignore-case",
         query,
-        str(root),
+        *(str(root) for root in search_roots),
     ]
     try:
         completed = subprocess.run(
@@ -341,6 +425,15 @@ def search_vault_files_operation(
             text=True,
             timeout=_default_search_timeout_seconds(),
             check=False,
+        )
+    except FileNotFoundError:
+        return _operation_result(
+            "Error: ripgrep (rg) not found. Please install ripgrep to use search functionality.",
+            operation="search",
+            path=search_path,
+            search_term=query,
+            status="error",
+            error_type="ripgrep_not_found",
         )
     except subprocess.TimeoutExpired:
         return _operation_result(
@@ -361,7 +454,7 @@ def search_vault_files_operation(
             error_type="search_failed",
         )
 
-    matches = _format_rg_matches(completed.stdout, vault_root, result_prefix=result_prefix)
+    matches = _format_rg_matches(completed.stdout, result_root, result_prefix=result_prefix)
     if not matches:
         return _operation_result(
             f"No matches found for '{query}' in text files",
@@ -435,7 +528,12 @@ def overwrite_vault_file_operation(
             status="error",
             error_type="invalid_path",
         )
-    target = resolve_text_target(vault_path=vault_path, path=path, markdown_only=True)
+    target = resolve_text_target(
+        vault_path=vault_path,
+        path=path,
+        markdown_only=True,
+        prefer_markdown_extension=True,
+    )
     existed_before = target.full_path.exists()
     if existed_before:
         mutation = replace_vault_file_content(
@@ -541,19 +639,130 @@ def replace_text_vault_file_operation(
     )
 
 
+def edit_vault_line_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    line_number: int,
+    old_text: str,
+    new_text: str,
+) -> VaultFileOperationResult:
+    """Replace one validated line in an existing markdown file."""
+    target = resolve_markdown_text_target(vault_path=vault_path, path=path)
+    if not target.full_path.exists():
+        return _operation_result(
+            f"Cannot edit '{target.path}' - file does not exist",
+            operation="edit_line",
+            path=target.path,
+            status="not_found",
+            exists=False,
+            error_type="file_not_found",
+            metadata=target.requested_path_metadata,
+        )
+    if line_number < 1:
+        return _operation_result(
+            f"Invalid line_number {line_number} - must be >= 1",
+            operation="edit_line",
+            path=target.path,
+            status="error",
+            exists=True,
+            error_type="invalid_line_number",
+            metadata=target.requested_path_metadata,
+        )
+    if target.full_path.is_dir():
+        return _operation_result(
+            f"Cannot edit '{target.path}' - this is a directory, not a file",
+            operation="edit_line",
+            path=target.path,
+            status="invalid_target",
+            exists=True,
+            error_type="is_directory",
+            metadata=target.requested_path_metadata,
+        )
+
+    with target.full_path.open("r", encoding="utf-8", newline="") as file:
+        lines = file.readlines()
+    if line_number > len(lines):
+        return _operation_result(
+            f"Line {line_number} does not exist - file only has {len(lines)} lines",
+            operation="edit_line",
+            path=target.path,
+            status="invalid_target",
+            exists=True,
+            error_type="line_not_found",
+            metadata={
+                "line_count": len(lines),
+                **target.requested_path_metadata,
+            },
+        )
+
+    original_line = lines[line_number - 1]
+    current_line = original_line.rstrip("\r\n")
+    if current_line != old_text:
+        return _operation_result(
+            (
+                f"Line {line_number} content mismatch. "
+                f"Expected: '{old_text}', Found: '{current_line}'"
+            ),
+            operation="edit_line",
+            path=target.path,
+            status="error",
+            exists=True,
+            error_type="content_mismatch",
+            metadata={
+                "line_number": line_number,
+                **target.requested_path_metadata,
+            },
+        )
+
+    line_ending = "\r\n" if original_line.endswith("\r\n") else "\n"
+    if "\n" in new_text:
+        lines[line_number - 1:line_number] = [
+            line + line_ending
+            for line in new_text.split("\n")
+        ]
+    else:
+        lines[line_number - 1] = new_text + line_ending
+    mutation = replace_vault_file_content(
+        vault_path=vault_path,
+        path=target.path,
+        content="".join(lines),
+        operation="edit_line",
+        markdown_only=True,
+    )
+    return _mutation_result(
+        f"Successfully edited line {line_number} in '{target.path}'",
+        operation="edit_line",
+        path=target.path,
+        mutation=mutation,
+        exists=True,
+        metadata={
+            "line_number": line_number,
+            **target.requested_path_metadata,
+        },
+    )
+
+
 def move_vault_path_operation(
     *,
     vault_path: str | Path,
     path: str,
     destination: str,
+    overwrite: bool = False,
 ) -> VaultFileOperationResult:
-    """Move a vault file without overwriting an existing destination."""
+    """Move a vault file, optionally overwriting an existing destination."""
+    destination_target = resolve_text_target(
+        vault_path=vault_path,
+        path=destination,
+        markdown_only=False,
+    )
+    overwrote_destination = destination_target.full_path.exists()
     try:
         source_mutation, destination_mutation = move_vault_file(
             vault_path=vault_path,
             path=path,
             destination=destination,
-            overwrite=False,
+            overwrite=overwrite,
         )
     except VaultMutationRejected as exc:
         status = "not_found" if exc.code == "source_not_found" else "already_exists"
@@ -576,6 +785,7 @@ def move_vault_path_operation(
         status="completed",
         exists=True,
         metadata={
+            "overwrote_destination": overwrite and overwrote_destination,
             "task_id": source_mutation.task_id or destination_mutation.task_id,
             "vault_id": source_mutation.vault_id,
         },
@@ -1042,6 +1252,241 @@ def write_prepared_move_file(
     )
 
 
+def _read_existing_vault_file_operation(
+    *,
+    target: VaultTextTarget,
+    vault_path: Path,
+    start_line: int,
+    line_count: int,
+) -> VaultFileOperationResult:
+    if not target.full_path.exists():
+        return _operation_result(
+            f"Cannot read '{target.path}' - file does not exist.",
+            operation="read",
+            path=target.path,
+            status="not_found",
+            exists=False,
+            error_type="file_not_found",
+            metadata=target.requested_path_metadata,
+        )
+
+    extension = target.full_path.suffix.lower()
+    if start_line <= 0 and line_count <= 0 and SUPPORTED_READ_FILE_TYPES.get(extension) == "image":
+        binary_content = BinaryContent.from_path(target.full_path)
+        image_size_bytes = len(binary_content.data)
+        if get_chunking_max_image_bytes_per_image() > 0 and (
+            image_size_bytes > get_chunking_max_image_bytes_per_image()
+        ):
+            return _operation_result(
+                (
+                    f"Cannot attach image '{target.path}' ({image_size_bytes} bytes) - exceeds "
+                    "chunking_max_image_mb_per_image "
+                    f"({get_chunking_max_image_mb_per_image()} MB)."
+                ),
+                operation="read",
+                path=target.path,
+                status="unsupported",
+                exists=True,
+                error_type="image_too_large",
+                metadata={
+                    "media_mode": "image",
+                    "size_bytes": image_size_bytes,
+                    **target.requested_path_metadata,
+                },
+            )
+        payload = build_image_tool_payload(
+            image_path=target.full_path,
+            vault_path=str(vault_path),
+        )
+        return _operation_result(
+            [payload.note, payload.image_blob],
+            operation="read",
+            path=target.path,
+            status="completed",
+            exists=True,
+            metadata={
+                "media_mode": "image",
+                **payload.metadata,
+                **target.requested_path_metadata,
+            },
+        )
+
+    try:
+        file_content = _read_existing_text_file(target)
+    except VaultFileOperationRejected as exc:
+        return _rejected_result(exc, operation="read", fallback_path=target.path)
+
+    if start_line > 0 or line_count > 0:
+        return _slice_text_read_result(
+            target=target,
+            content=file_content,
+            start_line=start_line,
+            line_count=line_count,
+        )
+
+    if SUPPORTED_READ_FILE_TYPES.get(extension) == "markdown":
+        return _markdown_read_result(
+            target=target,
+            vault_path=vault_path,
+            file_content=file_content,
+        )
+    return _operation_result(
+        file_content,
+        operation="read",
+        path=target.path,
+        status="completed",
+        exists=True,
+        metadata={
+            "media_mode": "text",
+            "content_chars": len(file_content),
+            **target.requested_path_metadata,
+        },
+    )
+
+
+def _slice_text_read_result(
+    *,
+    target: VaultTextTarget,
+    content: str,
+    start_line: int,
+    line_count: int,
+) -> VaultFileOperationResult:
+    lines = content.splitlines()
+    start = max(start_line, 1) if start_line else 1
+    count = line_count if line_count > 0 else max(len(lines) - start + 1, 0)
+    selected = lines[start - 1:start - 1 + count]
+    media_mode = (
+        "markdown"
+        if SUPPORTED_READ_FILE_TYPES.get(target.full_path.suffix.lower()) == "markdown"
+        else "text"
+    )
+    return _operation_result(
+        "\n".join(selected),
+        operation="read",
+        path=target.path,
+        status="completed",
+        exists=True,
+        metadata={
+            "media_mode": media_mode,
+            "content_chars": len(content),
+            "start_line": start,
+            "line_count": count,
+            "lines_returned": len(selected),
+            "total_lines": len(lines),
+            **target.requested_path_metadata,
+        },
+    )
+
+
+def _markdown_read_result(
+    *,
+    target: VaultTextTarget,
+    vault_path: Path,
+    file_content: str,
+) -> VaultFileOperationResult:
+    markdown_chunks = parse_markdown_chunks(file_content)
+    if not any(chunk.kind == "image_ref" for chunk in markdown_chunks):
+        return _operation_result(
+            file_content,
+            operation="read",
+            path=target.path,
+            status="completed",
+            exists=True,
+            metadata={
+                "media_mode": "markdown",
+                "content_chars": len(file_content),
+                **target.requested_path_metadata,
+            },
+        )
+
+    decision = evaluate_markdown_image_policy(
+        file_content=file_content,
+        markdown_chunks=markdown_chunks,
+        source_markdown_path=target.path,
+        vault_path=str(vault_path),
+        auto_cache_max_tokens=get_auto_cache_max_tokens(),
+        policy=default_chunking_policy(),
+    )
+    if not decision.attach_images:
+        return _operation_result(
+            decision.normalized_text or file_content,
+            operation="read",
+            path=target.path,
+            status="completed",
+            exists=True,
+            metadata={
+                "media_mode": "markdown",
+                "content_chars": len(file_content),
+                "image_attachments_skipped": True,
+                "image_skip_reason": decision.reason,
+                **target.requested_path_metadata,
+            },
+        )
+
+    built = build_input_files_prompt(
+        input_file_data=[
+            {
+                "filepath": target.path,
+                "source_path": target.path,
+                "filename": Path(target.path).stem,
+                "content": file_content,
+                "found": True,
+                "error": None,
+                "images_policy": "auto",
+            }
+        ],
+        vault_path=str(vault_path),
+        include_file_framing=False,
+        supports_vision=None,
+    )
+    if isinstance(built.prompt, list):
+        return _operation_result(
+            built.prompt,
+            operation="read",
+            path=target.path,
+            status="completed",
+            exists=True,
+            metadata={
+                "filepath": target.path,
+                "media_mode": "markdown+images",
+                "attached_image_count": built.attached_image_count,
+                "attached_image_bytes": built.attached_image_bytes,
+                "warnings": built.warnings,
+                **target.requested_path_metadata,
+            },
+        )
+    return _operation_result(
+        built.prompt_text,
+        operation="read",
+        path=target.path,
+        status="completed",
+        exists=True,
+        metadata={
+            "media_mode": "markdown",
+            "content_chars": len(file_content),
+            "attached_image_count": built.attached_image_count,
+            "attached_image_bytes": built.attached_image_bytes,
+            **target.requested_path_metadata,
+        },
+    )
+
+
+def _parse_markdown_frontmatter(content: str) -> dict[str, Any]:
+    if not content.startswith("---"):
+        return {}
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    closing_index = next(
+        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"),
+        None,
+    )
+    if closing_index is None:
+        return {}
+    parsed = yaml.safe_load("\n".join(lines[1:closing_index])) or {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _read_existing_text_file(target: VaultTextTarget) -> str:
     if not target.full_path.exists():
         raise VaultFileOperationRejected(
@@ -1162,7 +1607,7 @@ def _operation_result(
 
 def _default_list_max_results() -> int:
     try:
-        return get_file_ops_safe_list_max_results()
+        return get_file_list_max_results()
     except Exception:
         return 200
 
@@ -1510,20 +1955,27 @@ def _list_virtual_paths_operation(
     )
 
 
-def _resolve_virtual_search_scope(path: str, mount_key: str) -> tuple[Path, str]:
-    root = _virtual_mount_root(mount_key)
-    rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
-    if ".." in rel.split("/"):
-        raise VaultFileOperationRejected(
-            "invalid_path",
-            "Path cannot contain '..' for virtual mounts.",
-            details={"path": path},
-        )
-    if rel:
-        scoped = (root / rel).resolve()
-        _ensure_within_root(root, scoped)
-        return scoped, mount_key
-    return root, mount_key
+def _resolve_search_roots(root: Path, scope: str) -> list[Path]:
+    """Resolve a bounded file, directory, or glob scope for ripgrep."""
+    if not scope:
+        return [root]
+    candidate = (root / scope).resolve()
+    _ensure_within_root(root, candidate)
+    if candidate.exists():
+        return [candidate]
+
+    matches: list[Path] = []
+    for raw_match in glob.iglob(str(root / scope), recursive="**" in scope):
+        match = Path(raw_match).resolve()
+        try:
+            _ensure_within_root(root, match)
+        except VaultFileOperationRejected:
+            continue
+        relative = _relative_to_root(root, match)
+        if any(part.startswith(".") for part in Path(relative).parts):
+            continue
+        matches.append(match)
+    return sorted(dict.fromkeys(matches))
 
 
 def _format_rg_matches(output: str, vault_root: Path, *, result_prefix: str = "") -> list[str]:

@@ -73,8 +73,9 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             model,
             thinking=None,
             context_template=None,
+            chat_mode="normal",
         ):
-            del vault_path, image_paths, image_uploads, thinking
+            del vault_path, image_paths, image_uploads, thinking, chat_mode
             history = chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
             agent = (
                 _BlockingSurfaceAgent()

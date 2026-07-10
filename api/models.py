@@ -285,6 +285,10 @@ class ChatTaskRequest(BaseModel):
     )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     workspace_path: Optional[str] = Field(None, description="Optional vault-relative workspace directory path")
+    chat_mode: Literal["normal", "collaborative"] = Field(
+        "normal",
+        description="Chat interaction mode. Collaborative mode routes file_write through inline review.",
+    )
 
 
 #######################################################################

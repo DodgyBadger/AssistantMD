@@ -9,6 +9,7 @@ current vault.
 
 - `write`
 - `append`
+- `edit_line`
 - `replace_text`
 - `move`
 - `delete`
@@ -41,6 +42,16 @@ file_write(operation="append", path="notes/log.md", content="\n- New item")
 
 ```python
 file_write(
+    operation="edit_line",
+    path="notes/todo.md",
+    line_number=5,
+    old_text="- [ ] draft",
+    new_text="- [x] draft",
+)
+```
+
+```python
+file_write(
     operation="replace_text",
     path="notes/todo.md",
     old_text="- [ ] draft",
@@ -51,6 +62,9 @@ file_write(
 ```python
 file_write(operation="move", path="Draft.md", destination="Archive/Draft.md")
 ```
+
+`move` does not replace an existing destination unless `overwrite=True` is
+explicitly provided.
 
 ```python
 file_write(operation="delete", path="Scratch.md", confirm_path="Scratch.md")
@@ -69,7 +83,7 @@ file_write(
 
 ## Batch Rules
 
-`batch` is for mutations only. It accepts `write`, `append`, `replace_text`,
+`batch` is for mutations only. It accepts `write`, `append`, `edit_line`, `replace_text`,
 `move`, `delete`, and `mkdir` rows. It rejects `read`, `list`, `search`, and
 nested `batch` rows before executing anything.
 
@@ -81,4 +95,7 @@ earlier successful rows if a later row fails.
 - Paths are vault-relative.
 - Mutating operations cannot write to virtual mounts.
 - Use `replace_text` for exact in-file edits.
+- Use `edit_line` when the line number and existing line content are both known.
+- Clear an existing file with `write(overwrite=True, content="")`; there is no
+  separate truncate operation.
 - Use `file_read` before calling `file_write` when you need to inspect context.

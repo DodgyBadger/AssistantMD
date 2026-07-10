@@ -27,8 +27,8 @@ from core.settings.store import (
     ProviderConfig,
     ToolConfig,
     SETTINGS_TEMPLATE,
-    get_enabled_tool_names,
-    get_enabled_tools_config,
+    get_enabled_tool_names as get_enabled_tool_names,
+    get_enabled_tools_config as get_enabled_tools_config,
     get_general_settings,
     get_models_config,
     get_providers_config,
@@ -635,12 +635,15 @@ def get_file_search_timeout_seconds() -> float:
     return timeout if timeout > 0 else 10.0
 
 
-def get_file_ops_safe_list_max_results() -> int:
-    """Return max list results for file_ops_safe list operations (0 disables cap)."""
-    entry = get_general_settings().get("file_ops_safe_list_max_results")
+def get_file_list_max_results() -> int:
+    """Return max results for file_read list operations (0 disables cap)."""
+    settings = get_general_settings()
+    entry = settings.get("file_list_max_results") or settings.get(
+        "file_ops_safe_list_max_results"
+    )
     value = getattr(entry, "value", None) if entry is not None else None
     template_default = _get_template_setting_positive_int(
-        "file_ops_safe_list_max_results", 200
+        "file_list_max_results", 200
     )
     try:
         parsed = int(value)

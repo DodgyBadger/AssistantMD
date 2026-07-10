@@ -49,7 +49,7 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                     )
                 }
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
             del vault_name, tools, model, thinking
             call_index["value"] += 1
             if call_index["value"] == 1:

@@ -3,12 +3,11 @@
 import asyncio
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat.chat_store import ChatStore
-from core.tools.propose_file_edits import ProposeFileEditsTool
+from core.chat.edit_proposals import create_edit_proposal
 from validation.core.base_scenario import BaseScenario
 
 
@@ -32,10 +31,18 @@ class EditProposalArtifactsScenario(BaseScenario):
         store = ChatStore(system_root=str(self._get_system_controller()._system_root))
         store.ensure_session(session_id, vault.name)
 
-        tool = ProposeFileEditsTool.get_tool(vault_path=str(vault))
+        def create_proposal(*, edits, title="", summary=""):
+            return create_edit_proposal(
+                vault_name=vault.name,
+                vault_path=vault,
+                session_id=session_id,
+                edits=edits,
+                title=title,
+                summary=summary,
+            )
+
         create_checkpoint = self.event_checkpoint()
-        result = await tool.function(
-            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+        result = create_proposal(
             edits=[
                 {
                     "path": "Projects/Alpha/README.md",
@@ -47,8 +54,8 @@ class EditProposalArtifactsScenario(BaseScenario):
             title="Review README status",
             summary="One focused status update.",
         )
-        assert result.metadata["artifact_ref"], "Proposal tool should return an artifact ref"
-        artifact_ref = result.metadata["artifact_ref"]
+        assert result["artifact_ref"], "Stored proposal should return an artifact ref"
+        artifact_ref = result["artifact_ref"]
         self.assert_event_contains(
             self.events_since(create_checkpoint),
             name="edit_proposal_created",
@@ -98,8 +105,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             "Apply history should include a completed assistant turn"
         )
 
-        content_alias_result = await tool.function(
-            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+        content_alias_result = create_proposal(
             edits=[
                 {
                     "operation": "replace_text",
@@ -111,7 +117,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             ],
             title="Content alias replacement",
         )
-        content_alias_ref = content_alias_result.metadata["artifact_ref"]
+        content_alias_ref = content_alias_result["artifact_ref"]
         content_alias_proposal = self.call_api(
             f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{content_alias_ref}"
         ).json()
@@ -152,8 +158,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             "Repeated apply should use a stable conflict error"
         )
 
-        conflict_result = await tool.function(
-            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+        conflict_result = create_proposal(
             edits=[
                 {
                     "path": "Projects/Alpha/README.md",
@@ -162,7 +167,7 @@ class EditProposalArtifactsScenario(BaseScenario):
                 }
             ],
         )
-        conflict_ref = conflict_result.metadata["artifact_ref"]
+        conflict_ref = conflict_result["artifact_ref"]
         (vault / "Projects/Alpha/README.md").write_text(
             "# Alpha\n\nStatus: Approved\n\nNext: Changed elsewhere.\n",
             encoding="utf-8",
@@ -180,8 +185,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             "Stale proposal apply should use the vault conflict error"
         )
 
-        operation_result = await tool.function(
-            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+        operation_result = create_proposal(
             edits=[
                 {
                     "operation": "create_file",
@@ -203,7 +207,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             ],
             title="Create delete move",
         )
-        operation_ref = operation_result.metadata["artifact_ref"]
+        operation_ref = operation_result["artifact_ref"]
         operation_proposal = self.call_api(
             f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{operation_ref}"
         ).json()
@@ -233,8 +237,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             "Move this note.\n"
         ), "Move proposal should use the approved destination override"
 
-        deny_result = await tool.function(
-            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+        deny_result = create_proposal(
             edits=[
                 {
                     "path": "Projects/Alpha/README.md",
@@ -243,7 +246,7 @@ class EditProposalArtifactsScenario(BaseScenario):
                 }
             ],
         )
-        deny_ref = deny_result.metadata["artifact_ref"]
+        deny_ref = deny_result["artifact_ref"]
         deny_checkpoint = self.event_checkpoint()
         denied = self.call_api(
             f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{deny_ref}/deny",
@@ -277,8 +280,7 @@ class EditProposalArtifactsScenario(BaseScenario):
             "Denied proposal apply should use a stable conflict error"
         )
 
-        review_result = await tool.function(
-            SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id=session_id)),
+        review_result = create_proposal(
             edits=[
                 {
                     "path": "Projects/Alpha/README.md",
@@ -292,7 +294,7 @@ class EditProposalArtifactsScenario(BaseScenario):
                 },
             ],
         )
-        review_ref = review_result.metadata["artifact_ref"]
+        review_ref = review_result["artifact_ref"]
         review_proposal = self.call_api(
             f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{review_ref}"
         ).json()

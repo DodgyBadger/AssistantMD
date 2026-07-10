@@ -20,7 +20,7 @@ from core.vault_state.identity import resolve_or_create_vault_identity
 
 
 class VaultStateMutationRecorderScenario(BaseScenario):
-    """Validate file_ops_safe(write) records task-scoped vault mutations."""
+    """Validate file_write records task-scoped vault mutations."""
 
     async def test_scenario(self):
         vault = self.create_vault("VaultStateMutationVault")
@@ -82,7 +82,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             ("append", "notes/preexisting-append.md"),
             ("edit_line", "notes/edit-target.md"),
             ("replace_text", "notes/replace-target.md"),
-            ("truncate", "notes/truncate-target.md"),
+            ("write", "notes/truncate-target.md"),
             ("delete", "notes/preexisting-delete.md"),
             ("move", "notes/move-source.md"),
             ("move", "notes/move-destination.md"),
@@ -97,7 +97,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         self.soft_assert_equal(
             expected_operations - operations_by_path,
             set(),
-            "Mutation rows should cover routed safe and unsafe operations",
+            "Mutation rows should cover routed file_write operations",
         )
         row = next((item for item in rows if item["path"] == "notes/created-by-workflow.md"), None)
         if row is not None:
@@ -452,94 +452,97 @@ description: Vault-state mutation recorder probe
 ## Run
 
 ```python
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/created-by-workflow.md",
     content="Created by workflow\\n",
 )
-await file_ops_safe(
+await file_write(
     operation="append",
     path="notes/preexisting-append.md",
     content="Second line\\n",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/edit-target.md",
     content="alpha\\nbeta\\n",
 )
-await file_ops_unsafe(
+await file_write(
     operation="edit_line",
     path="notes/edit-target.md",
     line_number=2,
-    old_content="beta",
-    new_content="gamma",
+    old_text="beta",
+    new_text="gamma",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/replace-target.md",
     content="before text\\n",
 )
-await file_ops_unsafe(
+await file_write(
     operation="replace_text",
     path="notes/replace-target.md",
-    old_content="before",
-    new_content="after",
+    old_text="before",
+    new_text="after",
     count=1,
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/truncate-target.md",
     content="remove me\\n",
 )
-await file_ops_unsafe(
-    operation="truncate",
+await file_write(
+    operation="write",
     path="notes/truncate-target.md",
-    confirm_path="notes/truncate-target.md",
+    content="",
+    overwrite=True,
 )
-await file_ops_unsafe(
+await file_write(
     operation="delete",
     path="notes/preexisting-delete.md",
     confirm_path="notes/preexisting-delete.md",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/move-source.md",
     content="move me\\n",
 )
-await file_ops_safe(
+await file_write(
     operation="move",
     path="notes/move-source.md",
     destination="notes/move-destination.md",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/overwrite-source.md",
     content="overwrite source\\n",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/overwrite-destination.md",
     content="overwrite destination\\n",
 )
-await file_ops_unsafe(
-    operation="move_overwrite",
+await file_write(
+    operation="move",
     path="notes/overwrite-source.md",
     destination="notes/overwrite-destination.md",
+    overwrite=True,
 )
-await file_ops_unsafe(
+await file_write(
     operation="delete",
     path="assets/delete-target.pdf",
     confirm_path="assets/delete-target.pdf",
 )
-await file_ops_safe(
+await file_write(
     operation="move",
     path="assets/move-source.pdf",
     destination="assets/move-destination.pdf",
 )
-await file_ops_unsafe(
-    operation="move_overwrite",
+await file_write(
+    operation="move",
     path="assets/overwrite-source.pdf",
     destination="assets/overwrite-destination.pdf",
+    overwrite=True,
 )
 await finish(status="completed", reason="write-probe-done")
 ```

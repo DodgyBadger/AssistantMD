@@ -60,14 +60,14 @@ class CodeExecutionScenario(BaseScenario):
                 if case_name == "allow_file_read":
                     return {
                         "code": (
-                            'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
+                            'doc = await file_read(operation="read", path="notes/blocked.md")\n'
                             'doc.return_value'
                         )
                     }
                 if case_name == "dynamic_attribute_helpers":
                     return {
                         "code": (
-                            'doc = await file_ops_safe(operation="read", path="notes/blocked.md")\n'
+                            'doc = await file_read(operation="read", path="notes/blocked.md")\n'
                             'hasattr(doc, "return_value") and getattr(doc, "return_value") == "BLOCKED_CONTENT"'
                         )
                     }
@@ -81,7 +81,7 @@ class CodeExecutionScenario(BaseScenario):
                 if case_name == "allow_write":
                     return {
                         "code": (
-                            'await file_ops_safe(operation="write", path="notes/derived.md", content="DERIVED_RESULT")\n'
+                            'await file_write(operation="write", path="notes/derived.md", content="DERIVED_RESULT")\n'
                             '"WRITE_OK"'
                         )
                     }
@@ -90,7 +90,7 @@ class CodeExecutionScenario(BaseScenario):
                         "code": (
                             'draft = await delegate(\n'
                             '    prompt="Read images/test_image.jpg and reply with IMAGE_OK.",\n'
-                            '    tools=["file_ops_safe"],\n'
+                            '    tools=["file_read"],\n'
                             '    model="test",\n'
                             ')\n'
                             'draft.return_value'
@@ -100,9 +100,9 @@ class CodeExecutionScenario(BaseScenario):
                     return {
                         "code": (
                             'cached = await read_cache(ref="tool/tavily_extract/call_seeded_full_surface")\n'
-                            'await file_ops_safe(operation="read", path="notes/structured.md")\n'
+                            'await file_read(operation="read", path="notes/structured.md")\n'
                             f'parsed = await parse_markdown(value={STRUCTURED_NOTE!r})\n'
-                            'listed = await file_ops_safe(operation="list", path="tasks")\n'
+                            'listed = await file_read(operation="list", path="tasks")\n'
                             'pending = await pending_files(\n'
                             '    operation="get",\n'
                             '    items=listed,\n'
@@ -123,14 +123,14 @@ class CodeExecutionScenario(BaseScenario):
                             '    instructions="Return one short deterministic line.",\n'
                             '    model="test",\n'
                             ')\n'
-                            'await file_ops_safe(operation="write", path="notes/full-surface.md", content=draft.return_value)\n'
+                            'await file_write(operation="write", path="notes/full-surface.md", content=draft.return_value)\n'
                             'await finish(status="completed", reason="full-surface-ok")\n'
                             '"UNREACHABLE"'
                         )
                     }
                 raise AssertionError(f"Unexpected scenario case: {case_name}")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
             del vault_name, vault_path, tools, model, thinking
             from core.authoring.shared.tool_binding import resolve_tool_binding
 
@@ -238,7 +238,7 @@ class CodeExecutionScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Read a vault file through code_execution.",
                     "session_id": "code_execution_allow_file_read",
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
@@ -256,7 +256,7 @@ class CodeExecutionScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Exercise dynamic Monty attribute helpers.",
                     "session_id": "code_execution_dynamic_attribute_helpers",
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
@@ -278,7 +278,7 @@ class CodeExecutionScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Stream code_execution detail payloads.",
                     "session_id": "code_execution_streaming_detail",
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
@@ -314,7 +314,7 @@ class CodeExecutionScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Write a derived cache artifact through code_execution.",
                     "session_id": "code_execution_allow_write",
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_write"],
                     "model": "test",
                 },
             )
@@ -333,7 +333,7 @@ class CodeExecutionScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Read an image through code_execution using delegate.",
                     "session_id": "code_execution_allow_image_input",
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
@@ -365,7 +365,7 @@ class CodeExecutionScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Exercise the full code_execution helper surface.",
                     "session_id": "code_execution_full_surface",
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read", "file_write"],
                     "model": "test",
                 },
             )
@@ -423,7 +423,7 @@ class CodeExecutionScenario(BaseScenario):
                 name="authoring_direct_tool_completed",
                 expected={
                     "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
-                    "tool": "file_ops_safe",
+                    "tool": "file_read",
                 },
             )
             self.assert_event_contains(

@@ -123,20 +123,20 @@ def _normalize_pending_items_input(value: Any) -> tuple[RetrievedItem, ...]:
         for item in value:
             if not isinstance(item, RetrievedItem):
                 raise ValueError(
-                    "pending_files items must be a file_ops_safe result, a RetrievedItem, "
+                    "pending_files items must be a file_read result, a RetrievedItem, "
                     "or a list/tuple of RetrievedItem values"
                 )
             normalized.append(item)
         return tuple(normalized)
     raise ValueError(
-        "pending_files items must be a file_ops_safe result, a RetrievedItem, "
+        "pending_files items must be a file_read result, a RetrievedItem, "
         "or a list/tuple of RetrievedItem values"
     )
 
 
 def _items_from_tool_result(result: ScriptToolResult) -> tuple[RetrievedItem, ...]:
-    if result.metadata.get("tool_name") != "file_ops_safe":
-        raise ValueError("pending_files only accepts ScriptToolResult values from file_ops_safe")
+    if result.metadata.get("tool_name") not in {"file_read", "file_ops_safe"}:
+        raise ValueError("pending_files only accepts ScriptToolResult values from file_read")
     paths = _extract_paths_from_file_ops_result(result)
     return tuple(
         RetrievedItem(
@@ -201,7 +201,7 @@ def _extract_paths_from_file_ops_text(result_text: str) -> tuple[str, ...]:
         paths.append(candidate)
     if not paths:
         raise ValueError(
-            "pending_files could not extract any file paths from the provided file_ops_safe result"
+            "pending_files could not extract any file paths from the provided file_read result"
         )
     return tuple(paths)
 
@@ -497,7 +497,7 @@ def _contract() -> dict[str, object]:
         ),
         "summary": (
             "Filter or complete workflow pending files. "
-            "Use `get` to filter a file_ops_safe result set down to the unprocessed subset and "
+            "Use `get` to filter a file_read result set down to the unprocessed subset and "
             "`complete` to mark a selected subset as processed."
         ),
         "arguments": {
@@ -509,7 +509,7 @@ def _contract() -> dict[str, object]:
             "items": {
                 "type": "ScriptToolResult | RetrievedItem | list | tuple",
                 "required": True,
-                "description": "A file_ops_safe result set or explicit pending file items to filter or complete.",
+                "description": "A file_read result set or explicit pending file items to filter or complete.",
             },
         },
         "return_shape": {
@@ -521,7 +521,7 @@ def _contract() -> dict[str, object]:
         "examples": [
             {
                 "code": (
-                    'listed = await file_ops_safe(operation="list", path="tasks")\n'
+                    'listed = await file_read(operation="list", path="tasks")\n'
                     'pending = await pending_files(operation="get", items=listed)\n'
                     "selected = pending.items[:3]\n"
                     "# ...process selected...\n"

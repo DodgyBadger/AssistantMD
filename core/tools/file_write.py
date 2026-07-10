@@ -13,6 +13,7 @@ from core.vault_state.file_operations import (
     VaultFileOperationResult,
     append_vault_file_operation,
     delete_vault_path_operation,
+    edit_vault_line_operation,
     make_vault_directory_operation,
     move_vault_path_operation,
     replace_text_vault_file_operation,
@@ -24,7 +25,15 @@ from .base import BaseTool
 
 logger = UnifiedLogger(tag="file-write-tool")
 
-_WRITE_OPERATIONS = {"write", "append", "replace_text", "move", "delete", "mkdir"}
+_WRITE_OPERATIONS = {
+    "write",
+    "append",
+    "edit_line",
+    "replace_text",
+    "move",
+    "delete",
+    "mkdir",
+}
 
 
 class FileWrite(BaseTool):
@@ -42,6 +51,7 @@ class FileWrite(BaseTool):
             destination: str = "",
             old_text: str = "",
             new_text: str = "",
+            line_number: int = 0,
             count: int = 1,
             overwrite: bool = False,
             confirm_path: str = "",
@@ -49,14 +59,15 @@ class FileWrite(BaseTool):
         ) -> ToolReturn:
             """Create, edit, move, delete, or batch mutate vault files.
 
-            :param operation: One of write, append, replace_text, move, delete, mkdir, batch.
+            :param operation: One of write, append, edit_line, replace_text, move, delete, mkdir, batch.
             :param path: Vault-relative file or directory path.
             :param content: Full content for write, or content to append.
             :param destination: Destination path for move.
             :param old_text: Exact text to replace for replace_text.
             :param new_text: Replacement text for replace_text.
+            :param line_number: One-indexed target line for edit_line.
             :param count: Replacement count for replace_text.
-            :param overwrite: For write, replace existing full-file content when true.
+            :param overwrite: For write or move, replace an existing target when true.
             :param confirm_path: Required path confirmation for delete.
             :param operations: Write operation objects for batch.
             """
@@ -79,6 +90,7 @@ class FileWrite(BaseTool):
                     destination=destination,
                     old_text=old_text,
                     new_text=new_text,
+                    line_number=line_number,
                     count=count,
                     overwrite=overwrite,
                     confirm_path=confirm_path,
@@ -106,7 +118,7 @@ class FileWrite(BaseTool):
             file_write,
             name="file_write",
             description=(
-                "Create, append, replace text, move, delete, create folders, "
+                "Create, append, edit lines, replace text, move, delete, create folders, "
                 "and batch mutate files within the current vault."
             ),
         )
@@ -129,6 +141,7 @@ def _execute_write_operation(
     destination: str,
     old_text: str,
     new_text: str,
+    line_number: int,
     count: int,
     overwrite: bool,
     confirm_path: str,
@@ -144,6 +157,14 @@ def _execute_write_operation(
         )
     if normalized == "append":
         return append_vault_file_operation(vault_path=vault_path, path=path, content=content)
+    if normalized == "edit_line":
+        return edit_vault_line_operation(
+            vault_path=vault_path,
+            path=path,
+            line_number=line_number,
+            old_text=old_text,
+            new_text=new_text,
+        )
     if normalized == "replace_text":
         return replace_text_vault_file_operation(
             vault_path=vault_path,
@@ -157,6 +178,7 @@ def _execute_write_operation(
             vault_path=vault_path,
             path=path,
             destination=destination,
+            overwrite=overwrite,
         )
     if normalized == "delete":
         return delete_vault_path_operation(
@@ -170,7 +192,7 @@ def _execute_write_operation(
         return _run_batch(vault_path=vault_path, operations=operations or [])
     return VaultFileOperationResult(
         return_value=(
-            f"Unknown operation '{operation}'. Available: write, append, "
+            f"Unknown operation '{operation}'. Available: write, append, edit_line, "
             "replace_text, move, delete, mkdir, batch"
         ),
         metadata={
@@ -223,6 +245,7 @@ def _run_batch(
             destination=str(item.get("destination", "")),
             old_text=str(item.get("old_text", "")),
             new_text=str(item.get("new_text", "")),
+            line_number=int(item.get("line_number", 0)),
             count=int(item.get("count", 1)),
             overwrite=bool(item.get("overwrite", False)),
             confirm_path=str(item.get("confirm_path", "")),

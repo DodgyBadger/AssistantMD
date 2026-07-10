@@ -34,7 +34,7 @@ AssistantMD examples and validation scenarios stay within this subset:
 - f-strings and type hints where they help readability
 - common imports used by AssistantMD examples, including `json`, `sys`, `typing`, `asyncio`, and `pathlib`
 - host-provided dataclasses and helper result objects, such as `RetrievedHistoryResult`, `HistoryMessage`, `ToolExchange`, and `LatestMessage`
-- external function calls through AssistantMD helpers and direct tools, such as `file_ops_safe(...)`, `delegate(...)`, and `assemble_context(...)`
+- external function calls through AssistantMD helpers and direct tools, such as `file_read(...)`, `file_write(...)`, `delegate(...)`, and `assemble_context(...)`
 - pre-execution type checking with Monty's bundled `ty` integration
 
 ### Authoring Guardrails
@@ -65,7 +65,7 @@ Scope comes from the current runtime context:
 
 Available helpers and reserved inputs:
 
-- direct tool functions such as `file_ops_safe(...)`, `delegate(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
+- direct tool functions such as `file_read(...)`, `file_write(...)`, `delegate(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
 - `retrieve_sessions(...)`: select current-vault chat session metadata, such as sessions pending summarization
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
@@ -88,8 +88,8 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### `pending_files`
 
-- `operation="get"` filters a `file_ops_safe` result down to the pending subset
-- `pending_files` does not accept `path`, `pattern`, `glob`, or `search_term`; first call `file_ops_safe(...)` to list/search/select candidate files, then pass that result as `items`
+- `operation="get"` filters a `file_read` result down to the pending subset
+- `pending_files` does not accept `path`, `pattern`, `glob`, or `search_term`; first call `file_read(...)` to list/search/select candidate files, then pass that result as `items`
 - always inspect `item.metadata["pending_diff"]` before computing your own diff; it is the built-in "changed since this workflow/chat scope last completed this file" signal
 - `pending_diff["available"]` is true when the current scope has previously completed that file and the retained baseline can be read
 - when available, `pending_diff["text"]` contains a unified diff from the last completed baseline to the current file, and `pending_diff["has_changes"]` indicates whether the diff has content
@@ -98,7 +98,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### Direct Tool Calls
 
-- call tools by their configured names, for example `await file_ops_safe(operation="read", path="notes/example.md")`
+- call tools by their configured names, for example `await file_read(operation="read", path="notes/example.md")`
 - `code_execution` itself is excluded to prevent recursive self-invocation
 - direct tool results expose `return_value`, `metadata`, `content`, and `items`
 - use `result.return_value` for the canonical tool result; `content` is reserved for Pydantic AI side-loaded content
@@ -179,7 +179,7 @@ history_result = await retrieve_history(scope="session", limit="all")
 context_messages = []
 
 if latest_message.exists and "trigonometry" in latest_message.text.lower():
-    guide = await file_ops_safe(operation="read", path="Projects/trig/study-guide.md")
+    guide = await file_read(operation="read", path="Projects/trig/study-guide.md")
     if guide.metadata.get("status") == "completed":
         context_messages.append({"role": "system", "content": guide.return_value})
 
@@ -239,7 +239,7 @@ Discovery example:
 ```python
 code_execution(
     code="""
-listed = await file_ops_safe(operation="list", path="Archive", recursive=True)
+listed = await file_read(operation="list", path="Archive", recursive=True)
 
 candidates = listed.metadata.get("empty_directory_candidates", [])
 
@@ -263,7 +263,7 @@ targets = [
 results = []
 
 for path in targets:
-    result = await file_ops_unsafe(
+    result = await file_write(
         operation="delete",
         path=path,
         confirm_path=path,
@@ -292,7 +292,7 @@ single execution.
 ```python
 code_execution(
     code="""
-listed = await file_ops_safe(operation="list", path="inbox")
+listed = await file_read(operation="list", path="inbox")
 pending = await pending_files(
     operation="get",
     items=listed,
@@ -311,7 +311,7 @@ for item in selected:
     else:
         changes_since_last_complete = ""
 
-    doc = await file_ops_safe(operation="read", path=item.ref)
+    doc = await file_read(operation="read", path=item.ref)
     parsed = await parse_markdown(value=doc.return_value)
     results.append({
         "ref": item.ref,

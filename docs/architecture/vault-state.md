@@ -78,7 +78,7 @@ Currently tracked mutation helpers include:
 - `delete_vault_file(...)`
 - `move_vault_file(...)`
 
-`file_ops_safe`, `file_ops_unsafe`, and ingestion output storage use this shared API for supported file mutations. The CI guard `scripts/check_vault_mutation_routing.py` scans core tool/helper/API/ingestion code for direct mutation primitives and fails when new writable paths bypass the shared mutation API, except for explicit allowlisted cases.
+`file_write` and ingestion output storage use this shared API for supported file mutations. The CI guard `scripts/check_vault_mutation_routing.py` scans core tool/helper/API/ingestion code for direct mutation primitives and fails when new writable paths bypass the shared mutation API, except for explicit allowlisted cases.
 
 If no execution task is active, the mutation still performs the file operation and refreshes vault state. Task-less calls log `vault_state_mutation_untracked` unless the caller marks the write as an intentional system-service mutation, such as ingestion storage.
 

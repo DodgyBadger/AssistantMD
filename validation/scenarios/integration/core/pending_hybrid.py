@@ -130,7 +130,7 @@ description: Pending hybrid validation
 ## Run
 
 ```python
-listed = await file_ops_safe(operation="list", path="tasks")
+listed = await file_read(operation="list", path="tasks")
 pending = await pending_files(operation="get", items=listed)
 if pending.items:
     await pending_files(operation="complete", items=pending.items)

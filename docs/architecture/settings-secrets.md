@@ -35,7 +35,13 @@ do not silently switch billing paths.
 
 Runtime-relevant general settings include:
 
+- `enabled_tools`: app-wide list of tool registry names exposed to chat,
+  delegate child agents, workflows, context scripts, and code execution. Chat
+  does not maintain a separate per-session tool selection.
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
+- `file_list_max_results`: maximum structured results returned by
+  `file_read(list)`; `0` disables the cap.
+- `file_search_timeout_seconds`: timeout for `file_read(search)`.
 - `persist_model_reasoning_parts`: when false, provider reasoning/thinking
   parts are not persisted in durable chat history; when true, those parts are
   stored with provider-native messages, which can increase replay tokens and

@@ -71,7 +71,7 @@ class BasicHaikuContextTemplateScenario(BaseScenario):
             name="authoring_direct_tool_started",
             expected={
                 "workflow_id": f"{vault.name}/context/basic_haiku_context.md/{session_id}",
-                "tool": "file_ops_safe",
+                "tool": "file_read",
             },
         )
         self.assert_event_contains(
@@ -79,7 +79,7 @@ class BasicHaikuContextTemplateScenario(BaseScenario):
             name="authoring_direct_tool_completed",
             expected={
                 "workflow_id": f"{vault.name}/context/basic_haiku_context.md/{session_id}",
-                "tool": "file_ops_safe",
+                "tool": "file_read",
             },
         )
         self.assert_event_contains(
@@ -145,7 +145,7 @@ description: Basic haiku context-template happy path
 ```python
 \"\"\"Build haiku seed words into downstream chat context and persist the seed artifact.\"\"\"
 
-source = await file_ops_safe(operation="read", path="notes/haiku_context_seed.md")
+source = await file_read(operation="read", path="notes/haiku_context_seed.md")
 source_text = source.return_value
 seed_words = await delegate(
     prompt=(
@@ -159,20 +159,16 @@ seed_words = await delegate(
     model="gpt-mini",
 )
 
-existing = await file_ops_safe(operation="read", path="outputs/haiku-seed-words.md")
+existing = await file_read(operation="read", path="outputs/haiku-seed-words.md")
 if existing.metadata.get("status") == "completed":
-    await file_ops_unsafe(
-        operation="truncate",
-        path="outputs/haiku-seed-words.md",
-        confirm_path="outputs/haiku-seed-words.md",
-    )
-    await file_ops_safe(
-        operation="append",
+    await file_write(
+        operation="write",
         path="outputs/haiku-seed-words.md",
         content=seed_words.return_value,
+        overwrite=True,
     )
 else:
-    await file_ops_safe(
+    await file_write(
         operation="write",
         path="outputs/haiku-seed-words.md",
         content=seed_words.return_value,

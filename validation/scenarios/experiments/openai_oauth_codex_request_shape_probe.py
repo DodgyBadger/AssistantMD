@@ -105,7 +105,7 @@ async def _map_probe_history(
                         provider_name="openai",
                     ),
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"operation": "read", "path": "notes/probe.md"},
                         tool_call_id="call_probe|fc_probe",
                         id="fc_probe",
@@ -117,7 +117,7 @@ async def _map_probe_history(
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content={"ok": True, "content": "probe result"},
                         tool_call_id="call_probe|fc_probe",
                     )

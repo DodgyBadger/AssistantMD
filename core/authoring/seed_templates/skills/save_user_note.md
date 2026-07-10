@@ -65,7 +65,7 @@ notes. Keep confirmed notes in the topical sections above it.
 
 ## How To Update
 
-1. Read `AssistantMD/user.md` with `file_ops_safe`.
+1. Read `AssistantMD/user.md` with `file_read`.
 2. If the file does not exist, create it with the structure above and the new
    context note in the best matching section.
 3. Check for duplicates or contradictions before adding a bullet.

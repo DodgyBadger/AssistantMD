@@ -161,7 +161,7 @@ payload = {
     "item_count": sessions.item_count,
     "items": [item.metadata for item in sessions.items],
 }
-await file_ops_safe(
+await file_write(
     operation="write",
     path="pending-sessions.md",
     content=json.dumps(payload, indent=2, sort_keys=True),

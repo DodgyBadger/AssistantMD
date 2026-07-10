@@ -319,8 +319,9 @@ def _project_tool_items(
     vault_path: str,
 ) -> tuple[RetrievedItem, ...]:
     return_value_text = coerce_tool_return_value_text(return_value)
-    if tool_name == "file_ops_safe":
-        return _project_file_ops_safe_items(
+    if tool_name in {"file_read", "file_ops_safe"}:
+        return _project_file_read_items(
+            tool_name=tool_name,
             return_value=return_value,
             return_value_text=return_value_text,
             metadata=metadata,
@@ -355,8 +356,9 @@ def _tool_return_value_type(value: Any) -> str:
     return type(value).__name__
 
 
-def _project_file_ops_safe_items(
+def _project_file_read_items(
     *,
+    tool_name: str,
     return_value: Any,
     return_value_text: str,
     metadata: dict[str, Any],
@@ -376,7 +378,7 @@ def _project_file_ops_safe_items(
         media_mode = str(metadata.get("media_mode") or "").strip()
         item_metadata = {
             **metadata,
-            "source_tool": "file_ops_safe",
+            "source_tool": tool_name,
             "source_path": path,
             "filepath": str(metadata.get("filepath") or path),
         }
@@ -411,7 +413,7 @@ def _project_file_ops_safe_items(
                 content="",
                 exists=True,
                 metadata={
-                    "source_tool": "file_ops_safe",
+                    "source_tool": tool_name,
                     "source_path": path,
                     "filepath": path,
                     **metadata,

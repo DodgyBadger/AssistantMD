@@ -29,7 +29,7 @@ users and agents.
 
 ## Consequences
 
-- `file_ops_safe(read)` remains the primary read path for markdown and image
+- `file_read(read)` remains the primary read path for markdown and image
   files.
 - `images=auto|ignore` stays the narrow policy surface for authoring inputs.
 - Remote refs need explicit future design before download or attachment.

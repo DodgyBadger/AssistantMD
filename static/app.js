@@ -1674,6 +1674,7 @@ async function sendMessage(promptOverride = null) {
     syncChatControlLocks();
 
     const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
+    const chatModeValue = chatElements.chatModeSelector ? chatElements.chatModeSelector.value || 'normal' : 'normal';
     const workspacePathValue = workspacePicker.currentPath() || null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
     state.sessionId = requestSessionId;

@@ -55,7 +55,7 @@ class AuthoringContractScenario(BaseScenario):
             name="authoring_direct_tool_started",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "tool": "file_ops_safe",
+                "tool": "file_read",
             },
         )
         self.assert_event_contains(
@@ -63,7 +63,7 @@ class AuthoringContractScenario(BaseScenario):
             name="authoring_direct_tool_completed",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "tool": "file_ops_safe",
+                "tool": "file_read",
             },
         )
         self.assert_event_contains(
@@ -196,19 +196,18 @@ description: Deterministic authoring contract success workflow
 
 ```python
 async def _write_replace(path, content):
-    existing = await file_ops_safe(operation="read", path=path)
+    existing = await file_read(operation="read", path=path)
     if existing.metadata.get("status") == "completed":
-        await file_ops_unsafe(operation="truncate", path=path, confirm_path=path)
-        await file_ops_safe(operation="append", path=path, content=content)
+        await file_write(operation="write", path=path, content=content, overwrite=True)
     else:
-        await file_ops_safe(operation="write", path=path, content=content)
+        await file_write(operation="write", path=path, content=content)
 
 
-source = await file_ops_safe(operation="read", path="notes/seed.md")
+source = await file_read(operation="read", path="notes/seed.md")
 source_text = source.return_value
-image_read = await file_ops_safe(operation="read", path="images/test_image.jpg")
-markdown_image_read = await file_ops_safe(operation="read", path="notes/structured.md")
-listing = await file_ops_safe(operation="list", path="notes")
+image_read = await file_read(operation="read", path="images/test_image.jpg")
+markdown_image_read = await file_read(operation="read", path="notes/structured.md")
+listing = await file_read(operation="list", path="notes")
 history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="Keep the response concise.",
@@ -218,9 +217,9 @@ assembled = await assemble_context(
     ],
     context_messages=[{"role": "system", "content": "Validation context"}],
 )
-structured = await file_ops_safe(operation="read", path="notes/structured.md")
+structured = await file_read(operation="read", path="notes/structured.md")
 parsed = await parse_markdown(value=STRUCTURED_NOTE_PLACEHOLDER)
-task_listing = await file_ops_safe(operation="list", path="tasks")
+task_listing = await file_read(operation="list", path="tasks")
 pending = await pending_files(operation="get", items=task_listing)
 await pending_files(operation="complete", items=(pending.items[0],))
 

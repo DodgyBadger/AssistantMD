@@ -65,13 +65,13 @@ class DelegateToolScenario(BaseScenario):
                     return {
                         "prompt": "Use your tools.",
                         "model": "test",
-                        "tools": ["file_ops_safe", "delegate", "code_execution"],
+                        "tools": ["file_read", "delegate", "code_execution"],
                     }
                 if case == "child_tools":
                     return {
                         "prompt": "List available notes.",
                         "model": "test",
-                        "tools": ["file_ops_safe"],
+                        "tools": ["file_read"],
                     }
                 if case == "limit_failure":
                     return {"prompt": "Exceed child usage limits.", "model": "test"}
@@ -79,7 +79,7 @@ class DelegateToolScenario(BaseScenario):
                     return {"prompt": "Exceed child model request usage limits.", "model": "test"}
                 raise AssertionError(f"Unexpected delegate case: {case}")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
             del vault_name, vault_path, tools, model, thinking
             from core.authoring.shared.tool_binding import resolve_tool_binding
             binding = resolve_tool_binding(["delegate"], vault_path=str(vault))
@@ -259,7 +259,7 @@ class DelegateToolScenario(BaseScenario):
                 name="delegate_started",
                 expected={
                     "workflow_id": "delegate_forbidden_stripping",
-                    "tool_names": ["file_ops_safe"],
+                    "tool_names": ["file_read"],
                     "stripped_tools": ["code_execution", "delegate"],
                 },
             )
@@ -294,7 +294,7 @@ class DelegateToolScenario(BaseScenario):
                 name="delegate_tool_binding_resolved",
                 expected={
                     "workflow_id": "delegate_child_tools",
-                    "requested": ["file_ops_safe"],
+                    "requested": ["file_read"],
                 },
             )
             self.assert_event_contains(
@@ -522,7 +522,7 @@ class DelegateToolScenario(BaseScenario):
             name="delegate_tool_binding_resolved",
             expected={
                 "workflow_id": "DelegateToolVault/delegate_with_tools",
-                "requested": ["file_ops_safe"],
+                "requested": ["file_read"],
             },
         )
         self.assert_event_contains(
@@ -563,7 +563,7 @@ class DelegateToolScenario(BaseScenario):
             tool_name="delegate",
             arguments={
                 "prompt": "Read notes/content.md and return its text.",
-                "tools": ["file_ops_safe"],
+                "tools": ["file_read"],
                 "model": "test",
             },
             run_buffers={},
@@ -594,7 +594,7 @@ class DelegateToolScenario(BaseScenario):
             if isinstance(tool_calls, list) and tool_calls:
                 self.soft_assert_equal(
                     tool_calls[0].get("tool"),
-                    "file_ops_safe",
+                    "file_read",
                     "Delegate audit should record child tool names",
                 )
                 self.soft_assert(
@@ -621,7 +621,7 @@ class DelegateToolScenario(BaseScenario):
             name="delegate_tool_binding_resolved",
             expected={
                 "workflow_id": "DelegateToolVault/delegate_markdown_image",
-                "requested": ["file_ops_safe"],
+                "requested": ["file_read"],
             },
         )
         markdown_image_output = vault / "outputs" / "delegate-markdown-image-result.md"
@@ -646,10 +646,10 @@ description: Validate delegate with child tool access
 ```python
 result = await delegate(
     prompt="Read notes/content.md and return its text.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     model="test",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="outputs/delegate-with-tools-result.md",
     content=result.return_value,
@@ -670,10 +670,10 @@ description: Validate delegate with markdown containing an embedded image
 ```python
 result = await delegate(
     prompt="Read notes/with-image.md and describe what source was provided.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     model="test",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="outputs/delegate-markdown-image-result.md",
     content=result.return_value,

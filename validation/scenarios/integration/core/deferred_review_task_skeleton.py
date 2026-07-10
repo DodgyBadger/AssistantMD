@@ -223,6 +223,26 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert api_payload.get("originating_task_id") == started.task.task_id
             assert api_payload.get("approvals", [{}])[0].get("tool_call_id") == "review-call-1"
 
+            duplicate_response = self.call_api(
+                (
+                    f"/api/vaults/{vault.name}/chat/deferred-review-session/"
+                    f"deferred-reviews/{review_event['artifact_ref']}/submit"
+                ),
+                method="POST",
+                data={
+                    "decisions": [
+                        {"tool_call_id": "review-call-1", "decision": "approve"},
+                        {"tool_call_id": "review-call-1", "decision": "deny"},
+                    ],
+                },
+            )
+            assert duplicate_response.status_code == 400, (
+                "A tool call must receive exactly one unambiguous review result"
+            )
+            assert duplicate_response.json().get("details", {}).get(
+                "duplicate_tool_call_ids"
+            ) == ["review-call-1"]
+
             submit_response = self.call_api(
                 (
                     f"/api/vaults/{vault.name}/chat/deferred-review-session/"
@@ -292,6 +312,50 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 },
             )
             assert stale_response.status_code == 409, "Repeated submit should be rejected"
+
+            denied_start = await start_queued_chat_stream_task(
+                vault_name=vault.name,
+                vault_path=str(vault),
+                prompt="write another draft",
+                image_paths=[],
+                image_uploads=[],
+                session_id="deferred-denial-session",
+                tools=[],
+                model="test",
+                chat_mode="collaborative",
+            )
+            denied_task = await self._wait_for_task_terminal(denied_start.task.task_id)
+            assert denied_task is not None
+            denied_events = await CHAT_TASK_EVENT_BUFFER.events_after(
+                denied_start.task.task_id
+            )
+            denied_review_event = denied_events[0].data
+            deny_response = self.call_api(
+                (
+                    f"/api/vaults/{vault.name}/chat/deferred-denial-session/"
+                    f"deferred-reviews/{denied_review_event['artifact_ref']}/submit"
+                ),
+                method="POST",
+                data={
+                    "decisions": [
+                        {
+                            "tool_call_id": "review-call-1",
+                            "decision": "deny",
+                            "message": "",
+                        }
+                    ],
+                },
+            )
+            assert deny_response.status_code == 200
+            denied_resume_task_id = deny_response.json().get("task", {}).get("task_id")
+            assert denied_resume_task_id
+            denied_resume_task = await self._wait_for_task_terminal(denied_resume_task_id)
+            assert denied_resume_task is not None
+            denied_result = resume_capture["deferred_tool_results"]
+            denial = denied_result.approvals["review-call-1"]
+            assert denial.message == "The tool call was denied.", (
+                "An empty optional comment must not hide the denial from the resumed model"
+            )
         finally:
             chat_executor._prepare_chat_execution = original_prepare
             chat_executor._prepare_deferred_review_resume_execution = original_prepare_resume

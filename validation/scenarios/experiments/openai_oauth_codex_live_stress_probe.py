@@ -49,7 +49,7 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": FIRST_TURN_PROMPT,
                     "session_id": session_id,
-                    "tools": ["file_ops_safe"],
+                    "tools": ["file_read", "file_write"],
                     "model": model,
                     "thinking": "off",
                 },
@@ -67,7 +67,7 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": SECOND_TURN_PROMPT,
                     "session_id": session_id,
-                    "tools": ["file_ops_safe"],
+                    "tools": ["file_read", "file_write"],
                     "model": model,
                     "thinking": "off",
                 },
@@ -91,13 +91,13 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
             tool_call_events = [
                 event for event in tool_events
                 if event.get("event_type") == "call"
-                and event.get("tool_name") == "file_ops_safe"
+                and event.get("tool_name") == "file_read"
             ]
 
             result_file = vault / "notes" / "oauth_stress_result.md"
             self.soft_assert(
                 len(tool_call_events) >= 20,
-                "Live stress probe should produce at least 20 file_ops_safe calls",
+                "Live stress probe should produce at least 20 file_read calls",
             )
             self.soft_assert(
                 result_file.exists(),
@@ -113,7 +113,7 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
                 "first_event_count": len(first["events"]),
                 "second_event_count": len(second["events"]),
                 "tool_event_count": len(tool_events),
-                "file_ops_safe_call_count": len(tool_call_events),
+                "file_read_call_count": len(tool_call_events),
                 "result_file_exists": result_file.exists(),
                 "result_file_preview": result_file.read_text(encoding="utf-8")[:2000]
                 if result_file.exists()
@@ -256,7 +256,7 @@ def _summarize_openai_status(status: dict[str, object]) -> dict[str, object]:
 
 FIRST_TURN_PROMPT = """Run a Codex OAuth stress probe.
 
-Use only file_ops_safe. Make separate read calls for notes/probe_01.md through
+Use only file_read. Make separate read calls for notes/probe_01.md through
 notes/probe_18.md, then make one read call for notes/missing_probe.md so we can
 observe the tool failure path, then read notes/index.md. Recover from the
 missing file and finish with a compact summary that reports how many probe
@@ -265,8 +265,8 @@ markers you saw."""
 
 SECOND_TURN_PROMPT = """Continue the same stress probe.
 
-Use only file_ops_safe. Make separate read calls for notes/probe_19.md through
-notes/probe_24.md. Then write notes/oauth_stress_result.md with:
+Use file_read for the separate read calls for notes/probe_19.md through
+notes/probe_24.md. Then use file_write to write notes/oauth_stress_result.md with:
 - the phrase OAUTH_CODEX_STRESS_COMPLETE
 - the total marker count across both turns
 - a short note that the missing file from turn one did not stop the session."""

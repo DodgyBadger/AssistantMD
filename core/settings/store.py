@@ -20,6 +20,15 @@ from core.runtime.paths import get_system_root
 
 
 SETTINGS_TEMPLATE = Path(__file__).parent / "settings.template.yaml"
+RETIRED_BUILTIN_TOOL_NAMES = frozenset(
+    {
+        "file_ops",
+        "file_ops_safe",
+        "file_ops_unsafe",
+        "propose_file_edits",
+        "review_create_file",
+    }
+)
 
 
 class SettingsEntry(BaseModel):
@@ -204,7 +213,12 @@ def get_enabled_tool_names() -> list[str]:
     seen: set[str] = set()
     for item in raw_enabled:
         name = str(item).strip()
-        if not name or name in seen or name not in tools:
+        if (
+            not name
+            or name in seen
+            or name not in tools
+            or name in RETIRED_BUILTIN_TOOL_NAMES
+        ):
             continue
         seen.add(name)
         enabled.append(name)

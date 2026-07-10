@@ -80,7 +80,7 @@ class ChatManualRetryScenario(BaseScenario):
 
             captured_retry_history: list[tuple[str, str]] = []
 
-            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
                 del vault_name, vault_path, tools, model, thinking
                 return ("Answer briefly.", "", TestModel(), [])
 

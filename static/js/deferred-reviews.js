@@ -86,7 +86,6 @@
             const toolName = String(call.tool_name || '');
             const args = normalizeArgs(call.args);
             const path = String(args.path || '');
-            const content = String(args.content || '');
             return `
                 <article class="edit-proposal-edit" data-deferred-review-call="${escapeHtml(toolCallId)}" data-review-decision="pending" data-tool-name="${escapeHtml(toolName)}">
                     <div class="edit-proposal-path-wrap">
@@ -103,7 +102,7 @@
                             ${icons.CIRCLE_X_ICON_SVG || icons.X_ICON_SVG || ''}<span>Deny</span>
                         </button>
                     </div>
-                    ${renderCallFields(toolName, toolCallId, args, content, locked)}
+                    ${renderCallFields(toolName, toolCallId, args, locked)}
                     <div class="edit-proposal-comment-block hidden" data-deferred-review-deny-block>
                         <label class="edit-proposal-label" for="deferred-review-deny-${escapeHtml(toolCallId)}">Reason (optional)</label>
                         <textarea id="deferred-review-deny-${escapeHtml(toolCallId)}" class="edit-proposal-comment" data-deferred-review-message="${escapeHtml(toolCallId)}" spellcheck="true" ${locked ? 'disabled' : ''}></textarea>
@@ -112,18 +111,7 @@
             `;
         }
 
-        function renderCallFields(toolName, toolCallId, args, content, locked) {
-            if (toolName === 'review_create_file') {
-                return `
-                    <div class="edit-proposal-diff is-single">
-                        <div>
-                            <div class="edit-proposal-label">Content</div>
-                            <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="content" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(content)}</textarea>
-                        </div>
-                    </div>
-                    <input type="hidden" data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="path" value="${escapeHtml(String(args.path || ''))}" />
-                `;
-            }
+        function renderCallFields(toolName, toolCallId, args, locked) {
             if (toolName === 'file_write') {
                 return renderFileOpsFields(toolCallId, args, locked);
             }
@@ -175,7 +163,24 @@
                     ${hidden.join('')}
                 `;
             }
+            if (operation === 'edit_line') {
+                hidden.push(hiddenArg(toolCallId, 'line_number', Number(args.line_number || 0), 'number'));
+                return `
+                    <div class="edit-proposal-diff">
+                        <div>
+                            <div class="edit-proposal-label">Original line</div>
+                            <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="old_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.old_text || ''))}</textarea>
+                        </div>
+                        <div>
+                            <div class="edit-proposal-label">Replacement line</div>
+                            <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="new_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.new_text || ''))}</textarea>
+                        </div>
+                    </div>
+                    ${hidden.join('')}
+                `;
+            }
             if (operation === 'move') {
+                hidden.push(hiddenArg(toolCallId, 'overwrite', Boolean(args.overwrite), 'boolean'));
                 return `
                     <div class="edit-proposal-path-edit">
                         <label class="edit-proposal-label" for="deferred-review-destination-${escapeHtml(toolCallId)}">Destination</label>
@@ -425,7 +430,6 @@
 
         function approvalSummary(call) {
             const args = normalizeArgs(call?.args);
-            if (call?.tool_name === 'review_create_file' && args.path) return `Create @${args.path}`;
             if (call?.tool_name === 'file_write') {
                 const operation = String(args.operation || 'file_write').toUpperCase();
                 return args.path ? `${operation} @${args.path}` : operation;
@@ -434,7 +438,6 @@
         }
 
         function toolOperationLabel(toolName, args = {}) {
-            if (toolName === 'review_create_file') return 'Create';
             if (toolName === 'file_write') return String(args.operation || 'file_write').toUpperCase();
             return 'Review';
         }

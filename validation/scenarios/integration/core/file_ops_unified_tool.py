@@ -19,6 +19,14 @@ class FileOpsUnifiedToolScenario(BaseScenario):
         vault = self.create_vault("FileOpsUnifiedToolVault")
         self.create_file(vault, "notes/source.md", "one\ntwo\nthree\nfour\n")
         self.create_file(vault, "notes/edit.md", "Alpha beta alpha\n")
+        self.create_file(
+            vault,
+            "notes/frontmatter.md",
+            "---\ntitle: Example\ntags:\n  - test\n---\n\nBody\n",
+        )
+        self.create_file(vault, "notes/lines.md", "same\ntarget\nsame\n")
+        self.create_file(vault, "archive/existing.md", "Existing destination\n")
+        self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
 
         await self.start_system()
         try:
@@ -46,6 +54,13 @@ class FileOpsUnifiedToolScenario(BaseScenario):
             assert listed.metadata["status"] == "completed"
             assert "notes/source.md" in listed.metadata["files"]
 
+            directory_read = await self._call(read_tool, vault, "file_read", {
+                "operation": "read",
+                "path": "notes",
+            })
+            assert directory_read.metadata["operation"] == "list"
+            assert "notes/source.md" in directory_read.metadata["files"]
+
             searched = await self._call(read_tool, vault, "file_read", {
                 "operation": "search",
                 "path": "notes",
@@ -53,6 +68,40 @@ class FileOpsUnifiedToolScenario(BaseScenario):
             })
             assert searched.metadata["status"] == "completed"
             assert searched.metadata["match_count"] >= 1
+
+            glob_search = await self._call(read_tool, vault, "file_read", {
+                "operation": "search",
+                "path": "notes/*.md",
+                "search_term": "two",
+            })
+            assert glob_search.metadata["status"] == "completed"
+            assert any(
+                match.startswith("notes/source.md:")
+                for match in glob_search.metadata["matches"]
+            )
+
+            frontmatter = await self._call(read_tool, vault, "file_read", {
+                "operation": "frontmatter",
+                "path": "notes/frontmatter.md",
+                "keys": "title,tags",
+            })
+            assert frontmatter.metadata["status"] == "completed"
+            assert frontmatter.metadata["file_count"] == 1
+            assert frontmatter.metadata["items"] == [
+                {
+                    "path": "notes/frontmatter.md",
+                    "frontmatter": {"title": "Example", "tags": ["test"]},
+                }
+            ]
+
+            image = await self._call(read_tool, vault, "file_read", {
+                "operation": "read",
+                "path": "images/test_image.jpg",
+            })
+            assert image.metadata["status"] == "completed"
+            assert image.metadata["media_mode"] == "image"
+            assert isinstance(image.return_value, list)
+            assert len(image.return_value) == 2
 
             created = await self._call(write_tool, vault, "file_write", {
                 "operation": "write",
@@ -109,6 +158,19 @@ class FileOpsUnifiedToolScenario(BaseScenario):
             assert replaced.metadata["replacement_count"] == 1
             assert (vault / "notes/edit.md").read_text(encoding="utf-8") == "Gamma beta alpha\n"
 
+            edited_line = await self._call(write_tool, vault, "file_write", {
+                "operation": "edit_line",
+                "path": "notes/lines.md",
+                "line_number": 3,
+                "old_text": "same",
+                "new_text": "changed",
+            })
+            assert edited_line.metadata["status"] == "completed"
+            assert edited_line.metadata["line_number"] == 3
+            assert (vault / "notes/lines.md").read_text(encoding="utf-8") == (
+                "same\ntarget\nchanged\n"
+            )
+
             moved = await self._call(write_tool, vault, "file_write", {
                 "operation": "move",
                 "path": "notes/new.md",
@@ -117,6 +179,19 @@ class FileOpsUnifiedToolScenario(BaseScenario):
             assert moved.metadata["status"] == "completed"
             assert not (vault / "notes/new.md").exists()
             assert (vault / "archive/new.md").exists()
+
+            moved_overwrite = await self._call(write_tool, vault, "file_write", {
+                "operation": "move",
+                "path": "notes/lines.md",
+                "destination": "archive/existing.md",
+                "overwrite": True,
+            })
+            assert moved_overwrite.metadata["status"] == "completed"
+            assert moved_overwrite.metadata["overwrote_destination"] is True
+            assert not (vault / "notes/lines.md").exists()
+            assert (vault / "archive/existing.md").read_text(encoding="utf-8") == (
+                "same\ntarget\nchanged\n"
+            )
 
             made_directory = await self._call(write_tool, vault, "file_write", {
                 "operation": "mkdir",

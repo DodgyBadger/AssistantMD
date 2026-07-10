@@ -56,7 +56,7 @@ class SessionOpsChatToolScenario(BaseScenario):
                     return {"operation": "get_session_summary"}
                 raise AssertionError(f"Unexpected session_ops case: {current_case['name']}")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
             del vault_name, tools, model, thinking
             binding = resolve_tool_binding(["session_ops"], vault_path=vault_path)
             return (

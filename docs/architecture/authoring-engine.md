@@ -29,7 +29,7 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 
 | Function | Purpose |
 | --- | --- |
-| direct tool functions | Invoke configured tools by name, e.g. `file_ops_safe(...)` |
+| direct tool functions | Invoke configured tools by name, e.g. `file_read(...)` or `file_write(...)` |
 | `retrieve_sessions` | Retrieve chat-session metadata selections for the current vault |
 | `retrieve_history` | Retrieve safe structured conversation-history units from the chat-history broker |
 | `assemble_context` | Build chat context from safe history units, context messages, and instructions |

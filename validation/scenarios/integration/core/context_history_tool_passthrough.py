@@ -46,7 +46,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"operation": "read", "path": "Math/page_images/a.png"},
                         tool_call_id="call-image-1",
                     )
@@ -56,7 +56,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content="Attached image 'Math/page_images/a.png'.",
                         tool_call_id="call-image-1",
                     )
@@ -66,7 +66,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"operation": "read", "path": "Math/page_images/b.png"},
                         tool_call_id="call-image-2",
                     )
@@ -76,7 +76,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content="Attached image 'Math/page_images/b.png'.",
                         tool_call_id="call-image-2",
                     )

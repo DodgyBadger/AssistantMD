@@ -313,7 +313,7 @@ def _should_preserve_vault_backed_tool_result(
     tool_name: str,
     args: dict[str, Any],
 ) -> bool:
-    if tool_name != "file_ops_safe":
+    if tool_name not in {"file_read", "file_ops_safe"}:
         return False
     operation = str(args.get("operation") or "").strip().lower()
     return operation == "read"

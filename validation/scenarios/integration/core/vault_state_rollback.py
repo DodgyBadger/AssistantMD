@@ -171,22 +171,22 @@ description: Vault-state rollback failure probe
 ## Run
 
 ```python
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/created-before-failure.md",
     content="created then rolled back\\n",
 )
-await file_ops_safe(
+await file_write(
     operation="append",
     path="notes/preexisting-append.md",
     content="mutated append\\n",
 )
-await file_ops_unsafe(
+await file_write(
     operation="delete",
     path="notes/preexisting-delete.md",
     confirm_path="notes/preexisting-delete.md",
 )
-await file_ops_safe(
+await file_write(
     operation="move",
     path="notes/move-source.md",
     destination="notes/move-destination.md",

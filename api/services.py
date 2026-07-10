@@ -8,6 +8,7 @@ import hashlib
 import mimetypes
 import re
 import shutil
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -641,18 +642,22 @@ async def submit_chat_deferred_review(
         if str(call.tool_call_id)
     }
     submitted_call_ids = [str(decision.get("tool_call_id") or "") for decision in decisions]
+    duplicate_call_ids = sorted(
+        call_id for call_id, count in Counter(submitted_call_ids).items() if count > 1
+    )
     unknown_call_ids = sorted(
         call_id for call_id in submitted_call_ids
         if call_id not in known_call_ids
     )
     missing_call_ids = sorted(known_call_ids - set(submitted_call_ids))
-    if unknown_call_ids or missing_call_ids:
+    if duplicate_call_ids or unknown_call_ids or missing_call_ids:
         raise APIException(
             status_code=400,
             error_type="DeferredReviewDecisionMismatch",
             message="Review decisions must cover the pending deferred tool calls.",
             details={
                 "artifact_ref": artifact_ref,
+                "duplicate_tool_call_ids": duplicate_call_ids,
                 "unknown_tool_call_ids": unknown_call_ids,
                 "missing_tool_call_ids": missing_call_ids,
             },
@@ -670,7 +675,12 @@ async def submit_chat_deferred_review(
                 else True
             )
         elif decision_value == "deny":
-            approvals[tool_call_id] = ToolDenied(str(decision.get("message") or "").strip())
+            denial_message = str(decision.get("message") or "").strip()
+            approvals[tool_call_id] = (
+                ToolDenied(denial_message)
+                if denial_message
+                else ToolDenied()
+            )
         else:
             raise APIException(
                 status_code=400,
@@ -3944,16 +3954,8 @@ async def get_metadata() -> MetadataResponse:
     except Exception:
         default_context_script = None
 
-    enabled_tools: list[str] = []
     try:
-        enabled_tools_entry = get_general_settings().get("enabled_tools")
-        raw_enabled_tools = getattr(enabled_tools_entry, "value", [])
-        if isinstance(raw_enabled_tools, list):
-            enabled_tools = [
-                str(tool_name).strip()
-                for tool_name in raw_enabled_tools
-                if str(tool_name).strip()
-            ]
+        enabled_tools = get_enabled_tool_names()
     except Exception:
         enabled_tools = []
 

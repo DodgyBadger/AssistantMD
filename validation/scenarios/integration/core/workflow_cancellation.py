@@ -76,12 +76,12 @@ enabled: false
 description: Cancellable workflow probe
 ---
 ```python
-await file_ops_safe(
+await file_write(
     operation="write",
     path="notes/cancelled-workflow-write.md",
     content="created before cancellation\\n",
 )
 while True:
-    await file_ops_safe(operation="list", path=".")
+    await file_read(operation="list", path=".")
 ```
 """

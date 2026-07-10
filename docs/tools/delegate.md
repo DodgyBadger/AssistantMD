@@ -24,7 +24,7 @@ start that workflow asynchronously instead.
 - `prompt`: required. Primary prompt passed to the child agent. Include file paths here when the child agent should read files.
 - `instructions`: optional. System-style instructions layered onto the child agent.
 - `model`: optional. Model alias resolved through the shared model configuration. Defaults to the runtime default model when omitted.
-- `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution` are always excluded regardless of what is passed. Include `file_ops_safe` when the child agent needs to read files.
+- `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution` are always excluded regardless of what is passed. Include `file_read` when the child agent needs to inspect files and `file_write` when it needs to mutate them.
 - `options`: optional dictionary. Supported key: `thinking`, which accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`.
 
 Delegate child runs are also bounded by the `delegate_tool_calls_limit` general
@@ -37,7 +37,7 @@ seconds; `0` disables this timeout.
 ```python
 result = await delegate(
     prompt="Summarise the note at notes/seed.md in two sentences.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     model="flash",
 )
 ```
@@ -45,7 +45,7 @@ result = await delegate(
 ```python
 result = await delegate(
     prompt="Identify the main trend shown in the chart at images/chart.png.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     model="flash",
 )
 ```
@@ -53,7 +53,7 @@ result = await delegate(
 ```python
 result = await delegate(
     prompt="Find the most recent invoice in Finance/Invoices and return the total.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     instructions="Return only the numeric total.",
 )
 ```
@@ -78,7 +78,7 @@ In scripted Monty flows, direct calls return an object with `return_value`, `met
 - `items`: empty; `delegate` does not project source artifacts
 
 ```python
-result = await delegate(prompt="...", tools=["file_ops_safe"])
+result = await delegate(prompt="...", tools=["file_read"])
 summary = result.return_value
 model_used = result.metadata["model"]
 tool_calls = result.metadata["audit"]["tool_calls"]
@@ -94,7 +94,7 @@ The `audit` metadata is a compact child-run summary for debugging and validation
 - child runs are bounded; if the child exceeds its tool-call or timeout guardrail, `delegate` returns a failed tool result with guidance instead of crashing the parent run
 - `delegate_tool_calls_limit` controls the child tool-call guardrail globally; use scoped prompts and multiple delegate calls rather than one broad child run when the limit is reached
 - `delegate_timeout_seconds` controls the child timeout globally; raise it for slower models or larger delegated tasks, or split broad work into smaller child runs
-- to work with files, include the file path in the prompt and add `file_ops_safe` to `tools` — the child agent reads them the same way the parent agent does
-- markdown files with embedded local images are handled by `file_ops_safe(read)` inside the child agent, preserving the same multimodal tool-return path used by chat
+- to work with files, include the file path in the prompt and add `file_read` or `file_write` to `tools` according to the required capability
+- markdown files with embedded local images are handled by `file_read(read)` inside the child agent, preserving the same multimodal tool-return path used by chat
 - when `model` is omitted, the child agent uses the same default model as the runtime
 - `options["thinking"]` is separate from the model alias; do not encode thinking level in the model string

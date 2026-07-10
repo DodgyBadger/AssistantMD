@@ -1268,7 +1268,7 @@ def _is_virtual_docs_file_call(
     event: ConversationToolEventItem,
     args: dict[str, Any] | None,
 ) -> bool:
-    if event.tool_name != "file_ops_safe" or not args:
+    if event.tool_name not in {"file_read", "file_ops_safe"} or not args:
         return False
     paths = _extract_arg_paths(args)
     return bool(paths) and all(path.startswith("__virtual_docs__/") for path in paths)

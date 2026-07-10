@@ -23,7 +23,7 @@ When AI models process web content using tools like search, extract or crawl, ma
 
 **Potential impact:**
 - Creation of incorrect or misleading content in your vault files
-- If using `file_ops_unsafe` tool, possible deletion or modification of files within the vault
+- A model with `file_write` enabled can delete or modify files within the vault
 
 ### Mitigation
 
@@ -53,8 +53,9 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 ### Best Practices
 
 - Review outputs from workflows and context templates that process web content
-- Use `file_ops_safe` tool by default - only enable `file_ops_unsafe` when you need write/delete capabilities
-- Be especially cautious when combining `file_ops_unsafe` with `browser` or other web tools on untrusted websites
+- Disable `file_write` app-wide when a deployment should not permit model-driven vault mutations
+- Use collaborative edit mode when you want to inspect interactive chat mutations before they execute
+- Be especially cautious when combining `file_write` with `browser` or other web tools on untrusted websites
 - Prefer the least powerful web tool that can do the job:
   - search when you need discovery
   - extract when you already know the page URL

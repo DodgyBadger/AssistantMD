@@ -165,7 +165,7 @@ class ChatCancellationScenario(BaseScenario):
                 "Cancelled chat should retain the submitted prompt"
             )
 
-            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
                 del vault_name, vault_path, tools, model, thinking
                 return ("Answer briefly.", "", TestModel(), [])
 

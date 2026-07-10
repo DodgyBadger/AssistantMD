@@ -838,8 +838,15 @@ class ApiEndpointsScenario(BaseScenario):
         async def second_limited_tool() -> str:
             return "SECOND"
 
-        def _limited_tool_agent_config(vault_name, vault_path, tools, model, thinking=None):
-            del vault_name, vault_path, tools, model, thinking
+        def _limited_tool_agent_config(
+            vault_name,
+            vault_path,
+            tools,
+            model,
+            thinking=None,
+            chat_mode=None,
+        ):
+            del vault_name, vault_path, tools, model, thinking, chat_mode
             return (
                 "Use the available tools before answering.",
                 "",

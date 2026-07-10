@@ -89,7 +89,7 @@ def compaction_prompt(context_notes_text, skill_policy, context_notes_file, targ
     )
 
 
-skill_frontmatter = await file_ops_safe(
+skill_frontmatter = await file_read(
     operation="frontmatter",
     path=SKILL_PATH,
     keys="context_notes_file,context_notes_char_limit",
@@ -103,7 +103,7 @@ trigger_chars = int(context_notes_char_limit * TRIGGER_RATIO)
 
 # Skip cleanly when there is no notes file yet. Users can create it manually or
 # through the Save User Note skill.
-context_notes_result = await file_ops_safe(operation="read", path=context_notes_file)
+context_notes_result = await file_read(operation="read", path=context_notes_file)
 if context_notes_result.metadata.get("status") != "completed":
     await finish(status="skipped", reason=f"{context_notes_file} not found")
 
@@ -115,7 +115,7 @@ if len(context_notes_text) <= trigger_chars:
         reason=f"{context_notes_file} is {len(context_notes_text)} chars; trigger is {trigger_chars}",
     )
 
-skill_result = await file_ops_safe(operation="read", path=SKILL_PATH)
+skill_result = await file_read(operation="read", path=SKILL_PATH)
 skill_policy = (
     skill_result.return_value
     if skill_result.metadata.get("status") == "completed"
@@ -170,13 +170,13 @@ elif len(curated_text) > trigger_chars:
 else:
     # Successful writes are two-step: archive the original, then write the
     # curated replacement. If either step fails, report it instead of hiding it.
-    await file_ops_safe(operation="mkdir", path=ARCHIVE_DIR)
+    await file_write(operation="mkdir", path=ARCHIVE_DIR)
 
     archive_path = ""
     for index in range(10):
         # Avoid overwriting an archive from an earlier run on the same date.
         candidate = archive_path_for_today(index)
-        existing = await file_ops_safe(operation="read", path=candidate)
+        existing = await file_read(operation="read", path=candidate)
         if existing.metadata.get("status") != "completed":
             archive_path = candidate
             break
@@ -192,7 +192,7 @@ else:
             "retried": retried,
         }
     else:
-        moved = await file_ops_safe(
+        moved = await file_write(
             operation="move",
             path=context_notes_file,
             destination=archive_path,
@@ -207,7 +207,7 @@ else:
                 "retried": retried,
             }
         else:
-            written = await file_ops_safe(
+            written = await file_write(
                 operation="write",
                 path=context_notes_file,
                 content=curated_text.rstrip() + "\n",
