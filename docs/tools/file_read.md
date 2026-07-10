@@ -46,4 +46,4 @@ file_read(operation="frontmatter", path="projects", keys="title,status")
   payloads when image policy permits. Ranged reads return text only.
 - `frontmatter` accepts a markdown path, directory, or glob and returns structured
   `items` metadata. Use `keys` to select a comma-separated subset.
-- Use `file_write` for create, edit, move, delete, mkdir, and batch operations.
+- Use `file_write` for create, edit, move, delete, and mkdir operations.

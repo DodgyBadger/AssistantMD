@@ -18,7 +18,7 @@ Expose two model-facing tools:
 
 - `file_read` performs `read`, `list`, `search`, and `frontmatter` operations.
 - `file_write` performs `write`, `append`, `edit_line`, `replace_text`, `move`,
-  `delete`, `mkdir`, and write-only `batch` operations.
+  `delete`, and `mkdir` operations.
 
 Both tools are thin adapters over shared operations in
 `core.vault_state.file_operations`. Mutations continue through
@@ -37,6 +37,8 @@ per-turn tool subset in the UI.
 - Read-only inspection never blocks on collaborative review.
 - Every reviewed mutation executes through the same tool and vault service as a
   direct mutation.
+- Multiple independent mutations use separate tool calls so collaborative
+  review retains per-operation decisions and results.
 - `move(overwrite=true)` represents explicit destination replacement.
 - `write(overwrite=true, content="")` represents clearing a file; there is no
   separate truncate operation.

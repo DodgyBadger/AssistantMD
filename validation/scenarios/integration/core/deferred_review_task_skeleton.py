@@ -8,7 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from pydantic_ai import AgentRunResultEvent, DeferredToolRequests, PartStartEvent
+from pydantic_ai import (
+    AgentRunResultEvent,
+    DeferredToolRequests,
+    DeferredToolResults,
+    PartStartEvent,
+    ToolDenied,
+)
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -28,15 +34,30 @@ from validation.core.base_scenario import BaseScenario
 
 class _DeferredReviewResult:
     def __init__(self, prompt: str) -> None:
-        self._tool_call = ToolCallPart(
-            tool_name="reviewed_write",
-            args={"path": "Draft.md", "content": "Draft content"},
-            tool_call_id="review-call-1",
-        )
-        self.output = DeferredToolRequests(approvals=[self._tool_call])
+        self._tool_calls = [
+            ToolCallPart(
+                tool_name="file_write",
+                args={
+                    "operation": "write",
+                    "path": "Draft.md",
+                    "content": "Draft content",
+                },
+                tool_call_id="review-call-1",
+            ),
+            ToolCallPart(
+                tool_name="file_write",
+                args={
+                    "operation": "write",
+                    "path": "Notes.md",
+                    "content": "Notes content",
+                },
+                tool_call_id="review-call-2",
+            ),
+        ]
+        self.output = DeferredToolRequests(approvals=self._tool_calls)
         self._messages = [
             ModelRequest(parts=[UserPromptPart(content=prompt)]),
-            ModelResponse(parts=[self._tool_call]),
+            ModelResponse(parts=self._tool_calls),
         ]
 
     def new_messages(self):
@@ -55,19 +76,33 @@ class _DeferredReviewAgent:
 class _ResumeResult:
     output = "resumed"
 
-    def new_messages(self):
-        return [
-            ModelRequest(
-                parts=[
+    def __init__(self, deferred_tool_results: DeferredToolResults) -> None:
+        tool_parts = []
+        for tool_call_id, decision in deferred_tool_results.approvals.items():
+            if isinstance(decision, ToolDenied):
+                tool_parts.append(
                     ToolReturnPart(
-                        tool_name="reviewed_write",
-                        content="wrote reviewed draft",
-                        tool_call_id="review-call-1",
+                        tool_name="file_write",
+                        content=decision.message,
+                        tool_call_id=tool_call_id,
+                        outcome="denied",
                     )
-                ]
-            ),
+                )
+            else:
+                tool_parts.append(
+                    ToolReturnPart(
+                        tool_name="file_write",
+                        content=f"executed {tool_call_id}",
+                        tool_call_id=tool_call_id,
+                    )
+                )
+        self._messages = [
+            ModelRequest(parts=tool_parts),
             ModelResponse(parts=[TextPart("resumed")]),
         ]
+
+    def new_messages(self):
+        return list(self._messages)
 
     def all_messages(self):
         return self.new_messages()
@@ -79,10 +114,11 @@ class _ResumeAgent:
 
     async def run_stream_events(self, prompt, **kwargs):
         self.capture["prompt"] = prompt
-        self.capture["deferred_tool_results"] = kwargs.get("deferred_tool_results")
+        deferred_tool_results = kwargs.get("deferred_tool_results")
+        self.capture["deferred_tool_results"] = deferred_tool_results
         self.capture["message_history"] = kwargs.get("message_history")
         yield PartStartEvent(index=0, part=TextPart("resumed"))
-        yield AgentRunResultEvent(result=_ResumeResult())
+        yield AgentRunResultEvent(result=_ResumeResult(deferred_tool_results))
 
 
 class DeferredReviewTaskSkeletonScenario(BaseScenario):
@@ -190,7 +226,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert (
                 review_event["artifact_kind"] == "deferred_tool_review"
             ), "Review event should identify deferred review artifacts"
-            assert review_event["review_count"] == 1, "Review event should summarize calls"
+            assert review_event["review_count"] == 2, (
+                "Independent write calls should share one review artifact"
+            )
             assert (
                 events[-1].data["choices"][0]["finish_reason"] == "tool_review_required"
             ), "Done event should identify review-required finish reason"
@@ -203,7 +241,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert review is not None, "Deferred review record should be persisted"
             assert review.status == "pending", "Deferred review should start pending"
             assert review.originating_task_id == started.task.task_id
-            assert review.review_count == 1
+            assert review.review_count == 2
             assert len(review.resume_messages) == 2, "Resume history should be persisted"
             assert review.resume_config.get("model") == "test"
             assert review.resume_config.get("tools") == []
@@ -221,7 +259,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert api_payload.get("artifact_kind") == "deferred_tool_review"
             assert api_payload.get("status") == "pending"
             assert api_payload.get("originating_task_id") == started.task.task_id
-            assert api_payload.get("approvals", [{}])[0].get("tool_call_id") == "review-call-1"
+            assert [
+                call.get("tool_call_id") for call in api_payload.get("approvals", [])
+            ] == ["review-call-1", "review-call-2"]
 
             duplicate_response = self.call_api(
                 (
@@ -233,6 +273,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                     "decisions": [
                         {"tool_call_id": "review-call-1", "decision": "approve"},
                         {"tool_call_id": "review-call-1", "decision": "deny"},
+                        {"tool_call_id": "review-call-2", "decision": "approve"},
                     ],
                 },
             )
@@ -255,10 +296,16 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                             "tool_call_id": "review-call-1",
                             "decision": "approve",
                             "override_args": {
+                                "operation": "write",
                                 "path": "Reviewed.md",
                                 "content": "Reviewed content",
                             },
-                        }
+                        },
+                        {
+                            "tool_call_id": "review-call-2",
+                            "decision": "deny",
+                            "message": "Keep the existing notes structure.",
+                        },
                     ],
                 },
             )
@@ -284,9 +331,12 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert resume_capture["prepared_chat_mode"] == "collaborative"
             approved = result.approvals["review-call-1"]
             assert approved.override_args == {
+                "operation": "write",
                 "path": "Reviewed.md",
                 "content": "Reviewed content",
             }, "Submit should preserve edited override args"
+            denied = result.approvals["review-call-2"]
+            assert denied.message == "Keep the existing notes structure."
             submitted_review = get_deferred_review(
                 vault_name=vault.name,
                 session_id="deferred-review-session",
@@ -342,7 +392,12 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                             "tool_call_id": "review-call-1",
                             "decision": "deny",
                             "message": "",
-                        }
+                        },
+                        {
+                            "tool_call_id": "review-call-2",
+                            "decision": "deny",
+                            "message": "Do not create either file.",
+                        },
                     ],
                 },
             )
@@ -355,6 +410,10 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             denial = denied_result.approvals["review-call-1"]
             assert denial.message == "The tool call was denied.", (
                 "An empty optional comment must not hide the denial from the resumed model"
+            )
+            assert (
+                denied_result.approvals["review-call-2"].message
+                == "Do not create either file."
             )
         finally:
             chat_executor._prepare_chat_execution = original_prepare

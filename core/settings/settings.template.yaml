@@ -424,7 +424,7 @@ tools:
     user_editable: false
   file_write:
     module: core.tools.file_write
-    description: "Create, append, edit lines, replace text, move, delete, create folders, and batch mutate files in the current vault"
+    description: "Create, append, edit lines, replace text, move, delete, and create folders in the current vault"
     requires_secrets: []
     user_editable: false
   tavily_extract:

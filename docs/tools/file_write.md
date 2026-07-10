@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Create, append, edit, move, delete, create folders, and batch mutate files in the
-current vault.
+Create, append, edit, move, delete, and create folders in the current vault.
 
 ## Operations
 
@@ -14,7 +13,6 @@ current vault.
 - `move`
 - `delete`
 - `mkdir`
-- `batch`
 
 ## Examples
 
@@ -70,26 +68,6 @@ explicitly provided.
 file_write(operation="delete", path="Scratch.md", confirm_path="Scratch.md")
 ```
 
-```python
-file_write(
-    operation="batch",
-    operations=[
-        {"operation": "write", "path": "notes/a.md", "content": "# A\n"},
-        {"operation": "write", "path": "notes/b.md", "content": "# B\n"},
-        {"operation": "move", "path": "notes/b.md", "destination": "archive/b.md"},
-    ],
-)
-```
-
-## Batch Rules
-
-`batch` is for mutations only. It accepts `write`, `append`, `edit_line`, `replace_text`,
-`move`, `delete`, and `mkdir` rows. It rejects `read`, `list`, `search`, and
-nested `batch` rows before executing anything.
-
-Batch execution is sequential and non-transactional. It does not roll back
-earlier successful rows if a later row fails.
-
 ## Notes
 
 - Paths are vault-relative.
@@ -99,3 +77,8 @@ earlier successful rows if a later row fails.
 - Clear an existing file with `write(overwrite=True, content="")`; there is no
   separate truncate operation.
 - Use `file_read` before calling `file_write` when you need to inspect context.
+- For multiple independent changes, issue separate `file_write` calls in one
+  response. Collaborative mode can then review and return each operation
+  independently.
+- Sequence dependent mutations across turns, or use a bounded script when
+  deterministic ordered processing is required.

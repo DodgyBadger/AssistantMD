@@ -34,6 +34,10 @@ class FileOpsUnifiedToolScenario(BaseScenario):
             assert binding.tool_names() == ["file_read", "file_write"]
             read_tool = binding.tool_functions[0]
             write_tool = binding.tool_functions[1]
+            write_properties = write_tool.function_schema.json_schema["properties"]
+            assert "operations" not in write_properties, (
+                "file_write should expose one mutation per tool call"
+            )
 
             read_range = await self._call(read_tool, vault, "file_read", {
                 "operation": "read",
@@ -200,50 +204,13 @@ class FileOpsUnifiedToolScenario(BaseScenario):
             assert made_directory.metadata["status"] == "completed"
             assert (vault / "empty/sub").is_dir()
 
-            batch = await self._call(write_tool, vault, "file_write", {
+            removed_batch = await self._call(write_tool, vault, "file_write", {
                 "operation": "batch",
-                "operations": [
-                    {
-                        "operation": "write",
-                        "path": "batch/one.md",
-                        "content": "One\n",
-                    },
-                    {
-                        "operation": "write",
-                        "path": "batch/two.md",
-                        "content": "Two\n",
-                    },
-                    {
-                        "operation": "move",
-                        "path": "batch/two.md",
-                        "destination": "batch/archive/two.md",
-                    },
-                ],
             })
-            assert batch.metadata["status"] == "completed"
-            assert batch.metadata["completed"] == 3
-            assert batch.metadata["failed"] == 0
-            assert len(batch.metadata["results"]) == 3
-            assert (vault / "batch/one.md").read_text(encoding="utf-8") == "One\n"
-            assert (vault / "batch/archive/two.md").read_text(encoding="utf-8") == "Two\n"
-
-            invalid_batch = await self._call(write_tool, vault, "file_write", {
-                "operation": "batch",
-                "operations": [
-                    {
-                        "operation": "read",
-                        "path": "batch/one.md",
-                    },
-                    {
-                        "operation": "delete",
-                        "path": "missing.md",
-                        "confirm_path": "missing.md",
-                    },
-                ],
-            })
-            assert invalid_batch.metadata["status"] == "error"
-            assert invalid_batch.metadata["error_type"] == "invalid_batch_operation"
-            assert invalid_batch.metadata["completed"] == 0
+            assert removed_batch.metadata["status"] == "error"
+            assert removed_batch.metadata["error_type"] == "unknown_operation"
+            assert "mkdir" in removed_batch.return_value
+            assert "batch" not in removed_batch.return_value.split("Available:", 1)[-1]
 
             deleted = await self._call(write_tool, vault, "file_write", {
                 "operation": "delete",

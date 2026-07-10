@@ -198,17 +198,6 @@
                     ${hidden.join('')}
                 `;
             }
-            if (operation === 'batch') {
-                return `
-                    <div class="edit-proposal-diff is-single">
-                        <div>
-                            <div class="edit-proposal-label">Operations</div>
-                            <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="operations" data-arg-type="json" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(JSON.stringify(args.operations || [], null, 2))}</textarea>
-                        </div>
-                    </div>
-                    ${hiddenArg(toolCallId, 'operation', 'batch')}
-                `;
-            }
             return `
                 <div class="edit-proposal-diff is-single">
                     <div>

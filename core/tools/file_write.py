@@ -25,19 +25,9 @@ from .base import BaseTool
 
 logger = UnifiedLogger(tag="file-write-tool")
 
-_WRITE_OPERATIONS = {
-    "write",
-    "append",
-    "edit_line",
-    "replace_text",
-    "move",
-    "delete",
-    "mkdir",
-}
-
 
 class FileWrite(BaseTool):
-    """Create, edit, move, delete, and batch mutate vault files."""
+    """Create, edit, move, and delete vault files."""
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -55,11 +45,10 @@ class FileWrite(BaseTool):
             count: int = 1,
             overwrite: bool = False,
             confirm_path: str = "",
-            operations: list[dict[str, Any]] | None = None,
         ) -> ToolReturn:
-            """Create, edit, move, delete, or batch mutate vault files.
+            """Create, edit, move, or delete vault files.
 
-            :param operation: One of write, append, edit_line, replace_text, move, delete, mkdir, batch.
+            :param operation: One of write, append, edit_line, replace_text, move, delete, mkdir.
             :param path: Vault-relative file or directory path.
             :param content: Full content for write, or content to append.
             :param destination: Destination path for move.
@@ -69,7 +58,6 @@ class FileWrite(BaseTool):
             :param count: Replacement count for replace_text.
             :param overwrite: For write or move, replace an existing target when true.
             :param confirm_path: Required path confirmation for delete.
-            :param operations: Write operation objects for batch.
             """
             try:
                 logger.set_sinks(["validation"]).info(
@@ -94,7 +82,6 @@ class FileWrite(BaseTool):
                     count=count,
                     overwrite=overwrite,
                     confirm_path=confirm_path,
-                    operations=operations,
                 )
                 return _to_tool_return(result)
             except VaultFileOperationRejected as exc:
@@ -118,8 +105,8 @@ class FileWrite(BaseTool):
             file_write,
             name="file_write",
             description=(
-                "Create, append, edit lines, replace text, move, delete, create folders, "
-                "and batch mutate files within the current vault."
+                "Create, append, edit lines, replace text, move, delete, and create "
+                "folders within the current vault."
             ),
         )
 
@@ -145,7 +132,6 @@ def _execute_write_operation(
     count: int,
     overwrite: bool,
     confirm_path: str,
-    operations: list[dict[str, Any]] | None,
 ) -> VaultFileOperationResult:
     normalized = operation.strip().lower()
     if normalized == "write":
@@ -188,12 +174,10 @@ def _execute_write_operation(
         )
     if normalized == "mkdir":
         return make_vault_directory_operation(vault_path=vault_path, path=path)
-    if normalized == "batch":
-        return _run_batch(vault_path=vault_path, operations=operations or [])
     return VaultFileOperationResult(
         return_value=(
             f"Unknown operation '{operation}'. Available: write, append, edit_line, "
-            "replace_text, move, delete, mkdir, batch"
+            "replace_text, move, delete, mkdir"
         ),
         metadata={
             "status": "error",
@@ -203,108 +187,6 @@ def _execute_write_operation(
             "error_type": "unknown_operation",
         },
     )
-
-
-def _run_batch(
-    *,
-    vault_path: str,
-    operations: list[dict[str, Any]],
-) -> VaultFileOperationResult:
-    if not operations:
-        return VaultFileOperationResult(
-            return_value="Batch requires at least one operation.",
-            metadata={
-                "status": "error",
-                "operation": "batch",
-                "error_type": "invalid_arguments",
-            },
-        )
-    invalid_rows = _invalid_batch_rows(operations)
-    if invalid_rows:
-        return VaultFileOperationResult(
-            return_value="Batch may contain only write operations.",
-            metadata={
-                "status": "error",
-                "operation": "batch",
-                "error_type": "invalid_batch_operation",
-                "invalid_rows": invalid_rows,
-                "total": len(operations),
-                "completed": 0,
-                "failed": len(operations),
-                "results": [],
-            },
-        )
-
-    rows: list[dict[str, Any]] = []
-    for index, item in enumerate(operations):
-        result = _execute_write_operation(
-            vault_path=vault_path,
-            operation=str(item.get("operation", "")),
-            path=str(item.get("path", "")),
-            content=str(item.get("content", "")),
-            destination=str(item.get("destination", "")),
-            old_text=str(item.get("old_text", "")),
-            new_text=str(item.get("new_text", "")),
-            line_number=int(item.get("line_number", 0)),
-            count=int(item.get("count", 1)),
-            overwrite=bool(item.get("overwrite", False)),
-            confirm_path=str(item.get("confirm_path", "")),
-            operations=None,
-        )
-        metadata = dict(result.metadata)
-        rows.append(
-            {
-                "index": index,
-                "status": metadata.get("status", "completed"),
-                "operation": metadata.get("operation", item.get("operation", "")),
-                "path": metadata.get("path"),
-                "destination": metadata.get("destination"),
-                "error_type": metadata.get("error_type"),
-                "return_value": result.return_value,
-                "metadata": metadata,
-            }
-        )
-
-    failed = sum(1 for row in rows if row["status"] != "completed")
-    completed = len(rows) - failed
-    status = "completed" if failed == 0 else "error" if completed == 0 else "partial"
-    return VaultFileOperationResult(
-        return_value=f"Batch {status}: {completed} completed, {failed} failed.",
-        metadata={
-            "status": status,
-            "operation": "batch",
-            "total": len(rows),
-            "completed": completed,
-            "failed": failed,
-            "results": rows,
-        },
-    )
-
-
-def _invalid_batch_rows(operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    invalid: list[dict[str, Any]] = []
-    for index, item in enumerate(operations):
-        if not isinstance(item, dict):
-            invalid.append(
-                {
-                    "index": index,
-                    "operation": "",
-                    "error_type": "invalid_arguments",
-                }
-            )
-            continue
-        operation = str(item.get("operation", "")).strip().lower()
-        if operation not in _WRITE_OPERATIONS:
-            invalid.append(
-                {
-                    "index": index,
-                    "operation": operation,
-                    "error_type": (
-                        "nested_batch" if operation == "batch" else "read_operation_not_allowed"
-                    ),
-                }
-            )
-    return invalid
 
 
 def _to_tool_return(result: VaultFileOperationResult) -> ToolReturn:

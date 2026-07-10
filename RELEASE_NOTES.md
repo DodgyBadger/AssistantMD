@@ -9,7 +9,8 @@
   mode renders `file_write` calls as inline review cards and resumes the same
   agent turn after review.
 - Review cards support creates, full writes, appends, line edits, exact text
-  replacements, moves, deletes, folder creation, and write batches.
+  replacements, moves, deletes, and folder creation. Multiple independent
+  `file_write` calls can be reviewed together with one decision per operation.
 - File references in assistant messages can open vault files directly from chat.
 
 ### Breaking Tool Changes
@@ -17,7 +18,7 @@
 - `file_read` replaces the read/list/search/frontmatter surface previously mixed
   into `file_ops_safe`.
 - `file_write` replaces mutating operations previously split between
-  `file_ops_safe` and `file_ops_unsafe` and adds write-only batching.
+  `file_ops_safe` and `file_ops_unsafe`.
 - `file_ops_safe`, `file_ops_unsafe`, and the transitional `file_ops` tool are
   removed. Authored scripts and workflows must call `file_read` or `file_write`.
 - The temporary `propose_file_edits` and `review_create_file` tools are removed;
