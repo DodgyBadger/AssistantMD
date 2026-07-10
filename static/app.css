@@ -1231,6 +1231,81 @@ details summary::-webkit-details-marker {
     justify-content: flex-end;
     gap: 0.5rem;
 }
+.vault-file-mode-toggle {
+    display: inline-flex;
+    padding: 0.125rem;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-elevated));
+}
+.vault-file-mode-toggle button {
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    color: rgb(var(--text-secondary));
+}
+.vault-file-mode-toggle button:hover,
+.vault-file-mode-toggle button:focus-visible {
+    color: rgb(var(--accent-primary));
+    outline: none;
+}
+.vault-file-mode-toggle button.is-active {
+    background: rgb(var(--bg-card));
+    color: rgb(var(--accent-primary));
+    box-shadow: 0 0 0 1px rgb(var(--border-primary));
+}
+.vault-file-mode-toggle svg {
+    width: 1rem;
+    height: 1rem;
+}
+.vault-file-preview {
+    color: rgb(var(--text-primary));
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.vault-file-preview > :first-child {
+    margin-top: 0;
+}
+.vault-file-preview > :last-child {
+    margin-bottom: 0;
+}
+.vault-file-preview :is(h1, h2, h3, h4, h5, h6, p, li, code, strong, em, th, td) {
+    color: rgb(var(--text-primary));
+}
+.vault-file-preview a {
+    color: rgb(var(--accent-primary));
+}
+.vault-file-preview a:hover {
+    color: rgb(var(--accent-hover));
+}
+.vault-file-preview blockquote {
+    color: rgb(var(--text-secondary));
+    border-inline-start-color: rgb(var(--border-primary));
+}
+.vault-file-preview :is(hr, th, td) {
+    border-color: rgb(var(--border-primary));
+}
+.vault-file-preview pre {
+    position: relative;
+    max-width: 100%;
+    padding: 1rem 1rem 2.5rem;
+    overflow-x: auto;
+    border: 1px solid rgb(var(--border-primary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--text-primary));
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.vault-file-preview pre .copy-button {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.75rem;
+}
 @media (max-width: 639px) {
     .app-modal-panel {
         max-width: none;

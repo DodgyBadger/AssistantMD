@@ -97,6 +97,11 @@ among similarly named files.
   plain-text content in the inline editor. Reject known binary media types,
   invalid UTF-8, NUL/control-byte content, and oversized files on the backend.
 - Default to read/preview mode.
+- Open Markdown files in a sanitized rendered preview using the same parser and
+  post-processing pipeline as chat. Provide explicit Preview and Edit modes;
+  other supported plain-text files open directly in Edit.
+- Render unsaved Markdown edits when switching to Preview, confirm before
+  leaving a dirty file, and return to Preview after a successful save.
 - Offer edit mode for supported text/markdown files.
 - Save with optimistic concurrency using a content hash from open time.
 - Route saves through `core.vault_state.file_mutations.replace_vault_file_content`

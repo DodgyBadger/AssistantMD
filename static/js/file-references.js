@@ -2,6 +2,7 @@
     function createFileReferencesController({ state, elements, icons, utils, callbacks }) {
         const { escapeHtml } = utils;
         let pickerOpen = false;
+        let activeFileCanClose = null;
         const resolutionCache = new Map();
 
         function selectedVault() {
@@ -69,7 +70,7 @@
         async function openFile(path, { allowCreate = false, onBack = null } = {}) {
             const vault = selectedVault();
             if (!vault || !path) return;
-            closeFileModal();
+            if (!closeFileModal()) return;
             const overlay = document.createElement('div');
             overlay.id = 'vault-file-modal';
             overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
@@ -85,12 +86,17 @@
                             <p id="vault-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(path)}</p>
                         </div>
                         <div class="app-modal-actions">
-                            <button type="button" class="ui-icon-button is-primary is-compact" data-vault-file-save="true" aria-label="Save file" title="Save file" disabled>${icons.SAVE_ICON_SVG}</button>
+                            <div class="vault-file-mode-toggle hidden" data-vault-file-mode-toggle role="group" aria-label="File view">
+                                <button type="button" data-vault-file-mode="preview" aria-label="Preview Markdown" title="Preview Markdown">${icons.EYE_ICON_SVG}</button>
+                                <button type="button" data-vault-file-mode="edit" aria-label="Edit Markdown" title="Edit Markdown">${icons.EDIT_ICON_SVG}</button>
+                            </div>
+                            <button type="button" class="ui-icon-button is-primary is-compact hidden" data-vault-file-save="true" aria-label="Save file" title="Save file" disabled>${icons.SAVE_ICON_SVG}</button>
                             <button type="button" class="ui-icon-button is-compact" data-vault-file-close="true" aria-label="Close" title="Close">${icons.X_ICON_SVG}</button>
                         </div>
                     </div>
                     <div class="p-4 space-y-3 flex-1 min-h-0 flex flex-col">
                         <div id="vault-file-modal-status" class="text-sm text-txt-secondary">Loading file...</div>
+                        <div id="vault-file-modal-preview" class="vault-file-preview prose prose-sm max-w-none hidden flex-1 min-h-0 overflow-y-auto"></div>
                         <textarea
                             id="vault-file-modal-editor"
                             class="w-full flex-1 min-h-0 px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -105,14 +111,45 @@
             const editor = overlay.querySelector('#vault-file-modal-editor');
             const statusLabel = overlay.querySelector('#vault-file-modal-status');
             const saveButton = overlay.querySelector('[data-vault-file-save]');
+            const preview = overlay.querySelector('#vault-file-modal-preview');
+            const modeToggle = overlay.querySelector('[data-vault-file-mode-toggle]');
             let sha256 = '';
             let createIfMissing = false;
+            let savedContent = '';
+            let mode = 'edit';
+            const supportsPreview = /\.(md|markdown)$/i.test(path);
+
+            function isDirty() {
+                return editor instanceof HTMLTextAreaElement && editor.value !== savedContent;
+            }
+
+            function confirmDiscard() {
+                return !isDirty() || window.confirm('Discard unsaved changes to this file?');
+            }
+            activeFileCanClose = confirmDiscard;
+
+            function renderPreview() {
+                if (!(preview instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement)) return;
+                callbacks.renderMarkdownPreview?.(preview, editor.value);
+            }
+
+            function setMode(nextMode) {
+                mode = supportsPreview && nextMode === 'preview' ? 'preview' : 'edit';
+                if (mode === 'preview') renderPreview();
+                preview?.classList.toggle('hidden', mode !== 'preview');
+                editor?.classList.toggle('hidden', mode !== 'edit');
+                saveButton?.classList.toggle('hidden', mode !== 'edit');
+                modeToggle?.querySelectorAll('[data-vault-file-mode]').forEach((button) => {
+                    button.classList.toggle('is-active', button.getAttribute('data-vault-file-mode') === mode);
+                    button.setAttribute('aria-pressed', button.getAttribute('data-vault-file-mode') === mode ? 'true' : 'false');
+                });
+            }
 
             overlay.addEventListener('click', async (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
                 if (target.closest('[data-vault-file-back="true"]')) {
-                    closeFileModal();
+                    if (!closeFileModal()) return;
                     onBack?.();
                     return;
                 }
@@ -120,12 +157,26 @@
                     closeFileModal();
                     return;
                 }
+                const modeButton = target.closest('[data-vault-file-mode]');
+                if (modeButton instanceof HTMLButtonElement) {
+                    setMode(modeButton.dataset.vaultFileMode || 'edit');
+                    if (statusLabel) statusLabel.textContent = `${mode === 'preview' ? 'Previewing' : 'Editing'} ${path}.`;
+                    return;
+                }
                 if (target.closest('[data-vault-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
-                    await saveFile(path, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
+                    const saved = await saveFile(path, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
                         sha256 = nextHash;
                         createIfMissing = false;
                     }, () => sha256);
+                    if (saved) {
+                        savedContent = editor.value;
+                        if (saveButton instanceof HTMLButtonElement) saveButton.disabled = true;
+                        if (supportsPreview) setMode('preview');
+                    }
                 }
+            });
+            editor?.addEventListener('input', () => {
+                if (saveButton instanceof HTMLButtonElement) saveButton.disabled = !isDirty() && !createIfMissing;
             });
 
             try {
@@ -133,14 +184,17 @@
                 sha256 = data.sha256 || '';
                 if (editor instanceof HTMLTextAreaElement) {
                     editor.value = data.content || '';
+                    savedContent = editor.value;
                     editor.disabled = false;
                 }
                 if (statusLabel) {
-                    statusLabel.textContent = `Editing ${data.path || path}.`;
+                    statusLabel.textContent = `${supportsPreview ? 'Previewing' : 'Editing'} ${data.path || path}.`;
                 }
                 if (saveButton instanceof HTMLButtonElement) {
-                    saveButton.disabled = false;
+                    saveButton.disabled = true;
                 }
+                if (supportsPreview) modeToggle?.classList.remove('hidden');
+                setMode(supportsPreview ? 'preview' : 'edit');
             } catch (error) {
                 if (error.errorType === 'VaultFileNotFound') {
                     if (!allowCreate) {
@@ -152,6 +206,7 @@
                     createIfMissing = true;
                     if (editor instanceof HTMLTextAreaElement) {
                         editor.value = '';
+                        savedContent = '';
                         editor.disabled = false;
                     }
                     if (statusLabel) {
@@ -160,6 +215,8 @@
                     if (saveButton instanceof HTMLButtonElement) {
                         saveButton.disabled = false;
                     }
+                    if (supportsPreview) modeToggle?.classList.remove('hidden');
+                    setMode('edit');
                     return;
                 }
                 if (error.errorType === 'VaultFileNotText') {
@@ -225,17 +282,22 @@
                 const data = await response.json();
                 setHash(data.sha256 || '');
                 if (statusLabel) statusLabel.textContent = data.message || 'Saved.';
+                return data;
             } catch (error) {
                 if (statusLabel) {
                     statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
                 }
+                return null;
             } finally {
                 if (saveButton instanceof HTMLButtonElement) saveButton.disabled = false;
             }
         }
 
-        function closeFileModal() {
+        function closeFileModal({ force = false } = {}) {
+            if (!force && activeFileCanClose && !activeFileCanClose()) return false;
             document.getElementById('vault-file-modal')?.remove();
+            activeFileCanClose = null;
+            return true;
         }
 
         function enhanceFileLinks(container) {
@@ -333,7 +395,9 @@
                     if (resolution.kind === 'directory') {
                         openDirectory(resolution.path);
                     } else {
-                        openFile(resolution.path);
+                        openFile(resolution.path, {
+                            onBack: () => openExplorer({ revealPath: resolution.path }),
+                        });
                     }
                 });
                 element.replaceWith(button);

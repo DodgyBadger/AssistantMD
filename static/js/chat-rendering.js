@@ -471,6 +471,11 @@
             bodyDiv.innerHTML = sanitizeAssistantHtml(restoredHtml);
         }
 
+        function renderMarkdownPreview(container, markdownContent = '') {
+            renderAssistantHtml(container, markdownContent);
+            postProcessAssistantBody(container);
+        }
+
         function protectLatexForMarkdown(markdown) {
             if (!markdown) {
                 return { markdown: '', segments: [] };
@@ -1547,6 +1552,7 @@
             setAssistantStatus,
             handleToolEvent,
             finalizeAssistantMessage,
+            renderMarkdownPreview,
         });
     }
 
