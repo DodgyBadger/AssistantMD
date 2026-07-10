@@ -50,11 +50,19 @@ The model still sees ordinary text such as `Clients/Acme/Brief.md`. The UI may
 display that reference as a chip or link, but the transcript remains legible
 without the UI layer.
 
-Chat instructions should teach one stable convention: user-facing vault file
-references use `@vault-relative/path.md` text, not custom HTML. Plain text is
-preferred, but the UI should tolerate inline-code refs because models commonly
-format paths that way. Paths should be vault-root relative, use forward slashes,
-and include the extension when known.
+Chat instructions should teach one stable convention: user-facing vault file or
+directory references use full `@vault-relative/path.md` or
+`@vault-relative/directory/` text, not custom HTML. Plain text is preferred, but
+the UI should tolerate inline-code refs because models commonly format paths
+that way. Paths should remain vault-root relative even when a workspace is
+active, use forward slashes, and include the extension when known.
+
+Rendered references are activated only after a batched backend resolution. A
+root-level basename such as `@README.md` may resolve relative to the active
+workspace as a narrow compatibility fallback; a positive workspace-root match
+beats a vault-root match. References containing a slash are interpreted only as
+full vault-relative paths. The resolver does not search recursively or guess
+among similarly named files.
 
 ### User Experience
 
@@ -69,10 +77,16 @@ and include the extension when known.
   backed by structured state or as a clear textual representation.
 - Add an autocomplete path for keyboard users, likely `@path`, backed by the same
   reference model as the picker.
-- Render assistant-mentioned vault file paths as links when they can be safely
-  recognized.
+- Render assistant-mentioned vault file and directory paths as links only when
+  the backend confirms that they currently exist.
 - Clicking a file reference opens a contextual file modal/panel for read and
-  edit.
+  edit. Clicking a directory opens the shared path browser rooted there.
+- Directory rows expand or collapse in place when their label or chevron is
+  selected. A directory link opens the full vault tree at its root and expands
+  the linked directory as the initial focus, without limiting navigation to
+  that subtree. Opening a file keeps the browser mounted underneath so Back or
+  Close returns to the same expanded tree state.
+- Missing references remain ordinary text and never imply a create action.
 
 ### File Modal Contract
 
@@ -92,6 +106,8 @@ Add API/service/model contracts for generic vault file operations:
 - read a vault file by `vault_name` and vault-relative `path`;
 - write supported text files with `content` and `expected_sha256`;
 - optionally list/search workspace or vault files for the picker.
+- resolve a bounded set of rendered path candidates into existing files,
+  directories, or missing paths in one request.
 
 The API layer should remain thin. Path normalization, vault lookup, content
 limits, text/binary support, hash generation, and mutation routing belong in
@@ -353,12 +369,19 @@ Current branch slice:
   - `PUT /api/vaults/{vault_name}/files?path=...`
 - Added `GET /api/vaults/{vault_name}/file-refs` for workspace/vault reference
   listing and search.
+- Added `POST /api/vaults/{vault_name}/file-refs/resolve` for bounded batched
+  classification of rendered chat paths, including workspace-first basename
+  fallback.
 - Added `static/js/file-references.js` to own:
   - composer reference picker modal;
   - insertion of `@vault/path.md` references into the chat input;
   - reusable vault file modal with hash-checked save;
-  - missing-file create flow for referenced files that do not exist yet;
-  - assistant-message vault path enhancement.
+  - existing-file modal links that do not create files when a historical target
+    is missing;
+  - assistant-message file and directory enhancement backed by resolver results;
+  - directory links that reuse the path picker from the resolved directory;
+  - a vault-wide browser that reveals the linked directory, expands folders in
+    place, and preserves tree state while entering and leaving file editing.
 - Wired the chat composer with an Add File Reference button.
 - Wired assistant markdown post-processing to upgrade recognized vault text paths
   and markdown file links into modal-opening controls.

@@ -147,7 +147,7 @@ FLIGHT CARD (MUST)
 - All tools: Pass named parameters (no positional args).
 - Always use code_execution tool for solving math and formulas to ensure accuracy.
 - Keep outputs compact; include short source refs; avoid raw dumps.
-- When referencing vault files in user-facing text, write the full vault-relative path with an @ prefix so the UI can open it, for example @Projects/Example/README.md. Plain text is preferred; inline code is acceptable. Avoid fenced code blocks for file-reference lists.
+- When referencing vault files or directories in user-facing text, always write the full vault-relative path with an @ prefix so the UI can open it, for example @Projects/Example/README.md or @Projects/Example/. Even when a workspace is active, do not shorten a reference to only its basename or a workspace-relative path. Plain text is preferred; inline code is acceptable. Avoid fenced code blocks for reference lists.
 - In collaborative edit mode, use `file_write` so proposed file changes are shown for inline review. For multiple independent changes, issue separate `file_write` calls in the same response so each change can be reviewed individually. Sequence dependent changes across turns.
 - Never write to AssistantMD/ unless explicitly requested.
 

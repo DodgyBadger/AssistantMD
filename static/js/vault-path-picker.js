@@ -84,9 +84,17 @@
                 if (selectButton instanceof HTMLElement) {
                     const path = selectButton.getAttribute('data-vault-path-picker-select') || '';
                     const kind = selectButton.getAttribute('data-vault-path-picker-kind') || '';
+                    if (kind === 'directory' && options.expandDirectoriesOnSelect) {
+                        const row = selectButton.closest('[data-vault-path-picker-row]');
+                        const rowToggle = row?.querySelector(':scope > .workspace-tree-row [data-vault-path-picker-toggle]');
+                        if (rowToggle instanceof HTMLElement) {
+                            await toggleNode(overlay, rowToggle, options);
+                        }
+                        return;
+                    }
                     if (path || mode === 'directories') {
                         options.onSelect?.({ path, kind });
-                        close();
+                        if (options.closeOnSelect !== false) close();
                     }
                 }
             });
@@ -94,9 +102,17 @@
             const debouncedLoad = debounce(() => loadResults(overlay, options), 180);
             queryInput?.addEventListener('input', debouncedLoad);
             scopeSelect?.addEventListener('change', () => loadResults(overlay, options));
-            loadResults(overlay, options).catch((error) => {
-                setStatus(overlay, `Unable to load paths: ${error.message}`, true);
-            });
+            const initialPath = options.revealInitialPath ? '' : (options.initialPath || '');
+            loadResults(overlay, options, initialPath)
+                .then(() => {
+                    if (options.revealInitialPath) {
+                        return revealPath(overlay, options, options.revealInitialPath);
+                    }
+                    return null;
+                })
+                .catch((error) => {
+                    setStatus(overlay, `Unable to load paths: ${error.message}`, true);
+                });
         }
 
         function close() {
@@ -206,6 +222,33 @@
             } catch (error) {
                 children.innerHTML = `<div class="py-1 text-xs state-error">Unable to load paths: ${escapeHtml(error.message)}</div>`;
             }
+        }
+
+        async function revealPath(overlay, options, path) {
+            const segments = String(path || '').split('/').filter(Boolean);
+            let currentPath = '';
+            let revealedRow = null;
+            for (const segment of segments) {
+                currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+                const row = Array.from(
+                    overlay.querySelectorAll('[data-vault-path-picker-row]')
+                ).find((candidate) => (
+                    candidate instanceof HTMLElement
+                    && candidate.getAttribute('data-vault-path-picker-row') === currentPath
+                ));
+                if (!(row instanceof HTMLElement)) return;
+                revealedRow = row;
+                const toggle = row.querySelector(
+                    ':scope > .workspace-tree-row [data-vault-path-picker-toggle]'
+                );
+                if (
+                    toggle instanceof HTMLElement
+                    && toggle.getAttribute('aria-expanded') !== 'true'
+                ) {
+                    await toggleNode(overlay, toggle, options);
+                }
+            }
+            revealedRow?.scrollIntoView({ block: 'nearest' });
         }
 
         function renderRow(item, depth, options) {

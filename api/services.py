@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic_ai import DeferredToolResults, ToolApproved, ToolDenied
@@ -169,6 +169,8 @@ from .models import (
     VaultDirectoryListResponse,
     VaultFileReferenceInfo,
     VaultFileReferenceListResponse,
+    VaultPathResolutionInfo,
+    VaultPathResolveResponse,
     VaultFileResponse,
     EditProposalApplyResponse,
     EditProposalDenyResponse,
@@ -985,6 +987,114 @@ def list_vault_file_references(
         query="",
         scope=normalized_scope,
         items=items,
+    )
+
+
+def resolve_vault_path_references(
+    *,
+    vault_name: str,
+    paths: list[str],
+    workspace_path: str | None = None,
+) -> VaultPathResolveResponse:
+    """Resolve rendered chat path candidates without guessing recursively."""
+    vault_root = _resolve_vault_root(vault_name)
+    normalized_workspace = _normalize_workspace_path(workspace_path)
+    workspace_root: Path | None = None
+    if normalized_workspace:
+        candidate_workspace = resolve_vault_relative_path(
+            vault_path=vault_root,
+            path=normalized_workspace,
+        )
+        if candidate_workspace.is_dir():
+            workspace_root = candidate_workspace
+
+    items: list[VaultPathResolutionInfo] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        requested_path = _normalize_chat_reference_candidate(raw_path)
+        if not requested_path or requested_path in seen:
+            continue
+        seen.add(requested_path)
+
+        resolved_item = None
+        if "/" not in requested_path and workspace_root is not None:
+            workspace_candidate = resolve_vault_relative_path(
+                vault_path=workspace_root,
+                path=requested_path,
+            )
+            resolved_item = _resolved_chat_path_item(
+                vault_root=vault_root,
+                requested_path=requested_path,
+                candidate=workspace_candidate,
+                source="workspace",
+            )
+        if resolved_item is None:
+            vault_candidate = resolve_vault_relative_path(
+                vault_path=vault_root,
+                path=requested_path,
+            )
+            resolved_item = _resolved_chat_path_item(
+                vault_root=vault_root,
+                requested_path=requested_path,
+                candidate=vault_candidate,
+                source="vault",
+            )
+        items.append(
+            resolved_item
+            or VaultPathResolutionInfo(
+                requested_path=requested_path,
+                path=requested_path,
+                kind="missing",
+                source="missing",
+            )
+        )
+
+    return VaultPathResolveResponse(
+        vault_name=vault_name,
+        workspace_path=normalized_workspace,
+        items=items,
+    )
+
+
+def _normalize_chat_reference_candidate(path: str) -> str:
+    raw_path = str(path or "").strip().removeprefix("@").replace("\\", "/")
+    if len(raw_path) > 1000:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultReferencePath",
+            message="Vault reference path is too long.",
+            details={"path": raw_path[:100]},
+        )
+    if raw_path.startswith("/") or ".." in raw_path.split("/"):
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultReferencePath",
+            message="Vault reference paths must stay relative to the vault.",
+            details={"path": raw_path},
+        )
+    return normalize_vault_relative_path(raw_path)
+
+
+def _resolved_chat_path_item(
+    *,
+    vault_root: Path,
+    requested_path: str,
+    candidate: Path,
+    source: Literal["workspace", "vault"],
+) -> VaultPathResolutionInfo | None:
+    if not candidate.exists() or not (candidate.is_file() or candidate.is_dir()):
+        return None
+    try:
+        relative = candidate.resolve().relative_to(vault_root).as_posix()
+    except ValueError:
+        return None
+    if any(part.startswith(".") for part in Path(relative).parts):
+        return None
+    return VaultPathResolutionInfo(
+        requested_path=requested_path,
+        path=relative,
+        kind="directory" if candidate.is_dir() else "file",
+        source=source,
     )
 
 

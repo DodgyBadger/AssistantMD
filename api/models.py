@@ -125,6 +125,44 @@ class VaultFileReferenceListResponse(BaseModel):
     items: List[VaultFileReferenceInfo] = Field(default_factory=list, description="Reference candidates")
 
 
+class VaultPathResolveRequest(BaseModel):
+    """Candidate vault paths extracted from rendered chat content."""
+
+    paths: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Candidate file or directory paths to resolve",
+    )
+    workspace_path: str = Field(
+        "",
+        description="Active vault-relative workspace used for root-level shorthand",
+    )
+
+
+class VaultPathResolutionInfo(BaseModel):
+    """Resolution of one candidate chat path."""
+
+    requested_path: str = Field(..., description="Normalized candidate path")
+    path: str = Field(..., description="Resolved vault-relative path")
+    kind: Literal["file", "directory", "missing"] = Field(..., description="Resolved kind")
+    source: Literal["workspace", "vault", "missing"] = Field(
+        ...,
+        description="Resolution source",
+    )
+
+
+class VaultPathResolveResponse(BaseModel):
+    """Resolved chat path candidates for one vault."""
+
+    vault_name: str = Field(..., description="Vault name")
+    workspace_path: str = Field("", description="Workspace used during resolution")
+    items: List[VaultPathResolutionInfo] = Field(
+        default_factory=list,
+        description="Resolution for each unique candidate path",
+    )
+
+
 class EditProposalApplyRequest(BaseModel):
     """Request to apply selected edits from a collaborative edit proposal."""
 

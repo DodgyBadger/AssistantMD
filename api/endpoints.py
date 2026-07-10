@@ -55,6 +55,8 @@ from .models import (
     DeferredReviewSubmitRequest,
     DeferredReviewSubmitResponse,
     VaultFileReferenceListResponse,
+    VaultPathResolveRequest,
+    VaultPathResolveResponse,
     VaultFileResponse,
     VaultFileUpdateRequest,
     ExecutionTaskCancelResponse,
@@ -134,6 +136,7 @@ from .services import (
     set_chat_session_workspace,
     list_vault_directories,
     list_vault_file_references,
+    resolve_vault_path_references,
     get_vault_file,
     update_vault_file,
     get_chat_edit_proposal,
@@ -1089,6 +1092,22 @@ async def vault_file_references(
             query=query,
             scope=scope,
             limit=limit,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/vaults/{vault_name}/file-refs/resolve", response_model=VaultPathResolveResponse)
+async def resolve_vault_file_references(
+    vault_name: str,
+    request: VaultPathResolveRequest,
+):
+    """Resolve candidate file and directory references from rendered chat content."""
+    try:
+        return resolve_vault_path_references(
+            vault_name=vault_name,
+            paths=request.paths,
+            workspace_path=request.workspace_path,
         )
     except Exception as e:
         return create_error_response(e)

@@ -11,7 +11,9 @@
 - Review cards support creates, full writes, appends, line edits, exact text
   replacements, moves, deletes, and folder creation. Multiple independent
   `file_write` calls can be reviewed together with one decision per operation.
-- File references in assistant messages can open vault files directly from chat.
+- Confirmed file and directory references in assistant messages open the inline
+  editor or path browser directly from chat. Full vault-relative paths are
+  preferred, with workspace-first fallback for root-level basenames.
 
 ### Breaking Tool Changes
 

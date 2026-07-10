@@ -17,6 +17,8 @@ class VaultFileReferenceApiScenario(BaseScenario):
         self.create_file(vault, "Projects/Alpha/README.md", "# Alpha\n\nStart here.\n")
         self.create_file(vault, "Projects/Alpha/notes.txt", "plain notes\n")
         self.create_file(vault, "Projects/Alpha/Nested/plan.md", "# Plan\n")
+        self.create_file(vault, "README.md", "# Vault root\n")
+        self.create_file(vault, "root-note.md", "root note\n")
         self.create_file(vault, ".hidden/secret.md", "hidden\n")
 
         await self.start_system()
@@ -44,6 +46,52 @@ class VaultFileReferenceApiScenario(BaseScenario):
         search_paths = {item["path"] for item in search.json().get("items", [])}
         assert "Projects/Alpha/README.md" in search_paths, "Search should find markdown files"
         assert ".hidden/secret.md" not in search_paths, "Search should not expose hidden files"
+
+        resolved = self.call_api(
+            f"/api/vaults/{vault.name}/file-refs/resolve",
+            method="POST",
+            data={
+                "workspace_path": "Projects/Alpha",
+                "paths": [
+                    "@README.md",
+                    "root-note.md",
+                    "Projects/Alpha/README.md",
+                    "Projects/Alpha",
+                    "Nested/plan.md",
+                    "missing.md",
+                    ".hidden/secret.md",
+                    "README.md",
+                ],
+            },
+        )
+        assert resolved.status_code == 200, "Candidate path resolution should succeed"
+        resolutions = {
+            item["requested_path"]: item for item in resolved.json().get("items", [])
+        }
+        assert resolutions["README.md"] == {
+            "requested_path": "README.md",
+            "path": "Projects/Alpha/README.md",
+            "kind": "file",
+            "source": "workspace",
+        }, "Workspace-root basename matches should beat vault-root matches"
+        assert resolutions["root-note.md"]["path"] == "root-note.md"
+        assert resolutions["root-note.md"]["source"] == "vault"
+        assert resolutions["Projects/Alpha/README.md"]["source"] == "vault"
+        assert resolutions["Projects/Alpha"]["kind"] == "directory"
+        assert resolutions["Nested/plan.md"]["kind"] == "missing", (
+            "Slash-containing references must not fall back to workspace-relative paths"
+        )
+        assert resolutions["missing.md"]["kind"] == "missing"
+        assert resolutions[".hidden/secret.md"]["kind"] == "missing"
+        assert len(resolutions) == 7, "Duplicate normalized candidates should resolve once"
+
+        invalid_resolution = self.call_api(
+            f"/api/vaults/{vault.name}/file-refs/resolve",
+            method="POST",
+            data={"paths": ["../outside.md"]},
+        )
+        assert invalid_resolution.status_code == 400
+        assert invalid_resolution.json().get("error") == "InvalidVaultReferencePath"
 
         read = self.call_api(
             f"/api/vaults/{vault.name}/files",

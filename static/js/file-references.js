@@ -2,6 +2,7 @@
     function createFileReferencesController({ state, elements, icons, utils, callbacks }) {
         const { escapeHtml } = utils;
         let pickerOpen = false;
+        const resolutionCache = new Map();
 
         function selectedVault() {
             return elements.vaultSelector?.value || '';
@@ -53,7 +54,7 @@
             pickerOpen = false;
         }
 
-        async function openFile(path) {
+        async function openFile(path, { allowCreate = false, onBack = null } = {}) {
             const vault = selectedVault();
             if (!vault || !path) return;
             closeFileModal();
@@ -64,6 +65,9 @@
                 <div class="absolute inset-0" data-vault-file-close="true"></div>
                 <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="vault-file-modal-title">
                     <div class="app-modal-header flex-none">
+                        ${typeof onBack === 'function' ? `
+                            <button type="button" class="ui-icon-button is-compact" data-vault-file-back="true" aria-label="Back to files" title="Back to files">${icons.ARROW_LEFT_ICON_SVG}</button>
+                        ` : ''}
                         <div class="app-modal-title-block">
                             <h2 id="vault-file-modal-title" class="text-lg font-semibold text-txt-primary">${escapeHtml(path.split('/').pop() || path)}</h2>
                             <p id="vault-file-modal-path" class="mt-1 text-xs text-txt-secondary cell-mono">${escapeHtml(path)}</p>
@@ -95,6 +99,11 @@
             overlay.addEventListener('click', async (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                if (target.closest('[data-vault-file-back="true"]')) {
+                    closeFileModal();
+                    onBack?.();
+                    return;
+                }
                 if (target.closest('[data-vault-file-close="true"]')) {
                     closeFileModal();
                     return;
@@ -122,6 +131,12 @@
                 }
             } catch (error) {
                 if (error.errorType === 'VaultFileNotFound') {
+                    if (!allowCreate) {
+                        if (statusLabel) {
+                            statusLabel.textContent = `${path} no longer exists.`;
+                        }
+                        return;
+                    }
                     createIfMissing = true;
                     if (editor instanceof HTMLTextAreaElement) {
                         editor.value = '';
@@ -139,6 +154,27 @@
                     statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
                 }
             }
+        }
+
+        function openDirectory(path) {
+            if (!path) return;
+            callbacks.openPathPicker?.({
+                id: 'vault-directory-browser-modal',
+                title: 'Vault Browser',
+                subtitle: path,
+                mode: 'files',
+                revealInitialPath: path,
+                initialScope: 'vault',
+                showPath: true,
+                emptyText: 'This folder is empty.',
+                expandDirectoriesOnSelect: true,
+                closeOnSelect: false,
+                onSelect: ({ path: selectedPath, kind }) => {
+                    if (kind === 'file') {
+                        openFile(selectedPath, { onBack: () => {} });
+                    }
+                },
+            });
         }
 
         async function fetchVaultFile(path) {
@@ -191,15 +227,15 @@
 
         function enhanceFileLinks(container) {
             if (!container) return;
-            enhanceInlineCodeFileRefs(container);
+            markStandaloneCandidates(container);
             const textNodes = [];
             const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
                 acceptNode(node) {
                     const parent = node.parentElement;
-                    if (!parent || parent.closest('a, button, code, pre, textarea')) {
+                    if (!parent || parent.closest('a, button, code, pre, textarea, [data-vault-reference-candidate]')) {
                         return NodeFilter.FILTER_REJECT;
                     }
-                    return /[\w .@-]+\/[\w .@/-]+\.(md|markdown|txt)/i.test(node.textContent || '')
+                    return candidateMatches(node.textContent || '').length
                         ? NodeFilter.FILTER_ACCEPT
                         : NodeFilter.FILTER_REJECT;
                 },
@@ -207,75 +243,199 @@
             while (walker.nextNode()) {
                 textNodes.push(walker.currentNode);
             }
-            textNodes.forEach(replaceFilePathTextNode);
+            textNodes.forEach(markTextNodeCandidates);
             container.querySelectorAll('a[href]').forEach((link) => {
                 if (!(link instanceof HTMLAnchorElement)) return;
                 if (link.dataset.vaultFileEnhanced === 'true') return;
-                const path = pathFromLink(link.getAttribute('href') || link.textContent || '');
-                if (!path) return;
-                link.removeAttribute('target');
-                link.removeAttribute('rel');
-                link.href = '#';
-                link.dataset.vaultFilePath = path;
-                link.dataset.vaultFileEnhanced = 'true';
-                link.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    openFile(path);
-                });
+                const candidate = standaloneCandidate(
+                    link.getAttribute('href') || link.textContent || ''
+                );
+                if (candidate) link.dataset.vaultReferenceCandidate = candidate;
+            });
+            resolveMarkedCandidates(container).catch((error) => {
+                console.error('Unable to resolve vault references:', error);
             });
         }
 
-        function enhanceInlineCodeFileRefs(container) {
+        function markStandaloneCandidates(container) {
             container.querySelectorAll('code').forEach((code) => {
                 if (!(code instanceof HTMLElement) || code.closest('pre')) return;
                 if (code.dataset.vaultFileEnhanced === 'true') return;
-                const path = pathFromLink(code.textContent || '');
-                if (!path) return;
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'vault-file-link vault-file-link-code';
-                button.textContent = `@${path}`;
-                button.dataset.vaultFilePath = path;
-                button.addEventListener('click', () => openFile(path));
-                code.replaceWith(button);
+                const candidate = standaloneCandidate(code.textContent || '');
+                if (candidate) code.dataset.vaultReferenceCandidate = candidate;
             });
         }
 
-        function replaceFilePathTextNode(node) {
+        function markTextNodeCandidates(node) {
             const text = node.textContent || '';
-            const pattern = /(^|[\s([`])([\w .@-]+\/[\w .@/-]+\.(?:md|markdown|txt))(?=$|[\s).,;:`\]])/gi;
-            let match;
+            const matches = candidateMatches(text);
+            if (!matches.length) return;
             let cursor = 0;
             const fragment = document.createDocumentFragment();
-            while ((match = pattern.exec(text)) !== null) {
-                const prefix = match[1] || '';
-                const rawPath = match[2] || '';
-                const path = normalizeDisplayPath(rawPath);
-                const start = match.index + prefix.length;
+            matches.forEach(({ start, end, raw, candidate }) => {
                 if (start > cursor) {
                     fragment.appendChild(document.createTextNode(text.slice(cursor, start)));
                 }
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'vault-file-link';
-                button.textContent = `@${path}`;
-                button.addEventListener('click', () => openFile(path));
-                fragment.appendChild(button);
-                cursor = start + rawPath.length;
-            }
-            if (cursor === 0) return;
+                const marker = document.createElement('span');
+                marker.textContent = raw;
+                marker.dataset.vaultReferenceCandidate = candidate;
+                fragment.appendChild(marker);
+                cursor = end;
+            });
             if (cursor < text.length) {
                 fragment.appendChild(document.createTextNode(text.slice(cursor)));
             }
             node.parentNode?.replaceChild(fragment, node);
         }
 
-        function pathFromLink(value) {
-            const raw = normalizeDisplayPath(value || '');
-            if (!raw || raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('#')) {
+        async function resolveMarkedCandidates(container) {
+            const marked = Array.from(
+                container.querySelectorAll('[data-vault-reference-candidate]')
+            ).filter((element) => element instanceof HTMLElement);
+            if (!marked.length) return;
+            const paths = marked.map((element) => element.dataset.vaultReferenceCandidate || '');
+            const resolutions = await resolveCandidates(paths);
+            marked.forEach((element) => {
+                const candidate = element.dataset.vaultReferenceCandidate || '';
+                const resolution = resolutions.get(candidate);
+                delete element.dataset.vaultReferenceCandidate;
+                if (!resolution || resolution.kind === 'missing') {
+                    if (element instanceof HTMLAnchorElement) {
+                        element.replaceWith(document.createTextNode(element.textContent || candidate));
+                    }
+                    return;
+                }
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = element instanceof HTMLElement && element.tagName === 'CODE'
+                    ? 'vault-file-link vault-file-link-code'
+                    : 'vault-file-link';
+                button.textContent = `@${resolution.path}`;
+                button.dataset.vaultFilePath = resolution.path;
+                button.dataset.vaultFileKind = resolution.kind;
+                button.title = resolution.kind === 'directory'
+                    ? `Browse ${resolution.path}`
+                    : `Open ${resolution.path}`;
+                button.addEventListener('click', () => {
+                    if (resolution.kind === 'directory') {
+                        openDirectory(resolution.path);
+                    } else {
+                        openFile(resolution.path);
+                    }
+                });
+                element.replaceWith(button);
+            });
+        }
+
+        async function resolveCandidates(paths) {
+            const vault = selectedVault();
+            const workspace = workspacePath();
+            const normalized = [...new Set(paths.map(normalizeDisplayPath).filter(Boolean))];
+            const resolved = new Map();
+            const unresolved = [];
+            normalized.forEach((path) => {
+                const cached = resolutionCache.get(resolutionCacheKey(vault, workspace, path));
+                if (cached) {
+                    resolved.set(path, cached);
+                } else {
+                    unresolved.push(path);
+                }
+            });
+            if (!vault || !unresolved.length) return resolved;
+            const response = await fetch(
+                `api/vaults/${encodeURIComponent(vault)}/file-refs/resolve`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: unresolved, workspace_path: workspace }),
+                }
+            );
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+            const items = Array.isArray(payload.items) ? payload.items : [];
+            items.forEach((item) => {
+                const requestedPath = normalizeDisplayPath(item.requested_path || '');
+                if (!requestedPath) return;
+                resolved.set(requestedPath, item);
+                if (item.kind !== 'missing') {
+                    resolutionCache.set(
+                        resolutionCacheKey(vault, workspace, requestedPath),
+                        item
+                    );
+                }
+            });
+            return resolved;
+        }
+
+        function resolutionCacheKey(vault, workspace, path) {
+            return `${vault}\u0000${workspace}\u0000${path}`;
+        }
+
+        function candidateMatches(text) {
+            const patterns = [
+                {
+                    regex: /@([^@\n<>()\[\]{},;:!?]*?\.(?:md|markdown|txt))/gi,
+                    group: 0,
+                    priority: 0,
+                },
+                {
+                    regex: /@((?:[\w .-]+\/)+)/gi,
+                    group: 0,
+                    priority: 0,
+                },
+                {
+                    regex: /(^|[\s([`])([\w.@-]+\/[\w .@/-]+\.(?:md|markdown|txt))(?=$|[\s).,;:`\]])/gi,
+                    group: 2,
+                    priority: 1,
+                },
+                {
+                    regex: /(^|[\s([`])([\w.@-]+(?:\/[\w.@-]+(?: [\w.@-]+)*)+\/?)(?=$|[\s).,;:`\]])/g,
+                    group: 2,
+                    priority: 2,
+                },
+                {
+                    regex: /(^|[\s([`])([\w.@-]+(?: [\w.@-]+)*\/)(?=$|[\s).,;:`\]])/g,
+                    group: 2,
+                    priority: 3,
+                },
+            ];
+            const found = [];
+            patterns.forEach(({ regex, group, priority }) => {
+                let match;
+                while ((match = regex.exec(text)) !== null) {
+                    const raw = match[group] || '';
+                    const start = match.index + (group === 2 ? (match[1] || '').length : 0);
+                    const candidate = normalizeDisplayPath(raw);
+                    if (candidate) {
+                        found.push({ start, end: start + raw.length, raw, candidate, priority });
+                    }
+                }
+            });
+            found.sort((left, right) => left.start - right.start || left.priority - right.priority);
+            const selected = [];
+            let cursor = -1;
+            found.forEach((match) => {
+                if (match.start < cursor) return;
+                selected.push(match);
+                cursor = match.end;
+            });
+            return selected;
+        }
+
+        function standaloneCandidate(value) {
+            const original = String(value || '').trim();
+            const raw = normalizeDisplayPath(original);
+            if (!raw || /^https?:\/\//i.test(raw) || raw.startsWith('#')) {
                 return '';
             }
-            if (!/\.(md|markdown|txt)$/i.test(raw) || !raw.includes('/')) {
+            if (
+                !original.startsWith('@')
+                && !/\.(md|markdown|txt)$/i.test(raw)
+                && !raw.includes('/')
+            ) {
                 return '';
             }
             return raw;
@@ -286,7 +446,8 @@
                 .trim()
                 .replace(/^@/, '')
                 .replace(/^\.?\//, '')
-                .replace(/[),.;:]+$/, '');
+                .replace(/[),.;:]+$/, '')
+                .replace(/\/+$/, '');
         }
 
         function debounce(fn, delayMs) {
