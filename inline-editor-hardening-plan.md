@@ -4,7 +4,7 @@
 
 Harden the `dev/inline-editor` branch before merge without changing its product
 direction: chat-native vault references, one unified vault tree/file modal,
-consolidated `file_read` and `file_write` tools, and optional collaborative
+consolidated `file_read` and `file_write` tools, and optional inline edit
 review backed by Pydantic AI deferred tools.
 
 This plan follows the contract-first smell framework in
@@ -85,7 +85,7 @@ precede structural cleanup.
 
 #### H-04: Collaborative overwrite, move, and delete lack a review-time base
 
-- **Smell:** stale state / partial collaborative contract.
+- **Smell:** stale state / partial inline edit contract.
 - **Evidence:** deferred review persists model tool arguments only. The
   `file_write` schema has no expected hash, and full overwrite calls
   `replace_vault_file_content()` without a concurrency check. Move and delete
@@ -145,7 +145,7 @@ precede structural cleanup.
 - **Evidence:** deferred file paths render as inert spans, and move destinations
   use a plain text input. The retired proposal renderer had open-file links and
   the shared path selector.
-- **Consequence:** collaborative review no longer provides the file inspection
+- **Consequence:** inline edit review no longer provides the file inspection
   and destination selection behavior established elsewhere in the unified
   modal.
 - **Correction:** make reviewed paths open the unified file/tree modal and reuse
@@ -158,7 +158,7 @@ precede structural cleanup.
 - **Smell:** obsolete parallel architecture / speculative compatibility.
 - **Evidence:** the temporary tools are retired, but `core/chat/edit_proposals`,
   mutating/review API endpoints, the frontend controller, prompt builders, and
-  schema remain active. Release notes and ADR 0023 state that collaborative
+  schema remain active. Release notes and ADR 0023 state that inline edit
   review is provided exclusively through deferred `file_write`.
 - **Consequence:** two review state machines and mutation paths must be
   maintained, and historical pending artifacts can still invoke the retired
@@ -216,7 +216,7 @@ path; older complexity hotspots remain outside this branch's focused refactor.
 
 Targeted scenarios cover vault-root containment and explorer pagination,
 atomic review submission, session queue ordering, stale reviewed targets,
-terminal review states, historical proposal compatibility, collaborative tool
+terminal review states, historical proposal compatibility, inline edit tool
 policy, unified file operations, API endpoints, external chat surfaces, and
 vault mutation recording. Frontend syntax checks pass. Browser-level visual,
 focus, mobile, and rapid-search checks remain part of live review.
@@ -301,7 +301,7 @@ Focused scenario targets:
 
 - `integration/core/deferred_review_task_skeleton`
 - `integration/core/chat_task_session_queue`
-- `integration/core/file_ops_collaborative_policy`
+- `integration/core/file_ops_inline_edit_policy`
 - `integration/core/file_ops_unified_tool`
 - `integration/core/vault_file_reference_api`
 - `integration/core/vault_state_mutation_recorder`

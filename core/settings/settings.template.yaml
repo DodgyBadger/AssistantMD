@@ -19,6 +19,11 @@ settings:
     description: "Default context script name for chat sessions (vault scripts override system scripts by name)."
     category: "Chat"
     restart_required: false
+  default_chat_mode:
+    value: normal
+    description: "Default mode for new chat sessions. Use normal or inline_edit."
+    category: "Chat"
+    restart_required: false
   enabled_tools:
     value:
       - web_search_duckduckgo

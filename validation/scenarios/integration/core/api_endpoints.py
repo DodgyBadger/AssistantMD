@@ -673,6 +673,9 @@ class ApiEndpointsScenario(BaseScenario):
         assert "default_model_thinking" in metadata_payload.get("settings", {}), (
             "Metadata exposes default thinking hint for chat UI"
         )
+        assert metadata_payload.get("settings", {}).get("default_chat_mode") == "normal", (
+            "Metadata exposes the default mode for new chat sessions"
+        )
         assert any(
             tool.get("name") == "workflow_run"
             for tool in metadata_payload.get("tools", [])

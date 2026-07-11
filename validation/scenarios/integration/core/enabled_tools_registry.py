@@ -39,6 +39,17 @@ class EnabledToolsRegistryScenario(BaseScenario):
                 "default_chat_tools" not in metadata.get("settings", {})
             ), "Metadata should not expose removed default_chat_tools setting"
 
+            mode_response = self.call_api(
+                "/api/system/settings/general/default_chat_mode",
+                method="PUT",
+                data={"value": "inline_edit"},
+            )
+            assert mode_response.status_code == 200, "Default chat mode should be user-editable"
+            updated_metadata = self.call_api("/api/metadata").json()
+            assert updated_metadata.get("settings", {}).get("default_chat_mode") == "inline_edit", (
+                "Metadata should expose the configured default chat mode"
+            )
+
             from core.authoring.shared.tool_binding import resolve_tool_binding
             from core.settings.store import get_enabled_tool_names
 

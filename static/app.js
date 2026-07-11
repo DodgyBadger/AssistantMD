@@ -177,6 +177,7 @@ sessionControls = window.SessionControls.create({
         clearSession,
         clearPendingAttachments,
         renderChatEmptyState,
+        resetChatModeToDefault,
         syncChatControlLocks,
         updateStatus,
     },
@@ -1042,6 +1043,9 @@ function populateSelectors() {
         chatElements.templateSelector.disabled = true;
     }
     populateThinkingSelector();
+    if (!state.sessionId) {
+        resetChatModeToDefault();
+    }
 
     state.metadata.vaults.forEach(vault => {
         const option = document.createElement('option');
@@ -1093,6 +1097,18 @@ function populateSelectors() {
 
     sessionControls.renderSelector();
     syncChatControlLocks();
+}
+
+function configuredDefaultChatMode() {
+    return state.metadata?.settings?.default_chat_mode === 'inline_edit'
+        ? 'inline_edit'
+        : 'normal';
+}
+
+function resetChatModeToDefault() {
+    if (chatElements.chatModeSelector) {
+        chatElements.chatModeSelector.value = configuredDefaultChatMode();
+    }
 }
 
 function isChatSelectableModel(model) {
@@ -1346,6 +1362,7 @@ function handleVaultChange() {
     state.sessionId = null;
     state.isWorkspaceUnlocked = false;
     state.sessions = [];
+    resetChatModeToDefault();
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';
     }
@@ -1758,6 +1775,7 @@ async function clearSession(confirmReset = true) {
 
     state.sessionId = null;
     state.isWorkspaceUnlocked = false;
+    resetChatModeToDefault();
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';
     }

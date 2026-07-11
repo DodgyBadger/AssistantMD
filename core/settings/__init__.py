@@ -498,6 +498,13 @@ def get_default_model_thinking() -> ThinkingValue:
     return normalize_thinking_value(value, source_name="default_model_thinking")
 
 
+def get_default_chat_mode() -> str:
+    """Return the configured default mode for new chat sessions."""
+    entry = get_general_settings().get("default_chat_mode")
+    value = str(getattr(entry, "value", "normal") or "normal").strip().lower()
+    return "inline_edit" if value == "inline_edit" else "normal"
+
+
 def get_auto_cache_max_tokens() -> int:
     """Return the configured auto-cache token limit, falling back to 0 (disabled)."""
     entry = get_general_settings().get("auto_cache_max_tokens")

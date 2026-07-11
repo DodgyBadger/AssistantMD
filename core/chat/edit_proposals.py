@@ -1,4 +1,4 @@
-"""Read-only access to historical collaborative edit proposals."""
+"""Read-only access to historical inline edit proposals."""
 
 from __future__ import annotations
 

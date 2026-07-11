@@ -1,4 +1,4 @@
-"""Validate collaborative approval policy for split file tools."""
+"""Validate inline edit approval policy for split file tools."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.authoring.shared.tool_binding import resolve_tool_binding
-from core.chat.executor import COLLABORATIVE_CHAT_MODE, approval_tools_for_chat_mode
+from core.chat.executor import INLINE_EDIT_CHAT_MODE, approval_tools_for_chat_mode
 from validation.core.base_scenario import BaseScenario
 
 
-class FileOpsCollaborativePolicyScenario(BaseScenario):
-    """Validate approval policy gates writes without gating reads."""
+class FileOpsInlineEditPolicyScenario(BaseScenario):
+    """Validate inline edit mode gates writes without gating reads."""
 
     async def test_scenario(self) -> None:
-        vault = self.create_vault("FileOpsCollaborativePolicyVault")
+        vault = self.create_vault("FileOpsInlineEditPolicyVault")
         await self.start_system()
         try:
             normal_binding = resolve_tool_binding(["file_read", "file_write"], vault_path=str(vault))
@@ -24,14 +24,14 @@ class FileOpsCollaborativePolicyScenario(BaseScenario):
             assert getattr(normal_binding.tool_functions[0], "requires_approval", False) is False
             assert getattr(normal_binding.tool_functions[1], "requires_approval", False) is False
 
-            collaborative_binding = resolve_tool_binding(
+            inline_edit_binding = resolve_tool_binding(
                 ["file_read", "file_write"],
                 vault_path=str(vault),
-                approval_tool_names=approval_tools_for_chat_mode(COLLABORATIVE_CHAT_MODE),
+                approval_tool_names=approval_tools_for_chat_mode(INLINE_EDIT_CHAT_MODE),
             )
-            assert collaborative_binding.tool_names() == ["file_read", "file_write"]
-            assert getattr(collaborative_binding.tool_functions[0], "requires_approval", False) is False
-            assert getattr(collaborative_binding.tool_functions[1], "requires_approval", False) is True
+            assert inline_edit_binding.tool_names() == ["file_read", "file_write"]
+            assert getattr(inline_edit_binding.tool_functions[0], "requires_approval", False) is False
+            assert getattr(inline_edit_binding.tool_functions[1], "requires_approval", False) is True
         finally:
             await self.stop_system()
             self.teardown_scenario()

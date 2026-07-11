@@ -7,7 +7,7 @@ Accepted.
 ## Context
 
 AssistantMD needs one consistent vault operation service for chat tools,
-authored scripts, mutation auditing, snapshots, and inline collaborative editing.
+authored scripts, mutation auditing, snapshots, and inline editing.
 The previous model-facing split between safe and unsafe operations mixed reads
 with some writes and separated writes according to perceived risk. That boundary
 did not align with deferred tool review, which is applied at the tool-call level.
@@ -24,7 +24,7 @@ Both tools are thin adapters over shared operations in
 `core.vault_state.file_operations`. Mutations continue through
 `core.vault_state.file_mutations` for audit, snapshots, refresh, and rollback.
 
-Interactive chats have `normal` and `collaborative` modes. Collaborative mode
+Interactive chats have `normal` and `inline_edit` modes. Inline edit mode
 defers `file_write` through Pydantic AI tool approval and renders the deferred
 call as an inline review card. `file_read` remains immediate. Workflows, context
 scripts, code execution, and delegate runs do not wait for interactive review.
@@ -43,10 +43,10 @@ per-turn tool subset in the UI.
 
 ## Consequences
 
-- Read-only inspection never blocks on collaborative review.
+- Read-only inspection never blocks on inline edit review.
 - Every reviewed mutation executes through the same tool and vault service as a
   direct mutation.
-- Multiple independent mutations use separate tool calls so collaborative
+- Multiple independent mutations use separate tool calls so inline edit
   review retains per-operation decisions and results.
 - `move(overwrite=true)` represents explicit destination replacement.
 - `write(overwrite=true, content="")` represents clearing a file; there is no
@@ -66,4 +66,4 @@ per-turn tool subset in the UI.
 - `core/chat/deferred_reviews.py`
 - `static/js/deferred-reviews.js`
 - `validation/scenarios/integration/core/file_ops_unified_tool.py`
-- `validation/scenarios/integration/core/file_ops_collaborative_policy.py`
+- `validation/scenarios/integration/core/file_ops_inline_edit_policy.py`

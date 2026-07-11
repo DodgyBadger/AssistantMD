@@ -212,7 +212,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 session_id="deferred-review-session",
                 tools=[],
                 model="test",
-                chat_mode="collaborative",
+                chat_mode="inline_edit",
             )
             task = await self._wait_for_task_terminal(started.task.task_id)
             assert task is not None, "Deferred review task should complete current stream"
@@ -248,7 +248,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert review.resume_config.get("model") == "test"
             assert review.resume_config.get("tools") == []
             assert review.resume_config.get("thinking") == "low"
-            assert review.resume_config.get("chat_mode") == "collaborative"
+            assert review.resume_config.get("chat_mode") == "inline_edit"
 
             api_response = self.call_api(
                 (
@@ -274,7 +274,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 session_id="deferred-review-session",
                 tools=[],
                 model="test",
-                chat_mode="collaborative",
+                chat_mode="inline_edit",
             )
             blocked_task = await self._wait_for_task_terminal(blocked_start.task.task_id)
             assert blocked_task is not None and blocked_task.status == "failed"
@@ -372,7 +372,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert resume_capture["prepared_model"] == "test"
             assert resume_capture["prepared_tools"] == []
             assert resume_capture["prepared_thinking"] == "low"
-            assert resume_capture["prepared_chat_mode"] == "collaborative"
+            assert resume_capture["prepared_chat_mode"] == "inline_edit"
             approved = result.approvals["review-call-1"]
             assert approved.override_args == {
                 "operation": "write",
@@ -417,7 +417,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 session_id="deferred-denial-session",
                 tools=[],
                 model="test",
-                chat_mode="collaborative",
+                chat_mode="inline_edit",
             )
             denied_task = await self._wait_for_task_terminal(denied_start.task.task_id)
             assert denied_task is not None

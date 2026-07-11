@@ -189,7 +189,7 @@ class VaultPathMutationResponse(BaseModel):
 
 
 class EditProposalResponse(BaseModel):
-    """Stored collaborative edit proposal artifact."""
+    """Stored historical inline edit proposal artifact."""
 
     artifact_ref: str = Field(..., description="Stable edit proposal artifact reference")
     artifact_kind: str = Field("file_edit_proposal", description="Artifact kind")
@@ -281,9 +281,9 @@ class ChatTaskRequest(BaseModel):
     )
     context_template: Optional[str] = Field(None, description="Optional context manager template name")
     workspace_path: Optional[str] = Field(None, description="Optional vault-relative workspace directory path")
-    chat_mode: Literal["normal", "collaborative"] = Field(
+    chat_mode: Literal["normal", "inline_edit"] = Field(
         "normal",
-        description="Chat interaction mode. Collaborative mode routes file_write through inline review.",
+        description="Chat interaction mode. Inline edit mode routes file_write through inline review.",
     )
 
 

@@ -55,7 +55,7 @@ logger = UnifiedLogger(tag="chat-executor")
 PromptInput = str | Sequence[UserContent] | None
 ChatMode = str
 NORMAL_CHAT_MODE = "normal"
-COLLABORATIVE_CHAT_MODE = "collaborative"
+INLINE_EDIT_CHAT_MODE = "inline_edit"
 
 
 _CHAT_STORE = ChatStore()
@@ -90,7 +90,7 @@ class ChatReviewPendingError(ValueError):
     """Raised when a session must resolve a deferred review before another turn."""
 
     def __init__(self, *, session_id: str):
-        super().__init__("Resolve the pending collaborative review before sending another message.")
+        super().__init__("Resolve the pending inline edit review before sending another message.")
         self.details = {"session_id": session_id, "error_type": "DeferredReviewPending"}
 
 
@@ -144,12 +144,12 @@ class PreparedChatExecution:
 def normalize_chat_mode(value: str | None) -> ChatMode:
     """Normalize chat mode values accepted by the API and persisted resume config."""
     normalized = str(value or NORMAL_CHAT_MODE).strip().lower()
-    return COLLABORATIVE_CHAT_MODE if normalized == COLLABORATIVE_CHAT_MODE else NORMAL_CHAT_MODE
+    return INLINE_EDIT_CHAT_MODE if normalized == INLINE_EDIT_CHAT_MODE else NORMAL_CHAT_MODE
 
 
 def approval_tools_for_chat_mode(chat_mode: ChatMode) -> set[str]:
     """Return tool names that require deferred review in the given chat mode."""
-    if normalize_chat_mode(chat_mode) == COLLABORATIVE_CHAT_MODE:
+    if normalize_chat_mode(chat_mode) == INLINE_EDIT_CHAT_MODE:
         return {"file_write"}
     return set()
 

@@ -54,7 +54,7 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 
 - Review outputs from workflows and context templates that process web content
 - Disable `file_write` app-wide when a deployment should not permit model-driven vault mutations
-- Use collaborative edit mode when you want to inspect interactive chat mutations before they execute
+- Use inline edit mode when you want to inspect interactive chat mutations before they execute
 - Be especially cautious when combining `file_write` with `browser` or other web tools on untrusted websites
 - Prefer the least powerful web tool that can do the job:
   - search when you need discovery

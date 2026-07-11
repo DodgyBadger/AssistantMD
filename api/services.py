@@ -37,6 +37,7 @@ from core.settings.store import (
 )
 from core.runtime.paths import set_bootstrap_roots, resolve_bootstrap_data_root, resolve_bootstrap_system_root
 from core.settings import (
+    get_default_chat_mode,
     validate_settings,
     SettingsError,
 )
@@ -4319,6 +4320,7 @@ async def get_metadata() -> MetadataResponse:
         tools=tools,
         settings={
             "enabled_tools": enabled_tools,
+            "default_chat_mode": get_default_chat_mode(),
             "default_model_thinking": getattr(
                 get_general_settings().get("default_model_thinking"), "value", "default"
             ),
