@@ -307,6 +307,7 @@
                 const result = await postReview(review, decisions);
                 setFeedback(feedback, 'Review submitted.', 'success');
                 setReviewLocked(container, 'Submitted');
+                callbacks.reviewSubmitted?.(result);
                 if (result?.task) {
                     const streamed = await callbacks.streamStartedTask?.(result);
                     if (streamed === false) {

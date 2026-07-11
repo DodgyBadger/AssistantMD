@@ -154,6 +154,15 @@ def approval_tools_for_chat_mode(chat_mode: ChatMode) -> set[str]:
     return set()
 
 
+def persist_chat_session_mode(*, vault_name: str, session_id: str, chat_mode: ChatMode) -> None:
+    """Persist the canonical mode selected for a chat session."""
+    _CHAT_STORE.set_session_chat_mode(
+        session_id=session_id,
+        vault_name=vault_name,
+        chat_mode=normalize_chat_mode(chat_mode),
+    )
+
+
 def _accepted_user_request(prepared: PreparedChatExecution) -> ModelRequest:
     """Build the accepted user turn persisted before model execution."""
     return ModelRequest(parts=[UserPromptPart(content=prepared.prompt_for_history)])

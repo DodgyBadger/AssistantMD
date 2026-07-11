@@ -644,6 +644,7 @@ class ChatSessionInfo(BaseModel):
     last_activity_at: str = Field(..., description="Most recent activity timestamp")
     title: Optional[str] = Field(None, description="User-defined title, if set")
     workspace: Optional[ChatWorkspaceInfo] = Field(None, description="Workspace associated with this session")
+    chat_mode: Literal["normal", "inline_edit"] = Field("normal", description="Selected session chat mode")
     has_summary: bool = Field(False, description="Whether a session summary record exists")
 
 
@@ -652,6 +653,20 @@ class ChatSessionWorkspaceRequest(BaseModel):
 
     vault_name: str = Field(..., description="Owning vault name")
     path: Optional[str] = Field(None, description="Vault-relative workspace directory path")
+
+
+class ChatSessionModeRequest(BaseModel):
+    """Request to change a persisted chat session mode."""
+
+    vault_name: str = Field(..., description="Owning vault name")
+    chat_mode: Literal["normal", "inline_edit"] = Field(..., description="Selected chat mode")
+
+
+class ChatSessionModeResponse(BaseModel):
+    """Persisted chat session mode."""
+
+    session_id: str = Field(..., description="Session identifier")
+    chat_mode: Literal["normal", "inline_edit"] = Field(..., description="Selected chat mode")
 
 
 class ChatSessionForkRequest(BaseModel):
@@ -785,6 +800,11 @@ class ChatSessionDetailResponse(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     vault_name: str = Field(..., description="Owning vault name")
     workspace: Optional[ChatWorkspaceInfo] = Field(None, description="Workspace associated with this session")
+    chat_mode: Literal["normal", "inline_edit"] = Field("normal", description="Selected session chat mode")
+    pending_review: Optional[DeferredReviewResponse] = Field(
+        None,
+        description="Active deferred review that must be resolved before another prompt",
+    )
     latest_failure: Optional[ChatSessionFailureInfo] = Field(None, description="Latest unfinished-turn marker")
     messages: List[ChatSessionMessageInfo] = Field(default_factory=list, description="Persisted messages")
     tool_events: List[ChatSessionToolEventInfo] = Field(default_factory=list, description="Persisted tool events")

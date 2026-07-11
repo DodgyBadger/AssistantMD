@@ -61,6 +61,8 @@ from .models import (
     StatusResponse,
     ChatTaskRequest,
     ChatTaskStartResponse,
+    ChatSessionModeRequest,
+    ChatSessionModeResponse,
     SystemLogResponse,
     SystemSettingsResponse,
     UpdateSettingsRequest,
@@ -131,6 +133,7 @@ from .services import (
     cleanup_goals,
     set_chat_session_title,
     set_chat_session_workspace,
+    set_chat_session_mode,
     list_vault_directories,
     list_vault_file_references,
     resolve_vault_path_references,
@@ -1320,6 +1323,16 @@ async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRe
     """Set or clear the workspace path for a chat session."""
     try:
         return set_chat_session_workspace(request.vault_name, session_id, request.path)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.patch("/chat/sessions/{session_id}/mode", response_model=ChatSessionModeResponse)
+async def set_session_mode(session_id: str, request: ChatSessionModeRequest):
+    """Persist the selected mode for a chat session."""
+    try:
+        chat_mode = set_chat_session_mode(request.vault_name, session_id, request.chat_mode)
+        return ChatSessionModeResponse(session_id=session_id, chat_mode=chat_mode)
     except Exception as e:
         return create_error_response(e)
 

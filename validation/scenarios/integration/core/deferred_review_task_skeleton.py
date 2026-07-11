@@ -250,6 +250,19 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert review.resume_config.get("thinking") == "low"
             assert review.resume_config.get("chat_mode") == "inline_edit"
 
+            session_detail = self.call_api(
+                "/api/chat/sessions/deferred-review-session"
+                f"?vault_name={vault.name}"
+            )
+            assert session_detail.status_code == 200
+            session_payload = session_detail.json()
+            assert session_payload.get("chat_mode") == "inline_edit", (
+                "Session detail should preserve the selected chat mode"
+            )
+            assert session_payload.get("pending_review", {}).get("artifact_ref") == (
+                review_event["artifact_ref"]
+            ), "Session reload should expose the active pending review"
+
             api_response = self.call_api(
                 (
                     f"/api/vaults/{vault.name}/chat/deferred-review-session/"
@@ -390,6 +403,26 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert submitted_review is not None
             assert submitted_review.status == "completed"
             assert submitted_review.resumed_task_id == resumed_task_id
+            completed_detail = self.call_api(
+                "/api/chat/sessions/deferred-review-session"
+                f"?vault_name={vault.name}"
+            ).json()
+            assert completed_detail.get("pending_review") is None, (
+                "Resolved reviews should not be reconstructed on session reload"
+            )
+            mode_update = self.call_api(
+                "/api/chat/sessions/deferred-review-session/mode",
+                method="PATCH",
+                data={"vault_name": vault.name, "chat_mode": "normal"},
+            )
+            assert mode_update.status_code == 200
+            assert mode_update.json().get("chat_mode") == "normal"
+            assert self.call_api(
+                "/api/chat/sessions/deferred-review-session"
+                f"?vault_name={vault.name}"
+            ).json().get("chat_mode") == "normal", (
+                "Explicit session mode changes should persist without sending a prompt"
+            )
 
             stale_response = self.call_api(
                 (

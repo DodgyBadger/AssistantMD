@@ -19,7 +19,7 @@ precede structural cleanup.
    same per-session ordering as an ordinary chat turn.
 3. Approved, denied, and failed review outcomes must remain understandable in
    canonical chat history and durable review state.
-4. Collaborative approval must not silently overwrite, move, or delete a file
+4. Inline edit review must not silently overwrite, move, or delete a file
    that changed materially while review was pending.
 5. Workflows, context scripts, delegates, and code execution must never block on
    interactive approval, but app-wide disabled tools must remain unavailable on
@@ -83,7 +83,7 @@ precede structural cleanup.
   priority from its originating turn; use submission order initially because it
   is deterministic and matches current user expectations.
 
-#### H-04: Collaborative overwrite, move, and delete lack a review-time base
+#### H-04: Inline edit overwrite, move, and delete lack a review-time base
 
 - **Smell:** stale state / partial inline edit contract.
 - **Evidence:** deferred review persists model tool arguments only. The
@@ -253,7 +253,7 @@ Add failing assertions before implementation:
 - Add lifecycle events for claim, resume start, completion, cancellation, and
   failure.
 
-### Stage 4: Collaborative Concurrency Contract
+### Stage 4: Inline Edit Concurrency Contract
 
 - Define operation-specific review snapshots for `file_write`.
 - Capture current hashes and existence state for overwrite, move, and delete.

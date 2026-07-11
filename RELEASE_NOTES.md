@@ -3,9 +3,9 @@
 
 ## 2026-07-10 - v0.7.0
 
-### Collaborative File Editing
+### Inline File Editing
 
-- Chats can switch between Normal and Collaborative edit modes. Collaborative
+- Chats can switch between Normal and Inline edit modes. Inline edit
   mode renders `file_write` calls as inline review cards and resumes the same
   agent turn after review.
 - Review cards support creates, full writes, appends, line edits, exact text
@@ -24,7 +24,7 @@
 - `file_ops_safe`, `file_ops_unsafe`, and the transitional `file_ops` tool are
   removed. Authored scripts and workflows must call `file_read` or `file_write`.
 - The temporary `propose_file_edits` and `review_create_file` tools are removed;
-  collaborative review is provided exclusively through deferred `file_write`.
+  inline edit review is provided exclusively through deferred `file_write`.
 - Per-chat tool selection is removed. `enabled_tools` now controls tool
   availability app-wide for chat, delegates, workflows, and scripts.
 

@@ -925,6 +925,22 @@ class ChatStore:
         path = workspace.get("path")
         return str(path).strip() if path is not None else ""
 
+    def set_session_chat_mode(
+        self, *, session_id: str, vault_name: str, chat_mode: str
+    ) -> None:
+        """Persist the selected chat mode in session metadata."""
+        normalized = "inline_edit" if str(chat_mode).strip().lower() == "inline_edit" else "normal"
+        self.update_session_metadata(
+            session_id=session_id,
+            vault_name=vault_name,
+            metadata_update={"chat_mode": normalized},
+        )
+
+    def get_session_chat_mode(self, session_id: str, vault_name: str) -> str:
+        """Return the selected chat mode for one session."""
+        value = str(self.get_session_metadata(session_id, vault_name).get("chat_mode") or "normal")
+        return "inline_edit" if value.strip().lower() == "inline_edit" else "normal"
+
     def get_session_history_revision(self, session_id: str, vault_name: str) -> int:
         """Return the monotonic effective-history revision for one session."""
         return _metadata_history_revision(self.get_session_metadata(session_id, vault_name))

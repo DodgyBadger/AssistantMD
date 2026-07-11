@@ -349,6 +349,11 @@ async def start_chat_stream_task(
     event_buffer: ChatTaskEventBuffer | None = None,
 ) -> ChatStreamTaskStart:
     """Preflight and start a streaming chat run in a background execution task."""
+    chat_executor.persist_chat_session_mode(
+        vault_name=vault_name,
+        session_id=session_id,
+        chat_mode=chat_mode,
+    )
     display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
     prepared = await chat_executor._prepare_chat_execution(
         vault_name=vault_name,
@@ -398,6 +403,11 @@ async def start_queued_chat_stream_task(
             try:
                 if has_pending_deferred_review(vault_name=vault_name, session_id=session_id):
                     raise chat_executor.ChatReviewPendingError(session_id=session_id)
+                chat_executor.persist_chat_session_mode(
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    chat_mode=chat_mode,
+                )
                 display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
                 prepared = await chat_executor._prepare_chat_execution(
                     vault_name=vault_name,

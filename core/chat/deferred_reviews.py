@@ -174,6 +174,32 @@ def get_deferred_review(
     return None if row is None else _review_from_row(row)
 
 
+def get_pending_deferred_review(
+    *, vault_name: str, session_id: str
+) -> StoredDeferredReview | None:
+    """Return the active pending review for a session, if one exists."""
+    ensure_chat_sessions_schema()
+    conn = connect_sqlite_from_system_db(DB_NAME)
+    conn.row_factory = _dict_row_factory
+    try:
+        row = conn.execute(
+            """
+            SELECT artifact_ref, session_id, vault_name, originating_task_id,
+                   status, requests_json, resume_messages_json,
+                   resume_config_json, result_json, created_at, submitted_at,
+                   resumed_task_id, error_json, review_context_json
+            FROM chat_deferred_reviews
+            WHERE session_id = ? AND vault_name = ? AND status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (session_id, vault_name),
+        ).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else _review_from_row(row)
+
+
 def mark_deferred_review_submitted(
     *,
     vault_name: str,

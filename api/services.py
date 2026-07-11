@@ -86,6 +86,7 @@ from core.chat.deferred_reviews import (
     deferred_review_conflicts,
     DeferredReviewError,
     get_deferred_review,
+    get_pending_deferred_review,
     mark_deferred_review_terminal,
     mark_deferred_review_submitted,
     StoredDeferredReview,
@@ -622,6 +623,11 @@ def get_chat_deferred_review(
                 "vault_name": vault_name,
             },
         )
+    return _deferred_review_response(review)
+
+
+def _deferred_review_response(review: StoredDeferredReview) -> DeferredReviewResponse:
+    """Translate a stored deferred review into its API representation."""
     return DeferredReviewResponse(
         artifact_ref=review.artifact_ref,
         vault_name=review.vault_name,
@@ -1478,6 +1484,30 @@ def set_chat_session_workspace(vault_name: str, session_id: str, path: str | Non
     return _chat_workspace_info(normalized_path)
 
 
+def set_chat_session_mode(vault_name: str, session_id: str, chat_mode: str) -> str:
+    """Set the selected mode for an existing chat session."""
+    existing_session = _chat_store.get_session_by_id(session_id)
+    if existing_session is None:
+        raise APIException(
+            status_code=404,
+            error_type="ChatSessionNotFound",
+            message=f"Chat session not found: {session_id}",
+        )
+    if existing_session.vault_name != vault_name:
+        raise APIException(
+            status_code=409,
+            error_type="ChatSessionVaultMismatch",
+            message=f"Chat session '{session_id}' belongs to another vault.",
+        )
+    normalized = "inline_edit" if str(chat_mode).strip().lower() == "inline_edit" else "normal"
+    _chat_store.set_session_chat_mode(
+        session_id=session_id,
+        vault_name=vault_name,
+        chat_mode=normalized,
+    )
+    return normalized
+
+
 def _execution_task_info(snapshot) -> ExecutionTaskInfo:
     """Convert a runtime task snapshot into an API model."""
     return ExecutionTaskInfo(
@@ -1941,6 +1971,7 @@ def list_chat_sessions(vault_name: str) -> List[ChatSessionInfo]:
             workspace=_chat_workspace_info(
                 _chat_store.get_session_workspace_path(session.session_id, vault_name)
             ),
+            chat_mode=_chat_store.get_session_chat_mode(session.session_id, vault_name),
             has_summary=summary_store.get_session_summary(
                 vault_name=vault_name,
                 session_id=session.session_id,
@@ -2046,6 +2077,7 @@ def fork_chat_session(
             workspace=_chat_workspace_info(
                 _chat_store.get_session_workspace_path(new_session.session_id, vault_name)
             ),
+            chat_mode=_chat_store.get_session_chat_mode(new_session.session_id, vault_name),
             has_summary=False,
         ),
         source_session_id=source_session_id,
@@ -2267,10 +2299,15 @@ def get_chat_session_detail(vault_name: str, session_id: str) -> ChatSessionDeta
     tool_events = _chat_store.get_tool_events(session_id, vault_name, committed_only=True)
     metadata = _chat_store.get_session_metadata(session_id, vault_name)
     latest_failure = _chat_session_failure_info(metadata.get("latest_turn_failure"))
+    pending_review = get_pending_deferred_review(vault_name=vault_name, session_id=session_id)
     return ChatSessionDetailResponse(
         session_id=session_id,
         vault_name=vault_name,
         workspace=_chat_workspace_info(_chat_store.get_session_workspace_path(session_id, vault_name)),
+        chat_mode=_chat_store.get_session_chat_mode(session_id, vault_name),
+        pending_review=(
+            _deferred_review_response(pending_review) if pending_review is not None else None
+        ),
         latest_failure=latest_failure,
         messages=[
             ChatSessionMessageInfo(

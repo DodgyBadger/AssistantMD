@@ -1,4 +1,4 @@
-# Inline Collaborative Editing Implementation Plan
+# Inline Editing Implementation Plan
 
 ## Goal
 
@@ -22,7 +22,7 @@ should not be framed primarily as a security or permission system.
 
 ## Decision
 
-Adopt Pydantic AI's deferred approval protocol for interactive collaborative
+Adopt Pydantic AI's deferred approval protocol for interactive inline
 file review:
 
 - file-changing chat tools can use `requires_approval=True` or raise
@@ -74,7 +74,7 @@ continue after the user accepts the changes.
 
 ## Product Framing
 
-This is an inline editor and collaborative writing workflow, not a sandbox. The
+This is an inline editor and writing workflow, not a sandbox. The
 blast radius of AssistantMD file changes is limited by the vault boundary,
 snapshots, mutation audit, and rollback support. Some operations are more
 disruptive than others, especially delete, truncate, move, and broad edits, but
@@ -103,13 +103,13 @@ internal protocol terms:
 The policy layer decides when an interactive chat file write becomes an inline
 review card. It should not be modeled primarily as a risk/permission matrix.
 
-Recommended initial user-facing modes:
+User-facing modes:
 
-- `inline_review`: show collaborative review UI for agent-proposed file changes.
-- `direct_write`: let the agent write directly when the user intent is clear.
-- `suggest_only`: allow proposed changes but block chat-initiated writes.
+- `normal`: let the agent write directly when the user intent is clear.
+- `inline_edit`: show inline review UI for agent-proposed file changes.
 
-Default: `inline_review`.
+The default for new chats comes from `default_chat_mode` and is `normal` in the
+settings template.
 
 Operation categories still matter, but mainly for UI and workflow shape:
 

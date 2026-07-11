@@ -40,7 +40,8 @@ const state = {
     compactionStatusRequestId: 0,
     isChatFocusMode: false,
     chatComposerResize: null,
-    isWorkspaceUnlocked: false
+    isWorkspaceUnlocked: false,
+    pendingDeferredReview: null
 };
 const chatComposeState = {
     pendingAttachments: [],
@@ -159,6 +160,10 @@ const deferredReviews = window.DeferredReviews.create({
     utils: window.AssistantMDUtils,
     callbacks: {
         streamStartedTask: (started) => streamDeferredReviewTask(started),
+        reviewSubmitted: () => {
+            state.pendingDeferredReview = null;
+            syncChatControlLocks();
+        },
         openFile: (path) => fileReferences.openFile(path, {
             onBack: () => fileReferences.openExplorer({ revealPath: path }),
         }),
@@ -562,20 +567,31 @@ function syncSendButtonState() {
     const btn = chatElements.sendBtn;
     if (!btn) return;
 
+    const reviewPending = Boolean(state.pendingDeferredReview);
     btn.classList.toggle('chat-stop-btn', state.isLoading);
     btn.innerHTML = state.isLoading
         ? window.AssistantMDIcons.STOP_ICON_SVG
         : window.AssistantMDIcons.SEND_HORIZONTAL_ICON_SVG;
-    btn.title = state.isLoading
+    btn.title = reviewPending
+        ? 'Tool review is pending. Resolve the review card before sending another message.'
+        : state.isLoading
         ? (state.isCancellingChat ? 'Stopping active response' : 'Stop the active response')
         : 'Send message';
     btn.setAttribute(
         'aria-label',
-        state.isLoading
+        reviewPending
+            ? 'Tool review is pending. Resolve the review card before sending another message.'
+            : state.isLoading
             ? (state.isCancellingChat ? 'Stopping active response' : 'Stop the active response')
             : 'Send message'
     );
-    btn.disabled = state.isLoading && state.isCancellingChat;
+    btn.disabled = reviewPending || (state.isLoading && state.isCancellingChat);
+    if (chatElements.chatInput) {
+        chatElements.chatInput.disabled = reviewPending;
+        chatElements.chatInput.title = reviewPending
+            ? 'Tool review is pending. Resolve the review card before resuming normal message flow.'
+            : '';
+    }
 }
 
 function parseSseEvent(rawEvent) {
@@ -759,6 +775,9 @@ function syncChatControlLocks() {
     if (chatElements.thinkingSelector) {
         chatElements.thinkingSelector.disabled = state.isLoading;
     }
+    if (chatElements.chatModeSelector) {
+        chatElements.chatModeSelector.disabled = state.isLoading || Boolean(state.pendingDeferredReview);
+    }
     if (chatElements.sessionBrowserTrigger) {
         chatElements.sessionBrowserTrigger.disabled = state.isLoading;
     }
@@ -810,6 +829,7 @@ async function loadSession(sessionId) {
         return;
     }
     try {
+        state.pendingDeferredReview = null;
         state.sessionId = sessionId;
         sessionControls.renderSelector();
         sessionControls.refreshCompactionProgress();
@@ -823,11 +843,22 @@ async function loadSession(sessionId) {
         }
         const payload = await response.json();
         state.sessionId = payload.session_id || sessionId;
+        if (chatElements.chatModeSelector) {
+            chatElements.chatModeSelector.value = payload.chat_mode === 'inline_edit'
+                ? 'inline_edit'
+                : 'normal';
+        }
+        state.pendingDeferredReview = payload.pending_review || null;
         state.isWorkspaceUnlocked = false;
         if (chatElements.workspacePathInput) {
             chatElements.workspacePathInput.value = payload.workspace?.path || '';
         }
         renderPersistedSession(payload);
+        if (state.pendingDeferredReview) {
+            const reviewMessage = createAssistantStreamingMessage();
+            handleDeferredReviewEvent(reviewMessage, state.pendingDeferredReview);
+            setAssistantStatus(reviewMessage, 'Waiting for review', 'tools');
+        }
         sessionControls.renderSelector();
         sessionControls.updateTitleRow();
         updateStatus();
@@ -1354,12 +1385,38 @@ function setupEventListeners() {
     if (chatElements.vaultSelector) {
         chatElements.vaultSelector.addEventListener('change', handleVaultChange);
     }
+    if (chatElements.chatModeSelector) {
+        chatElements.chatModeSelector.addEventListener('change', persistSelectedChatMode);
+    }
     syncChatControlLocks();
+}
+
+async function persistSelectedChatMode() {
+    const vault = chatElements.vaultSelector?.value || '';
+    const sessionId = state.sessionId;
+    if (!vault || !sessionId || !chatElements.chatModeSelector) return;
+    const chatMode = chatElements.chatModeSelector.value === 'inline_edit'
+        ? 'inline_edit'
+        : 'normal';
+    try {
+        const response = await fetch(`api/chat/sessions/${encodeURIComponent(sessionId)}/mode`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_name: vault, chat_mode: chatMode }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const session = state.sessions.find((item) => item.session_id === sessionId);
+        if (session) session.chat_mode = chatMode;
+    } catch (error) {
+        console.error('Failed to persist chat mode:', error);
+        addChatErrorMessage('Could not save the selected chat mode.');
+    }
 }
 
 function handleVaultChange() {
     const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
     state.sessionId = null;
+    state.pendingDeferredReview = null;
     state.isWorkspaceUnlocked = false;
     state.sessions = [];
     resetChatModeToDefault();
@@ -1426,6 +1483,8 @@ async function fetchTemplates(vault, preferredTemplate = '') {
 
 function handleDeferredReviewEvent(assistantMessage, payload) {
     if (!assistantMessage?.artifactList || !payload?.artifact_ref) return;
+    state.pendingDeferredReview = payload;
+    syncChatControlLocks();
     const container = document.createElement('div');
     container.className = 'message-artifact-item';
     assistantMessage.artifactList.appendChild(container);
@@ -1774,6 +1833,7 @@ async function clearSession(confirmReset = true) {
     if (!confirmed) return;
 
     state.sessionId = null;
+    state.pendingDeferredReview = null;
     state.isWorkspaceUnlocked = false;
     resetChatModeToDefault();
     if (chatElements.workspacePathInput) {

@@ -5,7 +5,7 @@
 Make vault file interaction part of the chat workflow without recreating an
 Obsidian-style knowledge environment. The chat remains the primary surface. A
 shared vault explorer provides basic navigation and deterministic file control,
-while file references and collaborative editing connect those files directly to
+while file references and inline editing connect those files directly to
 the conversation.
 
 ## Product Direction
@@ -139,7 +139,7 @@ service/core helpers.
   buttons/anchors that call the file modal. Do not ask the model to emit custom
   attributes or HTML for this.
 
-## Phase 2: Collaborative Edit Proposals
+## Phase 2: Inline Edit Review
 
 Build on Phase 1 by making proposed edits interactive chat artifacts.
 
@@ -303,7 +303,7 @@ The explorer owns only basic vault operations:
 - delete files and empty folders.
 
 Direct explorer actions are explicit user commands and do not enter the
-collaborative tool-review flow. They route through shared vault-state mutation
+inline edit review flow. They route through shared vault-state mutation
 helpers so audit, snapshot, refresh, and path-boundary behavior does not drift
 from agent tool operations. Directory moves and recursive deletion of non-empty
 directories remain unsupported until their rollback and confirmation contracts
@@ -431,7 +431,7 @@ Current branch slice:
 - Wired the chat composer with an Add File Reference button.
 - Wired assistant markdown post-processing to upgrade recognized vault text paths
   and markdown file links into modal-opening controls.
-- Added the first Phase 2 collaborative edit proposal slice:
+- Added the first Phase 2 edit proposal slice:
   - `propose_file_edits` tool creates server-owned proposal artifacts;
   - proposal artifacts are stored with the owning chat session;
   - tool events expose `artifact_ref` for persisted and live rendering;
@@ -457,6 +457,43 @@ Current branch slice:
   - Approved create/delete/move proposal rows use the same review/apply flow as
     text replacements, including user-edited create content and move destination
     overrides.
+
+## Objective Audit
+
+The branch now delivers the central product loop: users can navigate and edit
+vault files without leaving chat, open file references from conversation,
+preview Markdown, make direct explorer mutations, and review real `file_write`
+calls inline while the same agent turn pauses and resumes.
+
+The final objective audit produced these decisions:
+
+1. **Session mode is durable.** `default_chat_mode` supplies the mode for a new
+   chat. Existing sessions store and restore their selected `normal` or
+   `inline_edit` value through list, detail, fork, and explicit mode-update
+   contracts.
+2. **Only unresolved review UI is durable.** A pending deferred review is
+   returned with session detail and reconstructed after reload. It owns the
+   session until submitted: the prompt field and send button are locked with a
+   tooltip directing the user to the card. Resolved cards are intentionally not
+   reconstructed because canonical tool history carries their durable outcome.
+3. **Context-script UI actions are deferred.** Phase 3's proposed action prompt
+   is now considered part of a broader typed UI-artifact system that may support
+   agent- or script-authored forms, flash cards, and other interactive surfaces.
+   It is not part of the inline editor merge scope.
+
+Explicitly deferred, not missed:
+
+- `@path` autocomplete remains optional. The unified explorer, Add to prompt,
+  copy-path controls, and resolved chat links cover the core workflow without
+  preloading or repeatedly searching all vault paths from the browser.
+- Recursive directory moves and deletion of non-empty directories remain
+  outside the basic explorer contract until rollback and confirmation behavior
+  is defined.
+
+Remaining merge check:
+
+- Run focused browser checks for pending review reload state, composer locking,
+  mobile layout, dark mode, rapid explorer search, and dirty-editor navigation.
 
 Known Phase 1 follow-ups:
 
