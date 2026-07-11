@@ -48,7 +48,7 @@ class FileWrite(BaseTool):
         ) -> ToolReturn:
             """Create, edit, move, or delete vault files.
 
-            :param operation: One of write, append, edit_line, replace_text, move, delete, mkdir.
+            :param operation: One of write, append, edit_line, replace_text, move, delete, mkdir. Write is create-only unless overwrite is true.
             :param path: Vault-relative file or directory path.
             :param content: Full content for write, or content to append.
             :param destination: Destination path for move.
@@ -56,7 +56,7 @@ class FileWrite(BaseTool):
             :param new_text: Replacement text for replace_text.
             :param line_number: One-indexed target line for edit_line.
             :param count: Replacement count for replace_text.
-            :param overwrite: For write or move, replace an existing target when true.
+            :param overwrite: For write, set true when updating or rewriting a known existing file. For move, set true to replace an existing destination. False keeps both operations create-only/non-destructive.
             :param confirm_path: Required path confirmation for delete.
             """
             try:
@@ -106,7 +106,9 @@ class FileWrite(BaseTool):
             name="file_write",
             description=(
                 "Create, append, edit lines, replace text, move, delete, and create "
-                "folders within the current vault."
+                "folders within the current vault. The write operation is create-only by "
+                "default; when the user asks to update or rewrite a known existing file, "
+                "call write with overwrite=true."
             ),
         )
 

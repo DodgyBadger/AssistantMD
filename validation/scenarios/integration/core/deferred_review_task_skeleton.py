@@ -28,6 +28,7 @@ from core.chat import executor as chat_executor
 from core.chat.deferred_reviews import get_deferred_review
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER, start_queued_chat_stream_task
+from core.constants import INLINE_EDIT_DENIAL_MESSAGE
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
@@ -352,10 +353,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                             "tool_call_id": "review-call-1",
                             "decision": "approve",
                             "override_args": {
-                                "operation": "write",
-                                "path": "Draft.md",
                                 "content": "Reviewed content",
-                                "overwrite": True,
                             },
                         },
                         {
@@ -394,7 +392,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 "overwrite": True,
             }, "Submit should preserve edited override args"
             denied = result.approvals["review-call-2"]
-            assert denied.message == "Keep the existing notes structure."
+            assert denied.message == (
+                f"{INLINE_EDIT_DENIAL_MESSAGE} User reason: Keep the existing notes structure."
+            )
             submitted_review = get_deferred_review(
                 vault_name=vault.name,
                 session_id="deferred-review-session",
@@ -492,12 +492,12 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert denied_resume_task is not None
             denied_result = resume_capture["deferred_tool_results"]
             denial = denied_result.approvals["review-call-1"]
-            assert denial.message == "The tool call was denied.", (
+            assert denial.message == INLINE_EDIT_DENIAL_MESSAGE, (
                 "An empty optional comment must not hide the denial from the resumed model"
             )
             assert (
                 denied_result.approvals["review-call-2"].message
-                == "Do not create either file."
+                == f"{INLINE_EDIT_DENIAL_MESSAGE} User reason: Do not create either file."
             )
         finally:
             chat_executor._prepare_chat_execution = original_prepare

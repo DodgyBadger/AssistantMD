@@ -120,12 +120,7 @@
 
         function renderFileOpsFields(toolCallId, args, locked) {
             const operation = String(args.operation || '').toLowerCase();
-            const hidden = [
-                hiddenArg(toolCallId, 'operation', operation),
-                hiddenArg(toolCallId, 'path', String(args.path || '')),
-            ];
             if (operation === 'write') {
-                hidden.push(hiddenArg(toolCallId, 'overwrite', Boolean(args.overwrite), 'boolean'));
                 return `
                     <div class="edit-proposal-diff is-single">
                         <div>
@@ -133,7 +128,6 @@
                             <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="content" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.content || ''))}</textarea>
                         </div>
                     </div>
-                    ${hidden.join('')}
                 `;
             }
             if (operation === 'append') {
@@ -144,11 +138,9 @@
                             <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="content" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.content || ''))}</textarea>
                         </div>
                     </div>
-                    ${hidden.join('')}
                 `;
             }
             if (operation === 'replace_text') {
-                hidden.push(hiddenArg(toolCallId, 'count', Number(args.count || 1), 'number'));
                 return `
                     <div class="edit-proposal-diff">
                         <div>
@@ -160,11 +152,9 @@
                             <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="new_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.new_text || ''))}</textarea>
                         </div>
                     </div>
-                    ${hidden.join('')}
                 `;
             }
             if (operation === 'edit_line') {
-                hidden.push(hiddenArg(toolCallId, 'line_number', Number(args.line_number || 0), 'number'));
                 return `
                     <div class="edit-proposal-diff">
                         <div>
@@ -176,11 +166,9 @@
                             <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="new_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.new_text || ''))}</textarea>
                         </div>
                     </div>
-                    ${hidden.join('')}
                 `;
             }
             if (operation === 'move') {
-                hidden.push(hiddenArg(toolCallId, 'overwrite', Boolean(args.overwrite), 'boolean'));
                 return `
                     <div class="edit-proposal-path-edit">
                         <label class="edit-proposal-label" for="deferred-review-destination-${escapeHtml(toolCallId)}">Destination</label>
@@ -189,16 +177,11 @@
                             <button type="button" class="workspace-icon-button edit-proposal-path-picker-button" data-deferred-review-pick-destination="${escapeHtml(toolCallId)}" aria-label="Choose destination path" title="Choose destination path" ${locked ? 'disabled' : ''}>${icons.FOLDER_ICON_SVG || ''}</button>
                         </div>
                     </div>
-                    ${hidden.join('')}
                 `;
             }
             if (operation === 'delete' || operation === 'mkdir') {
-                if (operation === 'delete') {
-                    hidden.push(hiddenArg(toolCallId, 'confirm_path', String(args.confirm_path || args.path || '')));
-                }
                 return `
                     <div class="edit-proposal-delete-note">${escapeHtml(fileOpsStaticDescription(operation, args))}</div>
-                    ${hidden.join('')}
                 `;
             }
             return `
@@ -209,10 +192,6 @@
                     </div>
                 </div>
             `;
-        }
-
-        function hiddenArg(toolCallId, name, value, type = 'string') {
-            return `<input type="hidden" data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="${escapeHtml(name)}" data-arg-type="${escapeHtml(type)}" value="${escapeHtml(String(value))}" />`;
         }
 
         function pickMoveDestination(container, button) {

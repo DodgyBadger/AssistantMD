@@ -567,7 +567,7 @@ function syncSendButtonState() {
     const btn = chatElements.sendBtn;
     if (!btn) return;
 
-    const reviewPending = Boolean(state.pendingDeferredReview);
+    const reviewPending = Boolean(state.pendingDeferredReview) && !state.isLoading;
     btn.classList.toggle('chat-stop-btn', state.isLoading);
     btn.innerHTML = state.isLoading
         ? window.AssistantMDIcons.STOP_ICON_SVG

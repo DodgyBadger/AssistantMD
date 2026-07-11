@@ -20,6 +20,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
+from core.constants import INLINE_EDIT_DENIAL_MESSAGE
 from core.chat.chat_store import ChatStore
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
@@ -827,7 +828,10 @@ def _build_deferred_review_approvals(
         decision_value = str(decision.get("decision") or "")
         if decision_value == "deny":
             message = str(decision.get("message") or "").strip()
-            approvals[tool_call_id] = ToolDenied(message) if message else ToolDenied()
+            denial_message = INLINE_EDIT_DENIAL_MESSAGE
+            if message:
+                denial_message = f"{denial_message} User reason: {message}"
+            approvals[tool_call_id] = ToolDenied(denial_message)
             continue
         if decision_value != "approve":
             raise APIException(
@@ -847,7 +851,9 @@ def _build_deferred_review_approvals(
             artifact_ref=artifact_ref,
         )
         approvals[tool_call_id] = (
-            ToolApproved(override_args=dict(override_args)) if override_args else True
+            ToolApproved(override_args={**calls_by_id[tool_call_id].args_as_dict(), **override_args})
+            if override_args
+            else True
         )
     return approvals
 

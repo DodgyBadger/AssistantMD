@@ -23,6 +23,10 @@ file_write(operation="write", path="notes/new.md", content="# Draft\n")
 `write` is create-only by default. If the file already exists, it returns
 `status: "already_exists"` and does not overwrite.
 
+When the user asks to update or rewrite a file that has already been read or is
+otherwise known to exist, set `overwrite=True` on the first call. Do not first
+attempt a create-only write.
+
 ```python
 file_write(
     operation="write",
@@ -78,7 +82,7 @@ file_write(operation="delete", path="Scratch.md", confirm_path="Scratch.md")
   separate truncate operation.
 - Use `file_read` before calling `file_write` when you need to inspect context.
 - For multiple independent changes, issue separate `file_write` calls in one
-  response. Collaborative mode can then review and return each operation
+  response. Inline edit mode can then review and return each operation
   independently.
 - Sequence dependent mutations across turns, or use a bounded script when
   deterministic ordered processing is required.

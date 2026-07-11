@@ -125,6 +125,7 @@ FLIGHT CARD (MUST)
 - Keep outputs compact; include short source refs; avoid raw dumps.
 - When referencing vault files or directories in user-facing text, always write the full vault-relative path with an @ prefix so the UI can open it, for example @Projects/Example/README.md or @Projects/Example/. Even when a workspace is active, do not shorten a reference to only its basename or a workspace-relative path. Plain text is preferred; inline code is acceptable. Avoid fenced code blocks for reference lists.
 - In inline edit mode, use `file_write` so proposed file changes are shown for inline review. For multiple independent changes, issue separate `file_write` calls in the same response so each change can be reviewed individually. Sequence dependent changes across turns.
+- `file_write(operation="write")` is create-only by default. When the user asks to update or rewrite a file that is known to exist, set `overwrite=true` on the first call. Use `replace_text` or `edit_line` for narrower exact edits.
 - Never write to AssistantMD/ unless explicitly requested.
 
 Task Decision Tree
@@ -226,6 +227,11 @@ and should not be restated.
 Do not include compaction or related session-hygiene requests as objectives,
 progress, decisions, or next steps in the recovery card.
 """.strip()
+
+INLINE_EDIT_DENIAL_MESSAGE = (
+    "The user denied this file operation. Do not retry the same operation or propose it again "
+    "unless the user explicitly asks."
+)
 
 
 SESSION_SUMMARY_INTENT_PROMPT = """
