@@ -20,10 +20,33 @@ class VaultFileReferenceApiScenario(BaseScenario):
         self.create_file(vault, "README.md", "# Vault root\n")
         self.create_file(vault, "root-note.md", "root note\n")
         self.create_file(vault, "script.py", "print('editable')\n")
+        self.create_file(vault, "Pagination/a.md", "a\n")
+        self.create_file(vault, "Pagination/b.md", "b\n")
+        self.create_file(vault, "Pagination/c.md", "c\n")
         self.create_file(vault, ".hidden/secret.md", "hidden\n")
         (vault / "binary.docx").write_bytes(b"PK\x03\x04\x00\x00not plain text")
 
         await self.start_system()
+
+        from api.services import resolve_vault_root
+
+        assert resolve_vault_root(vault.name) == vault.resolve()
+        for invalid_vault_name in (".", "..", "nested/vault"):
+            try:
+                resolve_vault_root(invalid_vault_name)
+            except Exception as exc:
+                assert getattr(exc, "error_type", "") == "InvalidVaultName"
+            else:
+                raise AssertionError(f"Invalid vault name should be rejected: {invalid_vault_name}")
+
+        escaping_vault = vault.parent / "EscapingVault"
+        escaping_vault.symlink_to(self.run_path / "artifacts", target_is_directory=True)
+        try:
+            resolve_vault_root(escaping_vault.name)
+        except Exception as exc:
+            assert getattr(exc, "error_type", "") == "VaultRootEscapesDataRoot"
+        else:
+            raise AssertionError("A symlinked vault root must not escape the configured data root")
 
         refs = self.call_api(
             f"/api/vaults/{vault.name}/file-refs",
@@ -34,6 +57,26 @@ class VaultFileReferenceApiScenario(BaseScenario):
         paths = {item["path"] for item in refs_payload.get("items", [])}
         assert "Projects/Alpha" in paths, "Workspace listing should include project folders"
         assert ".hidden/secret.md" not in paths, "Workspace listing should not expose hidden paths"
+
+        first_page = self.call_api(
+            f"/api/vaults/{vault.name}/file-refs",
+            params={"path": "Pagination", "scope": "vault", "limit": 2},
+        )
+        assert first_page.status_code == 200
+        assert [item["path"] for item in first_page.json()["items"]] == [
+            "Pagination/a.md",
+            "Pagination/b.md",
+        ]
+        assert first_page.json()["truncated"] is True
+        assert first_page.json()["next_offset"] == 2
+        second_page = self.call_api(
+            f"/api/vaults/{vault.name}/file-refs",
+            params={"path": "Pagination", "scope": "vault", "limit": 2, "offset": 2},
+        )
+        assert [item["path"] for item in second_page.json()["items"]] == [
+            "Pagination/c.md"
+        ]
+        assert second_page.json()["truncated"] is False
 
         search = self.call_api(
             f"/api/vaults/{vault.name}/file-refs",

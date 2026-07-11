@@ -17,6 +17,7 @@ from core.chat.workspace import normalize_workspace_path
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.runtime.execution_tasks import ExecutionTaskCancellationResult
 from core.runtime.state import get_runtime_context
+from core.vault_state.pathing import resolve_configured_vault_root
 
 
 _CHAT_STORE = ChatStore()
@@ -44,7 +45,12 @@ async def start_chat_surface_task(request: ChatSurfaceRequest) -> ChatStreamTask
     """Start a queued chat task from a normalized external surface request."""
     _validate_surface_request(request)
     runtime = get_runtime_context()
-    vault_path = str(runtime.config.data_root / request.vault_name)
+    vault_path = str(
+        resolve_configured_vault_root(
+            data_root=runtime.config.data_root,
+            vault_name=request.vault_name,
+        )
+    )
     thinking = normalize_thinking_value(
         request.thinking,
         source_name=f"{request.surface} thinking",

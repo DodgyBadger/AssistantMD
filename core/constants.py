@@ -105,30 +105,6 @@ WEB_SOURCE_TOOL_NAMES = frozenset(
     }
 )
 
-EDIT_PROPOSAL_REVIEW_PROMPT_PREAMBLE = """
-Please revise the referenced proposed file edits.
-
-Use these review semantics:
-- Approved edits listed as already applied have been written to disk. Do not
-  propose those edits again.
-- Commented edits need revision according to the user's comment.
-- Denied edits are rejected. Do not apply them and do not propose them again
-  unless the user explicitly asks for an alternative.
-
-Create a revised edit proposal only for unresolved commented items or explicit
-alternatives the user requested.
-""".strip()
-EDIT_PROPOSAL_REVIEW_DISPLAY_PREFIX = "Review proposed file edits"
-EDIT_PROPOSAL_REVIEW_ARTIFACT_LABEL = "Artifact"
-EDIT_PROPOSAL_REVIEW_APPLIED_SECTION = "Already applied edits:"
-EDIT_PROPOSAL_REVIEW_UNRESOLVED_SECTION = "Unresolved review decisions:"
-EDIT_PROPOSAL_REVIEW_COMMENT_LABEL = "Comment"
-EDIT_PROPOSAL_REVIEW_DENIED_MARKER = "Decision: denied"
-EDIT_PROPOSAL_APPLY_HISTORY_PREFIX = "Approved and applied edit proposal"
-EDIT_PROPOSAL_APPLY_HISTORY_SECTION = "Applied edits:"
-EDIT_PROPOSAL_APPLY_ASSISTANT_CONFIRMATION = "Applied the approved edits."
-
-
 # ==============================================================================
 # LLM Prompts and Instructions
 # ==============================================================================

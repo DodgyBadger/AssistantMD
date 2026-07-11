@@ -91,7 +91,7 @@
                     <div class="edit-proposal-path-wrap">
                         <div class="edit-proposal-path-line">
                             <span class="edit-proposal-operation-label">${escapeHtml(toolOperationLabel(toolName, args))}</span>
-                            ${path ? `<span class="edit-proposal-new-path">@${escapeHtml(path)}</span>` : `<span class="edit-proposal-new-path">${escapeHtml(toolName)}</span>`}
+                            ${path ? `<button type="button" class="vault-file-link" data-deferred-review-open-file="${escapeHtml(path)}">@${escapeHtml(path)}</button>` : `<span class="edit-proposal-new-path">${escapeHtml(toolName)}</span>`}
                         </div>
                     </div>
                     <div class="edit-proposal-row-actions">
@@ -184,7 +184,10 @@
                 return `
                     <div class="edit-proposal-path-edit">
                         <label class="edit-proposal-label" for="deferred-review-destination-${escapeHtml(toolCallId)}">Destination</label>
-                        <input id="deferred-review-destination-${escapeHtml(toolCallId)}" class="edit-proposal-path-input" type="text" data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="destination" value="${escapeHtml(String(args.destination || ''))}" ${locked ? 'disabled' : ''} />
+                        <div class="edit-proposal-path-field">
+                            <input id="deferred-review-destination-${escapeHtml(toolCallId)}" class="edit-proposal-path-input" type="text" data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="destination" value="${escapeHtml(String(args.destination || ''))}" ${locked ? 'disabled' : ''} />
+                            <button type="button" class="workspace-icon-button edit-proposal-path-picker-button" data-deferred-review-pick-destination="${escapeHtml(toolCallId)}" aria-label="Choose destination path" title="Choose destination path" ${locked ? 'disabled' : ''}>${icons.FOLDER_ICON_SVG || ''}</button>
+                        </div>
                     </div>
                     ${hidden.join('')}
                 `;
@@ -212,10 +215,56 @@
             return `<input type="hidden" data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="${escapeHtml(name)}" data-arg-type="${escapeHtml(type)}" value="${escapeHtml(String(value))}" />`;
         }
 
+        function pickMoveDestination(container, button) {
+            if (typeof callbacks.openPathPicker !== 'function') return;
+            const row = button.closest('[data-deferred-review-call]');
+            if (!(row instanceof HTMLElement)) return;
+            const toolCallId = row.dataset.deferredReviewCall || '';
+            const input = row.querySelector(
+                `[data-deferred-review-arg="${cssEscape(toolCallId)}"][data-arg-name="destination"]`
+            );
+            const sourcePath = row.querySelector('[data-deferred-review-open-file]')
+                ?.getAttribute('data-deferred-review-open-file') || '';
+            callbacks.openPathPicker({
+                id: 'deferred-review-destination-picker-modal',
+                title: 'Move Destination',
+                mode: 'files',
+                subtitle: sourcePath ? `Move ${sourcePath}` : 'Choose destination',
+                initialScope: 'vault',
+                onSelect: ({ path, kind }) => {
+                    if (!(input instanceof HTMLInputElement)) return;
+                    input.value = kind === 'directory'
+                        ? joinVaultPath(path, basename(sourcePath))
+                        : path;
+                    updateSubmitButton(container);
+                },
+            });
+        }
+
+        function basename(path) {
+            return String(path || '').split('/').filter(Boolean).pop() || '';
+        }
+
+        function joinVaultPath(directory, name) {
+            const cleanDirectory = String(directory || '').replace(/\/+$/, '');
+            const cleanName = String(name || '').replace(/^\/+/, '');
+            return cleanDirectory ? `${cleanDirectory}/${cleanName}` : cleanName;
+        }
+
         function bindReviewCard(container, review) {
             container.addEventListener('click', async (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                const fileButton = target.closest('[data-deferred-review-open-file]');
+                if (fileButton instanceof HTMLButtonElement) {
+                    callbacks.openFile?.(fileButton.dataset.deferredReviewOpenFile || '');
+                    return;
+                }
+                const destinationButton = target.closest('[data-deferred-review-pick-destination]');
+                if (destinationButton instanceof HTMLButtonElement) {
+                    pickMoveDestination(container, destinationButton);
+                    return;
+                }
                 const toggle = target.closest('[data-deferred-review-toggle]');
                 if (toggle instanceof HTMLButtonElement) {
                     toggleReviewBody(container, toggle);
@@ -454,9 +503,11 @@
         }
 
         function reviewStatusLabel(status) {
+            if (status === 'resuming') return 'Resuming';
+            if (status === 'completed') return 'Applied';
+            if (status === 'failed') return 'Failed';
+            if (status === 'cancelled') return 'Cancelled';
             if (status === 'submitted') return 'Submitted';
-            if (status === 'approved') return 'Approved';
-            if (status === 'denied') return 'Denied';
             return 'Pending';
         }
 

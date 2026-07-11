@@ -41,6 +41,7 @@ class _DeferredReviewResult:
                     "operation": "write",
                     "path": "Draft.md",
                     "content": "Draft content",
+                    "overwrite": True,
                 },
                 tool_call_id="review-call-1",
             ),
@@ -126,6 +127,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
 
     async def test_scenario(self) -> None:
         vault = self.create_vault("DeferredReviewTaskVault")
+        self.create_file(vault, "Draft.md", "Original draft\n")
         await self.start_system()
 
         original_prepare = chat_executor._prepare_chat_execution
@@ -263,6 +265,29 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 call.get("tool_call_id") for call in api_payload.get("approvals", [])
             ] == ["review-call-1", "review-call-2"]
 
+            blocked_start = await start_queued_chat_stream_task(
+                vault_name=vault.name,
+                vault_path=str(vault),
+                prompt="continue before review",
+                image_paths=[],
+                image_uploads=[],
+                session_id="deferred-review-session",
+                tools=[],
+                model="test",
+                chat_mode="collaborative",
+            )
+            blocked_task = await self._wait_for_task_terminal(blocked_start.task.task_id)
+            assert blocked_task is not None and blocked_task.status == "failed"
+            blocked_events = await CHAT_TASK_EVENT_BUFFER.events_after(
+                blocked_start.task.task_id
+            )
+            assert blocked_events[-1].event == "error"
+            assert "Review pending" in str(
+                blocked_events[-1].data.get("choices", [{}])[0]
+                .get("delta", {})
+                .get("content", "")
+            )
+
             duplicate_response = self.call_api(
                 (
                     f"/api/vaults/{vault.name}/chat/deferred-review-session/"
@@ -284,6 +309,24 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 "duplicate_tool_call_ids"
             ) == ["review-call-1"]
 
+            (vault / "Draft.md").write_text("Changed while review was pending\n", encoding="utf-8")
+            stale_target_response = self.call_api(
+                (
+                    f"/api/vaults/{vault.name}/chat/deferred-review-session/"
+                    f"deferred-reviews/{review_event['artifact_ref']}/submit"
+                ),
+                method="POST",
+                data={
+                    "decisions": [
+                        {"tool_call_id": "review-call-1", "decision": "approve"},
+                        {"tool_call_id": "review-call-2", "decision": "deny"},
+                    ],
+                },
+            )
+            assert stale_target_response.status_code == 409
+            assert stale_target_response.json().get("error") == "DeferredReviewTargetConflict"
+            (vault / "Draft.md").write_text("Original draft\n", encoding="utf-8")
+
             submit_response = self.call_api(
                 (
                     f"/api/vaults/{vault.name}/chat/deferred-review-session/"
@@ -297,8 +340,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                             "decision": "approve",
                             "override_args": {
                                 "operation": "write",
-                                "path": "Reviewed.md",
+                                "path": "Draft.md",
                                 "content": "Reviewed content",
+                                "overwrite": True,
                             },
                         },
                         {
@@ -311,7 +355,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             )
             assert submit_response.status_code == 200, "Submit should start a resume task"
             submit_payload = submit_response.json()
-            assert submit_payload.get("status") == "submitted"
+            assert submit_payload.get("status") in {"resuming", "completed"}
             resumed_task_id = submit_payload.get("task", {}).get("task_id")
             assert resumed_task_id, "Submit response should include resumed task id"
             resumed_task = await self._wait_for_task_terminal(resumed_task_id)
@@ -332,8 +376,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             approved = result.approvals["review-call-1"]
             assert approved.override_args == {
                 "operation": "write",
-                "path": "Reviewed.md",
+                "path": "Draft.md",
                 "content": "Reviewed content",
+                "overwrite": True,
             }, "Submit should preserve edited override args"
             denied = result.approvals["review-call-2"]
             assert denied.message == "Keep the existing notes structure."
@@ -343,7 +388,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 artifact_ref=review_event["artifact_ref"],
             )
             assert submitted_review is not None
-            assert submitted_review.status == "submitted"
+            assert submitted_review.status == "completed"
             assert submitted_review.resumed_task_id == resumed_task_id
 
             stale_response = self.call_api(
@@ -380,28 +425,34 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 denied_start.task.task_id
             )
             denied_review_event = denied_events[0].data
-            deny_response = self.call_api(
-                (
-                    f"/api/vaults/{vault.name}/chat/deferred-denial-session/"
-                    f"deferred-reviews/{denied_review_event['artifact_ref']}/submit"
-                ),
-                method="POST",
-                data={
-                    "decisions": [
-                        {
-                            "tool_call_id": "review-call-1",
-                            "decision": "deny",
-                            "message": "",
-                        },
-                        {
-                            "tool_call_id": "review-call-2",
-                            "decision": "deny",
-                            "message": "Do not create either file.",
-                        },
-                    ],
-                },
+            deny_path = (
+                f"/api/vaults/{vault.name}/chat/deferred-denial-session/"
+                f"deferred-reviews/{denied_review_event['artifact_ref']}/submit"
             )
-            assert deny_response.status_code == 200
+            deny_data = {
+                "decisions": [
+                    {
+                        "tool_call_id": "review-call-1",
+                        "decision": "deny",
+                        "message": "",
+                    },
+                    {
+                        "tool_call_id": "review-call-2",
+                        "decision": "deny",
+                        "message": "Do not create either file.",
+                    },
+                ],
+            }
+            concurrent_responses = await asyncio.gather(
+                asyncio.to_thread(self.call_api, deny_path, method="POST", data=deny_data),
+                asyncio.to_thread(self.call_api, deny_path, method="POST", data=deny_data),
+            )
+            assert sorted(response.status_code for response in concurrent_responses) == [200, 409], (
+                "A pending review must be claimed atomically before any resume task starts"
+            )
+            deny_response = next(
+                response for response in concurrent_responses if response.status_code == 200
+            )
             denied_resume_task_id = deny_response.json().get("task", {}).get("task_id")
             assert denied_resume_task_id
             denied_resume_task = await self._wait_for_task_terminal(denied_resume_task_id)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,8 +29,15 @@ from core.authoring.context_manager import ContextTemplateExecutionError
 from core.chat import executor as chat_executor
 from core.chat.chat_store import ChatStore
 from core.chat.compaction import chat_session_history_lock
-from core.chat.deferred_reviews import create_deferred_review, summarize_deferred_review
-from core.chat.deferred_reviews import StoredDeferredReview
+from core.chat.deferred_reviews import (
+    DeferredReviewError,
+    StoredDeferredReview,
+    capture_deferred_review_context,
+    create_deferred_review,
+    has_pending_deferred_review,
+    mark_deferred_review_terminal,
+    summarize_deferred_review,
+)
 from core.chat.task_events import ChatTaskEventBuffer
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
@@ -231,27 +238,98 @@ async def start_deferred_review_resume_task(
     chat_mode: chat_executor.ChatMode = chat_executor.NORMAL_CHAT_MODE,
     event_buffer: ChatTaskEventBuffer | None = None,
 ) -> ChatStreamTaskStart:
-    """Resume a chat task after the user submits deferred inline review results."""
-    prepared = await chat_executor._prepare_deferred_review_resume_execution(
-        vault_name=vault_name,
-        vault_path=vault_path,
-        session_id=session_id,
-        tools=tools,
-        model=model,
-        message_history=review.resume_messages,
-        deferred_tool_results=deferred_tool_results,
-        thinking=thinking,
-        context_template=context_template,
-        chat_mode=chat_mode,
+    """Queue a resumed chat task behind other work in the same session."""
+    runtime = get_runtime_context()
+    buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
+
+    async def _mark_terminal(status: str, error: BaseException | None = None) -> None:
+        try:
+            mark_deferred_review_terminal(
+                vault_name=vault_name,
+                session_id=session_id,
+                artifact_ref=review.artifact_ref,
+                status=status,
+                error=(
+                    {"error_type": type(error).__name__, "message": str(error)}
+                    if error is not None
+                    else None
+                ),
+            )
+        except DeferredReviewError:
+            chat_executor.logger.warning(
+                "Deferred review terminal state could not be recorded",
+                data={"artifact_ref": review.artifact_ref, "status": status},
+            )
+
+    async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
+        async def _run_in_session_gate() -> None:
+            await runtime.task_coordinator.mark_started(tracked_task.task_id)
+            prepared = await chat_executor._prepare_deferred_review_resume_execution(
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                tools=tools,
+                model=model,
+                message_history=review.resume_messages,
+                deferred_tool_results=deferred_tool_results,
+                thinking=thinking,
+                context_template=context_template,
+                chat_mode=chat_mode,
+            )
+            await _run_prepared_chat_stream_task(
+                task=tracked_task,
+                prepared=prepared,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                event_buffer=buffer,
+                persist_user_request=False,
+            )
+            await _mark_terminal("completed")
+
+        await runtime.task_runner.run_with_gate(
+            tracked_task,
+            ExecutionGatePolicy(
+                key=chat_session_scope(session_id),
+                queued_status="queued",
+                clear_metadata={"queue_position": 0, "waiting_for_task_id": None},
+            ),
+            _run_in_session_gate,
+        )
+
+    task = await runtime.task_runner.start_background(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.CHAT,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=chat_task_label(session_id),
+            metadata={
+                "vault": vault_name,
+                "session_id": session_id,
+                "streaming": True,
+                "model": model,
+                "tools": list(tools),
+                "deferred_review_artifact_ref": review.artifact_ref,
+                "queued_by_session": True,
+            },
+        ),
+        _run,
+        hooks=ExecutionTaskHooks(
+            on_cancelled=lambda task_id: _mark_review_cancelled(buffer, task_id, _mark_terminal),
+            on_failed=lambda _task_id, exc: _mark_terminal("failed", exc),
+        ),
+        start_immediately=False,
     )
-    return await start_prepared_chat_stream_task(
-        prepared=prepared,
-        vault_name=vault_name,
-        vault_path=vault_path,
-        session_id=session_id,
-        event_buffer=event_buffer,
-        persist_user_request=False,
-    )
+    return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def _mark_review_cancelled(
+    event_buffer: ChatTaskEventBuffer,
+    task_id: str,
+    mark_terminal: Callable[[str], Awaitable[None]],
+) -> None:
+    await _append_cancelled_if_open(event_buffer, task_id)
+    await mark_terminal("cancelled")
 
 
 async def start_chat_stream_task(
@@ -318,6 +396,8 @@ async def start_queued_chat_stream_task(
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         async def _run_in_session_gate() -> None:
             try:
+                if has_pending_deferred_review(vault_name=vault_name, session_id=session_id):
+                    raise chat_executor.ChatReviewPendingError(session_id=session_id)
                 display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
                 prepared = await chat_executor._prepare_chat_execution(
                     vault_name=vault_name,
@@ -470,6 +550,8 @@ def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
         return _error_event_data(f"\n\nError: {str(exc)}", exc.details)
     if isinstance(exc, chat_executor.ChatContextTemplateError):
         return _error_event_data(f"\n\nTemplate error: {str(exc)}", exc.details)
+    if isinstance(exc, chat_executor.ChatReviewPendingError):
+        return _error_event_data(f"\n\nReview pending: {str(exc)}", exc.details)
     if isinstance(
         exc,
         (
@@ -496,6 +578,8 @@ def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
 
 def _is_user_correctable_preflight_error(exc: Exception) -> bool:
     """Return whether a preflight exception message is safe and actionable."""
+    if isinstance(exc, chat_executor.ChatReviewPendingError):
+        return True
     if not isinstance(exc, ValueError):
         return False
     message = str(exc)
@@ -666,6 +750,10 @@ async def _run_prepared_chat_stream_task(
                             requests=deferred_requests,
                             resume_messages=list(final_result.all_messages()),
                             resume_config=prepared.resume_config(),
+                            review_context=capture_deferred_review_context(
+                                vault_path=vault_path,
+                                requests=deferred_requests,
+                            ),
                         )
                 chat_executor._log_chat_lifecycle(
                     (

@@ -555,6 +555,22 @@ details summary::-webkit-details-marker {
 .workspace-tree-row:hover {
     background: rgb(var(--bg-elevated));
 }
+.vault-path-picker-more {
+    align-self: flex-start;
+    margin: 0.4rem 0 0.4rem 1.6rem;
+    padding: 0.35rem 0.55rem;
+    border-radius: 0.3rem;
+    color: rgb(var(--accent-primary));
+    font-size: 0.8125rem;
+}
+.vault-path-picker-more:hover,
+.vault-path-picker-more:focus-visible {
+    background: rgb(var(--accent-primary) / 0.1);
+    outline: none;
+}
+.vault-path-picker-more:disabled {
+    opacity: 0.6;
+}
 .vault-explorer-row-actions {
     position: relative;
     display: flex;

@@ -16,16 +16,11 @@ from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic_ai import DeferredToolResults, ToolApproved, ToolDenied
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, UserPromptPart
+from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
 from core.chat.chat_store import ChatStore
-from core.constants import (
-    EDIT_PROPOSAL_APPLY_ASSISTANT_CONFIRMATION,
-    EDIT_PROPOSAL_APPLY_HISTORY_PREFIX,
-    EDIT_PROPOSAL_APPLY_HISTORY_SECTION,
-)
 from core.runtime.state import get_runtime_context, RuntimeStateError
 from core.scheduling.jobs import setup_scheduler_jobs
 from core.scheduling.job_history import get_scheduler_job_history
@@ -86,14 +81,16 @@ from core.chat import export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.chat.deferred_reviews import (
+    attach_deferred_review_task,
+    deferred_review_conflicts,
     DeferredReviewError,
     get_deferred_review,
+    mark_deferred_review_terminal,
     mark_deferred_review_submitted,
+    StoredDeferredReview,
 )
 from core.chat.edit_proposals import (
     EditProposalError,
-    apply_edit_proposal,
-    deny_edit_proposal,
     get_edit_proposal,
 )
 from core.chat.task_execution import start_deferred_review_resume_task
@@ -114,6 +111,7 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
+from core.vault_state.pathing import VaultRootResolutionError, resolve_configured_vault_root
 from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import (
     VaultMutationRejected,
@@ -181,8 +179,6 @@ from .models import (
     VaultPathMutationResponse,
     VaultPathResolveResponse,
     VaultFileResponse,
-    EditProposalApplyResponse,
-    EditProposalDenyResponse,
     EditProposalResponse,
     DeferredReviewCallInfo,
     DeferredReviewResponse,
@@ -344,18 +340,27 @@ def _normalize_workspace_path(path: str | None) -> str:
         ) from exc
 
 
-def _resolve_vault_root(vault_name: str) -> Path:
+def resolve_vault_root(vault_name: str) -> Path:
     """Return an existing vault root for API file operations."""
     runtime = get_runtime_context()
-    vault_root = (runtime.config.data_root / vault_name).resolve()
-    if not vault_root.is_dir():
-        raise APIException(
-            status_code=404,
-            error_type="VaultNotFound",
-            message=f"Vault not found: {vault_name}",
-            details={"vault_name": vault_name},
+    try:
+        return resolve_configured_vault_root(
+            data_root=runtime.config.data_root,
+            vault_name=vault_name,
         )
-    return vault_root
+    except VaultRootResolutionError as exc:
+        status_code = 404 if exc.code == "vault_not_found" else 400
+        error_type = {
+            "invalid_vault_name": "InvalidVaultName",
+            "vault_root_escapes_data_root": "VaultRootEscapesDataRoot",
+            "vault_not_found": "VaultNotFound",
+        }.get(exc.code, "InvalidVaultName")
+        raise APIException(
+            status_code=status_code,
+            error_type=error_type,
+            message=str(exc),
+            details={"vault_name": exc.vault_name},
+        ) from exc
 
 
 def _normalize_vault_file_path(path: str | None) -> str:
@@ -372,7 +377,7 @@ def _normalize_vault_file_path(path: str | None) -> str:
 
 def _resolve_vault_file_path(vault_name: str, path: str | None) -> tuple[Path, str, Path]:
     """Resolve a vault-relative file path under an existing vault."""
-    vault_root = _resolve_vault_root(vault_name)
+    vault_root = resolve_vault_root(vault_name)
     normalized = _normalize_vault_file_path(path)
     try:
         resolved = resolve_vault_relative_path(
@@ -652,6 +657,96 @@ async def submit_chat_deferred_review(
     decisions: list[dict[str, Any]],
 ) -> DeferredReviewSubmitResponse:
     """Submit deferred inline review decisions and start a resume task."""
+    review = _require_pending_deferred_review(
+        vault_name=vault_name,
+        session_id=session_id,
+        artifact_ref=artifact_ref,
+        decisions=decisions,
+    )
+    approvals = _build_deferred_review_approvals(
+        review=review,
+        decisions=decisions,
+        artifact_ref=artifact_ref,
+    )
+    results = DeferredToolResults(approvals=approvals)
+    tools, model, thinking, context_template, chat_mode = _deferred_resume_options(
+        review.resume_config,
+        artifact_ref=artifact_ref,
+    )
+    vault_path = str(resolve_vault_root(vault_name))
+    conflicts = deferred_review_conflicts(
+        review=review,
+        approved_call_ids={
+            tool_call_id
+            for tool_call_id, decision in approvals.items()
+            if not isinstance(decision, ToolDenied)
+        },
+        vault_path=vault_path,
+    )
+    if conflicts:
+        raise APIException(
+            status_code=409,
+            error_type="DeferredReviewTargetConflict",
+            message="A reviewed file changed while approval was pending.",
+            details={"artifact_ref": artifact_ref, "conflicts": conflicts},
+        )
+    try:
+        claimed = mark_deferred_review_submitted(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+            results=results,
+            resumed_task_id="",
+        )
+    except DeferredReviewError as exc:
+        raise _deferred_review_api_error(exc) from exc
+    try:
+        started = await start_deferred_review_resume_task(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            review=claimed,
+            deferred_tool_results=results,
+            tools=tools,
+            model=model,
+            thinking=thinking,
+            context_template=context_template,
+            chat_mode=chat_mode,
+        )
+        updated = attach_deferred_review_task(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=artifact_ref,
+            resumed_task_id=started.task.task_id,
+        )
+    except Exception as exc:
+        try:
+            mark_deferred_review_terminal(
+                vault_name=vault_name,
+                session_id=session_id,
+                artifact_ref=artifact_ref,
+                status="failed",
+                error={"error_type": type(exc).__name__, "message": str(exc)},
+            )
+        except DeferredReviewError:
+            pass
+        raise
+    task = await get_execution_task(started.task.task_id)
+    return DeferredReviewSubmitResponse(
+        artifact_ref=updated.artifact_ref,
+        status=updated.status,
+        session_id=session_id,
+        task=task,
+    )
+
+
+def _require_pending_deferred_review(
+    *,
+    vault_name: str,
+    session_id: str,
+    artifact_ref: str,
+    decisions: list[dict[str, Any]],
+) -> StoredDeferredReview:
     review = get_deferred_review(
         vault_name=vault_name,
         session_id=session_id,
@@ -662,11 +757,7 @@ async def submit_chat_deferred_review(
             status_code=404,
             error_type="DeferredReviewNotFound",
             message="Deferred review request was not found for this chat session.",
-            details={
-                "artifact_ref": artifact_ref,
-                "session_id": session_id,
-                "vault_name": vault_name,
-            },
+            details={"artifact_ref": artifact_ref},
         )
     if review.status != "pending":
         raise APIException(
@@ -694,52 +785,44 @@ async def submit_chat_deferred_review(
             details={"artifact_ref": artifact_ref},
         )
 
-    known_call_ids = {
-        str(call.tool_call_id)
-        for call in review.requests.approvals
-        if str(call.tool_call_id)
-    }
-    submitted_call_ids = [str(decision.get("tool_call_id") or "") for decision in decisions]
-    duplicate_call_ids = sorted(
-        call_id for call_id, count in Counter(submitted_call_ids).items() if count > 1
+    known_ids = {str(call.tool_call_id) for call in review.requests.approvals}
+    submitted_ids = [str(decision.get("tool_call_id") or "") for decision in decisions]
+    duplicate_ids = sorted(
+        call_id for call_id, count in Counter(submitted_ids).items() if count > 1
     )
-    unknown_call_ids = sorted(
-        call_id for call_id in submitted_call_ids
-        if call_id not in known_call_ids
-    )
-    missing_call_ids = sorted(known_call_ids - set(submitted_call_ids))
-    if duplicate_call_ids or unknown_call_ids or missing_call_ids:
+    unknown_ids = sorted(call_id for call_id in submitted_ids if call_id not in known_ids)
+    missing_ids = sorted(known_ids - set(submitted_ids))
+    if duplicate_ids or unknown_ids or missing_ids:
         raise APIException(
             status_code=400,
             error_type="DeferredReviewDecisionMismatch",
             message="Review decisions must cover the pending deferred tool calls.",
             details={
                 "artifact_ref": artifact_ref,
-                "duplicate_tool_call_ids": duplicate_call_ids,
-                "unknown_tool_call_ids": unknown_call_ids,
-                "missing_tool_call_ids": missing_call_ids,
+                "duplicate_tool_call_ids": duplicate_ids,
+                "unknown_tool_call_ids": unknown_ids,
+                "missing_tool_call_ids": missing_ids,
             },
         )
+    return review
 
+
+def _build_deferred_review_approvals(
+    *,
+    review: StoredDeferredReview,
+    decisions: list[dict[str, Any]],
+    artifact_ref: str,
+) -> dict[str, bool | ToolApproved | ToolDenied]:
+    calls_by_id = {str(call.tool_call_id): call for call in review.requests.approvals}
     approvals: dict[str, bool | ToolApproved | ToolDenied] = {}
     for decision in decisions:
         tool_call_id = str(decision.get("tool_call_id") or "")
         decision_value = str(decision.get("decision") or "")
-        if decision_value == "approve":
-            override_args = decision.get("override_args") or {}
-            approvals[tool_call_id] = (
-                ToolApproved(override_args=dict(override_args))
-                if isinstance(override_args, dict) and override_args
-                else True
-            )
-        elif decision_value == "deny":
-            denial_message = str(decision.get("message") or "").strip()
-            approvals[tool_call_id] = (
-                ToolDenied(denial_message)
-                if denial_message
-                else ToolDenied()
-            )
-        else:
+        if decision_value == "deny":
+            message = str(decision.get("message") or "").strip()
+            approvals[tool_call_id] = ToolDenied(message) if message else ToolDenied()
+            continue
+        if decision_value != "approve":
             raise APIException(
                 status_code=400,
                 error_type="InvalidDeferredReviewDecision",
@@ -747,8 +830,59 @@ async def submit_chat_deferred_review(
                 details={"tool_call_id": tool_call_id, "decision": decision_value},
             )
 
-    results = DeferredToolResults(approvals=approvals)
-    resume_config = review.resume_config
+        override_args = decision.get("override_args") or {}
+        if not isinstance(override_args, dict):
+            override_args = {}
+        _validate_deferred_review_overrides(
+            tool_call_id=tool_call_id,
+            original_args=calls_by_id[tool_call_id].args_as_dict(),
+            override_args=override_args,
+            artifact_ref=artifact_ref,
+        )
+        approvals[tool_call_id] = (
+            ToolApproved(override_args=dict(override_args)) if override_args else True
+        )
+    return approvals
+
+
+def _validate_deferred_review_overrides(
+    *,
+    tool_call_id: str,
+    original_args: dict[str, Any],
+    override_args: dict[str, Any],
+    artifact_ref: str,
+) -> None:
+    if not override_args:
+        return
+    operation = str(original_args.get("operation") or "").strip().lower()
+    editable_args = {
+        "write": {"content"},
+        "append": {"content"},
+        "replace_text": {"old_text", "new_text"},
+        "edit_line": {"old_text", "new_text"},
+        "move": {"destination"},
+    }.get(operation, set())
+    changed_immutable = sorted(
+        key
+        for key, value in override_args.items()
+        if key not in editable_args and value != original_args.get(key)
+    )
+    if changed_immutable:
+        raise APIException(
+            status_code=400,
+            error_type="DeferredReviewImmutableArgument",
+            message="Review overrides cannot change the operation target or policy.",
+            details={
+                "artifact_ref": artifact_ref,
+                "tool_call_id": tool_call_id,
+                "immutable_arguments": changed_immutable,
+            },
+        )
+
+
+def _deferred_resume_options(
+    resume_config: dict[str, Any], *, artifact_ref: str
+) -> tuple[list[str], str, str | None, str | None, str]:
     model = str(resume_config.get("model") or "").strip()
     if not model:
         raise APIException(
@@ -757,137 +891,14 @@ async def submit_chat_deferred_review(
             message="Deferred review request is missing the model needed to resume.",
             details={"artifact_ref": artifact_ref},
         )
-    tools = [
-        str(tool)
-        for tool in resume_config.get("tools") or []
-        if str(tool).strip()
-    ]
+    tools = [str(tool) for tool in resume_config.get("tools") or [] if str(tool).strip()]
     thinking = normalize_thinking_value(
         resume_config.get("thinking"),
         source_name="stored deferred review thinking",
     )
-    context_template = resume_config.get("context_template")
-    context_template = str(context_template).strip() or None
+    context_template = str(resume_config.get("context_template") or "").strip() or None
     chat_mode = str(resume_config.get("chat_mode") or "normal").strip() or "normal"
-    runtime = get_runtime_context()
-    vault_path = str(runtime.config.data_root / vault_name)
-    started = await start_deferred_review_resume_task(
-        vault_name=vault_name,
-        vault_path=vault_path,
-        session_id=session_id,
-        review=review,
-        deferred_tool_results=results,
-        tools=tools,
-        model=model,
-        thinking=thinking,
-        context_template=context_template,
-        chat_mode=chat_mode,
-    )
-    try:
-        updated = mark_deferred_review_submitted(
-            vault_name=vault_name,
-            session_id=session_id,
-            artifact_ref=artifact_ref,
-            results=results,
-            resumed_task_id=started.task.task_id,
-        )
-    except DeferredReviewError as exc:
-        raise _deferred_review_api_error(exc) from exc
-    task = await get_execution_task(started.task.task_id)
-    return DeferredReviewSubmitResponse(
-        artifact_ref=updated.artifact_ref,
-        status=updated.status,
-        session_id=session_id,
-        task=task,
-    )
-
-
-def apply_chat_edit_proposal(
-    *,
-    vault_name: str,
-    session_id: str,
-    artifact_ref: str,
-    selected_edit_ids: list[str],
-    replacement_overrides: dict[str, str],
-    record_history: bool = True,
-) -> EditProposalApplyResponse:
-    """Apply selected edits from one chat edit proposal artifact."""
-    try:
-        proposal = (
-            get_edit_proposal(
-                vault_name=vault_name,
-                session_id=session_id,
-                artifact_ref=artifact_ref,
-            )
-            if record_history
-            else None
-        )
-        vault_root = _resolve_vault_root(vault_name)
-        result = apply_edit_proposal(
-            vault_name=vault_name,
-            vault_path=vault_root,
-            session_id=session_id,
-            artifact_ref=artifact_ref,
-            selected_edit_ids=selected_edit_ids,
-            replacement_overrides=replacement_overrides,
-        )
-    except EditProposalError as exc:
-        raise _edit_proposal_api_error(exc) from exc
-    if record_history and proposal is not None:
-        _append_edit_proposal_apply_history(
-            vault_name=vault_name,
-            session_id=session_id,
-            proposal=proposal,
-            applied_edit_ids=result.get("applied_edit_ids", []),
-        )
-    return EditProposalApplyResponse(**result)
-
-
-def deny_chat_edit_proposal(
-    *,
-    vault_name: str,
-    session_id: str,
-    artifact_ref: str,
-) -> EditProposalDenyResponse:
-    """Deny one chat edit proposal artifact without applying edits."""
-    try:
-        result = deny_edit_proposal(
-            vault_name=vault_name,
-            session_id=session_id,
-            artifact_ref=artifact_ref,
-        )
-    except EditProposalError as exc:
-        raise _edit_proposal_api_error(exc) from exc
-    return EditProposalDenyResponse(**result)
-
-
-def _append_edit_proposal_apply_history(
-    *,
-    vault_name: str,
-    session_id: str,
-    proposal: dict[str, Any],
-    applied_edit_ids: list[str],
-) -> None:
-    """Append a portable chat-history record for approve-only proposal applies."""
-    applied = {str(edit_id) for edit_id in applied_edit_ids}
-    lines = [
-        f"{EDIT_PROPOSAL_APPLY_HISTORY_PREFIX} `{proposal.get('artifact_ref') or ''}`.",
-        "",
-        EDIT_PROPOSAL_APPLY_HISTORY_SECTION,
-    ]
-    for edit in proposal.get("edits", []):
-        edit_id = str(edit.get("edit_id") or "")
-        if edit_id not in applied:
-            continue
-        lines.append(f"- Edit `{edit_id}` in @{edit.get('path') or ''}")
-    ChatStore().add_messages(
-        session_id,
-        vault_name,
-        [
-            ModelRequest(parts=[UserPromptPart(content="\n".join(lines))]),
-            ModelResponse(parts=[TextPart(content=EDIT_PROPOSAL_APPLY_ASSISTANT_CONFIRMATION)]),
-        ],
-    )
+    return tools, model, thinking, context_template, chat_mode
 
 
 def _edit_proposal_api_error(exc: EditProposalError) -> APIException:
@@ -919,6 +930,7 @@ def _deferred_review_api_error(exc: DeferredReviewError) -> APIException:
     status_by_code = {
         "DeferredReviewNotFound": 404,
         "DeferredReviewAlreadySubmitted": 409,
+        "DeferredReviewStateConflict": 409,
     }
     return APIException(
         status_code=status_by_code.get(exc.code, 400),
@@ -931,7 +943,7 @@ def _deferred_review_api_error(exc: DeferredReviewError) -> APIException:
 def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> tuple[str, Path]:
     """Return a normalized path and existing directory for picker browsing."""
     normalized_path = _normalize_workspace_path(path)
-    vault_root = _resolve_vault_root(vault_name)
+    vault_root = resolve_vault_root(vault_name)
     resolved = (vault_root / normalized_path).resolve() if normalized_path else vault_root
     try:
         resolved.relative_to(vault_root)
@@ -962,8 +974,7 @@ def _resolve_existing_vault_directory(*, vault_name: str, path: str | None) -> t
 def list_vault_directories(vault_name: str, path: str | None = None) -> VaultDirectoryListResponse:
     """Return child directories for one vault-relative path."""
     base_path, base_dir = _resolve_existing_vault_directory(vault_name=vault_name, path=path)
-    runtime = get_runtime_context()
-    vault_root = (runtime.config.data_root / vault_name).resolve()
+    vault_root = resolve_vault_root(vault_name)
     directories: list[VaultDirectoryInfo] = []
     for child in sorted(base_dir.iterdir(), key=lambda item: item.name.lower()):
         if not _is_workspace_picker_directory(child):
@@ -996,13 +1007,15 @@ def list_vault_file_references(
     query: str | None = None,
     scope: str = "workspace",
     limit: int = _VAULT_FILE_REFERENCE_LIMIT,
+    offset: int = 0,
 ) -> VaultFileReferenceListResponse:
     """Return file/folder candidates for chat reference insertion."""
-    vault_root = _resolve_vault_root(vault_name)
+    vault_root = resolve_vault_root(vault_name)
     normalized_workspace = _normalize_workspace_path(workspace_path)
     normalized_scope = scope if scope in {"workspace", "vault"} else "workspace"
     normalized_query = (query or "").strip().lower()
     bounded_limit = min(max(int(limit or _VAULT_FILE_REFERENCE_LIMIT), 1), _VAULT_FILE_REFERENCE_LIMIT)
+    bounded_offset = max(int(offset or 0), 0)
 
     if normalized_query:
         base_relative = normalized_workspace if normalized_scope == "workspace" else ""
@@ -1010,7 +1023,7 @@ def list_vault_file_references(
         if not base_dir.exists() or not base_dir.is_dir():
             base_relative = ""
             base_dir = vault_root
-        items = _search_vault_file_references(
+        items, truncated = _search_vault_file_references(
             vault_root=vault_root,
             base_dir=base_dir,
             workspace_path=normalized_workspace,
@@ -1024,17 +1037,19 @@ def list_vault_file_references(
             query=normalized_query,
             scope=normalized_scope,
             items=items,
+            truncated=truncated,
         )
 
     base_relative = _normalize_workspace_path(path)
     if not base_relative and normalized_scope == "workspace":
         base_relative = normalized_workspace
     base_path, base_dir = _resolve_existing_vault_directory(vault_name=vault_name, path=base_relative)
-    items = _list_vault_file_reference_children(
+    items, truncated = _list_vault_file_reference_children(
         vault_root=vault_root,
         base_dir=base_dir,
         workspace_path=normalized_workspace,
         limit=bounded_limit,
+        offset=bounded_offset,
     )
     return VaultFileReferenceListResponse(
         vault_name=vault_name,
@@ -1042,6 +1057,8 @@ def list_vault_file_references(
         workspace_path=normalized_workspace,
         query="",
         scope=normalized_scope,
+        truncated=truncated,
+        next_offset=bounded_offset + len(items) if truncated else None,
         items=items,
     )
 
@@ -1053,7 +1070,7 @@ def resolve_vault_path_references(
     workspace_path: str | None = None,
 ) -> VaultPathResolveResponse:
     """Resolve rendered chat path candidates without guessing recursively."""
-    vault_root = _resolve_vault_root(vault_name)
+    vault_root = resolve_vault_root(vault_name)
     normalized_workspace = _normalize_workspace_path(workspace_path)
     workspace_root: Path | None = None
     if normalized_workspace:
@@ -1322,11 +1339,20 @@ def _list_vault_file_reference_children(
     base_dir: Path,
     workspace_path: str,
     limit: int,
-) -> list[VaultFileReferenceInfo]:
+    offset: int = 0,
+) -> tuple[list[VaultFileReferenceInfo], bool]:
     items: list[VaultFileReferenceInfo] = []
+    eligible_index = 0
+    truncated = False
     for child in sorted(base_dir.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
         if not _is_file_reference_path(child):
             continue
+        if eligible_index < offset:
+            eligible_index += 1
+            continue
+        if len(items) >= limit:
+            truncated = True
+            break
         info = _vault_file_reference_info(
             vault_root=vault_root,
             path=child,
@@ -1334,9 +1360,8 @@ def _list_vault_file_reference_children(
         )
         if info is not None:
             items.append(info)
-        if len(items) >= limit:
-            break
-    return items
+        eligible_index += 1
+    return items, truncated
 
 
 def _search_vault_file_references(
@@ -1346,10 +1371,10 @@ def _search_vault_file_references(
     workspace_path: str,
     query: str,
     limit: int,
-) -> list[VaultFileReferenceInfo]:
+) -> tuple[list[VaultFileReferenceInfo], bool]:
     matches: list[VaultFileReferenceInfo] = []
     for child in base_dir.rglob("*"):
-        if len(matches) >= limit:
+        if len(matches) > limit:
             break
         if not _is_file_reference_path(child):
             continue
@@ -1367,7 +1392,8 @@ def _search_vault_file_references(
         )
         if info is not None:
             matches.append(info)
-    return sorted(matches, key=lambda item: (not item.in_workspace, item.kind != "directory", item.path.lower()))
+    ordered = sorted(matches, key=lambda item: (not item.in_workspace, item.kind != "directory", item.path.lower()))
+    return ordered[:limit], len(ordered) > limit
 
 
 def _is_file_reference_path(path: Path) -> bool:

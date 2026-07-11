@@ -80,6 +80,7 @@ class GoalOps(BaseTool):
                     tool_name="goal_ops",
                     message="goal_ops could not complete the requested operation",
                     classification=FailureClassification(
+                        error_type=type(exc).__name__,
                         failure_kind="permanent",
                         retryable=False,
                         phase="tool_execution",
@@ -102,6 +103,7 @@ class GoalOps(BaseTool):
                     tool_name="goal_ops",
                     message="goal_ops encountered an unexpected failure",
                     classification=FailureClassification(
+                        error_type=type(exc).__name__,
                         failure_kind="unknown",
                         retryable=False,
                         phase="tool_execution",

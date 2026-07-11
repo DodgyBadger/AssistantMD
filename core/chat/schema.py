@@ -136,6 +136,7 @@ def ensure_chat_sessions_schema(
                 requests_json TEXT NOT NULL,
                 resume_messages_json TEXT NOT NULL,
                 resume_config_json TEXT,
+                review_context_json TEXT,
                 result_json TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 submitted_at DATETIME,
@@ -157,6 +158,12 @@ def ensure_chat_sessions_schema(
             conn,
             "chat_deferred_reviews",
             "resume_config_json",
+            "TEXT",
+        )
+        _ensure_column(
+            conn,
+            "chat_deferred_reviews",
+            "review_context_json",
             "TEXT",
         )
         _deduplicate_session_ids(conn)

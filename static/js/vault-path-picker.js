@@ -3,6 +3,8 @@
         const { escapeHtml, flashCopyFeedback, handleCopy } = utils;
         let activePickerId = '';
         let activeOnClose = null;
+        let rootLoadGeneration = 0;
+        let rootAbortController = null;
 
         function selectedVault() {
             return elements.vaultSelector?.value || '';
@@ -80,7 +82,16 @@
                     return;
                 }
                 if (target.closest('[data-vault-explorer-refresh]')) {
-                    await refreshExplorer(overlay, options);
+                    try {
+                        await refreshExplorer(overlay, options);
+                    } catch (error) {
+                        setStatus(overlay, `Unable to refresh paths: ${error.message}`, true);
+                    }
+                    return;
+                }
+                const loadMoreButton = target.closest('[data-vault-path-picker-more]');
+                if (loadMoreButton instanceof HTMLButtonElement) {
+                    await loadMoreResults(loadMoreButton, options);
                     return;
                 }
                 if (target.closest('[data-vault-explorer-action-cancel]')) {
@@ -133,9 +144,14 @@
                 await submitExplorerMutation(overlay, form, options);
             });
 
-            const debouncedLoad = debounce(() => loadResults(overlay, options), 180);
+            const loadRoot = () => loadResults(overlay, options).catch((error) => {
+                if (error.name !== 'AbortError') {
+                    setStatus(overlay, `Unable to load paths: ${error.message}`, true);
+                }
+            });
+            const debouncedLoad = debounce(loadRoot, 180);
             queryInput?.addEventListener('input', debouncedLoad);
-            scopeSelect?.addEventListener('change', () => loadResults(overlay, options));
+            scopeSelect?.addEventListener('change', loadRoot);
             const initialPath = options.revealInitialPath ? '' : (options.initialPath || '');
             loadResults(overlay, options, initialPath)
                 .then(() => {
@@ -150,6 +166,9 @@
         }
 
         function close() {
+            rootAbortController?.abort();
+            rootAbortController = null;
+            rootLoadGeneration += 1;
             if (activePickerId) {
                 document.getElementById(activePickerId)?.remove();
             }
@@ -160,13 +179,18 @@
         }
 
         async function loadResults(overlay, options, path = '') {
+            const generation = ++rootLoadGeneration;
+            rootAbortController?.abort();
+            const controller = new AbortController();
+            rootAbortController = controller;
             const mode = options.mode === 'directories' ? 'directories' : 'files';
             setStatus(overlay, 'Loading...');
             const results = overlay.querySelector('[data-vault-path-picker-results]');
             if (!(results instanceof HTMLElement)) return;
             results.innerHTML = '';
             if (mode === 'directories') {
-                const payload = await fetchDirectories(path);
+                const payload = await fetchDirectories(path, controller.signal);
+                if (generation !== rootLoadGeneration || !overlay.isConnected) return;
                 const items = Array.isArray(payload.directories)
                     ? payload.directories.map((item) => ({ ...item, kind: 'directory' }))
                     : [];
@@ -183,19 +207,21 @@
                 path,
                 query: queryInput instanceof HTMLInputElement ? queryInput.value.trim() : '',
                 scope: scopeSelect instanceof HTMLSelectElement ? scopeSelect.value : 'workspace',
+                signal: controller.signal,
             });
+            if (generation !== rootLoadGeneration || !overlay.isConnected) return;
             const items = Array.isArray(payload.items) ? payload.items : [];
             setStatus(overlay, renderFileStatus(payload, items.length));
             results.innerHTML = items.length
-                ? items.map((item) => renderRow(item, 0, options)).join('')
+                ? items.map((item) => renderRow(item, 0, options)).join('') + renderLoadMore(payload, 0, options)
                 : `<p class="text-sm text-txt-secondary">${escapeHtml(options.emptyText || 'No matching files.')}</p>`;
         }
 
-        async function fetchDirectories(path) {
+        async function fetchDirectories(path, signal = undefined) {
             const params = new URLSearchParams();
             if (path) params.set('path', path);
             const suffix = params.toString() ? `?${params.toString()}` : '';
-            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/directories${suffix}`);
+            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/directories${suffix}`, { signal });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || `HTTP ${response.status}`);
@@ -203,13 +229,14 @@
             return response.json();
         }
 
-        async function fetchFileRefs({ path = '', query = '', scope = 'workspace' } = {}) {
+        async function fetchFileRefs({ path = '', query = '', scope = 'workspace', offset = 0, signal = undefined } = {}) {
             const params = new URLSearchParams();
             if (path) params.set('path', path);
             if (workspacePath()) params.set('workspace_path', workspacePath());
             if (query) params.set('query', query);
+            if (offset) params.set('offset', String(offset));
             params.set('scope', scope || 'workspace');
-            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/file-refs?${params.toString()}`);
+            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/file-refs?${params.toString()}`, { signal });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || `HTTP ${response.status}`);
@@ -249,7 +276,7 @@
                     const payload = await fetchFileRefs({ path, scope: 'vault' });
                     const items = Array.isArray(payload.items) ? payload.items : [];
                     children.innerHTML = items.length
-                        ? items.map((item) => renderRow(item, depth, options)).join('')
+                        ? items.map((item) => renderRow(item, depth, options)).join('') + renderLoadMore(payload, depth, options)
                         : '<div class="py-1 text-xs text-txt-secondary">No child files.</div>';
                 }
                 children.dataset.loaded = 'true';
@@ -342,7 +369,40 @@
             const scope = payload?.scope === 'vault' ? 'vault' : 'workspace';
             const base = payload?.query ? `Found ${count}` : `Showing ${count}`;
             const root = payload?.path || (scope === 'workspace' ? workspacePath() : '') || 'vault root';
-            return `${base} item${count === 1 ? '' : 's'} in ${scope}: ${root}`;
+            const suffix = payload?.truncated && payload?.next_offset == null
+                ? ' Refine the search to see more.'
+                : '';
+            return `${base} item${count === 1 ? '' : 's'} in ${scope}: ${root}.${suffix}`;
+        }
+
+        function renderLoadMore(payload, depth, options) {
+            if (!Number.isInteger(payload?.next_offset)) return '';
+            return `
+                <button type="button" class="vault-path-picker-more" data-vault-path-picker-more
+                    data-path="${escapeHtml(payload.path || '')}"
+                    data-offset="${payload.next_offset}"
+                    data-depth="${depth}">Load more</button>
+            `;
+        }
+
+        async function loadMoreResults(button, options) {
+            button.disabled = true;
+            const path = button.dataset.path || '';
+            const offset = Number.parseInt(button.dataset.offset || '0', 10);
+            const depth = Number.parseInt(button.dataset.depth || '0', 10);
+            try {
+                const payload = await fetchFileRefs({ path, scope: 'vault', offset });
+                const items = Array.isArray(payload.items) ? payload.items : [];
+                button.insertAdjacentHTML(
+                    'beforebegin',
+                    items.map((item) => renderRow(item, depth, options)).join('')
+                    + renderLoadMore(payload, depth, options)
+                );
+                button.remove();
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = `Retry: ${error.message}`;
+            }
         }
 
         function setStatus(overlay, message, error = false) {

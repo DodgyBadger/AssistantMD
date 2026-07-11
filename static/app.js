@@ -149,7 +149,6 @@ const editProposals = window.EditProposals.create({
         openFile: (path) => fileReferences.openFile(path),
         openPathPicker: (options) => vaultPathPicker.open(options),
         enhanceFileLinks: (container) => fileReferences.enhanceFileLinks(container),
-        submitReview: (payload) => submitEditProposalReview(payload),
     },
 });
 
@@ -160,6 +159,10 @@ const deferredReviews = window.DeferredReviews.create({
     utils: window.AssistantMDUtils,
     callbacks: {
         streamStartedTask: (started) => streamDeferredReviewTask(started),
+        openFile: (path) => fileReferences.openFile(path, {
+            onBack: () => fileReferences.openExplorer({ revealPath: path }),
+        }),
+        openPathPicker: (options) => vaultPathPicker.open(options),
     },
 });
 
@@ -1537,107 +1540,6 @@ async function retryLatestFailure(button = null) {
         syncChatControlLocks();
         chatElements.chatInput.focus();
         sessionControls.refreshCompactionProgress();
-    }
-}
-
-async function submitEditProposalReview(payload) {
-    if (state.isLoading) return false;
-    const proposal = payload?.proposal || {};
-    const decisions = Array.isArray(payload?.decisions) ? payload.decisions : [];
-    if (!proposal.artifact_ref || !decisions.length) return false;
-
-    const vault = chatElements.vaultSelector.value;
-    const model = chatElements.modelSelector.value;
-    const thinking = chatElements.thinkingSelector ? (chatElements.thinkingSelector.value || 'default') : 'default';
-    if (!vault) {
-        alert('Please select a vault');
-        return false;
-    }
-    if (!model) {
-        alert('Please select a model');
-        return false;
-    }
-
-    const contextTemplateValue = chatElements.templateSelector ? chatElements.templateSelector.value || null : null;
-    const chatModeValue = chatElements.chatModeSelector ? chatElements.chatModeSelector.value || 'normal' : 'normal';
-    const workspacePathValue = workspacePicker.currentPath() || null;
-    const requestSessionId = state.sessionId || createClientSessionId(vault);
-    state.sessionId = requestSessionId;
-    state.isWorkspaceUnlocked = false;
-    sessionControls.renderSelector();
-    sessionControls.updateTitleRow();
-    sessionControls.refreshCompactionProgress();
-    syncChatControlLocks();
-    state.activeChatSessionId = requestSessionId;
-    state.isLoading = true;
-    chatElements.sendBtn.disabled = true;
-    const abortController = new AbortController();
-    state.activeChatAbortController = abortController;
-    const loadingMessage = addLoadingMessage();
-    const cleanup = () => {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        chatElements.sendBtn.disabled = false;
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-    };
-
-    try {
-        const artifactRef = String(proposal.artifact_ref || '')
-            .split('/')
-            .map((part) => encodeURIComponent(part))
-            .join('/');
-        const response = await fetch(
-            `api/vaults/${encodeURIComponent(vault)}/chat/${encodeURIComponent(requestSessionId)}/edit-proposals/${artifactRef}/review`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    decisions: decisions.map((decision) => ({
-                        edit_id: decision.editId,
-                        decision: decision.decision,
-                        replacement_text: decision.replacementText || '',
-                        comment: decision.comment || '',
-                    })),
-                    model,
-                    thinking,
-                    context_template: contextTemplateValue,
-                    workspace_path: workspacePathValue,
-                }),
-                signal: abortController.signal,
-            }
-        );
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `HTTP ${response.status}`);
-        }
-        const started = await response.json();
-        removeLoadingMessage(loadingMessage);
-        addMessage('user', String(started.display_prompt || 'Submitted edit proposal review.').trim());
-        streamStartedChatTask(started, vault, abortController)
-            .catch((error) => {
-                console.error('Error streaming edit proposal review:', error);
-                if (state.isCancellingChat || error.name === 'AbortError') {
-                    addMessage('assistant', 'Response stopped.');
-                } else {
-                    addChatErrorMessage(error.message);
-                }
-            })
-            .finally(cleanup);
-        return started;
-    } catch (error) {
-        console.error('Error submitting edit proposal review:', error);
-        removeLoadingMessage(loadingMessage);
-        if (state.isCancellingChat || error.name === 'AbortError') {
-            addMessage('assistant', 'Response stopped.');
-        } else {
-            addChatErrorMessage(error.message);
-        }
-        cleanup();
-        return false;
     }
 }
 

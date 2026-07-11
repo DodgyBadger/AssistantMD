@@ -18,7 +18,6 @@ from core.chat.task_execution import (
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
-from core.chat.edit_proposals import build_edit_proposal_review_prompts
 from core.chat.executor import UploadedImageAttachment
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.settings import (
@@ -45,11 +44,6 @@ from .models import (
     WorkflowEnabledResponse,
     WorkflowFileResponse,
     WorkflowFileUpdateRequest,
-    EditProposalApplyRequest,
-    EditProposalApplyResponse,
-    EditProposalDenyResponse,
-    EditProposalReviewRequest,
-    EditProposalReviewResponse,
     EditProposalResponse,
     DeferredReviewResponse,
     DeferredReviewSubmitRequest,
@@ -122,6 +116,7 @@ from .services import (
     update_workflow_file,
     get_metadata,
     get_enabled_chat_tool_names,
+    resolve_vault_root,
     list_context_templates,
     list_chat_sessions,
     get_chat_session_summary,
@@ -145,8 +140,6 @@ from .services import (
     get_chat_edit_proposal,
     get_chat_deferred_review,
     submit_chat_deferred_review,
-    apply_chat_edit_proposal,
-    deny_chat_edit_proposal,
     delete_chat_session,
     get_system_activity_log,
     get_system_settings,
@@ -324,8 +317,7 @@ async def _start_chat_task_request(
     image_uploads: list[UploadedImageAttachment],
 ) -> ChatTaskStartResponse:
     """Start task-owned streaming chat execution."""
-    runtime = get_runtime_context()
-    vault_path = str(runtime.config.data_root / chat_request.vault_name)
+    vault_path = str(resolve_vault_root(chat_request.vault_name))
     enabled_tools = get_enabled_chat_tool_names()
     try:
         session_id = resolve_chat_session_for_request(
@@ -1085,6 +1077,7 @@ async def vault_file_references(
     query: str | None = None,
     scope: str = "workspace",
     limit: int = 100,
+    offset: int = 0,
 ):
     """Return file and folder candidates for chat reference insertion."""
     try:
@@ -1095,6 +1088,7 @@ async def vault_file_references(
             query=query,
             scope=scope,
             limit=limit,
+            offset=offset,
         )
     except Exception as e:
         return create_error_response(e)
@@ -1224,175 +1218,6 @@ async def submit_deferred_review_artifact(
         return create_error_response(e)
 
 
-@router.post(
-    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/apply",
-    response_model=EditProposalApplyResponse,
-)
-async def apply_edit_proposal_artifact(
-    vault_name: str,
-    session_id: str,
-    artifact_ref: str,
-    request: EditProposalApplyRequest,
-):
-    """Apply selected edits from a chat edit proposal artifact."""
-    try:
-        return apply_chat_edit_proposal(
-            vault_name=vault_name,
-            session_id=session_id,
-            artifact_ref=artifact_ref,
-            selected_edit_ids=request.selected_edit_ids,
-            replacement_overrides=request.replacement_overrides,
-        )
-    except Exception as e:
-        return create_error_response(e)
-
-
-@router.post(
-    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/review",
-    response_model=EditProposalReviewResponse,
-)
-async def review_edit_proposal_artifact(
-    vault_name: str,
-    session_id: str,
-    artifact_ref: str,
-    request: EditProposalReviewRequest,
-):
-    """Apply approved rows and start a follow-up chat turn for unresolved review decisions."""
-    try:
-        if not request.decisions:
-            raise APIException(
-                status_code=400,
-                error_type="NoReviewDecisions",
-                message="Choose at least one review decision.",
-            )
-        resolved_session_id = resolve_chat_session_for_request(
-            requested_session_id=session_id,
-            vault_name=vault_name,
-        )
-        if request.workspace_path is not None:
-            set_chat_session_workspace(vault_name, resolved_session_id, request.workspace_path)
-
-        proposal_model = get_chat_edit_proposal(
-            vault_name=vault_name,
-            session_id=resolved_session_id,
-            artifact_ref=artifact_ref,
-        )
-        proposal = proposal_model.model_dump()
-        decisions = [decision.model_dump() for decision in request.decisions]
-        known_edit_ids = {
-            str(edit.get("edit_id") or "")
-            for edit in proposal.get("edits", [])
-            if str(edit.get("edit_id") or "")
-        }
-        unknown_edit_ids = sorted(
-            str(decision.get("edit_id") or "")
-            for decision in decisions
-            if str(decision.get("edit_id") or "") not in known_edit_ids
-        )
-        if unknown_edit_ids:
-            raise APIException(
-                status_code=400,
-                error_type="UnknownReviewEdit",
-                message="One or more reviewed edits are not part of this proposal.",
-                details={"edit_ids": unknown_edit_ids},
-            )
-        approved_decisions = [
-            decision for decision in decisions
-            if decision["decision"] == "approve"
-        ]
-        review_decisions = [
-            decision for decision in decisions
-            if decision["decision"] != "approve"
-        ]
-        if not review_decisions:
-            raise APIException(
-                status_code=400,
-                error_type="NoUnresolvedReviewDecisions",
-                message="Use the apply endpoint when every selected edit is approved.",
-            )
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / vault_name)
-        resolved_thinking = normalize_thinking_value(request.thinking, source_name="chat thinking")
-
-        applied_edit_ids: list[str] = []
-        applied_paths: list[str] = []
-        status = proposal.get("status", "pending")
-        if approved_decisions:
-            applied = apply_chat_edit_proposal(
-                vault_name=vault_name,
-                session_id=resolved_session_id,
-                artifact_ref=artifact_ref,
-                selected_edit_ids=[decision["edit_id"] for decision in approved_decisions],
-                replacement_overrides={
-                    decision["edit_id"]: decision.get("replacement_text", "")
-                    for decision in approved_decisions
-                },
-                record_history=False,
-            )
-            applied_edit_ids = list(applied.applied_edit_ids)
-            applied_paths = list(applied.applied_paths)
-            status = applied.status
-
-        prompt, display_prompt = build_edit_proposal_review_prompts(
-            proposal=proposal,
-            review_decisions=review_decisions,
-            applied_decisions=approved_decisions,
-        )
-        started = await start_queued_chat_stream_task(
-            vault_name=vault_name,
-            vault_path=vault_path,
-            prompt=prompt,
-            display_prompt=display_prompt,
-            image_paths=[],
-            image_uploads=[],
-            session_id=resolved_session_id,
-            tools=get_enabled_chat_tool_names(),
-            model=request.model,
-            thinking=resolved_thinking,
-            context_template=request.context_template,
-        )
-        task = await get_execution_task(started.task.task_id)
-        return EditProposalReviewResponse(
-            artifact_ref=artifact_ref,
-            status=status,
-            applied_edit_ids=applied_edit_ids,
-            applied_paths=applied_paths,
-            display_prompt=display_prompt,
-            session_id=resolved_session_id,
-            task=task,
-        )
-    except ChatSessionVaultMismatch as exc:
-        return create_error_response(
-            ChatSessionVaultMismatchError(
-                session_id=exc.session_id,
-                requested_vault=exc.requested_vault,
-                bound_vault=exc.bound_vault,
-            )
-        )
-    except Exception as e:
-        return create_error_response(e)
-
-
-@router.post(
-    "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}/deny",
-    response_model=EditProposalDenyResponse,
-)
-async def deny_edit_proposal_artifact(
-    vault_name: str,
-    session_id: str,
-    artifact_ref: str,
-):
-    """Deny a chat edit proposal artifact without applying edits."""
-    try:
-        return deny_chat_edit_proposal(
-            vault_name=vault_name,
-            session_id=session_id,
-            artifact_ref=artifact_ref,
-        )
-    except Exception as e:
-        return create_error_response(e)
-
-
 @router.get("/chat/sessions", response_model=List[ChatSessionInfo])
 async def chat_sessions(vault_name: str):
     """
@@ -1472,8 +1297,7 @@ async def chat_session_detail(session_id: str, vault_name: str):
 async def delete_chat_session_endpoint(session_id: str, vault_name: str):
     """Delete one chat session from the canonical store."""
     try:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / vault_name)
+        vault_path = str(resolve_vault_root(vault_name))
         delete_chat_session(vault_name, vault_path, session_id)
         return {"session_id": session_id, "deleted": True}
     except Exception as e:
@@ -1530,8 +1354,7 @@ async def retry_chat_session_turn_endpoint(session_id: str, request: ChatSession
                 details={"session_id": session_id},
             )
 
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / request.vault_name)
+        vault_path = str(resolve_vault_root(request.vault_name))
         started = await start_chat_turn_retry_task(
             vault_name=request.vault_name,
             vault_path=vault_path,
@@ -1556,8 +1379,7 @@ async def retry_chat_session_turn_endpoint(session_id: str, request: ChatSession
 async def export_chat_session_endpoint(session_id: str, request: ChatSessionExportRequest):
     """Export one persisted chat session transcript into the owning vault."""
     try:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / request.vault_name)
+        vault_path = str(resolve_vault_root(request.vault_name))
         return export_chat_session_markdown(request.vault_name, vault_path, session_id)
     except Exception as e:
         return create_error_response(e)
@@ -1576,8 +1398,7 @@ async def chat_history_compaction_status_endpoint(session_id: str, vault_name: s
 async def compact_chat_history_endpoint(session_id: str, request: ChatHistoryCompactionRequest):
     """Compact one persisted chat session into a summary plus recent turns."""
     try:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / request.vault_name)
+        vault_path = str(resolve_vault_root(request.vault_name))
         return await compact_chat_session_history(
             request.vault_name,
             vault_path,
@@ -1594,8 +1415,7 @@ async def purge_chat_sessions_endpoint(request: ChatSessionsPurgeRequest):
     Delete old chat sessions and their transcript files for a vault.
     """
     try:
-        runtime = get_runtime_context()
-        vault_path = str(runtime.config.data_root / request.vault_name)
+        vault_path = str(resolve_vault_root(request.vault_name))
         return purge_chat_sessions(
             request.vault_name,
             vault_path,

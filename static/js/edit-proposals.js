@@ -39,8 +39,8 @@
             const edits = Array.isArray(proposal.edits) ? proposal.edits : [];
             const applied = proposal.status === 'applied';
             const denied = proposal.status === 'denied';
-            const locked = applied || denied;
-            const expanded = !locked;
+            const locked = true;
+            const expanded = false;
             return `
                 <section class="edit-proposal-card" data-edit-proposal-card="${escapeHtml(proposal.artifact_ref || '')}">
                     <div class="edit-proposal-header">
@@ -473,7 +473,7 @@
         function proposalStatusLabel(status) {
             if (status === 'applied') return 'Applied';
             if (status === 'denied') return 'Denied';
-            return 'Pending';
+            return 'Historical';
         }
 
         function selectedVault() {

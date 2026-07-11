@@ -29,6 +29,15 @@ defers `file_write` through Pydantic AI tool approval and renders the deferred
 call as an inline review card. `file_read` remains immediate. Workflows, context
 scripts, code execution, and delegate runs do not wait for interactive review.
 
+Deferred review is a durable pause in the chat task lifecycle. A pending review
+is claimed atomically, its resumed task uses the same per-session execution gate
+as ordinary chat turns, and the review records `completed`, `failed`, or
+`cancelled` when that task terminates. Destructive operations capture target
+existence and content hashes when the card is created; approval is rejected if
+the reviewed target changed before submission. Review overrides may edit
+operation content or a move destination, but cannot change the operation target
+or overwrite policy.
+
 Tool availability is app-wide through `enabled_tools`; chat does not select a
 per-turn tool subset in the UI.
 
@@ -46,6 +55,8 @@ per-turn tool subset in the UI.
   ignores retired built-in names and settings repair prunes them.
 - Persisted historical tool events can still be interpreted by compatibility
   adapters without keeping the retired executable tools registered.
+- Historical edit-proposal artifacts remain readable for old chat cards, but
+  their former apply, deny, and review paths are not executable.
 
 ## Evidence
 

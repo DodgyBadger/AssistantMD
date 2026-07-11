@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 from dataclasses import dataclass
-from typing import Any, Dict, Type
+from typing import Any, Callable, Dict, Type
 
 from pydantic_ai import RunContext
 from pydantic_ai.messages import ToolReturn
@@ -324,18 +324,20 @@ def _wrap_tool_function(
                 tool_name,
                 tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
             )
-        try:
-            if original_takes_ctx:
-                result = await original_func(ctx, **kwargs)
-            else:
-                result = await original_func(**kwargs)
-        except TypeError as exc:
+        binding_error = _tool_argument_binding_error(
+            original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
+        )
+        if binding_error is not None:
             return _to_tool_return(
                 tool_name,
-                _format_tool_type_error(tool_name, exc, tool_instructions),
+                _format_tool_type_error(tool_name, binding_error, tool_instructions),
                 status="error",
                 error_type="invalid_parameters",
             )
+        if original_takes_ctx:
+            result = await original_func(ctx, **kwargs)
+        else:
+            result = await original_func(**kwargs)
         return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
     def _call_sync(ctx: RunContext, **kwargs):
@@ -344,18 +346,20 @@ def _wrap_tool_function(
                 tool_name,
                 tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
             )
-        try:
-            if original_takes_ctx:
-                result = original_func(ctx, **kwargs)
-            else:
-                result = original_func(**kwargs)
-        except TypeError as exc:
+        binding_error = _tool_argument_binding_error(
+            original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
+        )
+        if binding_error is not None:
             return _to_tool_return(
                 tool_name,
-                _format_tool_type_error(tool_name, exc, tool_instructions),
+                _format_tool_type_error(tool_name, binding_error, tool_instructions),
                 status="error",
                 error_type="invalid_parameters",
             )
+        if original_takes_ctx:
+            result = original_func(ctx, **kwargs)
+        else:
+            result = original_func(**kwargs)
         return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
     wrapper = _call_async if inspect.iscoroutinefunction(original_func) else _call_sync
@@ -391,6 +395,27 @@ def _wrap_tool_function(
             else getattr(tool, "requires_approval", False)
         ),
     )
+
+
+def _tool_argument_binding_error(
+    function: Callable[..., Any],
+    *,
+    original_takes_ctx: bool,
+    ctx: RunContext,
+    kwargs: dict[str, Any],
+) -> TypeError | None:
+    """Return call-shape errors without masking TypeError raised inside a tool."""
+    try:
+        signature = inspect.signature(function)
+        if original_takes_ctx:
+            signature.bind(ctx, **kwargs)
+        else:
+            signature.bind(**kwargs)
+    except TypeError as exc:
+        return exc
+    except (ValueError, RuntimeError):
+        return None
+    return None
 
 
 def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:

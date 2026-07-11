@@ -86,6 +86,14 @@ class ChatContextTemplateError(ValueError):
         self.details = details or {}
 
 
+class ChatReviewPendingError(ValueError):
+    """Raised when a session must resolve a deferred review before another turn."""
+
+    def __init__(self, *, session_id: str):
+        super().__init__("Resolve the pending collaborative review before sending another message.")
+        self.details = {"session_id": session_id, "error_type": "DeferredReviewPending"}
+
+
 class ChatToolCallLimitError(ValueError):
     """Raised when a chat run exceeds the configured tool-call limit."""
 
