@@ -94,8 +94,14 @@
                             <button type="button" class="ui-icon-button is-compact" data-vault-file-close="true" aria-label="Close" title="Close">${icons.X_ICON_SVG}</button>
                         </div>
                     </div>
-                    <div class="p-4 space-y-3 flex-1 min-h-0 flex flex-col">
+                    <div class="vault-file-modal-content flex-1 min-h-0 flex flex-col">
                         <div id="vault-file-modal-status" class="text-sm text-txt-secondary">Loading file...</div>
+                        <div id="vault-file-modal-properties" class="vault-file-properties hidden flex-none">
+                            <details>
+                                <summary>Properties</summary>
+                                <pre data-vault-file-properties-content></pre>
+                            </details>
+                        </div>
                         <div id="vault-file-modal-preview" class="vault-file-preview prose prose-sm max-w-none hidden flex-1 min-h-0 overflow-y-auto"></div>
                         <textarea
                             id="vault-file-modal-editor"
@@ -112,6 +118,8 @@
             const statusLabel = overlay.querySelector('#vault-file-modal-status');
             const saveButton = overlay.querySelector('[data-vault-file-save]');
             const preview = overlay.querySelector('#vault-file-modal-preview');
+            const properties = overlay.querySelector('#vault-file-modal-properties');
+            const propertiesContent = overlay.querySelector('[data-vault-file-properties-content]');
             const modeToggle = overlay.querySelector('[data-vault-file-mode-toggle]');
             let sha256 = '';
             let createIfMissing = false;
@@ -130,13 +138,19 @@
 
             function renderPreview() {
                 if (!(preview instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement)) return;
-                callbacks.renderMarkdownPreview?.(preview, editor.value);
+                const parts = splitMarkdownFrontmatter(editor.value);
+                callbacks.renderMarkdownPreview?.(preview, parts.body);
+                if (propertiesContent instanceof HTMLElement) {
+                    propertiesContent.textContent = parts.frontmatter;
+                }
+                properties?.classList.toggle('hidden', !parts.frontmatter);
             }
 
             function setMode(nextMode) {
                 mode = supportsPreview && nextMode === 'preview' ? 'preview' : 'edit';
                 if (mode === 'preview') renderPreview();
                 preview?.classList.toggle('hidden', mode !== 'preview');
+                if (mode !== 'preview') properties?.classList.add('hidden');
                 editor?.classList.toggle('hidden', mode !== 'edit');
                 saveButton?.classList.toggle('hidden', mode !== 'edit');
                 modeToggle?.querySelectorAll('[data-vault-file-mode]').forEach((button) => {
@@ -160,7 +174,6 @@
                 const modeButton = target.closest('[data-vault-file-mode]');
                 if (modeButton instanceof HTMLButtonElement) {
                     setMode(modeButton.dataset.vaultFileMode || 'edit');
-                    if (statusLabel) statusLabel.textContent = `${mode === 'preview' ? 'Previewing' : 'Editing'} ${path}.`;
                     return;
                 }
                 if (target.closest('[data-vault-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
@@ -187,9 +200,7 @@
                     savedContent = editor.value;
                     editor.disabled = false;
                 }
-                if (statusLabel) {
-                    statusLabel.textContent = `${supportsPreview ? 'Previewing' : 'Editing'} ${data.path || path}.`;
-                }
+                statusLabel?.classList.add('hidden');
                 if (saveButton instanceof HTMLButtonElement) {
                     saveButton.disabled = true;
                 }
@@ -229,6 +240,22 @@
             }
         }
 
+        function splitMarkdownFrontmatter(content) {
+            const normalized = String(content || '').replace(/\r\n?/g, '\n');
+            const lines = normalized.split('\n');
+            if (lines[0]?.trim() !== '---') {
+                return { frontmatter: '', body: normalized };
+            }
+            const closingIndex = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+            if (closingIndex < 0) {
+                return { frontmatter: '', body: normalized };
+            }
+            return {
+                frontmatter: lines.slice(1, closingIndex).join('\n').trim(),
+                body: lines.slice(closingIndex + 1).join('\n').replace(/^\n+/, ''),
+            };
+        }
+
         function openDirectory(path) {
             if (!path) return;
             openExplorer({ revealPath: path });
@@ -263,7 +290,10 @@
             if (!(editor instanceof HTMLTextAreaElement)) return;
             if (saveButton instanceof HTMLButtonElement) saveButton.disabled = true;
             const createIfMissing = shouldCreate();
-            if (statusLabel) statusLabel.textContent = createIfMissing ? 'Creating...' : 'Saving...';
+            if (statusLabel) {
+                statusLabel.classList.remove('hidden');
+                statusLabel.textContent = createIfMissing ? 'Creating...' : 'Saving...';
+            }
             try {
                 const vault = selectedVault();
                 const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/files?path=${encodeURIComponent(path)}`, {

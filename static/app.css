@@ -1277,10 +1277,38 @@ details summary::-webkit-details-marker {
     width: 1rem;
     height: 1rem;
 }
+.vault-file-modal-content {
+    gap: 0.75rem;
+    padding: 0.375rem 1rem 1rem;
+}
 .vault-file-preview {
     color: rgb(var(--text-primary));
     font-size: 0.9375rem;
     line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.vault-file-properties {
+    color: rgb(var(--text-primary));
+}
+.vault-file-properties summary {
+    padding: 0.625rem 0;
+    color: rgb(var(--text-secondary));
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.vault-file-properties pre {
+    max-height: 14rem;
+    margin: 0 0 0.75rem;
+    padding: 0.75rem;
+    overflow: auto;
+    border: 1px solid rgb(var(--border-primary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--text-primary));
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 .vault-file-preview > :first-child {
