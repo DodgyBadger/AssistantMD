@@ -309,6 +309,12 @@ prompt insertion, workspace changes, create, move, rename, and delete remain
 locked until chat interaction resumes. The lock updates in place as chat and
 review state changes.
 
+Vault Markdown previews render single newlines as visible line breaks without
+requiring trailing spaces. Assistant chat messages retain standard Markdown
+soft-break behavior. Embedded HTML is parsed by Marked and then sanitized by
+DOMPurify; if the sanitizer is unavailable, the original Markdown is displayed
+as plain text rather than inserting unsanitized HTML.
+
 Direct explorer actions are explicit user commands and do not enter the
 inline edit review flow. They route through shared vault-state mutation
 helpers so audit, snapshot, refresh, and path-boundary behavior does not drift

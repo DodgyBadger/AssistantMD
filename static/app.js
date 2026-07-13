@@ -138,7 +138,11 @@ const fileReferences = window.FileReferences.create({
         closePathPicker: () => vaultPathPicker.close(),
         syncPathPickerLocks: () => vaultPathPicker.syncInteractionLocks(),
         setWorkspace: (path) => workspacePicker.setPath(path),
-        renderMarkdownPreview: (container, content) => chatRendering.renderMarkdownPreview(container, content),
+        renderMarkdownPreview: (container, content) => chatRendering.renderMarkdownPreview(
+            container,
+            content,
+            { softBreaks: true }
+        ),
     },
 });
 
