@@ -13,9 +13,13 @@
             return (elements.workspacePathInput?.value || '').trim();
         }
 
+        function interactionLocked() {
+            return Boolean(state.isLoading || state.pendingDeferredReview);
+        }
+
         function insertReference(path) {
             const input = elements.chatInput;
-            if (!(input instanceof HTMLTextAreaElement) || !path) return;
+            if (interactionLocked() || !(input instanceof HTMLTextAreaElement) || !path) return;
 
             const token = `@${path}`;
             const start = input.selectionStart ?? input.value.length;
@@ -45,12 +49,15 @@
                 showPath: true,
                 expandDirectoriesOnSelect: true,
                 closeOnSelect: false,
+                isReadOnly: interactionLocked,
                 onSelect: ({ path, kind }) => {
                     if (kind === 'file') openFile(path, { onBack: () => {} });
                 },
                 onOpenFile: (path) => openFile(path, { onBack: () => {} }),
                 onAddReference: insertReference,
-                onSetWorkspace: (path) => callbacks.setWorkspace?.(path),
+                onSetWorkspace: (path) => {
+                    if (!interactionLocked()) callbacks.setWorkspace?.(path);
+                },
                 onMutate: mutatePath,
                 onClose: () => {
                     pickerOpen = false;
@@ -126,6 +133,7 @@
             let savedContent = '';
             let mode = 'edit';
             const supportsPreview = /\.(md|markdown)$/i.test(path);
+            const lockMessage = 'Available when the active response finishes.';
 
             function isDirty() {
                 return editor instanceof HTMLTextAreaElement && editor.value !== savedContent;
@@ -147,17 +155,41 @@
             }
 
             function setMode(nextMode) {
+                if (supportsPreview && nextMode === 'edit' && interactionLocked()) {
+                    nextMode = 'preview';
+                }
                 mode = supportsPreview && nextMode === 'preview' ? 'preview' : 'edit';
                 if (mode === 'preview') renderPreview();
                 preview?.classList.toggle('hidden', mode !== 'preview');
                 if (mode !== 'preview') properties?.classList.add('hidden');
                 editor?.classList.toggle('hidden', mode !== 'edit');
-                saveButton?.classList.toggle('hidden', mode !== 'edit');
+                saveButton?.classList.toggle('hidden', mode !== 'edit' || interactionLocked());
                 modeToggle?.querySelectorAll('[data-vault-file-mode]').forEach((button) => {
                     button.classList.toggle('is-active', button.getAttribute('data-vault-file-mode') === mode);
                     button.setAttribute('aria-pressed', button.getAttribute('data-vault-file-mode') === mode ? 'true' : 'false');
                 });
             }
+
+            function applyInteractionLock() {
+                const locked = interactionLocked();
+                if (editor instanceof HTMLTextAreaElement) {
+                    editor.readOnly = locked;
+                    editor.title = locked ? lockMessage : '';
+                }
+                const editButton = modeToggle?.querySelector('[data-vault-file-mode="edit"]');
+                if (editButton instanceof HTMLButtonElement) {
+                    editButton.disabled = locked;
+                    editButton.title = locked ? lockMessage : 'Edit Markdown';
+                }
+                if (saveButton instanceof HTMLButtonElement) {
+                    saveButton.classList.toggle('hidden', locked || mode !== 'edit');
+                    saveButton.disabled = locked || (!isDirty() && !createIfMissing);
+                    saveButton.title = locked ? lockMessage : 'Save file';
+                }
+                if (locked && supportsPreview && mode === 'edit') setMode('preview');
+            }
+
+            overlay.addEventListener('vault-explorer-lock-change', applyInteractionLock);
 
             overlay.addEventListener('click', async (event) => {
                 const target = event.target;
@@ -173,10 +205,12 @@
                 }
                 const modeButton = target.closest('[data-vault-file-mode]');
                 if (modeButton instanceof HTMLButtonElement) {
+                    if (modeButton.dataset.vaultFileMode === 'edit' && interactionLocked()) return;
                     setMode(modeButton.dataset.vaultFileMode || 'edit');
                     return;
                 }
                 if (target.closest('[data-vault-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
+                    if (interactionLocked()) return;
                     const saved = await saveFile(path, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
                         sha256 = nextHash;
                         createIfMissing = false;
@@ -189,7 +223,9 @@
                 }
             });
             editor?.addEventListener('input', () => {
-                if (saveButton instanceof HTMLButtonElement) saveButton.disabled = !isDirty() && !createIfMissing;
+                if (saveButton instanceof HTMLButtonElement) {
+                    saveButton.disabled = interactionLocked() || (!isDirty() && !createIfMissing);
+                }
             });
 
             try {
@@ -206,6 +242,7 @@
                 }
                 if (supportsPreview) modeToggle?.classList.remove('hidden');
                 setMode(supportsPreview ? 'preview' : 'edit');
+                applyInteractionLock();
             } catch (error) {
                 if (error.errorType === 'VaultFileNotFound') {
                     if (!allowCreate) {
@@ -228,6 +265,7 @@
                     }
                     if (supportsPreview) modeToggle?.classList.remove('hidden');
                     setMode('edit');
+                    applyInteractionLock();
                     return;
                 }
                 if (error.errorType === 'VaultFileNotText') {
@@ -262,6 +300,9 @@
         }
 
         async function mutatePath(payload) {
+            if (interactionLocked()) {
+                throw new Error('Wait for the active response to finish.');
+            }
             const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/paths/mutate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -328,6 +369,13 @@
             document.getElementById('vault-file-modal')?.remove();
             activeFileCanClose = null;
             return true;
+        }
+
+        function syncInteractionLocks() {
+            callbacks.syncPathPickerLocks?.();
+            document.getElementById('vault-file-modal')?.dispatchEvent(
+                new CustomEvent('vault-explorer-lock-change')
+            );
         }
 
         function enhanceFileLinks(container) {
@@ -572,6 +620,7 @@
             insertReference,
             openFile,
             closeFileModal,
+            syncInteractionLocks,
             enhanceFileLinks,
             isPickerOpen: () => pickerOpen,
         });

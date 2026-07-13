@@ -136,6 +136,7 @@ const fileReferences = window.FileReferences.create({
         addChatErrorMessage,
         openPathPicker: (options) => vaultPathPicker.open(options),
         closePathPicker: () => vaultPathPicker.close(),
+        syncPathPickerLocks: () => vaultPathPicker.syncInteractionLocks(),
         setWorkspace: (path) => workspacePicker.setPath(path),
         renderMarkdownPreview: (container, content) => chatRendering.renderMarkdownPreview(container, content),
     },
@@ -782,12 +783,17 @@ function syncChatControlLocks() {
         chatElements.sessionBrowserTrigger.disabled = state.isLoading;
     }
     if (chatElements.fileReferenceBtn) {
-        chatElements.fileReferenceBtn.disabled = state.isLoading;
+        const explorerReadOnly = state.isLoading || Boolean(state.pendingDeferredReview);
+        chatElements.fileReferenceBtn.disabled = false;
+        chatElements.fileReferenceBtn.title = explorerReadOnly
+            ? 'Open vault explorer in read-only mode'
+            : 'Open vault explorer';
     }
     if (chatElements.newSessionTrigger) {
         chatElements.newSessionTrigger.disabled = state.isLoading;
     }
     workspacePicker.syncControls();
+    fileReferences.syncInteractionLocks();
     syncSendButtonState();
 }
 

@@ -302,6 +302,13 @@ The explorer owns only basic vault operations:
 - move or rename files;
 - delete files and empty folders.
 
+While a chat response is running or an inline tool review is pending, the
+explorer remains available as a read-only surface. Search, tree navigation, file
+preview, raw text viewing, and path copy remain enabled. File editing, save,
+prompt insertion, workspace changes, create, move, rename, and delete remain
+locked until chat interaction resumes. The lock updates in place as chat and
+review state changes.
+
 Direct explorer actions are explicit user commands and do not enter the
 inline edit review flow. They route through shared vault-state mutation
 helpers so audit, snapshot, refresh, and path-boundary behavior does not drift

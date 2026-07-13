@@ -3,6 +3,7 @@
         const { escapeHtml, flashCopyFeedback, handleCopy } = utils;
         let activePickerId = '';
         let activeOnClose = null;
+        let activeOptions = null;
         let rootLoadGeneration = 0;
         let rootAbortController = null;
 
@@ -12,6 +13,10 @@
 
         function workspacePath() {
             return (elements.workspacePathInput?.value || '').trim();
+        }
+
+        function isReadOnly(options) {
+            return Boolean(options?.isReadOnly?.());
         }
 
         function open(options = {}) {
@@ -24,6 +29,7 @@
             const id = options.id || 'vault-path-picker-modal';
             activePickerId = id;
             activeOnClose = typeof options.onClose === 'function' ? options.onClose : null;
+            activeOptions = options;
             const mode = options.mode === 'directories' ? 'directories' : 'files';
             const titleId = `${id}-title`;
             const showSearch = mode === 'files';
@@ -111,6 +117,7 @@
                 }
                 const rowAction = target.closest('[data-vault-explorer-row-action]');
                 if (rowAction instanceof HTMLButtonElement) {
+                    if (isReadOnly(options)) return;
                     await handleRowAction(overlay, rowAction, options);
                     return;
                 }
@@ -176,6 +183,24 @@
             activeOnClose?.();
             activePickerId = '';
             activeOnClose = null;
+            activeOptions = null;
+        }
+
+        function syncInteractionLocks() {
+            if (!activePickerId || !activeOptions) return;
+            const overlay = document.getElementById(activePickerId);
+            if (!(overlay instanceof HTMLElement)) return;
+            const readOnly = isReadOnly(activeOptions);
+            const lockMessage = 'Available when the active response finishes.';
+            overlay.querySelectorAll('[data-vault-explorer-more]').forEach((button) => {
+                if (!(button instanceof HTMLButtonElement)) return;
+                button.disabled = readOnly;
+                button.title = readOnly ? lockMessage : 'More actions';
+            });
+            overlay.querySelectorAll('[data-vault-explorer-mutation-form] button[type="submit"]').forEach((button) => {
+                if (button instanceof HTMLButtonElement) button.disabled = readOnly;
+            });
+            if (readOnly) closeActionPanel(overlay);
         }
 
         async function loadResults(overlay, options, path = '') {
@@ -319,6 +344,8 @@
             const indent = Math.min(Math.max(depth, 0) * 1.25, 5);
             const canExpand = kind === 'directory' && item.has_children;
             const icon = kind === 'directory' ? icons.FOLDER_ICON_SVG : fileIcon();
+            const readOnly = options.explorer && isReadOnly(options);
+            const moreTitle = readOnly ? 'Available when the active response finishes.' : 'More actions';
             return `
                 <div data-vault-path-picker-row="${escapeHtml(path)}" data-vault-path-picker-depth="${depth}">
                     <div class="workspace-tree-row" role="treeitem" style="padding-left: ${indent}rem;">
@@ -339,7 +366,7 @@
                         ${options.explorer ? `
                             <div class="vault-explorer-row-actions">
                                 <button type="button" class="ui-icon-button is-compact" data-vault-explorer-copy="${escapeHtml(path)}" aria-label="Copy path" title="Copy path">${icons.COPY_ICON_SVG}</button>
-                                <button type="button" class="ui-icon-button is-compact" data-vault-explorer-more="${escapeHtml(path)}" aria-label="More actions" title="More actions">${icons.MORE_HORIZONTAL_ICON_SVG}</button>
+                                <button type="button" class="ui-icon-button is-compact" data-vault-explorer-more="${escapeHtml(path)}" aria-label="More actions" title="${moreTitle}" ${readOnly ? 'disabled' : ''}>${icons.MORE_HORIZONTAL_ICON_SVG}</button>
                                 <div class="vault-explorer-row-menu hidden" data-vault-explorer-row-menu>
                                     <button type="button" data-vault-explorer-row-action="reference" data-path="${escapeHtml(path)}" data-kind="${kind}">Add to prompt</button>
                                     ${kind === 'directory' ? `<button type="button" data-vault-explorer-row-action="workspace" data-path="${escapeHtml(path)}" data-kind="${kind}">Set as workspace</button>` : ''}
@@ -486,6 +513,10 @@
             const value = valueInput instanceof HTMLInputElement ? valueInput.value.trim() : '';
             const status = form.querySelector('[data-vault-explorer-form-status]');
             const submit = form.querySelector('button[type="submit"]');
+            if (isReadOnly(options)) {
+                if (status) status.innerHTML = '<span class="state-error">Wait for the active response to finish.</span>';
+                return;
+            }
             if (submit instanceof HTMLButtonElement) submit.disabled = true;
             if (operation.startsWith('create_') && (!value || value === '.' || value === '..' || /[\\/]/.test(value))) {
                 if (status) status.innerHTML = '<span class="state-error">Enter a name without path separators.</span>';
@@ -533,7 +564,7 @@
             };
         }
 
-        return Object.freeze({ open, close });
+        return Object.freeze({ open, close, syncInteractionLocks });
     }
 
     window.VaultPathPicker = Object.freeze({
