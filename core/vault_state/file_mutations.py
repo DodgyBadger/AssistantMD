@@ -93,6 +93,19 @@ class DirectoryCleanupResult:
     event_sequence: int | None
 
 
+@dataclass(frozen=True)
+class DirectoryMoveResult:
+    """Result of one observed directory move inside a vault."""
+
+    vault_id: str
+    vault_name: str
+    source_path: str
+    destination_path: str
+    descendant_file_count: int
+    descendant_directory_count: int
+    event_sequence: int | None
+
+
 def write_vault_file(
     *,
     vault_path: str | Path,
@@ -273,6 +286,120 @@ def delete_empty_vault_directory_tree(
             "skipped_count": len(result.skipped_paths),
             "blocker_count": len(result.blocker_paths),
             "after_exists": result.after_exists,
+            "event_sequence": result.event_sequence,
+        },
+    )
+    return result
+
+
+def move_vault_directory(
+    *,
+    vault_path: str | Path,
+    path: str,
+    destination: str,
+) -> DirectoryMoveResult:
+    """Move one directory tree and record the user-visible intent as one event."""
+    vault_root = Path(vault_path).resolve()
+    source_relative = normalize_vault_relative_path(path)
+    destination_relative = normalize_vault_relative_path(destination)
+    if not source_relative or not destination_relative:
+        raise VaultMutationRejected(
+            "invalid_target",
+            "Cannot move the vault root directory.",
+        )
+    source_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=source_relative,
+        markdown_only=False,
+    )
+    destination_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=destination_relative,
+        markdown_only=False,
+    )
+
+    with vault_file_mutation_lock(source_path, destination_path):
+        if not source_path.exists():
+            raise VaultMutationRejected(
+                "source_not_found",
+                f"Cannot move '{source_relative}' - source directory does not exist.",
+            )
+        if not source_path.is_dir():
+            raise VaultMutationRejected(
+                "source_not_directory",
+                f"Cannot move '{source_relative}' as a directory - source is not a directory.",
+            )
+        if destination_path == source_path:
+            raise VaultMutationRejected(
+                "source_equals_destination",
+                "Directory source and destination must be different.",
+            )
+        if source_path in destination_path.parents:
+            raise VaultMutationRejected(
+                "destination_inside_source",
+                f"Cannot move '{source_relative}' inside itself.",
+            )
+        if destination_path.exists():
+            raise VaultMutationRejected(
+                "destination_exists",
+                f"Cannot move '{source_relative}' - destination already exists.",
+            )
+
+        descendant_file_count, descendant_directory_count = _directory_descendant_counts(
+            source_path
+        )
+        identity = resolve_or_create_vault_identity(vault_root)
+        vault_name = vault_root.name
+        service = VaultStateService()
+        stage = "mutate"
+        try:
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source_path, destination_path)
+            stage = "refresh"
+            refresh = service.refresh_vault(vault_root, vault_name=vault_name)
+        except Exception as exc:
+            logger.add_sink("validation").warning(
+                "vault_directory_move_failed",
+                data={
+                    "event": "vault_directory_move_failed",
+                    "vault_id": identity.vault_id,
+                    "vault_name": vault_name,
+                    "source_path": source_relative,
+                    "destination_path": destination_relative,
+                    "stage": stage,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            if stage == "refresh":
+                raise VaultMutationRejected(
+                    "mutation_state_uncertain",
+                    (
+                        f"Directory move from '{source_relative}' to '{destination_relative}' "
+                        f"was applied, but vault-state refresh failed: {exc}"
+                    ),
+                ) from exc
+            raise
+
+    result = DirectoryMoveResult(
+        vault_id=identity.vault_id,
+        vault_name=vault_name,
+        source_path=source_relative,
+        destination_path=destination_relative,
+        descendant_file_count=descendant_file_count,
+        descendant_directory_count=descendant_directory_count,
+        event_sequence=refresh.latest_sequence,
+    )
+    logger.add_sink("validation").info(
+        "vault_directory_move_completed",
+        data={
+            "event": "vault_directory_move_completed",
+            "vault_id": result.vault_id,
+            "vault_name": result.vault_name,
+            "source_path": result.source_path,
+            "destination_path": result.destination_path,
+            "descendant_file_count": result.descendant_file_count,
+            "descendant_directory_count": result.descendant_directory_count,
             "event_sequence": result.event_sequence,
         },
     )
@@ -688,6 +815,16 @@ def _remaining_directory_paths(vault_root: Path, target: Path) -> tuple[str, ...
         for directory_name in dirs:
             paths.append(_relative_to_vault(vault_root, root_path / directory_name))
     return tuple(sorted(paths))
+
+
+def _directory_descendant_counts(path: Path) -> tuple[int, int]:
+    """Count files and child directories without following directory symlinks."""
+    file_count = 0
+    directory_count = 0
+    for _root, directories, files in os.walk(path):
+        directory_count += len(directories)
+        file_count += len(files)
+    return file_count, directory_count
 
 
 def _remaining_directory_blockers(vault_root: Path, target: Path) -> tuple[str, ...]:

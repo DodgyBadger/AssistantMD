@@ -281,6 +281,23 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert not (vault / "Explorer/draft.md").exists()
         assert (vault / "Explorer/renamed.md").is_file()
 
+        (vault / "Explorer/Nested").mkdir()
+        (vault / "Explorer/Nested/child.txt").write_text("nested\n", encoding="utf-8")
+        (vault / "OccupiedDestination").mkdir()
+        collision = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={
+                "operation": "move",
+                "path": "Explorer",
+                "destination": "OccupiedDestination",
+            },
+        )
+        assert collision.status_code == 409
+        assert collision.json().get("error") == "destination_exists"
+        assert (vault / "Explorer/Nested/child.txt").is_file()
+
+        move_directory_checkpoint = self.event_checkpoint()
         move_directory = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",
             method="POST",
@@ -290,13 +307,43 @@ class VaultFileReferenceApiScenario(BaseScenario):
                 "destination": "MovedExplorer",
             },
         )
-        assert move_directory.status_code == 400
-        assert move_directory.json().get("error") == "VaultDirectoryMoveUnsupported"
+        assert move_directory.status_code == 200
+        move_directory_payload = move_directory.json()
+        assert move_directory_payload["kind"] == "directory"
+        assert move_directory_payload["destination"] == "MovedExplorer"
+        assert move_directory_payload["metadata"]["descendant_file_count"] == 2
+        assert move_directory_payload["metadata"]["descendant_directory_count"] == 1
+        assert not (vault / "Explorer").exists()
+        assert (vault / "MovedExplorer/renamed.md").is_file()
+        assert (vault / "MovedExplorer/Nested/child.txt").read_text(encoding="utf-8") == "nested\n"
+        self.assert_event_contains(
+            self.events_since(move_directory_checkpoint),
+            name="vault_directory_move_completed",
+            expected={
+                "vault_name": vault.name,
+                "source_path": "Explorer",
+                "destination_path": "MovedExplorer",
+                "descendant_file_count": 2,
+                "descendant_directory_count": 1,
+            },
+        )
+
+        descendant_move = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={
+                "operation": "move",
+                "path": "MovedExplorer",
+                "destination": "MovedExplorer/Nested/Again",
+            },
+        )
+        assert descendant_move.status_code == 400
+        assert descendant_move.json().get("error") == "destination_inside_source"
 
         non_empty_delete = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",
             method="POST",
-            data={"operation": "delete", "path": "Explorer"},
+            data={"operation": "delete", "path": "MovedExplorer"},
         )
         assert non_empty_delete.status_code == 409
         assert non_empty_delete.json().get("error") == "VaultDirectoryNotEmpty"
@@ -304,18 +351,32 @@ class VaultFileReferenceApiScenario(BaseScenario):
         delete_file = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",
             method="POST",
-            data={"operation": "delete", "path": "Explorer/renamed.md"},
+            data={"operation": "delete", "path": "MovedExplorer/renamed.md"},
         )
         assert delete_file.status_code == 200
-        assert not (vault / "Explorer/renamed.md").exists()
+        assert not (vault / "MovedExplorer/renamed.md").exists()
+
+        delete_nested_file = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={"operation": "delete", "path": "MovedExplorer/Nested/child.txt"},
+        )
+        assert delete_nested_file.status_code == 200
+
+        delete_nested_directory = self.call_api(
+            f"/api/vaults/{vault.name}/paths/mutate",
+            method="POST",
+            data={"operation": "delete", "path": "MovedExplorer/Nested"},
+        )
+        assert delete_nested_directory.status_code == 200
 
         delete_directory = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",
             method="POST",
-            data={"operation": "delete", "path": "Explorer"},
+            data={"operation": "delete", "path": "MovedExplorer"},
         )
         assert delete_directory.status_code == 200
-        assert not (vault / "Explorer").exists()
+        assert not (vault / "MovedExplorer").exists()
 
     def _vault_file_events(self) -> list[sqlite3.Row]:
         db_path = self.run_path / "system" / "vault_state.db"

@@ -34,11 +34,13 @@ from core.utils.image_inputs import build_image_tool_payload
 from core.utils.hash import hash_file_bytes, hash_file_content
 from core.vault_state.file_mutations import (
     DirectoryCleanupResult,
+    DirectoryMoveResult,
     RecordedMutationResult,
     VaultMutationRejected,
     append_vault_file,
     delete_empty_vault_directory_tree,
     delete_vault_file,
+    move_vault_directory,
     move_vault_file,
     replace_vault_file_content,
     vault_file_mutation_lock,
@@ -808,6 +810,49 @@ def move_vault_path_operation(
             "overwrote_destination": overwrite and overwrote_destination,
             "task_id": source_mutation.task_id or destination_mutation.task_id,
             "vault_id": source_mutation.vault_id,
+        },
+    )
+
+
+def move_vault_directory_operation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    destination: str,
+) -> VaultFileOperationResult:
+    """Move one directory tree without creating per-descendant file mutations."""
+    try:
+        move_result: DirectoryMoveResult = move_vault_directory(
+            vault_path=vault_path,
+            path=path,
+            destination=destination,
+        )
+    except VaultMutationRejected as exc:
+        status_by_code = {
+            "source_not_found": "not_found",
+            "destination_exists": "already_exists",
+        }
+        return _operation_result(
+            str(exc),
+            operation="move",
+            path=path,
+            destination=destination,
+            status=status_by_code.get(exc.code, "error"),
+            exists=exc.code != "source_not_found",
+            error_type=exc.code,
+        )
+    return _operation_result(
+        f"Successfully moved directory '{path}' to '{destination}'",
+        operation="move",
+        path=path,
+        destination=destination,
+        status="completed",
+        exists=True,
+        metadata={
+            "vault_id": move_result.vault_id,
+            "event_sequence": move_result.event_sequence,
+            "descendant_file_count": move_result.descendant_file_count,
+            "descendant_directory_count": move_result.descendant_directory_count,
         },
     )
 

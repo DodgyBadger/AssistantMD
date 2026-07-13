@@ -126,6 +126,7 @@ from core.vault_state.file_operations import (
     VaultFileOperationResult,
     delete_vault_path_operation,
     make_vault_directory_operation,
+    move_vault_directory_operation,
     move_vault_path_operation,
     replace_full_text_content,
 )
@@ -1207,25 +1208,26 @@ def mutate_vault_path(
         )
 
     if operation == "move":
-        if full_path.is_dir():
-            raise APIException(
-                status_code=400,
-                error_type="VaultDirectoryMoveUnsupported",
-                message="Moving directories is not supported by the vault explorer yet.",
-                details={"path": normalized, "vault_name": vault_name},
-            )
         normalized_destination = _normalize_vault_file_path(destination)
-        result = move_vault_path_operation(
-            vault_path=vault_root,
-            path=normalized,
-            destination=normalized_destination,
-            overwrite=False,
-        )
+        kind: Literal["file", "directory"] = "directory" if full_path.is_dir() else "file"
+        if kind == "directory":
+            result = move_vault_directory_operation(
+                vault_path=vault_root,
+                path=normalized,
+                destination=normalized_destination,
+            )
+        else:
+            result = move_vault_path_operation(
+                vault_path=vault_root,
+                path=normalized,
+                destination=normalized_destination,
+                overwrite=False,
+            )
         return _vault_path_operation_response(
             operation=operation,
             path=normalized,
             destination=normalized_destination,
-            kind="file",
+            kind=kind,
             result=result,
         )
 

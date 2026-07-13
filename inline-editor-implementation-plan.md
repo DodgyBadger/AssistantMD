@@ -299,7 +299,7 @@ The explorer owns only basic vault operations:
 - copy any file or folder path and add it to the current prompt;
 - set a folder as the chat workspace;
 - create an empty file or folder;
-- move or rename files;
+- move or rename files and directory trees;
 - delete files and empty folders.
 
 While a chat response is running or an inline tool review is pending, the
@@ -325,9 +325,11 @@ section.
 Direct explorer actions are explicit user commands and do not enter the
 inline edit review flow. They route through shared vault-state mutation
 helpers so audit, snapshot, refresh, and path-boundary behavior does not drift
-from agent tool operations. Directory moves and recursive deletion of non-empty
-directories remain unsupported until their rollback and confirmation contracts
-are defined.
+from agent tool operations. An explorer directory move is recorded as one
+source-to-destination user action with descendant counts, while the subsequent
+vault-state refresh observes each child's new path. Recursive deletion of
+non-empty directories remains unsupported until its confirmation contract is
+defined.
 
 The frontend implementation stays consolidated in `vault-path-picker.js` for
 tree state and explorer actions, `file-references.js` for prompt insertion and
@@ -426,10 +428,11 @@ Current branch slice:
 - Unified the composer reference picker, workspace selector, and linked-directory
   browser into one on-demand Vault Explorer modal.
 - Added direct explorer controls for copy path, add to prompt, set workspace,
-  create file/folder, move or rename files, and constrained deletion.
+  create file/folder, move or rename files and directory trees, and constrained
+  deletion.
 - Added `POST /api/vaults/{vault_name}/paths/mutate` as a thin API over shared
-  vault-state create, move, and delete operations. Directory moves and non-empty
-  directory deletion return explicit rejections.
+  vault-state create, move, and delete operations. Directory moves are recorded
+  once at the directory level; non-empty directory deletion remains rejected.
 - Added generic vault file read/write API models and routes:
   - `GET /api/vaults/{vault_name}/files?path=...`
   - `PUT /api/vaults/{vault_name}/files?path=...`
@@ -506,9 +509,12 @@ Explicitly deferred, not missed:
 - `@path` autocomplete remains optional. The unified explorer, Add to prompt,
   copy-path controls, and resolved chat links cover the core workflow without
   preloading or repeatedly searching all vault paths from the browser.
-- Recursive directory moves and deletion of non-empty directories remain
-  outside the basic explorer contract until rollback and confirmation behavior
-  is defined.
+- Review the Dashboard Vault Activity contract against all durable activity
+  sources. It currently presents task-scoped file mutations, while direct
+  explorer file edits, creates, moves, and deletes, along with some vault-state
+  observations, are recorded elsewhere and are not represented in that view.
+- Recursive deletion of non-empty directories remains outside the basic
+  explorer contract until confirmation behavior is defined.
 
 Remaining merge check:
 
