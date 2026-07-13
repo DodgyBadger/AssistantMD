@@ -1523,6 +1523,10 @@ details summary::-webkit-details-marker {
     border: 1px solid rgb(var(--border-primary));
     color: rgb(var(--text-primary));
 }
+.message-bubble.message-assistant.message-has-pending-review {
+    width: 100%;
+    max-width: 100% !important;
+}
 .message-bubble.message-assistant .message-body,
 .message-bubble.message-assistant .message-body p,
 .message-bubble.message-assistant .message-body li,
@@ -2599,6 +2603,9 @@ details[open] summary.collapsible-summary .chevron {
     line-height: 1.45;
     padding: 0.45rem 0.5rem;
     white-space: pre-wrap;
+}
+.edit-proposal-diff .edit-proposal-original pre {
+    min-height: 0;
 }
 .edit-proposal-comment-block {
     margin-top: 0.4rem;

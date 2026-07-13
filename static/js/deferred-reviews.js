@@ -13,8 +13,10 @@
                     container.innerHTML = renderReviewCard(review);
                     bindReviewCard(container, review);
                     autosizeTextareas(container);
+                    syncPendingReviewWidth(container, review.status === 'pending');
                 })
                 .catch((error) => {
+                    syncPendingReviewWidth(container, false);
                     container.innerHTML = `<div class="edit-proposal-card state-error">Unable to load review: ${escapeHtml(error.message)}</div>`;
                 });
         }
@@ -24,6 +26,7 @@
             container.innerHTML = renderReviewCard(payload);
             bindReviewCard(container, payload);
             autosizeTextareas(container);
+            syncPendingReviewWidth(container, !payload.status || payload.status === 'pending');
         }
 
         async function fetchReview(artifactRef) {
@@ -142,29 +145,29 @@
             }
             if (operation === 'replace_text') {
                 return `
-                    <div class="edit-proposal-diff">
+                    <div class="edit-proposal-diff is-single">
                         <div>
-                            <div class="edit-proposal-label">Original</div>
-                            <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="old_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.old_text || ''))}</textarea>
-                        </div>
-                        <div>
-                            <div class="edit-proposal-label">Replacement</div>
+                            <div class="edit-proposal-label">Revision</div>
                             <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="new_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.new_text || ''))}</textarea>
                         </div>
+                        <details class="edit-proposal-original">
+                            <summary>Before</summary>
+                            <pre>${escapeHtml(String(args.old_text || ''))}</pre>
+                        </details>
                     </div>
                 `;
             }
             if (operation === 'edit_line') {
                 return `
-                    <div class="edit-proposal-diff">
+                    <div class="edit-proposal-diff is-single">
                         <div>
-                            <div class="edit-proposal-label">Original line</div>
-                            <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="old_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.old_text || ''))}</textarea>
-                        </div>
-                        <div>
-                            <div class="edit-proposal-label">Replacement line</div>
+                            <div class="edit-proposal-label">Revision</div>
                             <textarea data-deferred-review-arg="${escapeHtml(toolCallId)}" data-arg-name="new_text" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeHtml(String(args.new_text || ''))}</textarea>
                         </div>
+                        <details class="edit-proposal-original">
+                            <summary>Before</summary>
+                            <pre>${escapeHtml(String(args.old_text || ''))}</pre>
+                        </details>
                     </div>
                 `;
             }
@@ -405,6 +408,7 @@
         function setReviewLocked(container, statusLabel) {
             const status = container.querySelector('.edit-proposal-status');
             if (status) status.textContent = statusLabel;
+            syncPendingReviewWidth(container, false);
             setReviewCollapsed(container, true);
             container.querySelectorAll('textarea, input, [data-deferred-review-bulk-decision], [data-deferred-review-decision], [data-deferred-review-submit]').forEach((item) => {
                 item.disabled = true;
@@ -420,6 +424,13 @@
             button.disabled = rows.length === 0 || selected.length !== rows.length;
             const label = button.querySelector('span') || button;
             label.textContent = selected.length === rows.length && rows.length ? 'Submit choices' : 'Choose all decisions';
+        }
+
+        function syncPendingReviewWidth(container, pending) {
+            container.closest('.message-bubble')?.classList.toggle(
+                'message-has-pending-review',
+                Boolean(pending)
+            );
         }
 
         function autosizeTextareas(container) {

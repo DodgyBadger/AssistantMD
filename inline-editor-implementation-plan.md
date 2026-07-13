@@ -315,6 +315,13 @@ soft-break behavior. Embedded HTML is parsed by Marked and then sanitized by
 DOMPurify; if the sanitizer is unavailable, the original Markdown is displayed
 as plain text rather than inserting unsanitized HTML.
 
+Pending review cards temporarily expand their assistant bubble to the full chat
+content width so editable fields remain comfortable on desktop while retaining
+the existing responsive mobile layout. Submitted cards collapse and return to
+normal assistant-bubble sizing. Exact text and line edits place the editable
+revision first and show the prior content in a collapsed, read-only `Before`
+section.
+
 Direct explorer actions are explicit user commands and do not enter the
 inline edit review flow. They route through shared vault-state mutation
 helpers so audit, snapshot, refresh, and path-boundary behavior does not drift
