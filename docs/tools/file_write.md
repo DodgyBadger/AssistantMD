@@ -84,5 +84,7 @@ file_write(operation="delete", path="Scratch.md", confirm_path="Scratch.md")
 - For multiple independent changes, issue separate `file_write` calls in one
   response. Inline edit mode can then review and return each operation
   independently.
+- Mutations targeting the same file are serialized, so independent text edits
+  issued together cannot overwrite one another with stale full-file content.
 - Sequence dependent mutations across turns, or use a bounded script when
   deterministic ordered processing is required.

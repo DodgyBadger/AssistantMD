@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 from core.logger import UnifiedLogger
@@ -35,6 +37,26 @@ class VaultMutationRejected(Exception):
 
 
 UNCERTAIN_MUTATION_STAGES = {"refresh", "persist"}
+_MUTATION_LOCKS = tuple(threading.RLock() for _ in range(256))
+
+
+@contextmanager
+def vault_file_mutation_lock(*paths: str | Path) -> Iterator[None]:
+    """Serialize mutations that target the same resolved vault path."""
+    lock_indexes = sorted(
+        {
+            hash(str(Path(path).resolve())) % len(_MUTATION_LOCKS)
+            for path in paths
+        }
+    )
+    locks = [_MUTATION_LOCKS[index] for index in lock_indexes]
+    for lock in locks:
+        lock.acquire()
+    try:
+        yield
+    finally:
+        for lock in reversed(locks):
+            lock.release()
 
 
 @dataclass(frozen=True)
@@ -279,6 +301,27 @@ def move_vault_file(
         path=destination_relative,
         markdown_only=markdown_only,
     )
+    with vault_file_mutation_lock(source_path, destination_path):
+        return _move_vault_file_locked(
+            vault_root=vault_root,
+            source_relative=source_relative,
+            destination_relative=destination_relative,
+            source_path=source_path,
+            destination_path=destination_path,
+            overwrite=overwrite,
+        )
+
+
+def _move_vault_file_locked(
+    *,
+    vault_root: Path,
+    source_relative: str,
+    destination_relative: str,
+    source_path: Path,
+    destination_path: Path,
+    overwrite: bool,
+) -> tuple[RecordedMutationResult, RecordedMutationResult]:
+    """Move a vault file while holding both path mutation locks."""
     if not source_path.exists():
         raise VaultMutationRejected(
             "source_not_found",
@@ -457,6 +500,33 @@ def mutate_vault_file(
         path=relative_path,
         markdown_only=markdown_only,
     )
+    with vault_file_mutation_lock(full_path):
+        return _mutate_vault_file_locked(
+            vault_root=vault_root,
+            relative_path=relative_path,
+            full_path=full_path,
+            operation=operation,
+            mutator=mutator,
+            require_exists=require_exists,
+            fail_if_exists=fail_if_exists,
+            create_parent=create_parent,
+            warn_without_task=warn_without_task,
+        )
+
+
+def _mutate_vault_file_locked(
+    *,
+    vault_root: Path,
+    relative_path: str,
+    full_path: Path,
+    operation: str,
+    mutator: Callable[[Path], object],
+    require_exists: bool,
+    fail_if_exists: bool,
+    create_parent: bool,
+    warn_without_task: bool,
+) -> RecordedMutationResult:
+    """Mutate one vault file while holding its path mutation lock."""
     before_exists = full_path.exists()
     if require_exists and not before_exists:
         raise VaultMutationRejected(

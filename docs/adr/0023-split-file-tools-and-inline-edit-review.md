@@ -23,6 +23,8 @@ Expose two model-facing tools:
 Both tools are thin adapters over shared operations in
 `core.vault_state.file_operations`. Mutations continue through
 `core.vault_state.file_mutations` for audit, snapshots, refresh, and rollback.
+Mutations targeting the same resolved path are serialized in that shared layer;
+read-modify-write operations hold the same lock from read through persistence.
 
 Interactive chats have `normal` and `inline_edit` modes. Inline edit mode
 defers `file_write` through Pydantic AI tool approval and renders the deferred

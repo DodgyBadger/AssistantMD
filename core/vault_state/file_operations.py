@@ -41,6 +41,7 @@ from core.vault_state.file_mutations import (
     delete_vault_file,
     move_vault_file,
     replace_vault_file_content,
+    vault_file_mutation_lock,
     write_vault_file,
 )
 from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
@@ -649,6 +650,25 @@ def edit_vault_line_operation(
 ) -> VaultFileOperationResult:
     """Replace one validated line in an existing markdown file."""
     target = resolve_markdown_text_target(vault_path=vault_path, path=path)
+    with vault_file_mutation_lock(target.full_path):
+        return _edit_vault_line_locked(
+            vault_path=vault_path,
+            target=target,
+            line_number=line_number,
+            old_text=old_text,
+            new_text=new_text,
+        )
+
+
+def _edit_vault_line_locked(
+    *,
+    vault_path: str | Path,
+    target: VaultTextTarget,
+    line_number: int,
+    old_text: str,
+    new_text: str,
+) -> VaultFileOperationResult:
+    """Replace one validated line while holding the target mutation lock."""
     if not target.full_path.exists():
         return _operation_result(
             f"Cannot edit '{target.path}' - file does not exist",
@@ -929,6 +949,33 @@ def replace_text(
         markdown_only=markdown_only,
         prefer_markdown_extension=prefer_markdown_extension,
     )
+    with vault_file_mutation_lock(target.full_path):
+        return _replace_text_locked(
+            vault_path=vault_path,
+            target=target,
+            old_text=old_text,
+            new_text=new_text,
+            count=count,
+            operation=operation,
+            markdown_only=markdown_only,
+            expected_sha256=expected_sha256,
+            require_match_count=require_match_count,
+        )
+
+
+def _replace_text_locked(
+    *,
+    vault_path: str | Path,
+    target: VaultTextTarget,
+    old_text: str,
+    new_text: str,
+    count: int,
+    operation: str,
+    markdown_only: bool,
+    expected_sha256: str | None,
+    require_match_count: int | None,
+) -> TextMutationResult:
+    """Replace text while holding the target mutation lock."""
     current = _read_existing_text_file(target)
     if count < 1:
         raise VaultFileOperationRejected(
@@ -1007,19 +1054,25 @@ def apply_text_replacements_once(
     markdown_only: bool = False,
 ) -> TextMutationResult:
     """Apply validated exact-once replacements to one file and write it once."""
-    prepared = prepare_text_replacements_once(
+    target = resolve_text_target(
         vault_path=vault_path,
         path=path,
-        replacements=replacements,
-        expected_sha256=expected_sha256,
         markdown_only=markdown_only,
     )
-    return write_prepared_text_mutation(
-        vault_path=vault_path,
-        prepared=prepared,
-        operation=operation,
-        markdown_only=markdown_only,
-    )
+    with vault_file_mutation_lock(target.full_path):
+        prepared = prepare_text_replacements_once(
+            vault_path=vault_path,
+            path=path,
+            replacements=replacements,
+            expected_sha256=expected_sha256,
+            markdown_only=markdown_only,
+        )
+        return write_prepared_text_mutation(
+            vault_path=vault_path,
+            prepared=prepared,
+            operation=operation,
+            markdown_only=markdown_only,
+        )
 
 
 def prepare_text_replacements_once(
