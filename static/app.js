@@ -216,6 +216,12 @@ const vaultActivity = window.VaultActivity.create({
     utils: window.AssistantMDUtils,
     callbacks: {
         formatChatSessionLabel: (session) => sessionControls.formatOptionLabel(session),
+        openFileRevision: ({ vaultName, path, snapshotId }) => fileReferences.openFile(path, {
+            vaultName,
+            initialMode: 'history',
+            initialRevisionId: snapshotId,
+            onBack: () => fileReferences.openExplorer({ vaultName, revealPath: path }),
+        }),
     },
 });
 

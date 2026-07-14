@@ -20,7 +20,7 @@
         }
 
         function open(options = {}) {
-            const vault = selectedVault();
+            const vault = options.vaultName || selectedVault();
             if (!vault) {
                 alert(options.missingVaultMessage || 'Select a vault first.');
                 return;
@@ -214,7 +214,7 @@
             if (!(results instanceof HTMLElement)) return;
             results.innerHTML = '';
             if (mode === 'directories') {
-                const payload = await fetchDirectories(path, controller.signal);
+                const payload = await fetchDirectories(path, controller.signal, options);
                 if (generation !== rootLoadGeneration || !overlay.isConnected) return;
                 const items = Array.isArray(payload.directories)
                     ? payload.directories.map((item) => ({ ...item, kind: 'directory' }))
@@ -233,6 +233,7 @@
                 query: queryInput instanceof HTMLInputElement ? queryInput.value.trim() : '',
                 scope: scopeSelect instanceof HTMLSelectElement ? scopeSelect.value : 'workspace',
                 signal: controller.signal,
+                options,
             });
             if (generation !== rootLoadGeneration || !overlay.isConnected) return;
             const items = Array.isArray(payload.items) ? payload.items : [];
@@ -242,11 +243,12 @@
                 : `<p class="text-sm text-txt-secondary">${escapeHtml(options.emptyText || 'No matching files.')}</p>`;
         }
 
-        async function fetchDirectories(path, signal = undefined) {
+        async function fetchDirectories(path, signal = undefined, options = {}) {
             const params = new URLSearchParams();
             if (path) params.set('path', path);
             const suffix = params.toString() ? `?${params.toString()}` : '';
-            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/directories${suffix}`, { signal });
+            const vault = options.vaultName || selectedVault();
+            const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/directories${suffix}`, { signal });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || `HTTP ${response.status}`);
@@ -254,14 +256,15 @@
             return response.json();
         }
 
-        async function fetchFileRefs({ path = '', query = '', scope = 'workspace', offset = 0, signal = undefined } = {}) {
+        async function fetchFileRefs({ path = '', query = '', scope = 'workspace', offset = 0, signal = undefined, options = {} } = {}) {
             const params = new URLSearchParams();
             if (path) params.set('path', path);
-            if (workspacePath()) params.set('workspace_path', workspacePath());
+            if (!options.vaultName && workspacePath()) params.set('workspace_path', workspacePath());
             if (query) params.set('query', query);
             if (offset) params.set('offset', String(offset));
             params.set('scope', scope || 'workspace');
-            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/file-refs?${params.toString()}`, { signal });
+            const vault = options.vaultName || selectedVault();
+            const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/file-refs?${params.toString()}`, { signal });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || `HTTP ${response.status}`);
@@ -290,7 +293,7 @@
                 const mode = options.mode === 'directories' ? 'directories' : 'files';
                 const depth = Number.parseInt(row.getAttribute('data-vault-path-picker-depth') || '0', 10) + 1;
                 if (mode === 'directories') {
-                    const payload = await fetchDirectories(path);
+                    const payload = await fetchDirectories(path, undefined, options);
                     const items = Array.isArray(payload.directories)
                         ? payload.directories.map((item) => ({ ...item, kind: 'directory' }))
                         : [];
@@ -298,7 +301,7 @@
                         ? items.map((item) => renderRow(item, depth, options)).join('')
                         : '<div class="py-1 text-xs text-txt-secondary">No child folders.</div>';
                 } else {
-                    const payload = await fetchFileRefs({ path, scope: 'vault' });
+                    const payload = await fetchFileRefs({ path, scope: 'vault', options });
                     const items = Array.isArray(payload.items) ? payload.items : [];
                     children.innerHTML = items.length
                         ? items.map((item) => renderRow(item, depth, options)).join('') + renderLoadMore(payload, depth, options)
@@ -418,7 +421,7 @@
             const offset = Number.parseInt(button.dataset.offset || '0', 10);
             const depth = Number.parseInt(button.dataset.depth || '0', 10);
             try {
-                const payload = await fetchFileRefs({ path, scope: 'vault', offset });
+                const payload = await fetchFileRefs({ path, scope: 'vault', offset, options });
                 const items = Array.isArray(payload.items) ? payload.items : [];
                 button.insertAdjacentHTML(
                     'beforebegin',

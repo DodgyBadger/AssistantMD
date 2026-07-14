@@ -35,15 +35,17 @@
             input.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
-        function openExplorer({ revealPath = '' } = {}) {
+        function openExplorer({ revealPath = '', vaultName = '' } = {}) {
+            const vault = vaultName || selectedVault();
             pickerOpen = true;
             callbacks.openPathPicker?.({
                 id: 'vault-explorer-modal',
                 title: 'Vault Explorer',
                 mode: 'files',
-                subtitle: selectedVault(),
+                vaultName: vault,
+                subtitle: vault,
                 missingVaultMessage: 'Select a vault before opening the explorer.',
-                initialScope: revealPath ? 'vault' : (workspacePath() ? 'workspace' : 'vault'),
+                initialScope: revealPath || vaultName ? 'vault' : (workspacePath() ? 'workspace' : 'vault'),
                 revealInitialPath: revealPath,
                 explorer: true,
                 showPath: true,
@@ -51,14 +53,14 @@
                 closeOnSelect: false,
                 isReadOnly: interactionLocked,
                 onSelect: ({ path, kind }) => {
-                    if (kind === 'file') openFile(path, { onBack: () => {} });
+                    if (kind === 'file') openFile(path, { vaultName: vault, onBack: () => {} });
                 },
-                onOpenFile: (path) => openFile(path, { onBack: () => {} }),
+                onOpenFile: (path) => openFile(path, { vaultName: vault, onBack: () => {} }),
                 onAddReference: insertReference,
                 onSetWorkspace: (path) => {
                     if (!interactionLocked()) callbacks.setWorkspace?.(path);
                 },
-                onMutate: mutatePath,
+                onMutate: (payload) => mutatePath(payload, vault),
                 onClose: () => {
                     pickerOpen = false;
                 },
@@ -74,8 +76,14 @@
             pickerOpen = false;
         }
 
-        async function openFile(path, { allowCreate = false, onBack = null } = {}) {
-            const vault = selectedVault();
+        async function openFile(path, {
+            allowCreate = false,
+            onBack = null,
+            vaultName = '',
+            initialMode = '',
+            initialRevisionId = '',
+        } = {}) {
+            const vault = vaultName || selectedVault();
             if (!vault || !path) return;
             if (!closeFileModal()) return;
             const overlay = document.createElement('div');
@@ -165,6 +173,14 @@
                 properties?.classList.toggle('hidden', !parts.frontmatter);
             }
 
+            function showHistoryOnly(message) {
+                if (statusLabel) statusLabel.textContent = message;
+                modeToggle?.classList.remove('hidden');
+                modeToggle?.querySelector('[data-vault-file-mode="preview"]')?.classList.add('hidden');
+                modeToggle?.querySelector('[data-vault-file-mode="edit"]')?.classList.add('hidden');
+                setMode('history');
+            }
+
             function setMode(nextMode) {
                 if (supportsPreview && nextMode === 'edit' && interactionLocked()) {
                     nextMode = 'preview';
@@ -231,7 +247,7 @@
                 }
                 if (target.closest('[data-vault-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
                     if (interactionLocked()) return;
-                    const saved = await saveFile(path, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
+                    const saved = await saveFile(path, vault, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
                         sha256 = nextHash;
                         createIfMissing = false;
                     }, () => sha256);
@@ -251,7 +267,7 @@
             });
 
             try {
-                const data = await fetchVaultFile(path);
+                const data = await fetchVaultFile(path, vault);
                 sha256 = data.sha256 || '';
                 if (editor instanceof HTMLTextAreaElement) {
                     editor.value = data.content || '';
@@ -264,10 +280,14 @@
                 }
                 modeToggle?.classList.remove('hidden');
                 modeToggle?.querySelector('[data-vault-file-mode="preview"]')?.classList.toggle('hidden', !supportsPreview);
-                setMode(supportsPreview ? 'preview' : 'edit');
+                setMode(initialMode === 'history' ? 'history' : (supportsPreview ? 'preview' : 'edit'));
                 applyInteractionLock();
             } catch (error) {
                 if (error.errorType === 'VaultFileNotFound') {
+                    if (initialMode === 'history') {
+                        showHistoryOnly(`${path} no longer exists.`);
+                        return;
+                    }
                     if (!allowCreate) {
                         if (statusLabel) {
                             statusLabel.textContent = `${path} no longer exists.`;
@@ -293,6 +313,10 @@
                     return;
                 }
                 if (error.errorType === 'VaultFileNotText') {
+                    if (initialMode === 'history') {
+                        showHistoryOnly('This file is not editable as plain text.');
+                        return;
+                    }
                     if (statusLabel) statusLabel.textContent = 'This file is not editable as plain text.';
                     return;
                 }
@@ -305,8 +329,7 @@
                 if (!(historyList instanceof HTMLElement)) return;
                 historyList.innerHTML = '<p class="text-sm text-txt-secondary">Loading revisions...</p>';
                 try {
-                    const vault = selectedVault();
-                    const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/files/revisions?path=${encodeURIComponent(path)}&limit=50`);
+                    const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/files/revisions?path=${encodeURIComponent(path)}&limit=100`);
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const data = await response.json();
                     const revisions = data.revisions || [];
@@ -327,6 +350,12 @@
                             <span class="vault-file-revision-meta">${escapeHtml(revisionKindLabel(revision.activity_kind))} · ${escapeHtml(formatShortDate(revision.created_at))}</span>
                         </button>
                     `).join('');
+                    const requestedRevision = initialRevisionId
+                        ? historyList.querySelector(`[data-vault-file-revision="${CSS.escape(String(initialRevisionId))}"]`)
+                        : null;
+                    if (requestedRevision instanceof HTMLButtonElement) {
+                        await previewRevision(requestedRevision);
+                    }
                 } catch (error) {
                     historyList.innerHTML = `<p class="state-error text-sm">Unable to load revisions: ${escapeHtml(error.message)}</p>`;
                 }
@@ -346,6 +375,11 @@
                     const snapshotId = button.dataset.vaultFileRevision || '';
                     const response = await fetch(`api/vault-state/snapshots/${encodeURIComponent(snapshotId)}/content`);
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const mediaType = response.headers.get('content-type') || '';
+                    if (mediaType && !isPreviewableTextMediaType(mediaType)) {
+                        historyPreview.innerHTML = '<p class="text-sm text-txt-secondary">This revision is not previewable as plain text.</p>';
+                        return;
+                    }
                     const content = await response.text();
                     if (supportsPreview) {
                         const parts = splitMarkdownFrontmatter(content);
@@ -396,11 +430,12 @@
             openExplorer({ revealPath: path });
         }
 
-        async function mutatePath(payload) {
+        async function mutatePath(payload, vaultName = '') {
             if (interactionLocked()) {
                 throw new Error('Wait for the active response to finish.');
             }
-            const response = await fetch(`api/vaults/${encodeURIComponent(selectedVault())}/paths/mutate`, {
+            const vault = vaultName || selectedVault();
+            const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/paths/mutate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -412,8 +447,8 @@
             return response.json();
         }
 
-        async function fetchVaultFile(path) {
-            const vault = selectedVault();
+        async function fetchVaultFile(path, vaultName = '') {
+            const vault = vaultName || selectedVault();
             const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/files?path=${encodeURIComponent(path)}`);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
@@ -424,7 +459,7 @@
             return response.json();
         }
 
-        async function saveFile(path, editor, statusLabel, saveButton, shouldCreate, setHash, getHash) {
+        async function saveFile(path, vault, editor, statusLabel, saveButton, shouldCreate, setHash, getHash) {
             if (!(editor instanceof HTMLTextAreaElement)) return;
             if (saveButton instanceof HTMLButtonElement) saveButton.disabled = true;
             const createIfMissing = shouldCreate();
@@ -433,7 +468,6 @@
                 statusLabel.textContent = createIfMissing ? 'Creating...' : 'Saving...';
             }
             try {
-                const vault = selectedVault();
                 const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/files?path=${encodeURIComponent(path)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -700,6 +734,16 @@
                 .replace(/^\.?\//, '')
                 .replace(/[),.;:]+$/, '')
                 .replace(/\/+$/, '');
+        }
+
+        function isPreviewableTextMediaType(value) {
+            const mediaType = String(value || '').split(';', 1)[0].trim().toLowerCase();
+            return mediaType.startsWith('text/')
+                || mediaType === 'application/json'
+                || mediaType === 'application/javascript'
+                || mediaType === 'application/xml'
+                || mediaType.endsWith('+json')
+                || mediaType.endsWith('+xml');
         }
 
         function debounce(fn, delayMs) {

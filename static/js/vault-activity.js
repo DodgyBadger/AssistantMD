@@ -180,20 +180,22 @@
             return String(label || '').replace(/^(chat|workflow|ingestion|context|context assembly|context_assembly):\s*/i, '');
         }
 
-        function renderMutationSnapshotLink(mutation) {
+        function renderMutationSnapshotLink(mutation, vaultName) {
             if (!mutation.before_snapshot_id) {
                 return '<span class="subtle">—</span>';
             }
-            const snapshotUrl = `api/vault-state/snapshots/${encodeURIComponent(mutation.before_snapshot_id)}/content`;
             return `
-                <a
-                    href="${snapshotUrl}"
-                    target="_blank"
-                    rel="noopener"
+                <button
+                    type="button"
                     class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                    data-vault-activity-revision="${escapeHtml(String(mutation.before_snapshot_id))}"
+                    data-vault-activity-revision-path="${escapeHtml(mutation.path || '')}"
+                    data-vault-activity-revision-vault="${escapeHtml(vaultName)}"
+                    aria-label="Open revision history for ${escapeHtml(mutation.path || 'file')}"
+                    title="Open revision history"
                 >
                     Open
-                </a>
+                </button>
             `;
         }
 
@@ -237,7 +239,7 @@
                                         ${renderVaultActivityMutationSortHeader('from', 'From')}
                                         ${renderVaultActivityMutationSortHeader('operation', 'Operation')}
                                         ${renderVaultActivityMutationSortHeader('time', 'Time')}
-                                        <th>Snapshot</th>
+                                        <th>Revision</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -247,7 +249,7 @@
                                             <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
                                             <td>${escapeHtml(mutation.operation)} ${mutation.target_kind === 'directory' ? '(folder)' : ''}</td>
                                             <td class="cell-xs">${formatShortDate(mutation.created_at)}</td>
-                                            <td>${renderMutationSnapshotLink(mutation)}</td>
+                                            <td>${renderMutationSnapshotLink(mutation, vaultName)}</td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
@@ -259,6 +261,19 @@
             overlay.addEventListener('click', (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                const revisionButton = target.closest('[data-vault-activity-revision]');
+                if (revisionButton instanceof HTMLButtonElement) {
+                    const revisionId = revisionButton.dataset.vaultActivityRevision || '';
+                    const path = revisionButton.dataset.vaultActivityRevisionPath || '';
+                    const revisionVault = revisionButton.dataset.vaultActivityRevisionVault || vaultName;
+                    closeVaultActivityDetails();
+                    callbacks.openFileRevision?.({
+                        vaultName: revisionVault,
+                        path,
+                        snapshotId: revisionId,
+                    });
+                    return;
+                }
                 if (target instanceof HTMLElement) {
                     const sortButton = target.closest('[data-vault-activity-mutation-sort]');
                     if (sortButton instanceof HTMLElement) {
