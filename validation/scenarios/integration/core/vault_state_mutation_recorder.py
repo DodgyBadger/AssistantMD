@@ -41,7 +41,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         self.soft_assert_equal(result.status, "completed", "Workflow write probe should complete")
         mutation_event = self.assert_event_contains(
             events,
-            name="task_file_mutation_recorded",
+            name="vault_mutation_recorded",
             expected={
                 "vault_name": vault.name,
                 "path": "notes/created-by-workflow.md",
@@ -64,7 +64,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         )
         self.assert_event_contains(
             events,
-            name="task_file_snapshot_recorded",
+            name="vault_file_snapshot_recorded",
             expected={
                 "task_id": task_id,
                 "vault_id": vault_id,
@@ -185,7 +185,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         )
 
         response = self.call_api(
-            f"/api/vaults/{vault.name}/task-mutations",
+            f"/api/vaults/{vault.name}/activity",
             params={"limit": 5},
         )
         self.soft_assert_equal(response.status_code, 200, "Task mutation activity API should respond")
@@ -194,7 +194,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         api_group = next((group for group in groups if group.get("task_id") == task_id), None)
         self.soft_assert(api_group is not None, "Task mutation activity API should include workflow task")
         if api_group is not None:
-            self.soft_assert_equal(api_group.get("activity_id"), task_id, "Workflow activity id should be task id")
+            self.soft_assert_equal(api_group.get("status"), "completed", "Workflow activity should complete")
             self.soft_assert_equal(api_group.get("activity_kind"), "workflow", "Workflow activity kind should match")
             self.soft_assert_equal(api_group.get("task_kind"), "workflow", "API should expose task kind")
             self.soft_assert_equal(api_group.get("task_source"), "api", "API should expose task source")
@@ -234,21 +234,18 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         self._insert_chat_session(vault_name=vault.name)
         self._insert_chat_mutation_rows(vault_id=current_vault_id, vault_name=vault.name)
         chat_response = self.call_api(
-            f"/api/vaults/{vault.name}/task-mutations",
+            f"/api/vaults/{vault.name}/activity",
             params={"limit": 5},
         )
         self.soft_assert_equal(chat_response.status_code, 200, "Chat activity API should respond")
         chat_groups = chat_response.json().get("groups", [])
-        chat_group = next(
-            (
-                group
-                for group in chat_groups
-                if group.get("activity_id") == "chat_session:validation-session"
-            ),
-            None,
-        )
-        self.soft_assert(chat_group is not None, "Direct chat mutations should group by chat session")
-        if chat_group is not None:
+        session_groups = [
+            group
+            for group in chat_groups
+            if group.get("chat_session_id") == "validation-session"
+        ]
+        self.soft_assert_equal(len(session_groups), 2, "Chat turns should remain separate activities")
+        for chat_group in session_groups:
             self.soft_assert_equal(chat_group.get("activity_kind"), "chat", "Chat activity kind should match")
             self.soft_assert_equal(
                 chat_group.get("chat_session_id"),
@@ -260,16 +257,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 "Validation Chat Title",
                 "Chat group should expose session title",
             )
-            self.soft_assert_equal(chat_group.get("mutation_count"), 2, "Chat group should include both turns")
-            chat_task_ids = {
-                mutation.get("task_id")
-                for mutation in chat_group.get("mutations", [])
-            }
-            self.soft_assert_equal(
-                chat_task_ids,
-                {"chat-task-1", "chat-task-2"},
-                "Chat group should retain per-turn task ids",
-            )
+            self.soft_assert_equal(chat_group.get("mutation_count"), 1, "Chat turn should include its mutation")
 
         manifest = self._manifest_row(current_vault_id, "notes/created-by-workflow.md")
         self.soft_assert(manifest is not None, "Manifest should update immediately after write")
@@ -324,13 +312,16 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         try:
             rows = conn.execute(
                 """
-                SELECT task_id, task_kind, task_source, task_scope, task_label,
-                       vault_id, vault_name, path, operation,
-                       related_path, event_sequence, before_exists, before_hash,
-                       before_snapshot_id, after_exists, after_hash, snapshot_ref, expires_at
-                FROM task_file_mutations
-                WHERE task_id = ?
-                ORDER BY id ASC
+                SELECT a.task_id, a.kind AS task_kind, a.source AS task_source,
+                       a.scope AS task_scope, a.label AS task_label,
+                       a.vault_id, a.vault_name, m.path, m.operation,
+                       m.related_path, m.event_sequence, m.before_exists, m.before_hash,
+                       m.before_snapshot_id, m.after_exists, m.after_hash,
+                       m.snapshot_ref, m.expires_at
+                FROM vault_mutations AS m
+                JOIN vault_activities AS a ON a.activity_id = m.activity_id
+                WHERE a.task_id = ?
+                ORDER BY m.id ASC
                 """,
                 (task_id,),
             ).fetchall()
@@ -369,6 +360,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         now = datetime.now(UTC)
         rows = [
             (
+                f"task:chat-task-1:{vault_id}",
                 "chat-task-1",
                 "chat",
                 "api",
@@ -388,6 +380,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
                 (now + timedelta(days=365)).isoformat(),
             ),
             (
+                f"task:chat-task-2:{vault_id}",
                 "chat-task-2",
                 "chat",
                 "api",
@@ -411,15 +404,44 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         try:
             conn.executemany(
                 """
-                INSERT INTO task_file_mutations (
-                    task_id, task_kind, task_source, task_scope, task_label,
-                    vault_id, vault_name, path, operation, event_sequence,
-                    before_exists, before_hash, after_exists, after_hash,
-                    snapshot_ref, created_at, expires_at
+                INSERT INTO vault_activities (
+                    activity_id, task_id, kind, source, scope, label,
+                    vault_id, vault_name, status, rollback_status,
+                    goal_id, step_id, created_at, updated_at, completed_at,
+                    expires_at, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', NULL, NULL, NULL,
+                        ?, ?, ?, ?, NULL)
                 """,
-                rows,
+                [
+                    (
+                        row[0], row[1], row[2], row[3], row[4], row[5],
+                        row[6], row[7], row[16], row[16], row[16], row[17],
+                    )
+                    for row in rows
+                ],
+            )
+            conn.executemany(
+                """
+                INSERT INTO vault_mutations (
+                    activity_id, operation_id, path, related_path,
+                    target_kind, operation, status,
+                    event_sequence, before_exists, before_hash,
+                    before_snapshot_id, after_exists, after_hash,
+                    after_snapshot_id, snapshot_ref, created_at, expires_at,
+                    metadata_json
+                )
+                VALUES (?, ?, ?, NULL, 'file', ?, 'completed', ?, ?, ?,
+                        NULL, ?, ?, NULL, ?, ?, ?, NULL)
+                """,
+                [
+                    (
+                        row[0], f"operation:{row[1]}", row[8], row[9], row[10],
+                        row[11], row[12], row[13], row[14], row[15], row[16],
+                        row[17],
+                    )
+                    for row in rows
+                ],
             )
             conn.commit()
         finally:

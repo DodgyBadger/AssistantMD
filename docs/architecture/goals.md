@@ -82,10 +82,9 @@ programmatically when they continue work under a goal.
 `goal_ops` does not create an artifact table or write files directly. File
 provenance stays canonical in the vault mutation system.
 
-When work runs with goal context, execution tasks and mutation rows may carry
-`goal_id` and optional lower-level step metadata. `goal_ops(list_activity)`
-queries existing `task_file_mutations` to show goal-related mutation groups and
-paths.
+When work runs with goal context, its vault activity carries `goal_id` and
+optional lower-level step metadata. `goal_ops(list_activity)` queries durable
+vault activities to show goal-related mutation groups and paths.
 
 ## Composition
 
@@ -105,4 +104,3 @@ The deterministic scenario
 `validation/scenarios/integration/core/goal_ops.py` covers goal creation,
 updates, source provenance, filtering, checkpoints, mutation-backed activity,
 cleanup, and logging.
-

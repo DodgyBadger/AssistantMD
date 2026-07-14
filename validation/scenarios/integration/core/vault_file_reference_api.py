@@ -203,13 +203,44 @@ class VaultFileReferenceApiScenario(BaseScenario):
         update_events = self.events_since(mutation_checkpoint)
         self.assert_event_contains(
             update_events,
-            name="vault_state_mutation_untracked",
+            name="vault_activity_completed",
             expected={
                 "vault_name": vault.name,
-                "path": "Projects/Alpha/README.md",
-                "operation": "update_vault_file",
-                "reason": "missing_execution_task_context",
+                "kind": "explorer",
+                "source": "api",
             },
+        )
+        activity = self.call_api(f"/api/vaults/{vault.name}/activity")
+        assert activity.status_code == 200
+        update_activity = next(
+            group
+            for group in activity.json()["groups"]
+            if any(
+                mutation["operation"] == "update_vault_file"
+                and mutation["path"] == "Projects/Alpha/README.md"
+                for mutation in group["mutations"]
+            )
+        )
+        assert update_activity["activity_kind"] == "explorer"
+        assert update_activity["status"] == "completed"
+        assert update_activity["operation_count"] == 1
+        revisions = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions",
+            params={"path": "Projects/Alpha/README.md"},
+        )
+        assert revisions.status_code == 200, "File revision history should respond"
+        revision_rows = revisions.json().get("revisions") or []
+        assert len(revision_rows) == 1, "Explorer save should retain one pre-edit revision"
+        revision = revision_rows[0]
+        assert revision["activity_kind"] == "explorer"
+        assert revision["operation"] == "update_vault_file"
+        assert revision["exists"] is True
+        snapshot = self.call_api(
+            f"/api/vault-state/snapshots/{revision['snapshot_id']}/content"
+        )
+        assert snapshot.status_code == 200
+        assert snapshot.text == "# Alpha\n\nStart here.\n", (
+            "Explorer revision should preserve the exact pre-edit content"
         )
 
         missing = self.call_api(
@@ -237,6 +268,15 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert (vault / "Projects/README.md").read_text(encoding="utf-8") == (
             "# Projects\n\nWorkspace landing page.\n"
         ), "Create-if-missing should write the new vault file"
+        create_revisions = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions",
+            params={"path": "Projects/README.md"},
+        )
+        assert create_revisions.status_code == 200
+        create_revision_rows = create_revisions.json()["revisions"]
+        assert len(create_revision_rows) == 1
+        assert create_revision_rows[0]["exists"] is False
+        assert create_revision_rows[0]["snapshot_available"] is False
 
         vault_events = self._vault_file_events()
         event_hashes = {row["path"]: row["content_hash"] for row in vault_events}
@@ -280,6 +320,18 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert move_file.status_code == 200
         assert not (vault / "Explorer/draft.md").exists()
         assert (vault / "Explorer/renamed.md").is_file()
+        source_revisions = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions",
+            params={"path": "Explorer/draft.md"},
+        )
+        assert source_revisions.status_code == 200
+        source_revision_rows = source_revisions.json()["revisions"]
+        assert [row["exists"] for row in source_revision_rows] == [True, False]
+        moved_source_snapshot = self.call_api(
+            f"/api/vault-state/snapshots/{source_revision_rows[0]['snapshot_id']}/content"
+        )
+        assert moved_source_snapshot.status_code == 200
+        assert moved_source_snapshot.text == "# Draft\n"
 
         (vault / "Explorer/Nested").mkdir()
         (vault / "Explorer/Nested/child.txt").write_text("nested\n", encoding="utf-8")
@@ -327,6 +379,24 @@ class VaultFileReferenceApiScenario(BaseScenario):
                 "descendant_directory_count": 1,
             },
         )
+        activity = self.call_api(f"/api/vaults/{vault.name}/activity")
+        assert all(
+            group.get("operation_count", 0) > 0
+            for group in activity.json()["groups"]
+        ), "Rejected Explorer commands should not create empty activity rows"
+        directory_activity = next(
+            group
+            for group in activity.json()["groups"]
+            if any(
+                mutation["operation"] == "move"
+                and mutation["path"] == "Explorer"
+                and mutation["target_kind"] == "directory"
+                for mutation in group["mutations"]
+            )
+        )
+        assert directory_activity["activity_kind"] == "explorer"
+        assert directory_activity["status"] == "completed"
+        assert directory_activity["operation_count"] == 1
 
         descendant_move = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",
@@ -355,6 +425,20 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         assert delete_file.status_code == 200
         assert not (vault / "MovedExplorer/renamed.md").exists()
+        deleted_revisions = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions",
+            params={"path": "MovedExplorer/renamed.md"},
+        )
+        assert deleted_revisions.status_code == 200
+        deleted_revision_rows = deleted_revisions.json()["revisions"]
+        assert len(deleted_revision_rows) == 1, (
+            "Revision history should stay exact-path and not follow the directory move"
+        )
+        deleted_snapshot = self.call_api(
+            f"/api/vault-state/snapshots/{deleted_revision_rows[0]['snapshot_id']}/content"
+        )
+        assert deleted_snapshot.status_code == 200
+        assert deleted_snapshot.text == "# Draft\n"
 
         delete_nested_file = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",

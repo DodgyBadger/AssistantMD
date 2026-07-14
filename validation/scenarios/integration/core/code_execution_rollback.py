@@ -104,7 +104,7 @@ class CodeExecutionRollbackScenario(BaseScenario):
             task_id = failed_event["data"]["task_id"]
             self.assert_event_contains(
                 events,
-                name="task_file_mutation_recorded",
+                name="vault_mutation_recorded",
                 expected={
                     "task_id": task_id,
                     "path": "notes/code-execution-write.md",

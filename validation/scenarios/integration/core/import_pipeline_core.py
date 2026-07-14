@@ -66,14 +66,14 @@ class ImportPipelineScenario(BaseScenario):
             deleted=True,
         ), "Cleaned-up source file should be marked deleted in vault state"
 
-        activity_response = self.call_api(f"/api/vaults/{vault.name}/task-mutations")
+        activity_response = self.call_api(f"/api/vaults/{vault.name}/activity")
         assert activity_response.status_code == 200, "Vault Activity mutation API should respond"
         groups = activity_response.json().get("groups") or []
         ingestion_group = next(
             (
                 group
                 for group in groups
-                if group.get("task_kind") == "ingestion"
+                if group.get("activity_kind") == "ingestion"
                 and group.get("task_source") == "api"
             ),
             None,

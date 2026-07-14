@@ -52,6 +52,11 @@ class VaultStateCleanupScenario(BaseScenario):
         payload = response.json()
         self.soft_assert_equal(payload.get("success"), True, "Cleanup should succeed")
         self.soft_assert_equal(
+            payload.get("expired_activity_rows_deleted"),
+            1,
+            "Cleanup should delete expired activity rows",
+        )
+        self.soft_assert_equal(
             payload.get("expired_mutation_rows_deleted"),
             1,
             "Cleanup should delete expired mutation rows",
@@ -74,6 +79,7 @@ class VaultStateCleanupScenario(BaseScenario):
             events,
             name="vault_state_cleanup_completed",
             expected={
+                "expired_activity_rows_deleted": 1,
                 "expired_mutation_rows_deleted": 1,
                 "expired_snapshot_rows_deleted": 1,
                 "snapshot_files_deleted": 1,
@@ -137,50 +143,80 @@ class VaultStateCleanupScenario(BaseScenario):
         try:
             conn.executemany(
                 """
-                INSERT INTO task_file_mutations (
-                    task_id, task_kind, task_source, task_scope, task_label,
-                    vault_id, vault_name, path, operation, event_sequence,
-                    before_exists, before_hash, after_exists, after_hash,
-                    snapshot_ref, created_at, expires_at
+                INSERT INTO vault_activities (
+                    activity_id, vault_id, vault_name, kind, source, scope, label,
+                    task_id, status, created_at, updated_at, completed_at, expires_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
-                        "expired-task",
+                        "task:expired-task:" + vault_id,
+                        vault_id,
+                        vault_name,
                         "workflow",
                         "api",
                         "workflow_vault:" + vault_name,
                         vault_name + "/expired",
-                        vault_id,
-                        vault_name,
-                        "notes/expired.md",
-                        "write",
-                        None,
-                        0,
-                        None,
-                        1,
-                        "expired-hash",
-                        None,
+                        "expired-task",
+                        "completed",
+                        expired_at.isoformat(),
+                        expired_at.isoformat(),
                         expired_at.isoformat(),
                         expired_at.isoformat(),
                     ),
                     (
-                        "retained-task",
+                        "task:retained-task:" + vault_id,
+                        vault_id,
+                        vault_name,
                         "workflow",
                         "api",
                         "workflow_vault:" + vault_name,
                         vault_name + "/retained",
-                        vault_id,
-                        vault_name,
-                        "notes/retained.md",
+                        "retained-task",
+                        "completed",
+                        retained_at.isoformat(),
+                        retained_at.isoformat(),
+                        retained_at.isoformat(),
+                        retained_at.isoformat(),
+                    ),
+                ],
+            )
+            conn.executemany(
+                """
+                INSERT INTO vault_mutations (
+                    activity_id, operation_id, path, target_kind, operation, status,
+                    before_exists, before_hash, after_exists, after_hash,
+                    created_at, expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "task:expired-task:" + vault_id,
+                        "expired-operation",
+                        "notes/expired.md",
+                        "file",
                         "write",
+                        "completed",
+                        0,
                         None,
+                        1,
+                        "expired-hash",
+                        expired_at.isoformat(),
+                        expired_at.isoformat(),
+                    ),
+                    (
+                        "task:retained-task:" + vault_id,
+                        "retained-operation",
+                        "notes/retained.md",
+                        "file",
+                        "write",
+                        "completed",
                         0,
                         None,
                         1,
                         "retained-hash",
-                        None,
                         retained_at.isoformat(),
                         retained_at.isoformat(),
                     ),
@@ -281,7 +317,13 @@ class VaultStateCleanupScenario(BaseScenario):
         db_path = self._get_system_controller()._system_root / "vault_state.db"
         conn = sqlite3.connect(db_path)
         try:
-            rows = conn.execute("SELECT task_id FROM task_file_mutations").fetchall()
+            rows = conn.execute(
+                """
+                SELECT a.task_id
+                FROM vault_mutations AS m
+                JOIN vault_activities AS a ON a.activity_id = m.activity_id
+                """
+            ).fetchall()
             return {str(row[0]) for row in rows}
         finally:
             conn.close()

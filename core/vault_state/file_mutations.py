@@ -6,22 +6,29 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 import os
 from pathlib import Path
 import threading
 from typing import Any
+import uuid
 
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import get_current_execution_task, goal_context_from_metadata
 from core.utils.hash import hash_file_bytes
+from core.vault_state.activity import (
+    VaultActivityContext,
+    get_current_vault_activity,
+    task_activity_id,
+)
 from core.vault_state.identity import resolve_or_create_vault_identity
-from core.vault_state.models import TaskFileMutation
+from core.vault_state.models import VaultActivity, VaultMutation
 from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
 from core.vault_state.service import VaultStateService
 from core.vault_state.snapshots import (
     compute_snapshot_expiration,
     compute_task_mutation_expiration,
-    ensure_task_file_snapshot,
+    ensure_file_snapshot,
 )
 
 
@@ -79,6 +86,22 @@ class RecordedMutationResult:
 
 
 @dataclass(frozen=True)
+class SnapshotAttribution:
+    """Ownership and policy for one pre-mutation snapshot capture."""
+
+    activity_id: str | None
+    task_id: str | None
+    kind: str | None
+    source: str | None
+    scope: str | None
+    label: str | None
+    purpose: str
+    snapshot_source: str
+    scope_kind: str
+    scope_id: str
+
+
+@dataclass(frozen=True)
 class DirectoryCleanupResult:
     """Result of a best-effort empty-directory cleanup inside a vault."""
 
@@ -115,7 +138,7 @@ def write_vault_file(
     markdown_only: bool = False,
     warn_without_task: bool = True,
 ) -> RecordedMutationResult:
-    """Create or overwrite a vault file while recording task mutation metadata."""
+    """Create or overwrite a vault file while recording attributed mutation metadata."""
     return mutate_vault_file(
         vault_path=vault_path,
         path=path,
@@ -403,7 +426,66 @@ def move_vault_directory(
             "event_sequence": result.event_sequence,
         },
     )
+    record_vault_directory_mutation(
+        vault_path=vault_root,
+        path=source_relative,
+        related_path=destination_relative,
+        operation="move",
+        before_exists=True,
+        after_exists=False,
+        event_sequence=result.event_sequence,
+        metadata={
+            "descendant_file_count": result.descendant_file_count,
+            "descendant_directory_count": result.descendant_directory_count,
+        },
+    )
     return result
+
+
+def record_vault_directory_mutation(
+    *,
+    vault_path: str | Path,
+    path: str,
+    operation: str,
+    before_exists: bool,
+    after_exists: bool,
+    related_path: str | None = None,
+    event_sequence: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Record one logical directory operation under current attribution."""
+    vault_root = Path(vault_path).resolve()
+    identity = resolve_or_create_vault_identity(vault_root)
+    task = get_current_execution_task()
+    created_at = datetime.now(UTC)
+    result = RecordedMutationResult(
+        vault_id=identity.vault_id,
+        vault_name=vault_root.name,
+        path=normalize_vault_relative_path(path),
+        related_path=(
+            normalize_vault_relative_path(related_path) if related_path else None
+        ),
+        operation=operation,
+        before_exists=before_exists,
+        before_hash=None,
+        after_exists=after_exists,
+        after_hash=None,
+        task_id=task.task_id if task is not None else None,
+        event_sequence=event_sequence,
+        before_snapshot_id=None,
+        snapshot_ref=None,
+    )
+    _persist_or_log_mutation(
+        service=VaultStateService(),
+        task=task,
+        result=result,
+        vault_root=vault_root,
+        operation_id=f"operation_{uuid.uuid4().hex}",
+        created_at=created_at,
+        expires_at=compute_task_mutation_expiration(created_at),
+        target_kind="directory",
+        metadata=metadata,
+    )
 
 
 def move_vault_file(
@@ -472,6 +554,7 @@ def _move_vault_file_locked(
     created_at = datetime.now(UTC)
     snapshot_expires_at = compute_snapshot_expiration(created_at)
     mutation_expires_at = compute_task_mutation_expiration(created_at)
+    operation_id = f"operation_{uuid.uuid4().hex}"
     source_snapshot_ref = None
     source_snapshot_id = None
     destination_snapshot_ref = None
@@ -479,47 +562,57 @@ def _move_vault_file_locked(
 
     stage = "snapshot"
     try:
-        if task is not None:
+        snapshot_attribution = _snapshot_attribution(task)
+        if snapshot_attribution is not None:
+            _ensure_explicit_activity(
+                service=service,
+                attribution=snapshot_attribution,
+                vault_root=vault_root,
+                vault_name=vault_name,
+                created_at=created_at,
+            )
             with service.SessionFactory() as session:
-                source_snapshot = ensure_task_file_snapshot(
+                source_snapshot = ensure_file_snapshot(
                     session=session,
-                    task_id=task.task_id,
-                    task_kind=task.kind,
-                    task_source=task.source,
-                    task_scope=task.scope,
-                    task_label=task.label,
+                    activity_id=snapshot_attribution.activity_id,
+                    task_id=snapshot_attribution.task_id,
+                    task_kind=snapshot_attribution.kind,
+                    task_source=snapshot_attribution.source,
+                    task_scope=snapshot_attribution.scope,
+                    task_label=snapshot_attribution.label,
                     vault_id=identity.vault_id,
                     vault_name=vault_name,
                     vault_root=vault_root,
                     relative_path=source_relative,
                     before_exists=True,
                     source_path=source_path,
-                    purpose="rollback",
-                    source="task_mutation_before",
-                    scope_kind="task",
-                    scope_id=task.task_id,
+                    purpose=snapshot_attribution.purpose,
+                    source=snapshot_attribution.snapshot_source,
+                    scope_kind=snapshot_attribution.scope_kind,
+                    scope_id=snapshot_attribution.scope_id,
                     created_at=created_at,
                     expires_at=snapshot_expires_at,
                 )
                 source_snapshot_ref = source_snapshot.snapshot_ref
                 source_snapshot_id = source_snapshot.file_snapshot_id
-                destination_snapshot = ensure_task_file_snapshot(
+                destination_snapshot = ensure_file_snapshot(
                     session=session,
-                    task_id=task.task_id,
-                    task_kind=task.kind,
-                    task_source=task.source,
-                    task_scope=task.scope,
-                    task_label=task.label,
+                    activity_id=snapshot_attribution.activity_id,
+                    task_id=snapshot_attribution.task_id,
+                    task_kind=snapshot_attribution.kind,
+                    task_source=snapshot_attribution.source,
+                    task_scope=snapshot_attribution.scope,
+                    task_label=snapshot_attribution.label,
                     vault_id=identity.vault_id,
                     vault_name=vault_name,
                     vault_root=vault_root,
                     relative_path=destination_relative,
                     before_exists=destination_before_exists,
                     source_path=destination_path,
-                    purpose="rollback",
-                    source="task_mutation_before",
-                    scope_kind="task",
-                    scope_id=task.task_id,
+                    purpose=snapshot_attribution.purpose,
+                    source=snapshot_attribution.snapshot_source,
+                    scope_kind=snapshot_attribution.scope_kind,
+                    scope_id=snapshot_attribution.scope_id,
                     created_at=created_at,
                     expires_at=snapshot_expires_at,
                 )
@@ -571,6 +664,8 @@ def _move_vault_file_locked(
             service=service,
             task=task,
             result=source_result,
+            vault_root=vault_root,
+            operation_id=operation_id,
             created_at=created_at,
             expires_at=mutation_expires_at,
         )
@@ -578,6 +673,8 @@ def _move_vault_file_locked(
             service=service,
             task=task,
             result=destination_result,
+            vault_root=vault_root,
+            operation_id=operation_id,
             created_at=created_at,
             expires_at=mutation_expires_at,
         )
@@ -675,28 +772,38 @@ def _mutate_vault_file_locked(
     created_at = datetime.now(UTC)
     snapshot_expires_at = compute_snapshot_expiration(created_at)
     mutation_expires_at = compute_task_mutation_expiration(created_at)
+    operation_id = f"operation_{uuid.uuid4().hex}"
 
     stage = "snapshot"
     try:
-        if task is not None:
+        snapshot_attribution = _snapshot_attribution(task)
+        if snapshot_attribution is not None:
+            _ensure_explicit_activity(
+                service=service,
+                attribution=snapshot_attribution,
+                vault_root=vault_root,
+                vault_name=vault_name,
+                created_at=created_at,
+            )
             with service.SessionFactory() as session:
-                snapshot = ensure_task_file_snapshot(
+                snapshot = ensure_file_snapshot(
                     session=session,
-                    task_id=task.task_id,
-                    task_kind=task.kind,
-                    task_source=task.source,
-                    task_scope=task.scope,
-                    task_label=task.label,
+                    activity_id=snapshot_attribution.activity_id,
+                    task_id=snapshot_attribution.task_id,
+                    task_kind=snapshot_attribution.kind,
+                    task_source=snapshot_attribution.source,
+                    task_scope=snapshot_attribution.scope,
+                    task_label=snapshot_attribution.label,
                     vault_id=identity.vault_id,
                     vault_name=vault_name,
                     vault_root=vault_root,
                     relative_path=relative_path,
                     before_exists=before_exists,
                     source_path=full_path,
-                    purpose="rollback",
-                    source="task_mutation_before",
-                    scope_kind="task",
-                    scope_id=task.task_id,
+                    purpose=snapshot_attribution.purpose,
+                    source=snapshot_attribution.snapshot_source,
+                    scope_kind=snapshot_attribution.scope_kind,
+                    scope_id=snapshot_attribution.scope_id,
                     created_at=created_at,
                     expires_at=snapshot_expires_at,
                 )
@@ -736,6 +843,8 @@ def _mutate_vault_file_locked(
             service=service,
             task=task,
             result=result,
+            vault_root=vault_root,
+            operation_id=operation_id,
             created_at=created_at,
             expires_at=mutation_expires_at,
             warn_without_task=warn_without_task,
@@ -856,12 +965,17 @@ def _persist_or_log_mutation(
     service: VaultStateService,
     task,
     result: RecordedMutationResult,
+    vault_root: Path,
+    operation_id: str,
     created_at: datetime,
     expires_at: datetime | None,
     warn_without_task: bool = True,
+    target_kind: str = "file",
+    metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Persist a mutation row when task context exists, otherwise log it as untracked."""
-    if task is None:
+    """Persist a mutation under explicit or task-derived activity attribution."""
+    context = _mutation_activity_context(task=task, result=result)
+    if context is None:
         if not warn_without_task:
             return
         logger.add_sink("validation").warning(
@@ -878,22 +992,33 @@ def _persist_or_log_mutation(
         )
         return
 
+    service.ensure_activity(
+        context=context,
+        vault_path=vault_root,
+        vault_name=result.vault_name,
+        created_at=created_at,
+    )
     with service.SessionFactory() as session:
-        goal_id, step_id = goal_context_from_metadata(getattr(task, "metadata", None))
+        activity = session.get(VaultActivity, context.activity_id)
+        if activity is None:
+            raise RuntimeError(
+                f"Vault activity disappeared before mutation persistence: {context.activity_id}"
+            )
+        activity.updated_at = created_at
+        if expires_at is not None and (
+            activity.expires_at is None
+            or _utc_datetime(expires_at) > _utc_datetime(activity.expires_at)
+        ):
+            activity.expires_at = expires_at
         session.add(
-            TaskFileMutation(
-                task_id=task.task_id,
-                task_kind=task.kind,
-                task_source=task.source,
-                task_scope=task.scope,
-                task_label=task.label,
-                goal_id=goal_id,
-                step_id=step_id,
-                vault_id=result.vault_id,
-                vault_name=result.vault_name,
+            VaultMutation(
+                activity_id=context.activity_id,
+                operation_id=operation_id,
                 path=result.path,
                 related_path=result.related_path,
+                target_kind=target_kind,
                 operation=result.operation,
+                status="completed",
                 event_sequence=result.event_sequence,
                 before_exists=result.before_exists,
                 before_hash=result.before_hash,
@@ -904,21 +1029,23 @@ def _persist_or_log_mutation(
                 snapshot_ref=result.snapshot_ref,
                 created_at=created_at,
                 expires_at=expires_at,
+                metadata_json=(
+                    json.dumps(metadata, sort_keys=True) if metadata else None
+                ),
             )
         )
         session.commit()
 
     logger.add_sink("validation").info(
-        "task_file_mutation_recorded",
+        "vault_mutation_recorded",
         data={
-            "event": "task_file_mutation_recorded",
-            "task_id": task.task_id,
-            "task_kind": task.kind,
-            "task_source": task.source,
-            "task_scope": task.scope,
-            "task_label": task.label,
-            "goal_id": goal_id,
-            "step_id": step_id,
+            "event": "vault_mutation_recorded",
+            "activity_id": context.activity_id,
+            "activity_kind": context.kind,
+            "activity_source": context.source,
+            "task_id": context.task_id,
+            "goal_id": context.goal_id,
+            "step_id": context.step_id,
             "vault_id": result.vault_id,
             "vault_name": result.vault_name,
             "path": result.path,
@@ -934,3 +1061,85 @@ def _persist_or_log_mutation(
             "snapshot_ref": result.snapshot_ref,
         },
     )
+
+
+def _mutation_activity_context(
+    *,
+    task: Any,
+    result: RecordedMutationResult,
+) -> VaultActivityContext | None:
+    explicit = get_current_vault_activity()
+    if explicit is not None:
+        return explicit
+    if task is None:
+        return None
+    goal_id, step_id = goal_context_from_metadata(getattr(task, "metadata", None))
+    return VaultActivityContext(
+        activity_id=task_activity_id(task.task_id, result.vault_id),
+        kind=task.kind,
+        source=task.source,
+        scope=task.scope,
+        label=task.label,
+        task_id=task.task_id,
+        goal_id=goal_id,
+        step_id=step_id,
+    )
+
+
+def _snapshot_attribution(task: Any) -> SnapshotAttribution | None:
+    explicit = get_current_vault_activity()
+    if explicit is not None:
+        return SnapshotAttribution(
+            activity_id=explicit.activity_id,
+            task_id=explicit.task_id,
+            kind=explicit.kind,
+            source=explicit.source,
+            scope=explicit.scope,
+            label=explicit.label,
+            purpose="revision",
+            snapshot_source="activity_mutation_before",
+            scope_kind="activity",
+            scope_id=explicit.activity_id,
+        )
+    if task is None:
+        return None
+    return SnapshotAttribution(
+        activity_id=None,
+        task_id=task.task_id,
+        kind=task.kind,
+        source=task.source,
+        scope=task.scope,
+        label=task.label,
+        purpose="rollback",
+        snapshot_source="task_mutation_before",
+        scope_kind="task",
+        scope_id=task.task_id,
+    )
+
+
+def _ensure_explicit_activity(
+    *,
+    service: VaultStateService,
+    attribution: SnapshotAttribution,
+    vault_root: Path,
+    vault_name: str,
+    created_at: datetime,
+) -> None:
+    if attribution.activity_id is None:
+        return
+    context = get_current_vault_activity()
+    if context is None or context.activity_id != attribution.activity_id:
+        raise RuntimeError("Snapshot activity attribution no longer matches the active context")
+    service.ensure_activity(
+        context=context,
+        vault_path=vault_root,
+        vault_name=vault_name,
+        created_at=created_at,
+    )
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    """Normalize SQLite-naive and timezone-aware timestamps for comparison."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

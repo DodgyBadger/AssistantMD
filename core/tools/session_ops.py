@@ -1441,7 +1441,7 @@ def _add_chat_mutation_artifacts(
         )
         key = (mutation.path, role)
         metadata = {
-            "source": "task_file_mutation",
+            "source": "vault_mutation",
             "operation": mutation.operation,
             "task_id": mutation.task_id,
             "task_kind": mutation.task_kind,

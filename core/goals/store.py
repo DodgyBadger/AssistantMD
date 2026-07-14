@@ -363,7 +363,7 @@ class GoalOpsStore:
         clean_goal_id = _required_text(goal_id, "goal_id")
         with self._connect() as conn:
             goal = self._goal_from_row(self._require_goal(conn, clean_goal_id))
-        groups = VaultStateService().list_task_mutations(
+        groups = VaultStateService().list_activities(
             vault_name=goal.vault_name,
             limit=_bounded_limit(limit),
             goal_id=clean_goal_id,
@@ -622,6 +622,8 @@ def _mutation_group_to_dict(group) -> dict[str, Any]:
         "activity_id": group.activity_id,
         "activity_kind": group.activity_kind,
         "activity_label": group.activity_label,
+        "status": group.status,
+        "rollback_status": group.rollback_status,
         "task_id": group.task_id,
         "task_kind": group.task_kind,
         "task_source": group.task_source,
@@ -632,11 +634,14 @@ def _mutation_group_to_dict(group) -> dict[str, Any]:
         "vault_id": group.vault_id,
         "vault_name": group.vault_name,
         "mutation_count": group.mutation_count,
+        "operation_count": group.operation_count,
         "first_mutation_at": group.first_mutation_at.isoformat(),
         "last_mutation_at": group.last_mutation_at.isoformat(),
         "mutations": [
             {
                 "id": mutation.id,
+                "activity_id": mutation.activity_id,
+                "operation_id": mutation.operation_id,
                 "task_id": mutation.task_id,
                 "task_kind": mutation.task_kind,
                 "task_source": mutation.task_source,
@@ -646,7 +651,9 @@ def _mutation_group_to_dict(group) -> dict[str, Any]:
                 "step_id": mutation.step_id,
                 "path": mutation.path,
                 "related_path": mutation.related_path,
+                "target_kind": mutation.target_kind,
                 "operation": mutation.operation,
+                "status": mutation.status,
                 "event_sequence": mutation.event_sequence,
                 "before_exists": mutation.before_exists,
                 "after_exists": mutation.after_exists,

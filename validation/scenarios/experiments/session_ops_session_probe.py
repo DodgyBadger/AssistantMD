@@ -636,18 +636,47 @@ def _insert_chat_mutation_rows(
 ) -> None:
     db_path = system_root / "vault_state.db"
     now = datetime.now(UTC)
-    rows = [
+    activities = [
         (
-            "memory-extract-chat-task-1",
+            f"task:memory-extract-chat-task-1:{vault_id}",
+            vault_id,
+            vault_name,
             "chat",
             "api",
             chat_session_scope(session_id),
             f"chat:{session_id}",
+            "memory-extract-chat-task-1",
+            "completed",
+            now.isoformat(),
+            now.isoformat(),
+            now.isoformat(),
+            (now + timedelta(days=365)).isoformat(),
+        ),
+        (
+            f"task:memory-extract-chat-task-2:{vault_id}",
             vault_id,
             vault_name,
+            "chat",
+            "api",
+            chat_session_scope(session_id),
+            f"chat:{session_id}",
+            "memory-extract-chat-task-2",
+            "completed",
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(days=365)).isoformat(),
+        ),
+    ]
+    mutations = [
+        (
+            f"task:memory-extract-chat-task-1:{vault_id}",
+            "memory-extract-operation-1",
             "Reports/Wetlands/update.md",
             None,
+            "file",
             "write",
+            "completed",
             101,
             0,
             None,
@@ -660,16 +689,13 @@ def _insert_chat_mutation_rows(
             (now + timedelta(days=365)).isoformat(),
         ),
         (
-            "memory-extract-chat-task-2",
-            "chat",
-            "api",
-            chat_session_scope(session_id),
-            f"chat:{session_id}",
-            vault_id,
-            vault_name,
+            f"task:memory-extract-chat-task-2:{vault_id}",
+            "memory-extract-operation-2",
             "Reports/Wetlands/archive.md",
             None,
+            "file",
             "delete",
+            "completed",
             102,
             1,
             "deleted-before-hash",
@@ -686,16 +712,26 @@ def _insert_chat_mutation_rows(
     try:
         conn.executemany(
             """
-            INSERT INTO task_file_mutations (
-                task_id, task_kind, task_source, task_scope, task_label,
-                vault_id, vault_name, path, related_path, operation,
+            INSERT INTO vault_activities (
+                activity_id, vault_id, vault_name, kind, source, scope, label,
+                task_id, status, created_at, updated_at, completed_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            activities,
+        )
+        conn.executemany(
+            """
+            INSERT INTO vault_mutations (
+                activity_id, operation_id, path, related_path, target_kind,
+                operation, status,
                 event_sequence, before_exists, before_hash, before_snapshot_id,
                 after_exists, after_hash, after_snapshot_id, snapshot_ref,
                 created_at, expires_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            rows,
+            mutations,
         )
         conn.commit()
     finally:

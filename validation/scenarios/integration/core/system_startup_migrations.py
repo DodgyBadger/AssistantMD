@@ -71,6 +71,13 @@ class SystemStartupMigrationsScenario(BaseScenario):
                 "Startup should preserve existing goal migration history and apply pending versions",
             )
 
+        with sqlite3.connect(system_root / "vault_state.db") as conn:
+            self.soft_assert_equal(
+                self._migration_versions(conn, "vault_state"),
+                [1],
+                "Startup should record the vault-state migration version",
+            )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()

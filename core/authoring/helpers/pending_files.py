@@ -27,7 +27,7 @@ from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import FileSnapshot, SnapshotSet
 from core.vault_state.pathing import normalize_vault_relative_path
 from core.vault_state.service import VaultStateService
-from core.vault_state.snapshots import compute_snapshot_expiration, ensure_task_file_snapshot
+from core.vault_state.snapshots import compute_snapshot_expiration, ensure_file_snapshot
 
 
 logger = UnifiedLogger(tag="authoring-host")
@@ -306,8 +306,9 @@ def _capture_completion_baselines(
             if not full_path.is_file():
                 continue
             relative_path = _vault_relative_path(full_path, vault_root=vault_root)
-            result = ensure_task_file_snapshot(
+            result = ensure_file_snapshot(
                 session=session,
+                activity_id=None,
                 task_id=task.task_id,
                 task_kind=task.kind,
                 task_source=task.source,

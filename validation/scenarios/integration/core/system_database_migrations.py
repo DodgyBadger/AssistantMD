@@ -26,7 +26,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            7,
+            8,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -37,9 +37,11 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         chat_target = target_by_db["chat_sessions"]
         summary_target = target_by_db["session_summaries"]
         goal_target = target_by_db["goal_ops"]
+        vault_target = target_by_db["vault_state"]
         self.soft_assert(chat_target.backup_path is not None, "Existing chat DB should be backed up")
         self.soft_assert(summary_target.backup_path is None, "New summary DB should not create an empty backup")
         self.soft_assert(goal_target.backup_path is None, "New goal_ops DB should not create an empty backup")
+        self.soft_assert(vault_target.backup_path is None, "New vault-state DB should not create an empty backup")
         if chat_target.backup_path:
             self.soft_assert(Path(chat_target.backup_path).exists(), "Chat DB backup should exist")
 
@@ -70,6 +72,13 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
                 self._migration_versions(conn, "goal_ops"),
                 [1, 2, 3],
                 "goal_ops migration version should be recorded",
+            )
+
+        with sqlite3.connect(system_root / "vault_state.db") as conn:
+            self.soft_assert_equal(
+                self._migration_versions(conn, "vault_state"),
+                [1],
+                "Vault-state migration version should be recorded",
             )
 
         second = run_system_migrations(system_root, backup=True)

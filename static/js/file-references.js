@@ -1,6 +1,6 @@
 (function fileReferencesModule(window, document) {
     function createFileReferencesController({ state, elements, icons, utils, callbacks }) {
-        const { escapeHtml } = utils;
+        const { escapeHtml, formatShortDate } = utils;
         let pickerOpen = false;
         let activeFileCanClose = null;
         const resolutionCache = new Map();
@@ -96,6 +96,7 @@
                             <div class="vault-file-mode-toggle hidden" data-vault-file-mode-toggle role="group" aria-label="File view">
                                 <button type="button" data-vault-file-mode="preview" aria-label="Preview Markdown" title="Preview Markdown">${icons.EYE_ICON_SVG}</button>
                                 <button type="button" data-vault-file-mode="edit" aria-label="Edit Markdown" title="Edit Markdown">${icons.EDIT_ICON_SVG}</button>
+                                <button type="button" data-vault-file-mode="history" aria-label="Revision history" title="Revision history">${icons.HISTORY_ICON_SVG}</button>
                             </div>
                             <button type="button" class="ui-icon-button is-primary is-compact hidden" data-vault-file-save="true" aria-label="Save file" title="Save file" disabled>${icons.SAVE_ICON_SVG}</button>
                             <button type="button" class="ui-icon-button is-compact" data-vault-file-close="true" aria-label="Close" title="Close">${icons.X_ICON_SVG}</button>
@@ -110,6 +111,12 @@
                             </details>
                         </div>
                         <div id="vault-file-modal-preview" class="vault-file-preview prose prose-sm max-w-none hidden flex-1 min-h-0 overflow-y-auto"></div>
+                        <div id="vault-file-modal-history" class="vault-file-history hidden flex-1 min-h-0">
+                            <div class="vault-file-history-list" data-vault-file-history-list></div>
+                            <div class="vault-file-history-preview" data-vault-file-history-preview>
+                                <p class="text-sm text-txt-secondary">Select a revision to preview.</p>
+                            </div>
+                        </div>
                         <textarea
                             id="vault-file-modal-editor"
                             class="w-full flex-1 min-h-0 px-3 py-2 border border-border-secondary rounded-md bg-app-bg text-txt-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -125,6 +132,9 @@
             const statusLabel = overlay.querySelector('#vault-file-modal-status');
             const saveButton = overlay.querySelector('[data-vault-file-save]');
             const preview = overlay.querySelector('#vault-file-modal-preview');
+            const history = overlay.querySelector('#vault-file-modal-history');
+            const historyList = overlay.querySelector('[data-vault-file-history-list]');
+            const historyPreview = overlay.querySelector('[data-vault-file-history-preview]');
             const properties = overlay.querySelector('#vault-file-modal-properties');
             const propertiesContent = overlay.querySelector('[data-vault-file-properties-content]');
             const modeToggle = overlay.querySelector('[data-vault-file-mode-toggle]');
@@ -132,6 +142,7 @@
             let createIfMissing = false;
             let savedContent = '';
             let mode = 'edit';
+            let historyLoaded = false;
             const supportsPreview = /\.(md|markdown)$/i.test(path);
             const lockMessage = 'Available when the active response finishes.';
 
@@ -158,11 +169,15 @@
                 if (supportsPreview && nextMode === 'edit' && interactionLocked()) {
                     nextMode = 'preview';
                 }
-                mode = supportsPreview && nextMode === 'preview' ? 'preview' : 'edit';
+                mode = nextMode === 'history'
+                    ? 'history'
+                    : (supportsPreview && nextMode === 'preview' ? 'preview' : 'edit');
                 if (mode === 'preview') renderPreview();
+                if (mode === 'history' && !historyLoaded) loadRevisionHistory();
                 preview?.classList.toggle('hidden', mode !== 'preview');
                 if (mode !== 'preview') properties?.classList.add('hidden');
                 editor?.classList.toggle('hidden', mode !== 'edit');
+                history?.classList.toggle('hidden', mode !== 'history');
                 saveButton?.classList.toggle('hidden', mode !== 'edit' || interactionLocked());
                 modeToggle?.querySelectorAll('[data-vault-file-mode]').forEach((button) => {
                     button.classList.toggle('is-active', button.getAttribute('data-vault-file-mode') === mode);
@@ -209,6 +224,11 @@
                     setMode(modeButton.dataset.vaultFileMode || 'edit');
                     return;
                 }
+                const revisionButton = target.closest('[data-vault-file-revision]');
+                if (revisionButton instanceof HTMLButtonElement) {
+                    await previewRevision(revisionButton);
+                    return;
+                }
                 if (target.closest('[data-vault-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
                     if (interactionLocked()) return;
                     const saved = await saveFile(path, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
@@ -217,6 +237,8 @@
                     }, () => sha256);
                     if (saved) {
                         savedContent = editor.value;
+                        historyLoaded = false;
+                        if (historyList instanceof HTMLElement) historyList.innerHTML = '';
                         if (saveButton instanceof HTMLButtonElement) saveButton.disabled = true;
                         if (supportsPreview) setMode('preview');
                     }
@@ -240,7 +262,8 @@
                 if (saveButton instanceof HTMLButtonElement) {
                     saveButton.disabled = true;
                 }
-                if (supportsPreview) modeToggle?.classList.remove('hidden');
+                modeToggle?.classList.remove('hidden');
+                modeToggle?.querySelector('[data-vault-file-mode="preview"]')?.classList.toggle('hidden', !supportsPreview);
                 setMode(supportsPreview ? 'preview' : 'edit');
                 applyInteractionLock();
             } catch (error) {
@@ -263,7 +286,8 @@
                     if (saveButton instanceof HTMLButtonElement) {
                         saveButton.disabled = false;
                     }
-                    if (supportsPreview) modeToggle?.classList.remove('hidden');
+                    modeToggle?.classList.remove('hidden');
+                    modeToggle?.querySelector('[data-vault-file-mode="preview"]')?.classList.toggle('hidden', !supportsPreview);
                     setMode('edit');
                     applyInteractionLock();
                     return;
@@ -276,6 +300,79 @@
                     statusLabel.innerHTML = `<span class="state-error">Error: ${escapeHtml(error.message)}</span>`;
                 }
             }
+
+            async function loadRevisionHistory() {
+                if (!(historyList instanceof HTMLElement)) return;
+                historyList.innerHTML = '<p class="text-sm text-txt-secondary">Loading revisions...</p>';
+                try {
+                    const vault = selectedVault();
+                    const response = await fetch(`api/vaults/${encodeURIComponent(vault)}/files/revisions?path=${encodeURIComponent(path)}&limit=50`);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    const revisions = data.revisions || [];
+                    historyLoaded = true;
+                    if (!revisions.length) {
+                        historyList.innerHTML = '<p class="text-sm text-txt-secondary">No retained AssistantMD revisions. External edits are not snapshotted.</p>';
+                        return;
+                    }
+                    historyList.innerHTML = revisions.map((revision) => `
+                        <button
+                            type="button"
+                            class="vault-file-revision-row"
+                            data-vault-file-revision="${escapeHtml(String(revision.snapshot_id))}"
+                            data-vault-file-revision-available="${revision.snapshot_available ? 'true' : 'false'}"
+                            data-vault-file-revision-exists="${revision.exists ? 'true' : 'false'}"
+                        >
+                            <span class="vault-file-revision-title">${escapeHtml(revision.activity_label || revision.operation)}</span>
+                            <span class="vault-file-revision-meta">${escapeHtml(revisionKindLabel(revision.activity_kind))} · ${escapeHtml(formatShortDate(revision.created_at))}</span>
+                        </button>
+                    `).join('');
+                } catch (error) {
+                    historyList.innerHTML = `<p class="state-error text-sm">Unable to load revisions: ${escapeHtml(error.message)}</p>`;
+                }
+            }
+
+            async function previewRevision(button) {
+                if (!(historyPreview instanceof HTMLElement)) return;
+                historyList?.querySelectorAll('[data-vault-file-revision]').forEach((row) => {
+                    row.classList.toggle('is-active', row === button);
+                });
+                if (button.dataset.vaultFileRevisionAvailable !== 'true') {
+                    historyPreview.innerHTML = '<p class="text-sm text-txt-secondary">The file did not exist before this operation.</p>';
+                    return;
+                }
+                historyPreview.innerHTML = '<p class="text-sm text-txt-secondary">Loading revision...</p>';
+                try {
+                    const snapshotId = button.dataset.vaultFileRevision || '';
+                    const response = await fetch(`api/vault-state/snapshots/${encodeURIComponent(snapshotId)}/content`);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const content = await response.text();
+                    if (supportsPreview) {
+                        const parts = splitMarkdownFrontmatter(content);
+                        historyPreview.innerHTML = `
+                            ${parts.frontmatter ? `<details class="vault-file-revision-properties"><summary>Properties</summary><pre>${escapeHtml(parts.frontmatter)}</pre></details>` : ''}
+                            <div class="vault-file-preview prose prose-sm max-w-none" data-vault-file-revision-markdown></div>
+                        `;
+                        const revisionMarkdown = historyPreview.querySelector('[data-vault-file-revision-markdown]');
+                        if (revisionMarkdown instanceof HTMLElement) {
+                            callbacks.renderMarkdownPreview?.(revisionMarkdown, parts.body);
+                        }
+                    } else {
+                        historyPreview.innerHTML = `<pre>${escapeHtml(content)}</pre>`;
+                    }
+                } catch (error) {
+                    historyPreview.innerHTML = `<p class="state-error text-sm">Unable to load revision: ${escapeHtml(error.message)}</p>`;
+                }
+            }
+        }
+
+        function revisionKindLabel(kind) {
+            const normalized = String(kind || '').trim().toLowerCase();
+            if (normalized === 'explorer') return 'Vault Explorer';
+            if (normalized === 'chat') return 'Chat';
+            if (normalized === 'workflow') return 'Workflow';
+            if (normalized === 'ingestion') return 'Ingestion';
+            return 'AssistantMD';
         }
 
         function splitMarkdownFrontmatter(content) {

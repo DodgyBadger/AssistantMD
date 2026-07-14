@@ -265,7 +265,7 @@ class GoalOpsScenario(BaseScenario):
         )
         self.assert_event_contains(
             mutation_events,
-            name="task_file_mutation_recorded",
+            name="vault_mutation_recorded",
             expected={
                 "goal_id": goal_id,
                 "path": "notes/goal-output.md",
@@ -274,7 +274,7 @@ class GoalOpsScenario(BaseScenario):
 
         activity_payload = await tool.function(ctx, operation="list_activity", goal_id=goal_id)
         activity = self._tool_payload(activity_payload)["result"]
-        self.soft_assert_equal(len(activity), 1, "Goal activity should derive from task mutation rows")
+        self.soft_assert_equal(len(activity), 1, "Goal activity should derive from vault activities")
         if activity:
             self.soft_assert_equal(activity[0]["goal_id"], goal_id, "Activity group should expose goal id")
             self.soft_assert_equal(

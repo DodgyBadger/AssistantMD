@@ -31,6 +31,12 @@ from core.memory.schema import (
     ensure_session_summary_schema,
 )
 from core.runtime.paths import get_system_root
+from core.vault_state.schema import (
+    DB_NAME as VAULT_STATE_DB_NAME,
+    MIGRATION_NAMESPACE as VAULT_STATE_MIGRATION_NAMESPACE,
+    VAULT_STATE_MIGRATIONS,
+    ensure_vault_state_schema,
+)
 
 
 logger = UnifiedLogger(tag="system_migrations")
@@ -95,6 +101,15 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
         namespace=GOAL_OPS_MIGRATION_NAMESPACE,
         migrations=GOAL_OPS_MIGRATIONS,
         ensure_schema=lambda system_root: ensure_goal_ops_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
+    SystemMigrationTarget(
+        db_name=VAULT_STATE_DB_NAME,
+        namespace=VAULT_STATE_MIGRATION_NAMESPACE,
+        migrations=VAULT_STATE_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_vault_state_schema(
             system_root,
             apply_migrations=True,
         ),

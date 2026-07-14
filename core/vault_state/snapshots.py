@@ -1,4 +1,4 @@
-"""Task-scoped snapshot set and file snapshot capture."""
+"""Activity- and task-scoped snapshot set and file snapshot capture."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ logger = UnifiedLogger(tag="vault-snapshots")
 
 @dataclass(frozen=True)
 class SnapshotCaptureResult:
-    """Result of ensuring a task snapshot for one path."""
+    """Result of ensuring an activity- or task-owned snapshot for one path."""
 
     snapshot_set_id: int | None
     file_snapshot_id: int | None
@@ -27,10 +27,11 @@ class SnapshotCaptureResult:
     recorded_path: bool
 
 
-def ensure_task_file_snapshot(
+def ensure_file_snapshot(
     *,
     session,
-    task_id: str,
+    activity_id: str | None,
+    task_id: str | None,
     task_kind: str | None = None,
     task_source: str | None = None,
     task_scope: str | None = None,
@@ -48,11 +49,18 @@ def ensure_task_file_snapshot(
     created_at: datetime,
     expires_at: datetime | None,
 ) -> SnapshotCaptureResult:
-    """Capture one file state once for a task/vault/path/source."""
+    """Capture one file state once for an owner, vault, path, and source."""
+    if not activity_id and not task_id:
+        raise ValueError("Snapshot capture requires an activity_id or task_id")
+    owner_filter = (
+        FileSnapshot.activity_id == activity_id
+        if activity_id
+        else FileSnapshot.task_id == task_id
+    )
     existing = (
         session.query(FileSnapshot)
         .filter(
-            FileSnapshot.task_id == task_id,
+            owner_filter,
             FileSnapshot.vault_id == vault_id,
             FileSnapshot.path == relative_path,
             FileSnapshot.source == source,
@@ -69,10 +77,15 @@ def ensure_task_file_snapshot(
             recorded_path=False,
         )
 
+    snapshot_owner_filter = (
+        SnapshotSet.activity_id == activity_id
+        if activity_id
+        else SnapshotSet.task_id == task_id
+    )
     snapshot = (
         session.query(SnapshotSet)
         .filter(
-            SnapshotSet.task_id == task_id,
+            snapshot_owner_filter,
             SnapshotSet.vault_id == vault_id,
             SnapshotSet.purpose == purpose,
         )
@@ -82,6 +95,7 @@ def ensure_task_file_snapshot(
     created_snapshot = False
     if snapshot is None:
         snapshot = SnapshotSet(
+            activity_id=activity_id,
             task_id=task_id,
             task_kind=task_kind,
             task_source=task_source,
@@ -109,6 +123,7 @@ def ensure_task_file_snapshot(
             data={
                 "event": "snapshot_set_created",
                 "snapshot_set_id": snapshot.id,
+                "activity_id": activity_id,
                 "task_id": task_id,
                 "vault_id": vault_id,
                 "vault_name": vault_name,
@@ -131,6 +146,7 @@ def ensure_task_file_snapshot(
 
     file_snapshot = FileSnapshot(
         snapshot_set_id=snapshot.id,
+        activity_id=activity_id,
         task_id=task_id,
         vault_id=vault_id,
         vault_name=vault_name,
@@ -146,11 +162,12 @@ def ensure_task_file_snapshot(
     session.flush()
 
     logger.add_sink("validation").info(
-        "task_file_snapshot_recorded",
+        "vault_file_snapshot_recorded",
         data={
-            "event": "task_file_snapshot_recorded",
+            "event": "vault_file_snapshot_recorded",
             "snapshot_set_id": snapshot.id,
             "file_snapshot_id": file_snapshot.id,
+            "activity_id": activity_id,
             "task_id": task_id,
             "vault_id": vault_id,
             "vault_name": vault_name,
@@ -175,7 +192,7 @@ def compute_snapshot_expiration(created_at: datetime) -> datetime | None:
 
 
 def compute_task_mutation_expiration(created_at: datetime) -> datetime | None:
-    """Return mutation audit row expiration using task mutation retention settings."""
+    """Return vault mutation expiration using the configured retention period."""
     return _compute_expiration(created_at, get_task_mutation_retention_days())
 
 

@@ -42,6 +42,7 @@ from core.vault_state.file_mutations import (
     delete_vault_file,
     move_vault_directory,
     move_vault_file,
+    record_vault_directory_mutation,
     replace_vault_file_content,
     vault_file_mutation_lock,
     write_vault_file,
@@ -916,6 +917,13 @@ def make_vault_directory_operation(
     """Create a directory within the vault."""
     target = resolve_text_target(vault_path=vault_path, path=path, markdown_only=False)
     target.full_path.mkdir(parents=True, exist_ok=True)
+    record_vault_directory_mutation(
+        vault_path=vault_path,
+        path=target.path,
+        operation="mkdir",
+        before_exists=False,
+        after_exists=True,
+    )
     return _operation_result(
         f"Successfully created directory '{target.path}'",
         operation="mkdir",
@@ -1782,11 +1790,16 @@ def _delete_empty_directory_operation(
             exists=exc.code != "directory_not_found",
             error_type=exc.code,
         )
-    return _directory_cleanup_result(path=path, cleanup=cleanup)
+    return _directory_cleanup_result(
+        vault_path=vault_path,
+        path=path,
+        cleanup=cleanup,
+    )
 
 
 def _directory_cleanup_result(
     *,
+    vault_path: str | Path,
     path: str,
     cleanup: DirectoryCleanupResult,
 ) -> VaultFileOperationResult:
@@ -1806,6 +1819,19 @@ def _directory_cleanup_result(
     else:
         message = f"No empty directories were removed under '{path}'"
         status = "partial"
+    if removed:
+        record_vault_directory_mutation(
+            vault_path=vault_path,
+            path=path,
+            operation="delete",
+            before_exists=True,
+            after_exists=cleanup.after_exists,
+            event_sequence=cleanup.event_sequence,
+            metadata={
+                "removed_directory_count": len(removed),
+                "skipped_directory_count": len(skipped),
+            },
+        )
     return _operation_result(
         message,
         operation="delete",

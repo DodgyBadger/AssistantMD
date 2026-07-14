@@ -9,10 +9,12 @@ import mimetypes
 import re
 import shutil
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+import uuid
 
 import yaml
 from pydantic_ai import DeferredToolResults, ToolApproved, ToolDenied
@@ -114,6 +116,7 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
+from core.vault_state.activity import VaultActivityContext, use_vault_activity
 from core.vault_state.pathing import VaultRootResolutionError, resolve_configured_vault_root
 from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import (
@@ -183,6 +186,8 @@ from .models import (
     VaultPathMutationResponse,
     VaultPathResolveResponse,
     VaultFileResponse,
+    VaultFileRevisionInfo,
+    VaultFileRevisionResponse,
     EditProposalResponse,
     DeferredReviewCallInfo,
     DeferredReviewResponse,
@@ -195,9 +200,9 @@ from .models import (
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
     ExecutionTaskListResponse,
-    VaultTaskMutationGroupInfo,
-    VaultTaskMutationInfo,
-    VaultTaskMutationsResponse,
+    VaultActivityGroupInfo,
+    VaultMutationInfo,
+    VaultActivityResponse,
     VaultStateCleanupResponse,
 )
 from .exceptions import APIException, SystemConfigurationError
@@ -458,6 +463,43 @@ def get_vault_file(vault_name: str, path: str) -> VaultFileResponse:
     )
 
 
+def get_vault_file_revisions(
+    *,
+    vault_name: str,
+    path: str,
+    limit: int = 50,
+) -> VaultFileRevisionResponse:
+    """Return retained pre-mutation states for one exact vault file path."""
+    _, normalized, _ = _resolve_vault_file_path(vault_name, path)
+    revisions = VaultStateService().list_file_revisions(
+        vault_name=vault_name,
+        path=normalized,
+        limit=limit,
+    )
+    return VaultFileRevisionResponse(
+        vault_name=vault_name,
+        path=normalized,
+        revisions=[
+            VaultFileRevisionInfo(
+                snapshot_id=revision.snapshot_id,
+                activity_id=revision.activity_id,
+                activity_kind=revision.activity_kind,
+                activity_source=revision.activity_source,
+                activity_label=revision.activity_label,
+                task_id=revision.task_id,
+                path=revision.path,
+                operation=revision.operation,
+                exists=revision.exists,
+                content_hash=revision.content_hash,
+                snapshot_available=revision.snapshot_available,
+                created_at=revision.created_at,
+                expires_at=revision.expires_at,
+            )
+            for revision in revisions
+        ],
+    )
+
+
 def update_vault_file(
     *,
     vault_name: str,
@@ -470,13 +512,16 @@ def update_vault_file(
     vault_root, normalized, full_path = _resolve_vault_file_path(vault_name, path)
     if not full_path.exists() or not full_path.is_file():
         if create_if_missing and not full_path.exists():
-            write_vault_file(
-                vault_path=vault_root,
-                path=normalized,
-                content=content,
-                fail_if_exists=True,
-                markdown_only=False,
-            )
+            with _explorer_activity(
+                label=f"Create {normalized}",
+            ):
+                write_vault_file(
+                    vault_path=vault_root,
+                    path=normalized,
+                    content=content,
+                    fail_if_exists=True,
+                    markdown_only=False,
+                )
             return _vault_file_response(
                 vault_name=vault_name,
                 path=normalized,
@@ -496,14 +541,17 @@ def update_vault_file(
         vault_name=vault_name,
     )
     try:
-        replace_full_text_content(
-            vault_path=vault_root,
-            path=normalized,
-            content=content,
-            operation="update_vault_file",
-            expected_sha256=expected_sha256,
-            markdown_only=False,
-        )
+        with _explorer_activity(
+            label=f"Edit {normalized}",
+        ):
+            replace_full_text_content(
+                vault_path=vault_root,
+                path=normalized,
+                content=content,
+                operation="update_vault_file",
+                expected_sha256=expected_sha256,
+                markdown_only=False,
+            )
     except VaultFileOperationRejected as exc:
         if exc.code == "file_not_text":
             raise APIException(
@@ -1153,6 +1201,31 @@ def mutate_vault_path(
 ) -> VaultPathMutationResponse:
     """Apply one direct explorer mutation through shared vault operations."""
     vault_root, normalized, full_path = _resolve_vault_file_path(vault_name, path)
+    with _explorer_activity(
+        label=f"{operation.replace('_', ' ').title()} {normalized}",
+    ):
+        return _mutate_vault_path_attributed(
+            vault_name=vault_name,
+            vault_root=vault_root,
+            normalized=normalized,
+            full_path=full_path,
+            operation=operation,
+            destination=destination,
+            content=content,
+        )
+
+
+def _mutate_vault_path_attributed(
+    *,
+    vault_name: str,
+    vault_root: Path,
+    normalized: str,
+    full_path: Path,
+    operation: str,
+    destination: str,
+    content: str,
+) -> VaultPathMutationResponse:
+    """Apply an explorer mutation under an established activity context."""
     if operation == "create_file":
         if full_path.exists():
             raise APIException(
@@ -1258,6 +1331,30 @@ def mutate_vault_path(
         message=f"Unsupported vault path mutation: {operation}",
         details={"operation": operation, "path": normalized},
     )
+
+
+@contextmanager
+def _explorer_activity(
+    *,
+    label: str,
+):
+    """Track one synchronous Explorer command as durable vault activity."""
+    context = VaultActivityContext(
+        activity_id=f"activity_{uuid.uuid4().hex}",
+        kind="explorer",
+        source="api",
+        scope=None,
+        label=label,
+    )
+    service = VaultStateService()
+    with use_vault_activity(context):
+        try:
+            yield context
+        except Exception:
+            service.finish_activity(activity_id=context.activity_id, status="failed")
+            raise
+        else:
+            service.finish_activity(activity_id=context.activity_id, status="completed")
 
 
 def _vault_path_operation_response(
@@ -1612,27 +1709,27 @@ async def list_workflow_tasks(vault_name: str | None = None) -> ExecutionTaskLis
     return await list_execution_tasks(kind=ExecutionTaskKind.WORKFLOW.value, scope=scope)
 
 
-def get_vault_task_mutations(
+def get_vault_activity(
     *,
     vault_name: str,
     limit: int = 50,
     task_id: str | None = None,
     include_expired: bool = False,
     operation: str | None = None,
-) -> VaultTaskMutationsResponse:
-    """Return durable file mutation activity for one vault."""
+) -> VaultActivityResponse:
+    """Return durable attributed vault activity for one vault."""
     _get_vault_path(vault_name)
-    groups = VaultStateService().list_task_mutations(
+    groups = VaultStateService().list_activities(
         vault_name=vault_name,
         limit=limit,
         task_id=task_id,
         include_expired=include_expired,
         operation=operation,
     )
-    return VaultTaskMutationsResponse(
+    return VaultActivityResponse(
         vault_name=vault_name,
         groups=[
-            _vault_task_mutation_group_info(group)
+            _vault_activity_group_info(group)
             for group in groups
         ],
     )
@@ -1643,12 +1740,14 @@ def cleanup_vault_state() -> VaultStateCleanupResponse:
     result = cleanup_expired_vault_state()
     return VaultStateCleanupResponse(
         success=True,
+        expired_activity_rows_deleted=result.expired_activity_rows_deleted,
         expired_mutation_rows_deleted=result.expired_mutation_rows_deleted,
         expired_snapshot_rows_deleted=result.expired_snapshot_rows_deleted,
         snapshot_files_deleted=result.snapshot_files_deleted,
         snapshot_dirs_deleted=result.snapshot_dirs_deleted,
         message=(
             "Vault-state cleanup completed: "
+            f"{result.expired_activity_rows_deleted} activity row(s), "
             f"{result.expired_mutation_rows_deleted} mutation row(s), "
             f"{result.expired_snapshot_rows_deleted} snapshot row(s), "
             f"{result.snapshot_files_deleted} snapshot file(s), "
@@ -1683,11 +1782,11 @@ def get_vault_snapshot_file(snapshot_id: int) -> SnapshotFileResponse:
     )
 
 
-def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
+def _vault_activity_group_info(group) -> VaultActivityGroupInfo:
     chat_session = None
     if group.activity_kind == "chat" and group.chat_session_id:
         chat_session = _chat_store.get_session(group.chat_session_id, group.vault_name)
-    return VaultTaskMutationGroupInfo(
+    return VaultActivityGroupInfo(
         activity_id=group.activity_id,
         activity_kind=group.activity_kind,
         activity_label=group.activity_label,
@@ -1697,6 +1796,8 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
         chat_session_last_activity_at=(
             chat_session.last_activity_at if chat_session else group.chat_session_last_activity_at
         ),
+        status=group.status,
+        rollback_status=group.rollback_status,
         task_id=group.task_id,
         task_kind=group.task_kind,
         task_source=group.task_source,
@@ -1707,12 +1808,15 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
         vault_id=group.vault_id,
         vault_name=group.vault_name,
         mutation_count=group.mutation_count,
+        operation_count=group.operation_count,
         first_mutation_at=group.first_mutation_at,
         last_mutation_at=group.last_mutation_at,
         expires_at=group.expires_at,
         mutations=[
-            VaultTaskMutationInfo(
+            VaultMutationInfo(
                 id=mutation.id,
+                activity_id=mutation.activity_id,
+                operation_id=mutation.operation_id,
                 task_id=mutation.task_id,
                 task_kind=mutation.task_kind,
                 task_source=mutation.task_source,
@@ -1722,7 +1826,9 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
                 step_id=mutation.step_id,
                 path=mutation.path,
                 related_path=mutation.related_path,
+                target_kind=mutation.target_kind,
                 operation=mutation.operation,
+                status=mutation.status,
                 event_sequence=mutation.event_sequence,
                 before_exists=mutation.before_exists,
                 before_hash=mutation.before_hash,
@@ -1733,6 +1839,7 @@ def _vault_task_mutation_group_info(group) -> VaultTaskMutationGroupInfo:
                 snapshot_ref=mutation.snapshot_ref,
                 created_at=mutation.created_at,
                 expires_at=mutation.expires_at,
+                metadata=mutation.metadata,
             )
             for mutation in group.mutations
         ],

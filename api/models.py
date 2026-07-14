@@ -102,6 +102,32 @@ class VaultFileResponse(BaseModel):
     message: Optional[str] = Field(None, description="Human-readable update summary")
 
 
+class VaultFileRevisionInfo(BaseModel):
+    """One retained pre-mutation state for an exact vault file path."""
+
+    snapshot_id: int = Field(..., description="Retained file snapshot id")
+    activity_id: str = Field(..., description="Owning vault activity id")
+    activity_kind: str = Field(..., description="Activity kind such as chat or explorer")
+    activity_source: str = Field(..., description="Activity source such as api or tool")
+    activity_label: str = Field(..., description="User-facing activity label")
+    task_id: Optional[str] = Field(None, description="Execution task id when task-backed")
+    path: str = Field(..., description="Exact vault-relative path at mutation time")
+    operation: str = Field(..., description="Mutation that followed this state")
+    exists: bool = Field(..., description="Whether the file existed in this revision")
+    content_hash: Optional[str] = Field(None, description="Revision content hash")
+    snapshot_available: bool = Field(..., description="Whether retained content can be previewed")
+    created_at: datetime = Field(..., description="Mutation timestamp")
+    expires_at: Optional[datetime] = Field(None, description="Snapshot expiration timestamp")
+
+
+class VaultFileRevisionResponse(BaseModel):
+    """Retained path-based revision history for one vault file."""
+
+    vault_name: str = Field(..., description="Vault name")
+    path: str = Field(..., description="Exact vault-relative path")
+    revisions: List[VaultFileRevisionInfo] = Field(default_factory=list)
+
+
 class VaultFileReferenceInfo(BaseModel):
     """One file or folder candidate for chat reference insertion."""
 
@@ -374,11 +400,13 @@ class VaultRescanResponse(BaseModel):
     metadata: Optional["MetadataResponse"] = Field(None, description="Updated metadata after rescan")
 
 
-class VaultTaskMutationInfo(BaseModel):
-    """One recorded file mutation for a vault task."""
+class VaultMutationInfo(BaseModel):
+    """One recorded path mutation for an attributed vault activity."""
 
     id: int = Field(..., description="Mutation row id")
-    task_id: str = Field(..., description="Execution task id that recorded this mutation")
+    activity_id: str = Field(..., description="Owning vault activity id")
+    operation_id: str = Field(..., description="Logical operation id")
+    task_id: Optional[str] = Field(None, description="Execution task id when task-backed")
     task_kind: Optional[str] = Field(None, description="Task kind such as chat or workflow")
     task_source: Optional[str] = Field(None, description="Task source such as api or scheduler")
     task_scope: Optional[str] = Field(None, description="Task scope")
@@ -387,7 +415,9 @@ class VaultTaskMutationInfo(BaseModel):
     step_id: Optional[str] = Field(None, description="Optional goal_ops step id associated with the mutation")
     path: str = Field(..., description="Vault-relative mutated path")
     related_path: Optional[str] = Field(None, description="Related vault-relative path for paired mutations")
+    target_kind: Literal["file", "directory"] = Field(..., description="Mutation target kind")
     operation: str = Field(..., description="Mutation operation")
+    status: str = Field(..., description="Mutation outcome")
     event_sequence: Optional[int] = Field(None, description="Linked vault file event sequence")
     before_exists: bool = Field(..., description="Whether the file existed before mutation")
     before_hash: Optional[str] = Field(None, description="Content hash before mutation")
@@ -398,10 +428,11 @@ class VaultTaskMutationInfo(BaseModel):
     snapshot_ref: Optional[str] = Field(None, description="Retained pre-mutation snapshot reference")
     created_at: datetime = Field(..., description="Mutation timestamp")
     expires_at: Optional[datetime] = Field(None, description="Snapshot retention expiration")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Operation metadata")
 
 
-class VaultTaskMutationGroupInfo(BaseModel):
-    """File mutations grouped by user-facing activity."""
+class VaultActivityGroupInfo(BaseModel):
+    """Vault mutations grouped by one attributed activity."""
 
     activity_id: str = Field(..., description="Activity group id")
     activity_kind: str = Field(..., description="Activity kind such as chat or workflow")
@@ -410,7 +441,9 @@ class VaultTaskMutationGroupInfo(BaseModel):
     chat_session_title: Optional[str] = Field(None, description="User-defined chat session title")
     chat_session_created_at: Optional[str] = Field(None, description="Chat session creation timestamp")
     chat_session_last_activity_at: Optional[str] = Field(None, description="Chat session last activity timestamp")
-    task_id: str = Field(..., description="Primary task id or chat session scope for this group")
+    status: str = Field(..., description="Durable activity outcome")
+    rollback_status: Optional[str] = Field(None, description="Rollback outcome when applicable")
+    task_id: Optional[str] = Field(None, description="Execution task id when task-backed")
     task_kind: Optional[str] = Field(None, description="Task kind such as chat or workflow")
     task_source: Optional[str] = Field(None, description="Task source such as api or scheduler")
     task_scope: Optional[str] = Field(None, description="Task scope")
@@ -419,20 +452,21 @@ class VaultTaskMutationGroupInfo(BaseModel):
     step_id: Optional[str] = Field(None, description="Optional goal_ops step id associated with the activity")
     vault_id: str = Field(..., description="Stable vault id")
     vault_name: str = Field(..., description="Vault name at mutation time")
-    mutation_count: int = Field(..., description="Number of returned mutations for the task")
+    mutation_count: int = Field(..., description="Number of returned path mutations")
+    operation_count: int = Field(..., description="Number of logical operations")
     first_mutation_at: datetime = Field(..., description="First returned mutation timestamp")
     last_mutation_at: datetime = Field(..., description="Last returned mutation timestamp")
-    expires_at: Optional[datetime] = Field(None, description="Earliest snapshot retention expiration")
-    mutations: List[VaultTaskMutationInfo] = Field(default_factory=list, description="Returned mutations")
+    expires_at: Optional[datetime] = Field(None, description="Earliest activity data expiration")
+    mutations: List[VaultMutationInfo] = Field(default_factory=list, description="Returned mutations")
 
 
-class VaultTaskMutationsResponse(BaseModel):
-    """Response for recent vault file mutation activity."""
+class VaultActivityResponse(BaseModel):
+    """Response for recent attributed vault activity."""
 
     vault_name: str = Field(..., description="Requested vault name")
-    groups: List[VaultTaskMutationGroupInfo] = Field(
+    groups: List[VaultActivityGroupInfo] = Field(
         default_factory=list,
-        description="Recent task mutation groups",
+        description="Recent attributed activity groups",
     )
 
 
@@ -440,6 +474,7 @@ class VaultStateCleanupResponse(BaseModel):
     """Response for manual vault-state cleanup."""
 
     success: bool = Field(..., description="Whether cleanup completed")
+    expired_activity_rows_deleted: int = Field(..., description="Deleted expired activity rows")
     expired_mutation_rows_deleted: int = Field(..., description="Deleted expired mutation rows")
     expired_snapshot_rows_deleted: int = Field(..., description="Deleted expired snapshot rows")
     snapshot_files_deleted: int = Field(..., description="Deleted snapshot files")

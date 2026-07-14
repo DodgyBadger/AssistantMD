@@ -54,7 +54,7 @@ Runtime-relevant general settings include:
 - `vault_state_excluded_patterns`: gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds.
 - `vault_scan_interval_seconds`: interval in seconds for the reserved `vault-state-refresh` scheduler job; `0` disables scheduled vault-state refresh.
 - `task_rollback_enabled`: enable automatic rollback for failed, cancelled, or timed-out task file mutations.
-- `task_mutation_retention_days`: days to retain task mutation audit rows before cleanup; defaults to 365 days.
+- `task_mutation_retention_days`: days to retain attributed vault activity and mutation rows before cleanup; defaults to 365 days.
 - `task_snapshot_retention_days`: days to retain task snapshot metadata and files before cleanup; defaults to 30 days.
 - `compaction_type`: chat history compaction policy (`auto`, `suggested`, or `none`). `auto` is the default and is recommended for long-running tasks; if compaction happens too often, tune `compaction_token_threshold` before switching to `suggested` or `none`.
 - `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.

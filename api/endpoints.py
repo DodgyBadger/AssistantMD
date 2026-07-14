@@ -36,7 +36,7 @@ from .models import (
     SystemMigrationStatusResponse,
     VaultRescanRequest,
     VaultRescanResponse,
-    VaultTaskMutationsResponse,
+    VaultActivityResponse,
     VaultStateCleanupResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
@@ -54,6 +54,7 @@ from .models import (
     VaultPathMutationRequest,
     VaultPathMutationResponse,
     VaultFileResponse,
+    VaultFileRevisionResponse,
     VaultFileUpdateRequest,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
@@ -139,6 +140,7 @@ from .services import (
     resolve_vault_path_references,
     mutate_vault_path,
     get_vault_file,
+    get_vault_file_revisions,
     update_vault_file,
     get_chat_edit_proposal,
     get_chat_deferred_review,
@@ -178,7 +180,7 @@ from .services import (
     get_execution_task,
     list_execution_tasks,
     list_workflow_tasks,
-    get_vault_task_mutations,
+    get_vault_activity,
     get_vault_snapshot_file,
     cleanup_vault_state,
     resolve_chat_session_for_request,
@@ -876,7 +878,7 @@ async def refresh_system_authoring_templates_endpoint():
 
 @router.post("/vault-state/cleanup", response_model=VaultStateCleanupResponse)
 async def cleanup_vault_state_endpoint():
-    """Manually delete expired vault-state task safety artifacts."""
+    """Manually delete expired vault-state activity and safety artifacts."""
     try:
         return cleanup_vault_state()
     except Exception as e:
@@ -925,17 +927,17 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
         return create_error_response(e)
 
 
-@router.get("/vaults/{vault_name}/task-mutations", response_model=VaultTaskMutationsResponse)
-async def vault_task_mutations(
+@router.get("/vaults/{vault_name}/activity", response_model=VaultActivityResponse)
+async def vault_activity(
     vault_name: str,
     limit: int = 50,
     task_id: str | None = None,
     include_expired: bool = False,
     operation: str | None = None,
 ):
-    """Return recent durable task file mutations for one vault."""
+    """Return recent durable attributed activity for one vault."""
     try:
-        return get_vault_task_mutations(
+        return get_vault_activity(
             vault_name=vault_name,
             limit=limit,
             task_id=task_id,
@@ -1136,6 +1138,22 @@ async def vault_file(vault_name: str, path: str):
     """Return editable vault file content."""
     try:
         return get_vault_file(vault_name, path)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/vaults/{vault_name}/files/revisions",
+    response_model=VaultFileRevisionResponse,
+)
+async def vault_file_revisions(vault_name: str, path: str, limit: int = 50):
+    """Return retained revision history for one exact vault file path."""
+    try:
+        return get_vault_file_revisions(
+            vault_name=vault_name,
+            path=path,
+            limit=limit,
+        )
     except Exception as e:
         return create_error_response(e)
 

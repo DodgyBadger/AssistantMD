@@ -55,24 +55,43 @@ class VaultFileEvent(Base):
     metadata_json = Column(Text, nullable=True)
 
 
-class TaskFileMutation(Base):
-    """Task-scoped vault file mutation audit row."""
+class VaultActivity(Base):
+    """One durable attributed unit of vault work."""
 
-    __tablename__ = "task_file_mutations"
+    __tablename__ = "vault_activities"
+
+    activity_id = Column(String, primary_key=True, nullable=False)
+    vault_id = Column(String, nullable=False, index=True)
+    vault_name = Column(String, nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    source = Column(String, nullable=False)
+    scope = Column(String, nullable=True)
+    label = Column(String, nullable=False)
+    task_id = Column(String, nullable=True, index=True)
+    goal_id = Column(String, nullable=True, index=True)
+    step_id = Column(String, nullable=True, index=True)
+    status = Column(String, nullable=False)
+    rollback_status = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column(Text, nullable=True)
+
+
+class VaultMutation(Base):
+    """One path-level mutation linked to a durable vault activity."""
+
+    __tablename__ = "vault_mutations"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    task_id = Column(String, nullable=False)
-    task_kind = Column(String, nullable=True)
-    task_source = Column(String, nullable=True)
-    task_scope = Column(String, nullable=True)
-    task_label = Column(String, nullable=True)
-    goal_id = Column(String, nullable=True)
-    step_id = Column(String, nullable=True)
-    vault_id = Column(String, nullable=False)
-    vault_name = Column(String, nullable=False)
+    activity_id = Column(String, nullable=False, index=True)
+    operation_id = Column(String, nullable=False, index=True)
     path = Column(String, nullable=False)
     related_path = Column(String, nullable=True)
+    target_kind = Column(String, nullable=False)
     operation = Column(String, nullable=False)
+    status = Column(String, nullable=False)
     event_sequence = Column(Integer, nullable=True)
     before_exists = Column(Boolean, nullable=False)
     before_hash = Column(String, nullable=True)
@@ -83,15 +102,17 @@ class TaskFileMutation(Base):
     snapshot_ref = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column(Text, nullable=True)
 
 
 class SnapshotSet(Base):
-    """A task-scoped moment when one or more file snapshots were captured."""
+    """An activity- or task-scoped file snapshot capture point."""
 
     __tablename__ = "snapshot_sets"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    task_id = Column(String, nullable=False)
+    activity_id = Column(String, nullable=True, index=True)
+    task_id = Column(String, nullable=True)
     task_kind = Column(String, nullable=True)
     task_source = Column(String, nullable=True)
     task_scope = Column(String, nullable=True)
@@ -115,7 +136,8 @@ class FileSnapshot(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     snapshot_set_id = Column(Integer, nullable=False)
-    task_id = Column(String, nullable=False)
+    activity_id = Column(String, nullable=True, index=True)
+    task_id = Column(String, nullable=True)
     vault_id = Column(String, nullable=False)
     vault_name = Column(String, nullable=False)
     path = Column(String, nullable=False)

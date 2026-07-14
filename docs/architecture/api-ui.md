@@ -40,9 +40,10 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - `/api/chat/tasks` is the canonical chat execution entrypoint. It creates a task-owned streaming chat run; clients observe live events through `/api/chat/tasks/{task_id}/events`, task status through `/api/tasks/{task_id}`, or persisted history through session detail endpoints.
 - `/api/chat/tasks/{task_id}/events` returns `410 ChatTaskEventsExpired` when a known terminal chat task still exists but its process-local event buffer has been pruned.
 - Multipart chat image uploads enforce configured image count, per-image bytes, and total image bytes at the API boundary while reading upload streams. Oversized uploads return `413` before task creation.
-- `/api/vaults/{vault_name}/task-mutations` exposes grouped task file mutation activity for the Dashboard tab.
+- `/api/vaults/{vault_name}/activity` exposes durable attributed vault activity for the Dashboard tab.
 - `/api/vault-state/snapshots/{snapshot_id}/content` serves retained vault-state snapshot files inline after resolving them under the managed snapshot root.
-- `/api/vault-state/cleanup` deletes expired vault-state mutation rows and retained task snapshot artifacts.
+- `/api/vaults/{vault_name}/files/revisions` exposes retained exact-path revisions for the Vault Explorer file history view.
+- `/api/vault-state/cleanup` deletes expired vault activity, mutation, and retained task snapshot artifacts.
 - `/api/system/migrations/status` and `/api/system/migrations/run` expose registered system database migration status and manual execution.
 - `/api/chat/sessions/{session_id}/active-task` and `/api/chat/sessions/{session_id}/cancel` expose chat-session-scoped task lookup and cancellation.
 - `/api/chat/sessions/{session_id}/compaction-status` and `/api/chat/sessions/{session_id}/compact` expose chat history compaction status and execution.

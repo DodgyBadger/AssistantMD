@@ -47,7 +47,7 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
     "vault_state": SystemDatabaseDefinition(
         name="vault_state",
         owner="core.vault_state",
-        description="Rebuildable vault file manifest, change feed, and task audit metadata.",
+        description="Rebuildable vault manifest, change feed, and attributed activity ledger.",
     ),
     "session_summaries": SystemDatabaseDefinition(
         name="session_summaries",
@@ -99,7 +99,7 @@ def get_system_database_path(db_name: str, system_root: str = None) -> str:
     return os.path.join(system_root, f"{db_name}.db")
 
 
-def create_engine_from_system_db(db_name: str):
+def create_engine_from_system_db(db_name: str, system_root: str = None):
     """Create SQLAlchemy engine for a system database with runtime context support.
 
     Automatically uses the system_root from runtime context when available,
@@ -108,13 +108,16 @@ def create_engine_from_system_db(db_name: str):
 
     Args:
         db_name: Name of the database file (without .db extension)
+        system_root: Optional explicit system directory override
 
     Returns:
         SQLAlchemy engine
     """
     get_system_database_definition(db_name)
     # Check if runtime context is available (validation or production)
-    if has_runtime_context():
+    if system_root is not None:
+        database_path = get_system_database_path(db_name, system_root)
+    elif has_runtime_context():
         runtime = get_runtime_context()
         system_root = str(runtime.config.system_root)
         database_path = get_system_database_path(db_name, system_root)

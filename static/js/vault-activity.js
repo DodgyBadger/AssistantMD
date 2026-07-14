@@ -8,14 +8,14 @@
             }
             const activity = state.vaultActivity[vaultName];
             if (!activity) {
-                return '<p class="text-sm text-txt-secondary">Loading task file mutations...</p>';
+                return '<p class="text-sm text-txt-secondary">Loading vault activity...</p>';
             }
             if (activity.error) {
                 return `<p class="state-error text-sm">${escapeHtml(activity.error)}</p>`;
             }
             const groups = activity.groups || [];
             if (!groups.length) {
-                return '<p class="text-sm text-txt-secondary">No retained task file mutations for this vault.</p>';
+                return '<p class="text-sm text-txt-secondary">No retained vault activity for this vault.</p>';
             }
             const sortedGroups = sortVaultActivityGroups(groups);
             return `
@@ -24,9 +24,10 @@
                         <thead>
                             <tr>
                                 ${renderVaultActivitySortHeader('type', 'Type', 'cell-center')}
-                                ${renderVaultActivitySortHeader('task', 'Task')}
+                                ${renderVaultActivitySortHeader('task', 'Activity')}
+                                ${renderVaultActivitySortHeader('status', 'Status')}
                                 ${renderVaultActivitySortHeader('last_run', 'Last Run')}
-                                ${renderVaultActivitySortHeader('files', 'Files Mutated')}
+                                ${renderVaultActivitySortHeader('files', 'Changes')}
                             </tr>
                         </thead>
                         <tbody>
@@ -38,6 +39,7 @@
                                     <td>
                                         <span>${escapeHtml(renderActivityTaskTitle(group))}</span>
                                     </td>
+                                    <td class="cell-xs">${escapeHtml(renderActivityStatus(group))}</td>
                                     <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
                                     <td>
                                         <button
@@ -48,7 +50,7 @@
                                             aria-label="View activity files"
                                             title="View activity files"
                                         >
-                                            ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
+                                            ${group.operation_count || 0} operation${group.operation_count === 1 ? '' : 's'}
                                         </button>
                                     </td>
                                 </tr>
@@ -100,7 +102,10 @@
                 return renderActivityTaskTitle(a).localeCompare(renderActivityTaskTitle(b));
             }
             if (column === 'files') {
-                return (a.mutation_count || 0) - (b.mutation_count || 0);
+                return (a.operation_count || 0) - (b.operation_count || 0);
+            }
+            if (column === 'status') {
+                return renderActivityStatus(a).localeCompare(renderActivityStatus(b));
             }
             const aTime = Date.parse(a.last_mutation_at || '') || 0;
             const bTime = Date.parse(b.last_mutation_at || '') || 0;
@@ -117,7 +122,7 @@
                 });
             }
             return stripActivityKindPrefix(
-                group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
+                group.activity_label || `${group.activity_kind || 'activity'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
             );
         }
 
@@ -127,6 +132,7 @@
             if (kind === 'workflow') return '⚙️';
             if (kind === 'context') return '🧩';
             if (kind === 'ingestion') return '📥';
+            if (kind === 'explorer') return '✎';
             return '•';
         }
 
@@ -144,7 +150,8 @@
             if (kind === 'workflow') return 'Workflow';
             if (kind === 'context') return 'Context assembly';
             if (kind === 'ingestion') return 'Ingestion';
-            return 'Task';
+            if (kind === 'explorer') return 'Vault Explorer';
+            return 'Activity';
         }
 
         function normalizedActivityKind(group) {
@@ -152,6 +159,7 @@
             if (rawKind === 'chat') return 'chat';
             if (rawKind === 'workflow') return 'workflow';
             if (rawKind === 'ingestion') return 'ingestion';
+            if (rawKind === 'explorer') return 'explorer';
             if (rawKind === 'context' || rawKind === 'context_assembly' || rawKind === 'context assembly') {
                 return 'context';
             }
@@ -160,7 +168,12 @@
             if (label.startsWith('workflow:')) return 'workflow';
             if (label.startsWith('ingestion:')) return 'ingestion';
             if (label.startsWith('context:') || label.startsWith('context assembly:')) return 'context';
-            return rawKind || 'task';
+            return rawKind || 'activity';
+        }
+
+        function renderActivityStatus(group) {
+            const value = String(group.status || 'recorded').replaceAll('_', ' ');
+            return value.replace(/\b\w/g, character => character.toUpperCase());
         }
 
         function stripActivityKindPrefix(label) {
@@ -214,7 +227,7 @@
                     </div>
                     <div class="p-4">
                         <div class="text-sm text-txt-secondary mb-3">
-                            Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
+                            Last run ${formatShortDate(group.last_mutation_at)} · ${group.operation_count || 0} operation${group.operation_count === 1 ? '' : 's'} · ${escapeHtml(renderActivityStatus(group))}
                         </div>
                         <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity files" tabindex="0">
                             <table class="dashboard-table">
@@ -232,7 +245,7 @@
                                         <tr>
                                             <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
                                             <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
-                                            <td>${escapeHtml(mutation.operation)}</td>
+                                            <td>${escapeHtml(mutation.operation)} ${mutation.target_kind === 'directory' ? '(folder)' : ''}</td>
                                             <td class="cell-xs">${formatShortDate(mutation.created_at)}</td>
                                             <td>${renderMutationSnapshotLink(mutation)}</td>
                                         </tr>
@@ -329,7 +342,7 @@
             state.vaultActivity[vaultName] = { loading: true };
             updateVaultActivityContainer(vaultName);
             try {
-                const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/task-mutations?limit=25`);
+                const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/activity?limit=25`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 state.vaultActivity[vaultName] = { groups: data.groups || [] };

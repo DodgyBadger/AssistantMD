@@ -19,6 +19,7 @@ from core.settings import validate_settings
 from core.settings.store import get_general_settings, refresh_settings_cache
 from core.system_migrations import run_system_migrations
 from core.vault_state.rollback import handle_task_terminal_for_rollback
+from core.vault_state.activity import handle_task_terminal_for_activity
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.authoring.template_discovery import seed_system_templates
@@ -127,7 +128,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             pass
 
         task_coordinator = TaskCoordinator(
-            terminal_observers=[handle_task_terminal_for_rollback],
+            terminal_observers=[
+                handle_task_terminal_for_rollback,
+                handle_task_terminal_for_activity,
+            ],
         )
         background_tasks: set[asyncio.Task] = set()
         background_spawner = RuntimeBackgroundSpawner(

@@ -79,6 +79,8 @@ class VaultStateRollbackScenario(BaseScenario):
             expected={
                 "task_id": task_id,
                 "terminal_status": "failed",
+                "rollback_status": "partial",
+                "nonrollbackable_mutation_rows": 1,
             },
         )
 
@@ -105,9 +107,18 @@ class VaultStateRollbackScenario(BaseScenario):
             not (Path(vault) / "notes/move-destination.md").exists(),
             "Rollback should remove moved destination file",
         )
+        self.soft_assert(
+            (Path(vault) / "notes/directory-before-failure").is_dir(),
+            "Directory actions should remain when task rollback has no retained directory snapshot",
+        )
 
         snapshot_status = self._snapshot_status(task_id)
         self.soft_assert_equal(snapshot_status, "rolled_back", "Task snapshot should be marked rolled back")
+        self.soft_assert_equal(
+            self._activity_status(task_id),
+            ("failed", "partial"),
+            "Task activity should expose a partial rollback when directory actions remain",
+        )
         retry_result = rollback_task_file_mutations(
             task_id=task_id,
             terminal_status="failed",
@@ -155,9 +166,26 @@ class VaultStateRollbackScenario(BaseScenario):
         conn = sqlite3.connect(db_path)
         try:
             return conn.execute(
-                "SELECT id FROM task_file_mutations WHERE task_id = ?",
+                """
+                SELECT m.id
+                FROM vault_mutations AS m
+                JOIN vault_activities AS a ON a.activity_id = m.activity_id
+                WHERE a.task_id = ?
+                """,
                 (task_id,),
             ).fetchall()
+        finally:
+            conn.close()
+
+    def _activity_status(self, task_id: str) -> tuple[str, str | None] | None:
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT status, rollback_status FROM vault_activities WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+            return (row[0], row[1]) if row is not None else None
         finally:
             conn.close()
 
@@ -190,6 +218,10 @@ await file_write(
     operation="move",
     path="notes/move-source.md",
     destination="notes/move-destination.md",
+)
+await file_write(
+    operation="mkdir",
+    path="notes/directory-before-failure",
 )
 raise RuntimeError("rollback probe failure")
 ```

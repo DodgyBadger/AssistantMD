@@ -728,7 +728,7 @@ def get_vault_state_excluded_patterns() -> list[str]:
 
 
 def get_task_mutation_retention_days() -> int:
-    """Return days to retain task mutation audit rows."""
+    """Return days to retain attributed vault mutation rows."""
     entry = get_general_settings().get("task_mutation_retention_days")
     value = getattr(entry, "value", None) if entry is not None else None
     template_default = _get_template_setting_positive_int("task_mutation_retention_days", 365)
