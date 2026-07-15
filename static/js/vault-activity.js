@@ -3,6 +3,10 @@
         const { escapeHtml, formatShortDate } = utils;
         const icons = window.AssistantMDIcons;
         const rollbackPreviews = new WeakMap();
+
+        function interactionLocked() {
+            return Boolean(state.isLoading || state.pendingDeferredReview);
+        }
         function renderVaultActivityResult(vaultName) {
             if (!vaultName) {
                 return '<p class="text-sm text-txt-secondary">No vault selected.</p>';
@@ -318,28 +322,7 @@
                 }
                 if (!overlay.isConnected) return;
                 rollbackPreviews.set(overlay, payload);
-                if (!payload.can_rollback) {
-                    const reason = payload.issues?.[0]?.message || 'Rollback is not available for this activity.';
-                    area.innerHTML = `
-                        <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="${escapeHtml(reason)}">
-                            ${icons.RESTORE_ICON_SVG}
-                            <span>Rollback unavailable</span>
-                        </button>
-                    `;
-                    return;
-                }
-                const total = (payload.restore_count || 0) + (payload.delete_count || 0);
-                area.innerHTML = `
-                    <button
-                        type="button"
-                        class="ui-button-secondary vault-file-revision-action-button"
-                        data-vault-activity-rollback="true"
-                        title="Restore ${total} file state${total === 1 ? '' : 's'}"
-                    >
-                        ${icons.RESTORE_ICON_SVG}
-                        <span>Rollback activity</span>
-                    </button>
-                `;
+                renderRollbackAction(area, payload);
             } catch (error) {
                 if (!overlay.isConnected) return;
                 area.innerHTML = `
@@ -353,7 +336,7 @@
 
         async function rollbackVaultActivity(overlay, vaultName, activityId, button) {
             const preview = rollbackPreviews.get(overlay);
-            if (!preview?.can_rollback) return;
+            if (!preview?.can_rollback || interactionLocked()) return;
             const total = (preview.restore_count || 0) + (preview.delete_count || 0);
             if (!window.confirm(
                 `Rollback ${total} file state${total === 1 ? '' : 's'} from this activity? The current states will remain available as revisions.`
@@ -397,6 +380,50 @@
                         </button>
                     `;
                 }
+            }
+        }
+
+        function renderRollbackAction(area, preview) {
+            if (interactionLocked()) {
+                area.innerHTML = `
+                    <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="Available when the active response finishes">
+                        ${icons.RESTORE_ICON_SVG}
+                        <span>Rollback activity</span>
+                    </button>
+                `;
+                return;
+            }
+            if (!preview.can_rollback) {
+                const reason = preview.issues?.[0]?.message || 'Rollback is not available for this activity.';
+                area.innerHTML = `
+                    <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="${escapeHtml(reason)}">
+                        ${icons.RESTORE_ICON_SVG}
+                        <span>Rollback unavailable</span>
+                    </button>
+                `;
+                return;
+            }
+            const total = (preview.restore_count || 0) + (preview.delete_count || 0);
+            area.innerHTML = `
+                <button
+                    type="button"
+                    class="ui-button-secondary vault-file-revision-action-button"
+                    data-vault-activity-rollback="true"
+                    title="Restore ${total} file state${total === 1 ? '' : 's'}"
+                >
+                    ${icons.RESTORE_ICON_SVG}
+                    <span>Rollback activity</span>
+                </button>
+            `;
+        }
+
+        function syncInteractionLocks() {
+            const overlay = document.getElementById('vault-activity-modal');
+            if (!(overlay instanceof HTMLElement)) return;
+            const area = overlay.querySelector('[data-vault-activity-rollback-area]');
+            const preview = rollbackPreviews.get(overlay);
+            if (area instanceof HTMLElement && preview) {
+                renderRollbackAction(area, preview);
             }
         }
 
@@ -520,6 +547,7 @@
             loadActivity: loadVaultActivity,
             updateContainer: updateVaultActivityContainer,
             closeDetails: closeVaultActivityDetails,
+            syncInteractionLocks,
             attachEventListeners,
         });
     }

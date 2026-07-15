@@ -262,6 +262,8 @@
                     const saved = await saveFile(path, vault, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
                         sha256 = nextHash;
                         createIfMissing = false;
+                        currentFileExists = true;
+                        currentFileHashKnown = true;
                     }, () => sha256);
                     if (saved) {
                         savedContent = editor.value;

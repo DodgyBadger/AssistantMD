@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+import threading
 from typing import Iterable
 import uuid
 
@@ -20,6 +21,7 @@ from core.vault_state.pathing import resolve_vault_relative_path
 from core.vault_state.service import VaultStateService
 
 logger = UnifiedLogger(tag="vault-activity-rollback")
+_ACTIVITY_ROLLBACK_LOCKS = tuple(threading.RLock() for _ in range(128))
 
 
 @dataclass(frozen=True)
@@ -98,154 +100,29 @@ def preview_activity_rollback(
     vault_root = Path(vault_path).resolve()
     service = VaultStateService()
     now = datetime.now(UTC)
-    issues: list[ActivityRollbackIssue] = []
+    activity, rows, snapshots = _load_rollback_records(
+        service=service,
+        vault_root=vault_root,
+        activity_id=activity_id,
+    )
+    issues = _activity_rollback_issues(
+        activity=activity,
+        rows=rows,
+        vault_root=vault_root,
+        now=now,
+    )
     paths: list[ActivityRollbackPath] = []
-
-    with service.SessionFactory() as session:
-        activity = session.get(VaultActivity, activity_id)
-        if activity is None or activity.vault_name != vault_root.name:
-            raise LookupError(f"Vault activity not found: {activity_id}")
-        rows = list(
-            session.scalars(
-                select(VaultMutation)
-                .where(VaultMutation.activity_id == activity_id)
-                .order_by(VaultMutation.created_at.asc(), VaultMutation.id.asc())
-            )
-        )
-        snapshots = {
-            snapshot.id: snapshot
-            for snapshot in session.scalars(
-                select(FileSnapshot).where(
-                    FileSnapshot.id.in_(
-                        [
-                            row.before_snapshot_id
-                            for row in rows
-                            if row.before_snapshot_id
-                        ]
-                    )
-                )
-            )
-        }
-
-    current_identity = resolve_or_create_vault_identity(vault_root)
-    if current_identity.vault_id != activity.vault_id:
-        issues.append(
-            ActivityRollbackIssue(
-                code="vault_identity_mismatch",
-                message="This activity belongs to an earlier vault with the same name.",
-            )
-        )
-    if activity.status == "running":
-        issues.append(
-            ActivityRollbackIssue(
-                code="activity_in_progress",
-                message="This activity is still in progress.",
-            )
-        )
-    if _is_expired(activity.expires_at, now) or any(
-        _is_expired(row.expires_at, now) for row in rows
-    ):
-        issues.append(
-            ActivityRollbackIssue(
-                code="activity_expired",
-                message="This activity is outside its retained rollback window.",
-            )
-        )
-    if activity.rollback_status == "completed":
-        issues.append(
-            ActivityRollbackIssue(
-                code="already_rolled_back",
-                message="This activity has already been rolled back.",
-            )
-        )
-    if not rows:
-        issues.append(
-            ActivityRollbackIssue(
-                code="no_mutations",
-                message="This activity has no retained mutations to roll back.",
-            )
-        )
-    if any(row.target_kind != "file" for row in rows):
-        issues.append(
-            ActivityRollbackIssue(
-                code="unsupported_directory_operation",
-                message="Directory operations do not retain enough state for full rollback.",
-            )
-        )
-    if any(row.status != "completed" for row in rows):
-        issues.append(
-            ActivityRollbackIssue(
-                code="incomplete_mutation",
-                message="This activity contains a mutation without a completed outcome.",
-            )
-        )
-
     for path, path_rows in _group_rows_by_path(rows):
-        first = path_rows[0]
-        last = path_rows[-1]
-        snapshot_path: Path | None = None
-        snapshot_id = first.before_snapshot_id
-        if first.before_exists:
-            snapshot = snapshots.get(snapshot_id) if snapshot_id is not None else None
-            if snapshot is None or _is_expired(snapshot.expires_at, now):
-                issues.append(
-                    ActivityRollbackIssue(
-                        code="snapshot_unavailable",
-                        message=f"The retained state for '{path}' is no longer available.",
-                        path=path,
-                    )
-                )
-            else:
-                resolved = service.resolve_snapshot_file(snapshot.id)
-                if resolved is None or not resolved.path.is_file():
-                    issues.append(
-                        ActivityRollbackIssue(
-                            code="snapshot_unavailable",
-                            message=f"The retained state for '{path}' is no longer available.",
-                            path=path,
-                        )
-                    )
-                elif hash_file_bytes(resolved.path, length=None) != first.before_hash:
-                    issues.append(
-                        ActivityRollbackIssue(
-                            code="snapshot_invalid",
-                            message=f"The retained state for '{path}' failed integrity checking.",
-                            path=path,
-                        )
-                    )
-                else:
-                    snapshot_path = resolved.path
-
-        full_path = resolve_vault_relative_path(
-            vault_path=vault_root,
+        planned_path, path_issues = _plan_rollback_path(
+            service=service,
+            vault_root=vault_root,
             path=path,
-            markdown_only=False,
+            rows=path_rows,
+            snapshots=snapshots,
+            now=now,
         )
-        actual_exists = full_path.exists()
-        actual_hash = (
-            hash_file_bytes(full_path, length=None)
-            if actual_exists and full_path.is_file()
-            else None
-        )
-        if actual_exists != bool(last.after_exists) or actual_hash != last.after_hash:
-            issues.append(
-                ActivityRollbackIssue(
-                    code="state_conflict",
-                    message=f"'{path}' has changed since this activity completed.",
-                    path=path,
-                )
-            )
-        paths.append(
-            ActivityRollbackPath(
-                path=path,
-                expected_exists=bool(last.after_exists),
-                expected_sha256=last.after_hash,
-                restore_exists=bool(first.before_exists),
-                restore_sha256=first.before_hash,
-                snapshot_id=snapshot_id,
-                snapshot_path=snapshot_path,
-            )
-        )
+        paths.append(planned_path)
+        issues.extend(path_issues)
 
     return ActivityRollbackPlan(
         activity_id=activity.activity_id,
@@ -259,6 +136,170 @@ def preview_activity_rollback(
     )
 
 
+def _load_rollback_records(
+    *,
+    service: VaultStateService,
+    vault_root: Path,
+    activity_id: str,
+) -> tuple[VaultActivity, tuple[VaultMutation, ...], dict[int, FileSnapshot]]:
+    with service.SessionFactory() as session:
+        activity = session.get(VaultActivity, activity_id)
+        if activity is None or activity.vault_name != vault_root.name:
+            raise LookupError(f"Vault activity not found: {activity_id}")
+        rows = tuple(
+            session.scalars(
+                select(VaultMutation)
+                .where(VaultMutation.activity_id == activity_id)
+                .order_by(VaultMutation.created_at.asc(), VaultMutation.id.asc())
+            )
+        )
+        snapshot_ids = tuple(
+            row.before_snapshot_id for row in rows if row.before_snapshot_id is not None
+        )
+        snapshots = {
+            snapshot.id: snapshot
+            for snapshot in session.scalars(
+                select(FileSnapshot).where(FileSnapshot.id.in_(snapshot_ids))
+            )
+        }
+    return activity, rows, snapshots
+
+
+def _activity_rollback_issues(
+    *,
+    activity: VaultActivity,
+    rows: tuple[VaultMutation, ...],
+    vault_root: Path,
+    now: datetime,
+) -> list[ActivityRollbackIssue]:
+    issues: list[ActivityRollbackIssue] = []
+    current_identity = resolve_or_create_vault_identity(vault_root)
+    checks = (
+        (
+            current_identity.vault_id != activity.vault_id,
+            "vault_identity_mismatch",
+            "This activity belongs to an earlier vault with the same name.",
+        ),
+        (
+            activity.status == "running",
+            "activity_in_progress",
+            "This activity is still in progress.",
+        ),
+        (
+            _is_expired(activity.expires_at, now)
+            or any(_is_expired(row.expires_at, now) for row in rows),
+            "activity_expired",
+            "This activity is outside its retained rollback window.",
+        ),
+        (
+            activity.rollback_status == "completed",
+            "already_rolled_back",
+            "This activity has already been rolled back.",
+        ),
+        (
+            not rows,
+            "no_mutations",
+            "This activity has no retained mutations to roll back.",
+        ),
+        (
+            any(row.target_kind != "file" for row in rows),
+            "unsupported_directory_operation",
+            "Directory operations do not retain enough state for full rollback.",
+        ),
+        (
+            any(row.status != "completed" for row in rows),
+            "incomplete_mutation",
+            "This activity contains a mutation without a completed outcome.",
+        ),
+    )
+    for failed, code, message in checks:
+        if failed:
+            issues.append(ActivityRollbackIssue(code=code, message=message))
+    return issues
+
+
+def _plan_rollback_path(
+    *,
+    service: VaultStateService,
+    vault_root: Path,
+    path: str,
+    rows: tuple[VaultMutation, ...],
+    snapshots: dict[int, FileSnapshot],
+    now: datetime,
+) -> tuple[ActivityRollbackPath, tuple[ActivityRollbackIssue, ...]]:
+    first = rows[0]
+    last = rows[-1]
+    snapshot_path, snapshot_issue = _resolve_rollback_snapshot(
+        service=service,
+        path=path,
+        mutation=first,
+        snapshots=snapshots,
+        now=now,
+    )
+    issues = [snapshot_issue] if snapshot_issue is not None else []
+    full_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=path,
+        markdown_only=False,
+    )
+    actual_exists = full_path.exists()
+    actual_hash = (
+        hash_file_bytes(full_path, length=None)
+        if actual_exists and full_path.is_file()
+        else None
+    )
+    if actual_exists != bool(last.after_exists) or actual_hash != last.after_hash:
+        issues.append(
+            ActivityRollbackIssue(
+                code="state_conflict",
+                message=f"'{path}' has changed since this activity completed.",
+                path=path,
+            )
+        )
+    return (
+        ActivityRollbackPath(
+            path=path,
+            expected_exists=bool(last.after_exists),
+            expected_sha256=last.after_hash,
+            restore_exists=bool(first.before_exists),
+            restore_sha256=first.before_hash,
+            snapshot_id=first.before_snapshot_id,
+            snapshot_path=snapshot_path,
+        ),
+        tuple(issues),
+    )
+
+
+def _resolve_rollback_snapshot(
+    *,
+    service: VaultStateService,
+    path: str,
+    mutation: VaultMutation,
+    snapshots: dict[int, FileSnapshot],
+    now: datetime,
+) -> tuple[Path | None, ActivityRollbackIssue | None]:
+    if not mutation.before_exists:
+        return None, None
+    snapshot = snapshots.get(mutation.before_snapshot_id or 0)
+    unavailable = ActivityRollbackIssue(
+        code="snapshot_unavailable",
+        message=f"The retained state for '{path}' is no longer available.",
+        path=path,
+    )
+    if snapshot is None or _is_expired(snapshot.expires_at, now):
+        return None, unavailable
+    resolved = service.resolve_snapshot_file(snapshot.id)
+    if resolved is None or not resolved.path.is_file():
+        return None, unavailable
+    if hash_file_bytes(resolved.path, length=None) != mutation.before_hash:
+        return None, ActivityRollbackIssue(
+            code="snapshot_invalid",
+            message=f"The retained state for '{path}' failed integrity checking.",
+            path=path,
+        )
+    return resolved.path, None
+
+
 def execute_activity_rollback(
     *,
     vault_path: str | Path,
@@ -267,6 +308,23 @@ def execute_activity_rollback(
 ) -> ActivityRollbackResult:
     """Execute one preflighted activity rollback as a new durable activity."""
     vault_root = Path(vault_path).resolve()
+    lock_key = f"{vault_root}:{activity_id}"
+    lock = _ACTIVITY_ROLLBACK_LOCKS[hash(lock_key) % len(_ACTIVITY_ROLLBACK_LOCKS)]
+    with lock:
+        return _execute_activity_rollback_locked(
+            vault_root=vault_root,
+            activity_id=activity_id,
+            expected_states=expected_states,
+        )
+
+
+def _execute_activity_rollback_locked(
+    *,
+    vault_root: Path,
+    activity_id: str,
+    expected_states: Iterable[tuple[str, bool, str | None]],
+) -> ActivityRollbackResult:
+    """Execute rollback while exclusively owning the source activity lifecycle."""
     plan = preview_activity_rollback(vault_path=vault_root, activity_id=activity_id)
     expected_state_items = tuple(expected_states)
     expected_state_map = _expected_state_map(expected_state_items)
@@ -304,9 +362,9 @@ def execute_activity_rollback(
     states = tuple(
         FileStateRestore(
             path=path.path,
-            content=path.snapshot_path.read_bytes() if path.snapshot_path else None,
             expected_exists=path.expected_exists,
             expected_sha256=path.expected_sha256,
+            content_path=path.snapshot_path,
         )
         for path in plan.paths
     )

@@ -3,11 +3,15 @@
 import json
 import sqlite3
 import sys
+import threading
+import asyncio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.vault_state.activity import VaultActivityContext, use_vault_activity
+import core.vault_state.activity_rollback as activity_rollback
+from core.vault_state.activity_rollback import ActivityRollbackUnavailable
 from core.vault_state.file_mutations import (
     replace_vault_file_content,
     write_vault_file,
@@ -102,9 +106,9 @@ class VaultActivityRollbackScenario(BaseScenario):
         ) == "final update\n"
 
         available_again = self._preview(vault.name, source_id)
-        assert (
-            available_again["can_rollback"] is True
-        ), "Restoring the later edit should re-enable the earlier activity rollback"
+        assert available_again["can_rollback"] is True, (
+            "Restoring the later edit should re-enable the earlier activity rollback"
+        )
         rollback_checkpoint = self.event_checkpoint()
         source_rollback = self._execute(vault.name, source_id, available_again)
         assert source_rollback.status_code == 200
@@ -177,6 +181,81 @@ class VaultActivityRollbackScenario(BaseScenario):
             issue["code"] == "unsupported_directory_operation"
             for issue in directory_preview["issues"]
         )
+
+        await self._assert_concurrent_submission_is_serialized(vault)
+
+    async def _assert_concurrent_submission_is_serialized(self, vault: Path) -> None:
+        source_id = "activity_concurrent_rollback_source"
+        source_context = VaultActivityContext(
+            activity_id=source_id,
+            kind="explorer",
+            source="api",
+            scope=None,
+            label="Concurrent rollback fixture",
+        )
+        self.create_file(vault, "notes/concurrent-rollback.md", "before\n")
+        with use_vault_activity(source_context):
+            replace_vault_file_content(
+                vault_path=vault,
+                path="notes/concurrent-rollback.md",
+                content="after\n",
+                operation="update_vault_file",
+            )
+        VaultStateService().finish_activity(activity_id=source_id, status="completed")
+
+        preview = activity_rollback.preview_activity_rollback(
+            vault_path=vault,
+            activity_id=source_id,
+        )
+        expected_states = tuple(
+            (item.path, item.expected_exists, item.expected_sha256)
+            for item in preview.paths
+        )
+        first_entered = threading.Event()
+        allow_first = threading.Event()
+        restore_calls = 0
+        restore_calls_lock = threading.Lock()
+        original_restore = activity_rollback.restore_vault_file_states
+
+        def paused_restore(**kwargs):
+            nonlocal restore_calls
+            with restore_calls_lock:
+                restore_calls += 1
+                call_number = restore_calls
+            if call_number == 1:
+                first_entered.set()
+                assert allow_first.wait(2), "Timed out waiting to release rollback"
+            return original_restore(**kwargs)
+
+        def execute():
+            return activity_rollback.execute_activity_rollback(
+                vault_path=vault,
+                activity_id=source_id,
+                expected_states=expected_states,
+            )
+
+        activity_rollback.restore_vault_file_states = paused_restore
+        try:
+            first = asyncio.create_task(asyncio.to_thread(execute))
+            assert await asyncio.to_thread(first_entered.wait, 1)
+            second = asyncio.create_task(asyncio.to_thread(execute))
+            await asyncio.sleep(0.05)
+            assert restore_calls == 1, (
+                "A second rollback submission must wait before restore execution"
+            )
+            allow_first.set()
+            await first
+            try:
+                await second
+            except ActivityRollbackUnavailable:
+                pass
+            else:
+                raise AssertionError(
+                    "A duplicate rollback submission should be rejected"
+                )
+        finally:
+            allow_first.set()
+            activity_rollback.restore_vault_file_states = original_restore
 
     def _preview(self, vault_name: str, activity_id: str) -> dict:
         response = self.call_api(

@@ -322,3 +322,141 @@ At plan creation, the following focused scenarios pass:
 The vault mutation routing guard, Python compilation, Ruff default checks, JS
 syntax checks, and `git diff --check` also pass. These confirm the current happy
 path; they do not cover the critical and high-severity cases above.
+
+## Second Hardening Pass: Vault Activity And Explorer
+
+This pass reviews `98013d2..c8df85c`. The break is the first hardening commit,
+`98013d2 Harden collaborative review lifecycle`; the range after it introduced
+session mode persistence, review-loop protections, expanded Explorer behavior,
+durable vault activities and revisions, revision restore, and atomic activity
+rollback.
+
+### Current Invariants
+
+- Every AssistantMD vault mutation is serialized against conflicting mutations,
+  attributed to one activity, refreshed into vault state, and recorded with the
+  best available pre-mutation snapshot.
+- A directory mutation conflicts with every mutation at or below that directory;
+  moving a directory cannot race a write that recreates part of its old tree.
+- Explicit activity rollback is all-or-nothing, validates the caller's preview
+  against current state, and can complete at most once for a source activity.
+- Restore compensation uses retained snapshots without requiring all affected
+  file contents to be resident in memory.
+- The Explorer and Activity modal are read-only while chat execution or deferred
+  review owns the interactive mutation surface.
+- After creating or restoring a file, the open file view immediately reflects
+  the new existence and hash state used by later revision actions.
+- Session mode has one persisted `normal | inline_edit` contract across settings,
+  session reload, task execution, and deferred continuation.
+
+### Findings
+
+#### H2-01: Directory mutations do not conflict with descendant file mutations
+
+- **Severity:** High.
+- **Smell:** partial concurrency contract / hierarchy race.
+- **Evidence:** exact-path mutation locks serialize `folder` separately from
+  `folder/child.md`. Directory move locks only its source and destination roots;
+  empty-directory deletion and directory creation do not hold a mutation lock.
+- **Consequence:** a file write can overlap a directory move, recreate the old
+  source tree, or produce mutation records whose filesystem transition no longer
+  matches the recorded operation.
+- **Correction:** include the resolved vault root in every mutation lock set and
+  retain exact target locks for same-path ordering. Lock directory create,
+  cleanup, and move around validation, mutation, refresh, and recording. Ensure
+  outer read-modify-write helpers acquire the same root-first lock set.
+
+#### H2-02: Concurrent rollback submissions can both pass preflight
+
+- **Severity:** Medium.
+- **Smell:** check-then-act race / incomplete lifecycle serialization.
+- **Evidence:** rollback previews source status before acquiring any lock scoped
+  to the source activity, and marks `rollback_status=completed` only after the
+  new rollback activity finishes.
+- **Consequence:** two requests can start from the same eligible activity. File
+  state checks usually reject the loser, but content-neutral transitions can
+  permit duplicate rollback activities and audit history.
+- **Correction:** serialize preview and execution with a process-local
+  activity-scoped lock, matching the application's existing process-local vault
+  mutation locking model. A second request must re-preview and fail explicitly.
+
+#### H2-03: A newly created file remains absent in the open modal state
+
+- **Severity:** Medium.
+- **Smell:** stale frontend state / invalid lifecycle transition.
+- **Evidence:** successful save updates the hash and disables
+  `createIfMissing`, but does not set `currentFileExists` and
+  `currentFileHashKnown` to true.
+- **Consequence:** restoring the pre-create absent revision from the same modal
+  sends no expected hash and is rejected as stale even though the UI created the
+  file itself.
+- **Correction:** commit existence, hash-known, and hash state together after
+  every successful save.
+
+#### H2-04: Activity rollback bypasses Explorer read-only mode
+
+- **Severity:** Medium.
+- **Smell:** UI policy drift / bypass path.
+- **Evidence:** Explorer mutation controls disable while a chat turn or deferred
+  review is active, but the Activity modal rollback action does not consume or
+  refresh that shared interaction state.
+- **Consequence:** users can start a multi-file rollback while an agent task is
+  reading or mutating the same vault, undermining the read-only contract added
+  for in-flight turns.
+- **Correction:** give the Activity controller the same interaction lock check,
+  disable the action with the established tooltip, recheck on click, and refresh
+  open controls from `syncChatControlLocks()`.
+
+#### H2-05: Restore orchestration buffers every before and desired file state
+
+- **Severity:** Medium.
+- **Smell:** primitive obsession / avoidable memory amplification / long method.
+- **Evidence:** activity rollback reads every desired snapshot into bytes, while
+  atomic restore independently reads every displaced file into bytes for
+  compensation. `_restore_vault_file_states_locked()` has cyclomatic complexity
+  18 and stores five-element state tuples.
+- **Consequence:** a large activity can hold roughly both sides of every file in
+  memory, and compensation behavior is difficult to audit.
+- **Correction:** represent resolved and captured restore states explicitly,
+  stream snapshot-backed desired content, compensate from the snapshots already
+  captured for revision history, and split validation/capture/apply/record/
+  compensation into focused helpers.
+
+### Implementation Stages
+
+1. Add focused concurrency scenarios for directory-move versus child mutation
+   and duplicate activity rollback submission.
+2. Implement vault-hierarchy and activity rollback serialization with lifecycle
+   logging preserved.
+3. Correct Explorer save state and apply the shared read-only policy to Activity
+   rollback controls.
+4. Refactor exact-state restore around typed state records and snapshot-backed
+   streaming without changing its public result contract.
+5. Run the focused activity, revision, mutation recorder, concurrency, API, and
+   frontend structural checks. Maintainers retain ownership of the full suite.
+
+### Second Pass Outcome
+
+H2-01 through H2-05 are implemented.
+
+- File mutations now share a vault hierarchy lock while retaining exact-path
+  serialization; directory creation, cleanup, and move take the exclusive side.
+  Automatic task rollback participates in the same lock contract.
+- Explicit rollback serializes submissions by source activity and re-runs
+  preflight after acquiring that lock, so a duplicate request is rejected before
+  restore execution.
+- Exact-state restore uses named resolved/captured state records, streams desired
+  content from retained snapshots, and uses temporary files for compensation.
+  The new rollback and restore methods no longer exceed the project complexity
+  threshold.
+- File creation commits existence and hash-known state in the open Explorer
+  modal, and Activity rollback now follows the same in-flight read-only policy as
+  the Explorer.
+- Focused scenarios pass for hierarchy concurrency, activity rollback,
+  same-file concurrency, automatic task rollback, mutation recording, Explorer
+  file APIs, and API endpoints. Ruff, Python compilation, JavaScript syntax,
+  vault mutation routing, and whitespace checks pass.
+
+Maintainers should still run the full validation suite. Browser-level checks for
+an open Activity modal changing between enabled and read-only states, and for
+create-then-restore without closing the file modal, remain part of live review.

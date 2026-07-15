@@ -44,6 +44,7 @@ from core.vault_state.file_mutations import (
     move_vault_file,
     record_vault_directory_mutation,
     replace_vault_file_content,
+    vault_directory_mutation_lock,
     vault_file_mutation_lock,
     write_vault_file,
 )
@@ -653,7 +654,7 @@ def edit_vault_line_operation(
 ) -> VaultFileOperationResult:
     """Replace one validated line in an existing markdown file."""
     target = resolve_markdown_text_target(vault_path=vault_path, path=path)
-    with vault_file_mutation_lock(target.full_path):
+    with vault_file_mutation_lock(vault_path, target.full_path):
         return _edit_vault_line_locked(
             vault_path=vault_path,
             target=target,
@@ -916,14 +917,22 @@ def make_vault_directory_operation(
 ) -> VaultFileOperationResult:
     """Create a directory within the vault."""
     target = resolve_text_target(vault_path=vault_path, path=path, markdown_only=False)
-    target.full_path.mkdir(parents=True, exist_ok=True)
-    record_vault_directory_mutation(
-        vault_path=vault_path,
-        path=target.path,
-        operation="mkdir",
-        before_exists=False,
-        after_exists=True,
-    )
+    with vault_directory_mutation_lock(vault_path, target.full_path):
+        before_exists = target.full_path.exists()
+        if before_exists and not target.full_path.is_dir():
+            raise VaultFileOperationRejected(
+                "file_exists",
+                f"Cannot create directory '{target.path}' because a file exists there.",
+            )
+        target.full_path.mkdir(parents=True, exist_ok=True)
+        if not before_exists:
+            record_vault_directory_mutation(
+                vault_path=vault_path,
+                path=target.path,
+                operation="mkdir",
+                before_exists=False,
+                after_exists=True,
+            )
     return _operation_result(
         f"Successfully created directory '{target.path}'",
         operation="mkdir",
@@ -1002,7 +1011,7 @@ def replace_text(
         markdown_only=markdown_only,
         prefer_markdown_extension=prefer_markdown_extension,
     )
-    with vault_file_mutation_lock(target.full_path):
+    with vault_file_mutation_lock(vault_path, target.full_path):
         return _replace_text_locked(
             vault_path=vault_path,
             target=target,
@@ -1112,7 +1121,7 @@ def apply_text_replacements_once(
         path=path,
         markdown_only=markdown_only,
     )
-    with vault_file_mutation_lock(target.full_path):
+    with vault_file_mutation_lock(vault_path, target.full_path):
         prepared = prepare_text_replacements_once(
             vault_path=vault_path,
             path=path,

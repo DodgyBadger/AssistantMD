@@ -11,6 +11,7 @@ from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import ExecutionTaskSnapshot
 from core.runtime.state import get_runtime_context
 from core.settings import get_task_rollback_enabled
+from core.vault_state.file_mutations import vault_file_mutation_lock
 from core.vault_state.models import (
     FileSnapshot,
     SnapshotSet,
@@ -188,13 +189,14 @@ def rollback_task_file_mutations(
                     if file_snapshot is not None
                     else None
                 )
-                _restore_snapshot_file(
-                    file_snapshot=file_snapshot,
-                    snapshot_set=snapshot_set,
-                    mutation=first,
-                    target_path=target_path,
-                    task_id=task_id,
-                )
+                with vault_file_mutation_lock(vault_root, target_path):
+                    _restore_snapshot_file(
+                        file_snapshot=file_snapshot,
+                        snapshot_set=snapshot_set,
+                        mutation=first,
+                        target_path=target_path,
+                        task_id=task_id,
+                    )
                 paths_restored += 1
                 logger.add_sink("validation").info(
                     "task_rollback_file_restored",
@@ -209,9 +211,10 @@ def rollback_task_file_mutations(
                     },
                 )
             else:
-                if target_path.exists():
-                    target_path.unlink()
-                    paths_deleted += 1
+                with vault_file_mutation_lock(vault_root, target_path):
+                    if target_path.exists():
+                        target_path.unlink()
+                        paths_deleted += 1
                 logger.add_sink("validation").info(
                     "task_rollback_file_deleted",
                     data={

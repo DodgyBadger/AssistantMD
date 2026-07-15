@@ -9,21 +9,29 @@ from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
+import shutil
+import tempfile
 import threading
 from typing import Any
 import uuid
 
 from core.logger import UnifiedLogger
-from core.runtime.execution_tasks import get_current_execution_task, goal_context_from_metadata
+from core.runtime.execution_tasks import (
+    get_current_execution_task,
+    goal_context_from_metadata,
+)
 from core.utils.hash import hash_bytes, hash_file_bytes
 from core.vault_state.activity import (
     VaultActivityContext,
     get_current_vault_activity,
     task_activity_id,
 )
-from core.vault_state.identity import resolve_or_create_vault_identity
+from core.vault_state.identity import VaultIdentity, resolve_or_create_vault_identity
 from core.vault_state.models import VaultActivity, VaultMutation
-from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
+from core.vault_state.pathing import (
+    normalize_vault_relative_path,
+    resolve_vault_relative_path,
+)
 from core.vault_state.service import VaultStateService
 from core.vault_state.snapshots import (
     compute_snapshot_expiration,
@@ -45,17 +53,83 @@ class VaultMutationRejected(Exception):
 
 UNCERTAIN_MUTATION_STAGES = {"refresh", "persist"}
 _MUTATION_LOCKS = tuple(threading.RLock() for _ in range(256))
+_VAULT_MUTATION_LOCKS: tuple["_ReentrantReadWriteLock", ...]
 _EXPECTED_HASH_UNSET = object()
 
 
+class _ReentrantReadWriteLock:
+    """Allow concurrent file mutations while excluding vault hierarchy changes."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.RLock())
+        self._readers: dict[int, int] = {}
+        self._writer: int | None = None
+        self._writer_depth = 0
+        self._waiting_writers = 0
+
+    def acquire_read(self) -> None:
+        thread_id = threading.get_ident()
+        with self._condition:
+            if self._writer == thread_id or thread_id in self._readers:
+                self._readers[thread_id] = self._readers.get(thread_id, 0) + 1
+                return
+            while self._writer is not None or self._waiting_writers:
+                self._condition.wait()
+            self._readers[thread_id] = 1
+
+    def release_read(self) -> None:
+        thread_id = threading.get_ident()
+        with self._condition:
+            depth = self._readers.get(thread_id, 0)
+            if depth <= 1:
+                self._readers.pop(thread_id, None)
+                self._condition.notify_all()
+            else:
+                self._readers[thread_id] = depth - 1
+
+    def acquire_write(self) -> None:
+        thread_id = threading.get_ident()
+        with self._condition:
+            if self._writer == thread_id:
+                self._writer_depth += 1
+                return
+            if thread_id in self._readers:
+                raise RuntimeError("Cannot upgrade a vault mutation read lock")
+            self._waiting_writers += 1
+            try:
+                while self._writer is not None or self._readers:
+                    self._condition.wait()
+                self._writer = thread_id
+                self._writer_depth = 1
+            finally:
+                self._waiting_writers -= 1
+
+    def release_write(self) -> None:
+        thread_id = threading.get_ident()
+        with self._condition:
+            if self._writer != thread_id:
+                raise RuntimeError(
+                    "Current thread does not own the vault mutation lock"
+                )
+            self._writer_depth -= 1
+            if self._writer_depth == 0:
+                self._writer = None
+                self._condition.notify_all()
+
+
+_VAULT_MUTATION_LOCKS = tuple(_ReentrantReadWriteLock() for _ in range(64))
+
+
 @contextmanager
-def vault_file_mutation_lock(*paths: str | Path) -> Iterator[None]:
-    """Serialize mutations that target the same resolved vault path."""
+def vault_file_mutation_lock(
+    vault_path: str | Path,
+    *paths: str | Path,
+) -> Iterator[None]:
+    """Share the vault hierarchy lock and serialize exact file targets."""
+    vault_lock = _vault_mutation_lock(vault_path)
+    vault_lock.acquire_read()
     lock_indexes = sorted(
-        {
-            hash(str(Path(path).resolve())) % len(_MUTATION_LOCKS)
-            for path in paths
-        }
+        {hash(str(Path(path).resolve())) % len(_MUTATION_LOCKS) for path in paths}
     )
     locks = [_MUTATION_LOCKS[index] for index in lock_indexes]
     for lock in locks:
@@ -65,6 +139,34 @@ def vault_file_mutation_lock(*paths: str | Path) -> Iterator[None]:
     finally:
         for lock in reversed(locks):
             lock.release()
+        vault_lock.release_read()
+
+
+@contextmanager
+def vault_directory_mutation_lock(
+    vault_path: str | Path,
+    *paths: str | Path,
+) -> Iterator[None]:
+    """Exclude file mutations while changing the vault directory hierarchy."""
+    vault_lock = _vault_mutation_lock(vault_path)
+    vault_lock.acquire_write()
+    lock_indexes = sorted(
+        {hash(str(Path(path).resolve())) % len(_MUTATION_LOCKS) for path in paths}
+    )
+    locks = [_MUTATION_LOCKS[index] for index in lock_indexes]
+    for lock in locks:
+        lock.acquire()
+    try:
+        yield
+    finally:
+        for lock in reversed(locks):
+            lock.release()
+        vault_lock.release_write()
+
+
+def _vault_mutation_lock(vault_path: str | Path) -> _ReentrantReadWriteLock:
+    resolved = str(Path(vault_path).resolve())
+    return _VAULT_MUTATION_LOCKS[hash(resolved) % len(_VAULT_MUTATION_LOCKS)]
 
 
 @dataclass(frozen=True)
@@ -91,9 +193,34 @@ class FileStateRestore:
     """One exact desired file state guarded by its expected current state."""
 
     path: str
-    content: bytes | None
     expected_exists: bool
     expected_sha256: str | None
+    content: bytes | None = None
+    content_path: Path | None = None
+
+    @property
+    def restore_exists(self) -> bool:
+        return self.content is not None or self.content_path is not None
+
+
+@dataclass(frozen=True)
+class ResolvedFileStateRestore:
+    """A restore request resolved to one vault-owned filesystem path."""
+
+    request: FileStateRestore
+    relative_path: str
+    full_path: Path
+
+
+@dataclass(frozen=True)
+class CapturedFileState:
+    """The displaced state and durable revision attribution for compensation."""
+
+    exists: bool
+    sha256: str | None
+    compensation_path: Path | None
+    snapshot_id: int | None = None
+    snapshot_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -260,9 +387,9 @@ def restore_vault_file(
         states=(
             FileStateRestore(
                 path=path,
-                content=content,
                 expected_exists=expected_sha256 is not None,
                 expected_sha256=expected_sha256,
+                content=content,
             ),
         ),
         operation="restore_revision",
@@ -287,9 +414,14 @@ def restore_vault_file_states(
         )
 
     vault_root = Path(vault_path).resolve()
-    normalized: list[tuple[FileStateRestore, str, Path]] = []
+    normalized: list[ResolvedFileStateRestore] = []
     seen_paths: set[str] = set()
     for state in states:
+        if state.content is not None and state.content_path is not None:
+            raise VaultMutationRejected(
+                "invalid_restore_state",
+                f"File state restoration has multiple content sources: {state.path}",
+            )
         relative_path = normalize_vault_relative_path(state.path)
         if relative_path in seen_paths:
             raise VaultMutationRejected(
@@ -302,9 +434,18 @@ def restore_vault_file_states(
             path=relative_path,
             markdown_only=False,
         )
-        normalized.append((state, relative_path, full_path))
+        normalized.append(
+            ResolvedFileStateRestore(
+                request=state,
+                relative_path=relative_path,
+                full_path=full_path,
+            )
+        )
 
-    with vault_file_mutation_lock(*(item[2] for item in normalized)):
+    with vault_file_mutation_lock(
+        vault_root,
+        *(item.full_path for item in normalized),
+    ):
         return _restore_vault_file_states_locked(
             vault_root=vault_root,
             states=tuple(normalized),
@@ -317,7 +458,7 @@ def restore_vault_file_states(
 def _restore_vault_file_states_locked(
     *,
     vault_root: Path,
-    states: tuple[tuple[FileStateRestore, str, Path], ...],
+    states: tuple[ResolvedFileStateRestore, ...],
     operation: str,
     metadata: dict[str, Any] | None,
     context: VaultActivityContext,
@@ -330,47 +471,123 @@ def _restore_vault_file_states_locked(
     snapshot_expires_at = compute_snapshot_expiration(created_at)
     mutation_expires_at = compute_task_mutation_expiration(created_at)
     operation_id = f"operation_{uuid.uuid4().hex}"
-    before_states: dict[
-        str, tuple[bool, str | None, bytes | None, int | None, str | None]
-    ] = {}
+    with tempfile.TemporaryDirectory(prefix="assistantmd-restore-") as temp_dir:
+        before_states = _capture_restore_before_states(
+            states=states,
+            temp_root=Path(temp_dir),
+        )
+        service.ensure_activity(
+            context=context,
+            vault_path=vault_root,
+            vault_name=vault_name,
+            created_at=created_at,
+        )
+        before_states = _record_restore_snapshots(
+            service=service,
+            states=states,
+            before_states=before_states,
+            context=context,
+            identity=identity,
+            vault_root=vault_root,
+            vault_name=vault_name,
+            created_at=created_at,
+            expires_at=snapshot_expires_at,
+        )
+        try:
+            _apply_file_state_restores(states)
+            refresh = service.refresh_vault(vault_root, vault_name=vault_name)
+            results = _build_restore_results(
+                states=states,
+                before_states=before_states,
+                identity=identity,
+                vault_name=vault_name,
+                operation=operation,
+                task_id=context.task_id,
+                event_sequence=refresh.latest_sequence,
+            )
+            _persist_mutation_batch(
+                service=service,
+                context=context,
+                results=results,
+                operation_id=operation_id,
+                created_at=created_at,
+                expires_at=mutation_expires_at,
+                metadata=metadata,
+            )
+            return results
+        except Exception as exc:
+            _compensate_file_state_restores(
+                service=service,
+                vault_root=vault_root,
+                vault_name=vault_name,
+                states=states,
+                before_states=before_states,
+                cause=exc,
+            )
+            if isinstance(exc, VaultMutationRejected):
+                raise
+            raise VaultMutationRejected(
+                "restore_failed",
+                f"File-state restoration failed and was compensated: {exc}",
+            ) from exc
 
-    for state, relative_path, full_path in states:
-        current_exists = full_path.exists()
-        if current_exists and not full_path.is_file():
+
+def _capture_restore_before_states(
+    *,
+    states: tuple[ResolvedFileStateRestore, ...],
+    temp_root: Path,
+) -> dict[str, CapturedFileState]:
+    captured: dict[str, CapturedFileState] = {}
+    for index, item in enumerate(states):
+        current_exists = item.full_path.exists()
+        if current_exists and not item.full_path.is_file():
             raise VaultMutationRejected(
                 "file_conflict",
-                f"Cannot restore '{relative_path}' because it is no longer a file.",
+                f"Cannot restore '{item.relative_path}' because it is no longer a file.",
             )
         current_hash = (
-            hash_file_bytes(full_path, length=None) if current_exists else None
+            hash_file_bytes(item.full_path, length=None) if current_exists else None
         )
         if (
-            current_exists != state.expected_exists
-            or current_hash != state.expected_sha256
+            current_exists != item.request.expected_exists
+            or current_hash != item.request.expected_sha256
         ):
             raise VaultMutationRejected(
                 "file_conflict",
-                f"Cannot restore '{relative_path}' because the current file state changed.",
+                f"Cannot restore '{item.relative_path}' because the current file state changed.",
             )
-        before_states[relative_path] = (
-            current_exists,
-            current_hash,
-            full_path.read_bytes() if current_exists else None,
-            None,
-            None,
+        compensation_path = temp_root / f"{index}.bin" if current_exists else None
+        if compensation_path is not None:
+            shutil.copy2(item.full_path, compensation_path)
+            if hash_file_bytes(compensation_path, length=None) != current_hash:
+                raise VaultMutationRejected(
+                    "file_conflict",
+                    f"Cannot restore '{item.relative_path}' because it changed during preflight.",
+                )
+        captured[item.relative_path] = CapturedFileState(
+            exists=current_exists,
+            sha256=current_hash,
+            compensation_path=compensation_path,
         )
+    return captured
 
-    service.ensure_activity(
-        context=context,
-        vault_path=vault_root,
-        vault_name=vault_name,
-        created_at=created_at,
-    )
+
+def _record_restore_snapshots(
+    *,
+    service: VaultStateService,
+    states: tuple[ResolvedFileStateRestore, ...],
+    before_states: dict[str, CapturedFileState],
+    context: VaultActivityContext,
+    identity: VaultIdentity,
+    vault_root: Path,
+    vault_name: str,
+    created_at: datetime,
+    expires_at: datetime | None,
+) -> dict[str, CapturedFileState]:
+    recorded = dict(before_states)
     with service.SessionFactory() as session:
-        for _state, relative_path, full_path in states:
-            before_exists, before_hash, before_content, _snapshot_id, _snapshot_ref = (
-                before_states[relative_path]
-            )
+        for item in states:
+            before = before_states[item.relative_path]
             snapshot = ensure_file_snapshot(
                 session=session,
                 activity_id=context.activity_id,
@@ -382,114 +599,122 @@ def _restore_vault_file_states_locked(
                 vault_id=identity.vault_id,
                 vault_name=vault_name,
                 vault_root=vault_root,
-                relative_path=relative_path,
-                before_exists=before_exists,
-                source_path=full_path,
+                relative_path=item.relative_path,
+                before_exists=before.exists,
+                source_path=item.full_path,
                 purpose="revision",
                 source="activity_mutation_before",
                 scope_kind="activity",
                 scope_id=context.activity_id,
                 created_at=created_at,
-                expires_at=snapshot_expires_at,
+                expires_at=expires_at,
             )
-            before_states[relative_path] = (
-                before_exists,
-                before_hash,
-                before_content,
-                snapshot.file_snapshot_id,
-                snapshot.snapshot_ref,
+            recorded[item.relative_path] = CapturedFileState(
+                exists=before.exists,
+                sha256=before.sha256,
+                compensation_path=before.compensation_path,
+                snapshot_id=snapshot.file_snapshot_id,
+                snapshot_ref=snapshot.snapshot_ref,
             )
         session.commit()
+    return recorded
 
-    try:
-        for state, _relative_path, full_path in states:
-            if state.content is None and full_path.exists():
-                full_path.unlink()
-        for state, _relative_path, full_path in states:
-            if state.content is not None:
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_bytes(state.content)
 
-        refresh = service.refresh_vault(vault_root, vault_name=vault_name)
-        results: list[RecordedMutationResult] = []
-        for state, relative_path, full_path in states:
-            before_exists, before_hash, _before_content, snapshot_id, snapshot_ref = (
-                before_states[relative_path]
-            )
-            after_exists = full_path.exists()
-            after_hash = (
-                hash_file_bytes(full_path, length=None) if after_exists else None
-            )
-            expected_after_hash = (
-                hash_bytes(state.content, length=None)
-                if state.content is not None
-                else None
-            )
-            if (
-                after_exists != (state.content is not None)
-                or after_hash != expected_after_hash
-            ):
-                raise VaultMutationRejected(
-                    "file_conflict",
-                    f"Cannot complete restoration because '{relative_path}' changed during the operation.",
-                )
-            results.append(
-                RecordedMutationResult(
-                    vault_id=identity.vault_id,
-                    vault_name=vault_name,
-                    path=relative_path,
-                    related_path=None,
-                    operation=operation,
-                    before_exists=before_exists,
-                    before_hash=before_hash,
-                    after_exists=after_exists,
-                    after_hash=after_hash,
-                    task_id=context.task_id,
-                    event_sequence=refresh.latest_sequence,
-                    before_snapshot_id=snapshot_id,
-                    snapshot_ref=snapshot_ref,
-                )
-            )
-        _persist_mutation_batch(
-            service=service,
-            context=context,
-            results=tuple(results),
-            operation_id=operation_id,
-            created_at=created_at,
-            expires_at=mutation_expires_at,
-            metadata=metadata,
+def _apply_file_state_restores(states: tuple[ResolvedFileStateRestore, ...]) -> None:
+    for item in states:
+        if not item.request.restore_exists and item.full_path.exists():
+            item.full_path.unlink()
+    for item in states:
+        if not item.request.restore_exists:
+            continue
+        item.full_path.parent.mkdir(parents=True, exist_ok=True)
+        if item.request.content_path is not None:
+            shutil.copy2(item.request.content_path, item.full_path)
+        else:
+            item.full_path.write_bytes(item.request.content or b"")
+
+
+def _build_restore_results(
+    *,
+    states: tuple[ResolvedFileStateRestore, ...],
+    before_states: dict[str, CapturedFileState],
+    identity: VaultIdentity,
+    vault_name: str,
+    operation: str,
+    task_id: str | None,
+    event_sequence: int | None,
+) -> tuple[RecordedMutationResult, ...]:
+    results: list[RecordedMutationResult] = []
+    for item in states:
+        after_exists = item.full_path.is_file()
+        after_hash = (
+            hash_file_bytes(item.full_path, length=None) if after_exists else None
         )
-        return tuple(results)
-    except Exception as exc:
-        compensation_error: Exception | None = None
-        try:
-            for _state, relative_path, full_path in states:
-                (
-                    before_exists,
-                    _before_hash,
-                    before_content,
-                    _snapshot_id,
-                    _snapshot_ref,
-                ) = before_states[relative_path]
-                if before_exists:
-                    full_path.parent.mkdir(parents=True, exist_ok=True)
-                    full_path.write_bytes(before_content or b"")
-                elif full_path.exists():
-                    full_path.unlink()
-            service.refresh_vault(vault_root, vault_name=vault_name)
-        except Exception as rollback_exc:  # pragma: no cover - requires filesystem failure
-            compensation_error = rollback_exc
-        if compensation_error is not None:
+        expected_after_hash = _restore_content_hash(item.request)
+        if (
+            after_exists != item.request.restore_exists
+            or after_hash != expected_after_hash
+        ):
             raise VaultMutationRejected(
-                "mutation_state_uncertain",
-                f"File-state restoration failed and compensation was incomplete: {compensation_error}",
-            ) from exc
-        if isinstance(exc, VaultMutationRejected):
-            raise
+                "file_conflict",
+                f"Cannot complete restoration because '{item.relative_path}' changed during the operation.",
+            )
+        before = before_states[item.relative_path]
+        results.append(
+            RecordedMutationResult(
+                vault_id=identity.vault_id,
+                vault_name=vault_name,
+                path=item.relative_path,
+                related_path=None,
+                operation=operation,
+                before_exists=before.exists,
+                before_hash=before.sha256,
+                after_exists=after_exists,
+                after_hash=after_hash,
+                task_id=task_id,
+                event_sequence=event_sequence,
+                before_snapshot_id=before.snapshot_id,
+                snapshot_ref=before.snapshot_ref,
+            )
+        )
+    return tuple(results)
+
+
+def _restore_content_hash(state: FileStateRestore) -> str | None:
+    if state.content_path is not None:
+        return hash_file_bytes(state.content_path, length=None)
+    if state.content is not None:
+        return hash_bytes(state.content, length=None)
+    return None
+
+
+def _compensate_file_state_restores(
+    *,
+    service: VaultStateService,
+    vault_root: Path,
+    vault_name: str,
+    states: tuple[ResolvedFileStateRestore, ...],
+    before_states: dict[str, CapturedFileState],
+    cause: Exception,
+) -> None:
+    try:
+        for item in states:
+            before = before_states[item.relative_path]
+            if before.exists:
+                if before.compensation_path is None:
+                    raise RuntimeError(
+                        f"Missing compensation content for '{item.relative_path}'"
+                    )
+                item.full_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(before.compensation_path, item.full_path)
+            elif item.full_path.exists():
+                item.full_path.unlink()
+        service.refresh_vault(vault_root, vault_name=vault_name)
+    except Exception as rollback_exc:  # pragma: no cover - requires filesystem failure
         raise VaultMutationRejected(
-            "restore_failed",
-            f"File-state restoration failed and was compensated: {exc}",
-        ) from exc
+            "mutation_state_uncertain",
+            f"File-state restoration failed and compensation was incomplete: {rollback_exc}",
+        ) from cause
 
 
 def delete_empty_vault_directory_tree(
@@ -498,6 +723,25 @@ def delete_empty_vault_directory_tree(
     path: str,
 ) -> DirectoryCleanupResult:
     """Delete empty directories under ``path`` and leave non-empty dirs in place."""
+    vault_root = Path(vault_path).resolve()
+    full_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=path,
+        markdown_only=False,
+    )
+    with vault_directory_mutation_lock(vault_root, full_path):
+        return _delete_empty_vault_directory_tree_locked(
+            vault_path=vault_root,
+            path=path,
+        )
+
+
+def _delete_empty_vault_directory_tree_locked(
+    *,
+    vault_path: str | Path,
+    path: str,
+) -> DirectoryCleanupResult:
+    """Delete empty directories while holding the vault hierarchy lock."""
     vault_root = Path(vault_path).resolve()
     relative_path = normalize_vault_relative_path(path)
     if not relative_path:
@@ -579,6 +823,32 @@ def move_vault_directory(
 ) -> DirectoryMoveResult:
     """Move one directory tree and record the user-visible intent as one event."""
     vault_root = Path(vault_path).resolve()
+    source_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=path,
+        markdown_only=False,
+    )
+    destination_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=destination,
+        markdown_only=False,
+    )
+    with vault_directory_mutation_lock(vault_root, source_path, destination_path):
+        return _move_vault_directory_locked(
+            vault_path=vault_root,
+            path=path,
+            destination=destination,
+        )
+
+
+def _move_vault_directory_locked(
+    *,
+    vault_path: str | Path,
+    path: str,
+    destination: str,
+) -> DirectoryMoveResult:
+    """Move and record a directory while holding the vault hierarchy lock."""
+    vault_root = Path(vault_path).resolve()
     source_relative = normalize_vault_relative_path(path)
     destination_relative = normalize_vault_relative_path(destination)
     if not source_relative or not destination_relative:
@@ -597,7 +867,7 @@ def move_vault_directory(
         markdown_only=False,
     )
 
-    with vault_file_mutation_lock(source_path, destination_path):
+    with vault_directory_mutation_lock(vault_root, source_path, destination_path):
         if not source_path.exists():
             raise VaultMutationRejected(
                 "source_not_found",
@@ -624,8 +894,8 @@ def move_vault_directory(
                 f"Cannot move '{source_relative}' - destination already exists.",
             )
 
-        descendant_file_count, descendant_directory_count = _directory_descendant_counts(
-            source_path
+        descendant_file_count, descendant_directory_count = (
+            _directory_descendant_counts(source_path)
         )
         identity = resolve_or_create_vault_identity(vault_root)
         vault_name = vault_root.name
@@ -766,7 +1036,7 @@ def move_vault_file(
         path=destination_relative,
         markdown_only=markdown_only,
     )
-    with vault_file_mutation_lock(source_path, destination_path):
+    with vault_file_mutation_lock(vault_root, source_path, destination_path):
         return _move_vault_file_locked(
             vault_root=vault_root,
             source_relative=source_relative,
@@ -801,7 +1071,9 @@ def _move_vault_file_locked(
     source_before_hash = hash_file_bytes(source_path, length=None)
     destination_before_exists = destination_path.exists()
     destination_before_hash = (
-        hash_file_bytes(destination_path, length=None) if destination_before_exists else None
+        hash_file_bytes(destination_path, length=None)
+        if destination_before_exists
+        else None
     )
     identity = resolve_or_create_vault_identity(vault_root)
     vault_name = vault_root.name
@@ -894,7 +1166,9 @@ def _move_vault_file_locked(
             before_exists=True,
             before_hash=source_before_hash,
             after_exists=source_path.exists(),
-            after_hash=hash_file_bytes(source_path, length=None) if source_path.exists() else None,
+            after_hash=hash_file_bytes(source_path, length=None)
+            if source_path.exists()
+            else None,
             task_id=task.task_id if task is not None else None,
             event_sequence=event_sequence,
             before_snapshot_id=source_snapshot_id,
@@ -981,7 +1255,7 @@ def mutate_vault_file(
         path=relative_path,
         markdown_only=markdown_only,
     )
-    with vault_file_mutation_lock(full_path):
+    with vault_file_mutation_lock(vault_root, full_path):
         return _mutate_vault_file_locked(
             vault_root=vault_root,
             relative_path=relative_path,
@@ -1474,7 +1748,9 @@ def _ensure_explicit_activity(
         return
     context = get_current_vault_activity()
     if context is None or context.activity_id != attribution.activity_id:
-        raise RuntimeError("Snapshot activity attribution no longer matches the active context")
+        raise RuntimeError(
+            "Snapshot activity attribution no longer matches the active context"
+        )
     service.ensure_activity(
         context=context,
         vault_path=vault_root,

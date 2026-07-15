@@ -804,6 +804,7 @@ function syncChatControlLocks() {
     }
     workspacePicker.syncControls();
     fileReferences.syncInteractionLocks();
+    vaultActivity.syncInteractionLocks();
     syncSendButtonState();
 }
 
