@@ -117,6 +117,12 @@ from core.runtime.execution_tasks import (
 from core.runtime.task_runner import ExecutionTaskSpec
 from core.vault_state.service import VaultStateService
 from core.vault_state.activity import VaultActivityContext, use_vault_activity
+from core.vault_state.activity_rollback import (
+    ActivityRollbackPlan,
+    ActivityRollbackUnavailable,
+    execute_activity_rollback,
+    preview_activity_rollback,
+)
 from core.vault_state.pathing import VaultRootResolutionError, resolve_configured_vault_root
 from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import (
@@ -205,6 +211,10 @@ from .models import (
     VaultActivityGroupInfo,
     VaultMutationInfo,
     VaultActivityResponse,
+    VaultActivityRollbackIssueInfo,
+    VaultActivityRollbackPathInfo,
+    VaultActivityRollbackPreviewResponse,
+    VaultActivityRollbackResponse,
     VaultStateCleanupResponse,
 )
 from .exceptions import APIException, SystemConfigurationError
@@ -1817,6 +1827,113 @@ def get_vault_activity(
         groups=[
             _vault_activity_group_info(group)
             for group in groups
+        ],
+    )
+
+
+def get_vault_activity_rollback_preview(
+    *,
+    vault_name: str,
+    activity_id: str,
+) -> VaultActivityRollbackPreviewResponse:
+    """Return current all-or-nothing rollback availability for one activity."""
+    vault_root = _get_vault_path(vault_name)
+    try:
+        plan = preview_activity_rollback(
+            vault_path=vault_root,
+            activity_id=activity_id,
+        )
+    except LookupError as exc:
+        raise APIException(
+            status_code=404,
+            error_type="VaultActivityNotFound",
+            message=str(exc),
+            details={"vault_name": vault_name, "activity_id": activity_id},
+        ) from exc
+    return _vault_activity_rollback_preview_info(plan)
+
+
+def rollback_vault_activity(
+    *,
+    vault_name: str,
+    activity_id: str,
+    expected_states: list[tuple[str, bool, str | None]],
+) -> VaultActivityRollbackResponse:
+    """Restore every supported path in one activity to its first before-state."""
+    vault_root = _get_vault_path(vault_name)
+    try:
+        result = execute_activity_rollback(
+            vault_path=vault_root,
+            activity_id=activity_id,
+            expected_states=expected_states,
+        )
+    except LookupError as exc:
+        raise APIException(
+            status_code=404,
+            error_type="VaultActivityNotFound",
+            message=str(exc),
+            details={"vault_name": vault_name, "activity_id": activity_id},
+        ) from exc
+    except ActivityRollbackUnavailable as exc:
+        preview = _vault_activity_rollback_preview_info(exc.plan)
+        raise APIException(
+            status_code=409,
+            error_type="VaultActivityRollbackUnavailable",
+            message="Activity rollback is not currently available.",
+            details=preview.model_dump(mode="json"),
+        ) from exc
+    except VaultMutationRejected as exc:
+        raise APIException(
+            status_code=409,
+            error_type="VaultActivityRollbackConflict",
+            message=str(exc),
+            details={
+                "vault_name": vault_name,
+                "activity_id": activity_id,
+                "code": exc.code,
+            },
+        ) from exc
+    return VaultActivityRollbackResponse(
+        success=True,
+        source_activity_id=result.source_activity_id,
+        rollback_activity_id=result.rollback_activity_id,
+        vault_name=result.vault_name,
+        restored_count=result.restored_count,
+        deleted_count=result.deleted_count,
+        message=(
+            f"Rolled back {result.restored_count + result.deleted_count} file state(s)."
+        ),
+    )
+
+
+def _vault_activity_rollback_preview_info(
+    plan: ActivityRollbackPlan,
+) -> VaultActivityRollbackPreviewResponse:
+    return VaultActivityRollbackPreviewResponse(
+        activity_id=plan.activity_id,
+        activity_label=plan.activity_label,
+        vault_name=plan.vault_name,
+        can_rollback=plan.can_rollback,
+        restore_count=plan.restore_count,
+        delete_count=plan.delete_count,
+        paths=[
+            VaultActivityRollbackPathInfo(
+                path=path.path,
+                action=path.action,
+                expected_exists=path.expected_exists,
+                expected_sha256=path.expected_sha256,
+                restore_exists=path.restore_exists,
+                restore_sha256=path.restore_sha256,
+            )
+            for path in plan.paths
+        ],
+        issues=[
+            VaultActivityRollbackIssueInfo(
+                code=issue.code,
+                message=issue.message,
+                path=issue.path,
+            )
+            for issue in plan.issues
         ],
     )
 

@@ -215,6 +215,91 @@ Explorer actions before this schema will remain absent.
 - Keep rename lineage out of this slice. Move operations remain available in
   Vault Activity, while file history only follows the currently selected path.
 
+### Slice 4: Explicit Activity Rollback
+
+Add an explicit user action that restores every supported path in one durable
+activity to its state before that activity began. This is separate from the
+existing automatic task-failure rollback: it is initiated after completed work,
+must protect changes made since that work, and must itself remain visible and
+recoverable.
+
+#### Restoration semantics
+
+- Group mutations by exact vault-relative path and restore each path to the
+  earliest retained before-state in the source activity. Do not replay every
+  operation in reverse. This handles repeated edits, create-then-edit,
+  delete-then-recreate, and paired file moves without redundant writes.
+- Treat paired move rows as path-state changes sharing one logical operation.
+  Build the complete desired path-state plan before touching the filesystem so
+  move chains cannot fail because of transient source/destination collisions.
+- Require retained payloads for every desired existing file. An expired or
+  missing snapshot makes full rollback unavailable.
+- In the first release, directory-level mutations make full activity rollback
+  unavailable. Current directory records do not retain enough descendant state
+  to promise a complete restoration. Do not silently perform a partial file-only
+  rollback behind a **Rollback activity** action.
+- Keep rollback exact-path scoped. Rename lineage and changes made outside the
+  source activity are not inferred.
+
+#### Preflight and concurrency
+
+Add a vault-state rollback planner that returns the desired before-state and
+expected current state for every affected path. The planner must verify that:
+
+- the source activity belongs to the requested vault and has not already been
+  rolled back;
+- every mutation is supported and every required snapshot payload is readable;
+- each path still matches the source activity's final existence and content
+  hash, so later AssistantMD or external edits are not overwritten;
+- no target path resolves outside the vault.
+
+Execution repeats these checks while holding deterministic locks for the full
+path set. Any conflict rejects the entire rollback before writes begin. Capture
+all displaced current states before applying the plan. If a filesystem failure
+occurs after writes begin, attempt compensation from those captures and report
+an explicit uncertain outcome if compensation cannot restore every path.
+
+#### Durable provenance
+
+Execute a successful rollback as a new `explorer` activity rather than copying
+snapshot files directly or rewriting the source mutation rows. The new activity:
+
+- records one mutation per restored exact path through the shared vault mutation
+  infrastructure;
+- retains the displaced current states, making the rollback activity itself
+  eligible for a later rollback when its preflight still passes;
+- stores `source_activity_id` in activity metadata and uses a clear
+  `Rollback: <source label>` label;
+- finishes only after all path states are applied and the vault manifest is
+  refreshed once.
+
+Mark the source activity's `rollback_status` as `completed` only after the new
+activity completes. Keep the source activity's original execution status; its
+work completed even though a later user action reversed it. Disable repeated
+rollback of that source activity and use the new rollback activity to reverse
+the reversal.
+
+Do not reuse `rollback_task_file_mutations()` for this path. Automatic failure
+rollback remains task-lifecycle recovery and can use its existing first-state
+snapshots. Explicit rollback needs optimistic concurrency, a multi-path plan,
+new revision snapshots, and new activity provenance. Both paths may share small
+snapshot-loading and desired-state helpers where that removes real duplication.
+
+#### API and Dashboard
+
+- Add a rollback preview endpoint for one vault activity. Return affected paths,
+  restore/delete counts, conflicts, missing snapshots, unsupported operations,
+  and `can_rollback` without changing files.
+- Add an execution endpoint that includes the preview's expected path states;
+  revalidate them under lock rather than trusting the client preview.
+- Add **Rollback activity** to the Operations panel. Confirm with a concise path
+  summary, disable the action with a specific reason when preflight fails, and
+  refresh the activity list after success so the linked rollback activity is
+  immediately visible.
+- Keep single-revision restore and activity rollback as separate user actions,
+  backed by the same lower-level exact-state restoration primitives rather than
+  API calls between features.
+
 ## Validation Targets
 
 Extend deterministic integration scenarios before implementation:
@@ -229,6 +314,21 @@ Extend deterministic integration scenarios before implementation:
   current artifact and goal behavior.
 - migration smoke test: existing task mutation rows backfill idempotently and
   historical paired moves count as one logical operation.
+- activity rollback: multiple mutations to one file restore its first
+  before-state exactly once.
+- activity rollback: create-then-edit deletes the created file, while
+  delete-then-recreate restores the original file.
+- activity rollback: paired and chained file moves restore all exact path states
+  without transient collisions.
+- activity rollback: one stale path, missing snapshot, or directory mutation
+  rejects the whole rollback and performs no writes.
+- activity rollback: success creates a linked activity, preserves displaced
+  states as revisions, refreshes the manifest once, and marks only the source
+  activity's rollback status.
+- activity rollback: a rollback activity can itself be rolled back when its
+  expected current states still match.
+- activity rollback: an injected mid-apply failure compensates already-written
+  paths or persists an explicit uncertain outcome.
 
 Maintainers should run the full validation suite after the focused scenarios
 pass.
@@ -260,4 +360,20 @@ Slice 3 is implemented:
 - revision history intentionally does not follow moved or renamed files.
 
 Slice 2 observation provenance remains deferred.
-Maintainers should run the full validation suite before merge.
+Slice 4 explicit activity rollback is implemented:
+
+- preview derives each exact path's earliest retained before-state and latest
+  expected state;
+- one conflict, missing snapshot, active activity, vault identity mismatch, or
+  directory mutation rejects the complete rollback;
+- execution revalidates expected states under deterministic multi-path locks;
+- rollback uses one shared exact-state mutation primitive, captures displaced
+  states, refreshes once, and records one linked Explorer activity;
+- the Activity operations panel previews availability and confirms the atomic
+  rollback action;
+- rollback activities can themselves be rolled back when their expected states
+  still match.
+
+The focused activity rollback, revision restore, mutation recorder, and
+automatic task rollback scenarios pass. Maintainers should still run the full
+validation suite before merge.

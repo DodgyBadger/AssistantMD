@@ -12,6 +12,7 @@ Vault state maintains a durable, rebuildable view of vault files and a retained 
 - `core/vault_state/file_mutations.py` — shared mutation API for tracked vault writes
 - `core/vault_state/snapshots.py` — snapshot-set and file-snapshot capture
 - `core/vault_state/rollback.py` — automatic rollback for failed, cancelled, and timed-out tasks
+- `core/vault_state/activity_rollback.py` — explicit state-based rollback for completed activities
 - `core/vault_state/cleanup.py` — retained snapshot and mutation cleanup
 
 ## Storage Model
@@ -122,6 +123,29 @@ Restoring a retained revision is itself an Explorer mutation: the displaced
 current state is captured first, then the selected content or earlier absent
 state is applied. The caller supplies the current hash, or explicitly reports
 that the file is absent, so stale history views cannot overwrite newer changes.
+
+## Explicit Activity Rollback
+
+The Vault Activity detail view can roll back a completed activity when all of
+its exact file states remain compatible with the retained ledger. Preview and
+execution use:
+
+- `GET /api/vaults/{vault_name}/activity/{activity_id}/rollback`
+- `POST /api/vaults/{vault_name}/activity/{activity_id}/rollback`
+
+Rollback restores each path to its earliest before-state in the source activity
+rather than replaying every mutation. This makes repeated edits, file creation,
+deletion, and file moves one atomic state transition. Before writing, execution
+revalidates every current existence state and content hash under deterministic
+path locks. One conflict, expired snapshot, vault identity mismatch, active
+activity, or directory-level mutation rejects the complete rollback without
+changing any path.
+
+A successful rollback is recorded as a new `explorer` activity linked to the
+source activity through `source_activity_id` metadata. The displaced current
+states are retained as revisions, so the rollback activity can itself be rolled
+back while its expected states still match. The source activity keeps its
+original execution status and receives `rollback_status=completed`.
 
 ## Automatic Rollback
 

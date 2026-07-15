@@ -431,7 +431,7 @@
                     <div class="vault-file-revision-actions">
                         <button
                             type="button"
-                            class="ui-button-secondary"
+                            class="ui-button-secondary vault-file-revision-action-button"
                             data-vault-file-restore="${escapeHtml(button.dataset.vaultFileRevision || '')}"
                             data-vault-file-restore-exists="${escapeHtml(button.dataset.vaultFileRevisionExists || 'false')}"
                             title="${interactionLocked() ? 'Available when the active response finishes.' : 'Restore this revision'}"

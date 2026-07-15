@@ -513,6 +513,42 @@ class VaultStateService:
             },
         )
 
+    def update_activity_metadata(
+        self,
+        *,
+        activity_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Merge bounded provenance metadata into one existing activity."""
+        with self.SessionFactory() as session:
+            activity = session.get(VaultActivity, activity_id)
+            if activity is None:
+                raise RuntimeError(f"Vault activity not found: {activity_id}")
+            current: dict[str, Any] = {}
+            if activity.metadata_json:
+                parsed = json.loads(activity.metadata_json)
+                if isinstance(parsed, dict):
+                    current = parsed
+            current.update(metadata)
+            activity.metadata_json = json.dumps(current, sort_keys=True)
+            activity.updated_at = datetime.now(UTC)
+            session.commit()
+
+    def set_activity_rollback_status(
+        self,
+        *,
+        activity_id: str,
+        rollback_status: str,
+    ) -> None:
+        """Update only the later rollback outcome of a completed activity."""
+        with self.SessionFactory() as session:
+            activity = session.get(VaultActivity, activity_id)
+            if activity is None:
+                raise RuntimeError(f"Vault activity not found: {activity_id}")
+            activity.rollback_status = rollback_status
+            activity.updated_at = datetime.now(UTC)
+            session.commit()
+
     def finish_task_activities(
         self,
         *,

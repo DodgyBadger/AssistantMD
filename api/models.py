@@ -490,6 +490,64 @@ class VaultActivityResponse(BaseModel):
     )
 
 
+class VaultActivityRollbackIssueInfo(BaseModel):
+    """One reason an activity rollback is currently unavailable."""
+
+    code: str = Field(..., description="Stable rollback availability code")
+    message: str = Field(..., description="User-readable rollback availability detail")
+    path: Optional[str] = Field(None, description="Affected vault-relative path")
+
+
+class VaultActivityRollbackPathInfo(BaseModel):
+    """One exact path transition in an activity rollback preview."""
+
+    path: str = Field(..., description="Vault-relative path")
+    action: Literal["restore", "delete"] = Field(..., description="Rollback action")
+    expected_exists: bool = Field(..., description="Expected current existence state")
+    expected_sha256: Optional[str] = Field(None, description="Expected current content hash")
+    restore_exists: bool = Field(..., description="Whether rollback restores file content")
+    restore_sha256: Optional[str] = Field(None, description="Restored content hash")
+
+
+class VaultActivityRollbackPreviewResponse(BaseModel):
+    """Current all-or-nothing rollback availability for one activity."""
+
+    activity_id: str
+    activity_label: str
+    vault_name: str
+    can_rollback: bool
+    restore_count: int
+    delete_count: int
+    paths: List[VaultActivityRollbackPathInfo] = Field(default_factory=list)
+    issues: List[VaultActivityRollbackIssueInfo] = Field(default_factory=list)
+
+
+class VaultActivityRollbackExpectedState(BaseModel):
+    """One path state confirmed by an activity rollback client."""
+
+    path: str
+    exists: bool
+    sha256: Optional[str] = None
+
+
+class VaultActivityRollbackRequest(BaseModel):
+    """Expected states from the rollback preview being confirmed."""
+
+    expected_states: List[VaultActivityRollbackExpectedState]
+
+
+class VaultActivityRollbackResponse(BaseModel):
+    """Result of a completed explicit activity rollback."""
+
+    success: bool
+    source_activity_id: str
+    rollback_activity_id: str
+    vault_name: str
+    restored_count: int
+    deleted_count: int
+    message: str
+
+
 class VaultStateCleanupResponse(BaseModel):
     """Response for manual vault-state cleanup."""
 

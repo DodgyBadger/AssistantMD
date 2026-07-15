@@ -635,6 +635,28 @@ details summary::-webkit-details-marker {
     color: rgb(var(--text-primary));
     font-size: 0.8125rem;
 }
+.ui-button-secondary {
+    min-height: 2rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid rgb(var(--border-secondary));
+    border-radius: 0.375rem;
+    background: rgb(var(--bg-card));
+    color: rgb(var(--text-primary));
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.ui-button-secondary:hover,
+.ui-button-secondary:focus-visible {
+    border-color: rgb(var(--accent-primary));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--accent-primary));
+    outline: none;
+}
+.ui-button-secondary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
 .vault-explorer-mutation-form,
 .vault-explorer-mutation-form label {
     display: flex;
@@ -1404,14 +1426,18 @@ details summary::-webkit-details-marker {
     justify-content: flex-end;
     margin-bottom: 0.75rem;
 }
-.vault-file-revision-actions button {
+.vault-file-revision-action-button {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
 }
-.vault-file-revision-actions svg {
+.vault-file-revision-action-button svg {
     width: 1rem;
     height: 1rem;
+}
+.vault-activity-rollback-action {
+    display: flex;
+    align-items: center;
 }
 .vault-file-history-preview > pre,
 .vault-file-revision-properties pre {

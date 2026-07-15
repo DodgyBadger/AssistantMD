@@ -37,6 +37,9 @@ from .models import (
     VaultRescanRequest,
     VaultRescanResponse,
     VaultActivityResponse,
+    VaultActivityRollbackPreviewResponse,
+    VaultActivityRollbackRequest,
+    VaultActivityRollbackResponse,
     VaultStateCleanupResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
@@ -184,6 +187,8 @@ from .services import (
     list_execution_tasks,
     list_workflow_tasks,
     get_vault_activity,
+    get_vault_activity_rollback_preview,
+    rollback_vault_activity,
     get_vault_snapshot_file,
     cleanup_vault_state,
     resolve_chat_session_for_request,
@@ -946,6 +951,44 @@ async def vault_activity(
             task_id=task_id,
             include_expired=include_expired,
             operation=operation,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/vaults/{vault_name}/activity/{activity_id}/rollback",
+    response_model=VaultActivityRollbackPreviewResponse,
+)
+async def vault_activity_rollback_preview(vault_name: str, activity_id: str):
+    """Return current all-or-nothing rollback availability for one activity."""
+    try:
+        return get_vault_activity_rollback_preview(
+            vault_name=vault_name,
+            activity_id=activity_id,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/vaults/{vault_name}/activity/{activity_id}/rollback",
+    response_model=VaultActivityRollbackResponse,
+)
+async def vault_activity_rollback(
+    vault_name: str,
+    activity_id: str,
+    request: VaultActivityRollbackRequest,
+):
+    """Restore every supported path in one activity atomically."""
+    try:
+        return rollback_vault_activity(
+            vault_name=vault_name,
+            activity_id=activity_id,
+            expected_states=[
+                (state.path, state.exists, state.sha256)
+                for state in request.expected_states
+            ],
         )
     except Exception as e:
         return create_error_response(e)
