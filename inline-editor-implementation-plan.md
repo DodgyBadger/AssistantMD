@@ -661,3 +661,17 @@ Existing coverage is sufficient for the remaining durable decisions:
   Markdown preview behavior, text-file eligibility, and responsive card layout
   are product or UI contracts that should remain in architecture documentation
   rather than receive individual ADRs.
+
+## Release Notes Cleanup
+
+The `v0.7.0` release notes now introduce the branch as a broader Vault Explorer
+and inline editing workflow rather than a narrow review-card feature. The notes
+cover unified vault navigation, text preview/editing, revisions, activity
+rollback, and inline edit mode, then condense the breaking tool changes into the
+released `file_ops_safe`/`file_ops_unsafe` migration.
+
+Upgrade guidance now directs users to restart for automatic database migrations,
+check the System / Misc migration fallback, refresh packaged System Authoring
+scripts with an overwrite warning, repair settings when prompted, review
+`enabled_tools`, and update custom `AssistantMD/Authoring` automations to use
+`file_read` and `file_write`.

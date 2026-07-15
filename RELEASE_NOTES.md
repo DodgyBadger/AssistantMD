@@ -3,30 +3,53 @@
 
 ## 2026-07-10 - v0.7.0
 
-### Inline File Editing
+### Vault Explorer and Inline Editing
 
-- Chats can switch between Normal and Inline edit modes. Inline edit
-  mode renders `file_write` calls as inline review cards and resumes the same
-  agent turn after review.
-- Review cards support creates, full writes, appends, line edits, exact text
-  replacements, moves, deletes, and folder creation. Multiple independent
-  `file_write` calls can be reviewed together with one decision per operation.
-- Confirmed file and directory references in assistant messages open the inline
-  editor or path browser directly from chat. Full vault-relative paths are
-  preferred, with workspace-first fallback for root-level basenames.
+AssistantMD can now handle routine vault browsing, writing, organization, and
+recovery without leaving the chat window. The new Vault Explorer is a shared,
+on-demand surface rather than a separate Obsidian-style workspace, so the main UI
+stays focused while files remain directly accessible when needed.
 
-### Breaking Tool Changes
+- **Browse and edit:** Open the Vault Explorer from the chat toolbar or workspace
+  selector. Browse the full vault, preview rendered Markdown, edit UTF-8 text,
+  copy or add paths to a prompt, set the session workspace, create files and
+  folders, move or rename paths, and delete files or empty folder trees.
+- **Open files from chat:** File and directory references in assistant
+  messages become live links that open the same Explorer at the referenced path.
+- **Review agent edits:** Switch a chat session between Normal and Inline edit modes.
+  Inline edit presents each `file_write` operation as an editable approve-or-deny
+  card with the opportunity to make user-edits before approving or reasons for denying.
+- **Restore and roll back:** Open a file's revision history in the Vault Explorer
+  to preview or restore an earlier version. From AssistantMD Activity, undo all
+  file changes made by a completed chat turn, workflow run, or Explorer action in
+  one step. AssistantMD refuses to overwrite newer changes, and the rollback
+  itself can also be undone.
 
-- `file_read` replaces the read/list/search/frontmatter surface previously mixed
-  into `file_ops_safe`.
-- `file_write` replaces mutating operations previously split between
-  `file_ops_safe` and `file_ops_unsafe`.
-- `file_ops_safe`, `file_ops_unsafe`, and the transitional `file_ops` tool are
-  removed. Authored scripts and workflows must call `file_read` or `file_write`.
-- The temporary `propose_file_edits` and `review_create_file` tools are removed;
-  inline edit review is provided exclusively through deferred `file_write`.
-- Per-chat tool selection is removed. `enabled_tools` now controls tool
-  availability app-wide for chat, delegates, workflows, and scripts.
+### Breaking Changes and Upgrade Guidance
+
+Version 0.7 replaces `file_ops_safe` and `file_ops_unsafe` with `file_read` and
+`file_write`. All custom workflows and context assembly scripts that use the old
+tools must be updated.
+
+Per-chat tool selection has also been removed. AssistantMD's core functionality
+now depends on the full tool suite working together, so maintaining a different
+tool set for each chat is no longer practical. The built-in tool suite will stay
+deliberately small enough not to overwhelm the context window. Users who need to
+disable a tool can still do so globally with the `enabled_tools` setting.
+
+After upgrading:
+
+1. Restart AssistantMD so registered database migrations run automatically. If
+   System / Misc still reports pending Database Migrations, run them from there.
+2. In System / Misc, run **Refresh System Authoring Scripts** to install the
+   current packaged scripts. This overwrites `system/Authoring`, so preserve any
+   local changes there first; vault scripts under
+   `AssistantMD/Authoring` are not touched.
+3. If System Notices offers **Repair settings from template**, run it and review
+   the new `enabled_tools` setting.
+4. Review custom workflows and context scripts for `file_ops_safe` or `file_ops_unsafe`
+   calls and replace them with `file_read` or `file_write`. You can ask chat to inspect
+   and update the custom automations in `AssistantMD/Authoring` for you.
 
 
 ## 2026-07-06 - v0.6.10
